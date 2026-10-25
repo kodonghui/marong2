@@ -3,7 +3,7 @@
   python run.py --check   설정·Claude 키·Postgres·임베딩·요약을 점검하고 이 서버의 공인 IPv4 를 출력. 하나라도 실패하면 종료 코드 1
   python run.py --chat    카카오 없이 터미널에서 마롱이와 대화(말투 다듬기용). 대화는 'terminal' 방으로 저장됨
   python run.py --proactive <이름|#키> [--dry]
-                          그 친구의 1:1 방에 선톡 한 개를 지금 보냄(시험용. 조용한 날수·시간·PROACTIVE 설정과 상관없이).
+                          그 친구의 1:1 방에 선톡 한 개를 지금 보냄(시험용. 선톡 간격·시간·PROACTIVE 설정과 상관없이).
                           --dry 면 만든 말만 보여 주고 보내지 않음
 같은 봇 토큰으로 두 곳에서 run.py 를 켜지 않는다(서로 끊어 냄. 4004). --proactive 는 게이트웨이에 붙지 않아서 봇이 켜져 있어도 됨."""
 import asyncio
@@ -57,8 +57,9 @@ async def check(s, store: Store, emb: Embeddings, llm: LLM, agent: Agent, worker
     print("단체방:", f"{', '.join(s.group_triggers)} 이(가) 들어간 메시지에만 답함" if s.group_triggers
           else "받은 메시지 모두에 답함")
     start, end = s.proactive_hours
-    print("선톡:", f"켜짐(1:1 친구가 {s.proactive_quiet_days}일 조용하면 {start}~{end}시에 한 번, 하루 최대 "
-                 f"{s.proactive_daily_max}개)" if s.proactive else "꺼짐(PROACTIVE=off)")
+    print("선톡:", f"켜짐(1:1 친구에게 {s.proactive_every_days}일에 한 번쯤 {start}~{end}시에. 그날 친구가 먼저 말했거나 "
+                 f"지난 선톡에 답이 없으면 안 보냄. 하루 최대 {s.proactive_daily_max}개)" if s.proactive
+          else "꺼짐(PROACTIVE=off)")
 
     try:
         await store.open(wait=True, timeout=10)

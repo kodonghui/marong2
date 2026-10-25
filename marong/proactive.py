@@ -1,8 +1,9 @@
-"""선톡: 1:1 친구가 며칠 조용하면 마롱이가 먼저 한 번 말을 건다(.env 의 PROACTIVE=on 일 때만).
-- 누구에게: 카카오 1:1(채널채팅) 방에서 친구의 마지막 말이 PROACTIVE_QUIET_DAYS 일보다 오래됐고, 그 뒤로 선톡을
-  아직 안 보낸 방. 친구가 답하기 전에는 다시 보내지 않는다. 친구가 그만하라고 하면 그 방은 끈다(set_proactive).
+"""선톡: 1:1 친구에게 마롱이가 이틀에 한 번쯤 먼저 말을 건다(.env 의 PROACTIVE=on 일 때만).
+- 누구에게: 카카오 1:1(채널채팅) 방에서 그날 친구가 아직 말하지 않았고, 최근 PROACTIVE_EVERY_DAYS 일(오늘 포함)
+  안에 선톡을 안 보낸 방. 지난 선톡에 친구가 답하기 전에는 다시 보내지 않는다. 친구가 그만하라고 하면 그 방은
+  끈다(set_proactive).
 - 언제: PROACTIVE_HOURS(한국 시각) 안에서 30분마다 확인한다. 대상이 있어도 확인할 때마다 보내지는 않아서
-  보내는 시각이 매번 같지 않다. 한 번에 한 명.
+  보내는 시각이 매번 같지 않다(그 시간 안에 고루 퍼짐). 한 번에 한 명.
 - 얼마나: 하루 PROACTIVE_DAILY_MAX 개까지.
 - 기록: 보낸 말은 messages 에 마롱이 말로 남기고 meta.proactive=true. 전달에 실패해도 남긴다(같은 방에 다시 시도하지 않게).
 - 끄기: .env 를 PROACTIVE=off 로 바꾸고 재시작. 시험으로 한 명에게만 보내기: run.py --proactive <이름|#키>"""
@@ -24,7 +25,7 @@ from .store import Store
 log = logging.getLogger("proactive")
 
 CHECK_S = 1800     # 이 간격으로 보낼 친구가 있는지 확인
-CHANCE = 0.3       # 대상이 있어도 확인할 때마다 이 확률로만 보냄
+CHANCE = 0.15      # 대상이 있어도 확인할 때마다 이 확률로만 보냄(12~21시에 고루 퍼지고, 그날 못 보내면 다음 날)
 CANDIDATES = 5     # 한 번 확인할 때 보는 방 수(오래 조용한 친구부터)
 
 
@@ -42,8 +43,8 @@ class Proactive:
 
     async def run(self) -> None:
         start, end = self.s.proactive_hours
-        log.info("선톡 켜짐: 1:1 친구가 %d일 조용하면 %d~%d시에 한 번, 하루 최대 %d개",
-                 self.s.proactive_quiet_days, start, end, self.s.proactive_daily_max)
+        log.info("선톡 켜짐: 1:1 친구에게 %d일에 한 번쯤 %d~%d시에, 하루 최대 %d개",
+                 self.s.proactive_every_days, start, end, self.s.proactive_daily_max)
         while True:
             await asyncio.sleep(CHECK_S)
             try:
@@ -60,12 +61,13 @@ class Proactive:
         today = now.replace(hour=0, minute=0, second=0, microsecond=0)
         if await self.store.proactive_count(today) >= self.s.proactive_daily_max:
             return 0
-        for room in await self.store.proactive_due(self.s.proactive_quiet_days, CANDIDATES):
+        for room in await self.store.proactive_due(today, self.s.proactive_every_days, CANDIDATES):
             if self._skip.get(room["room_key"]) == now.date() or self.rng() >= self.chance:
                 continue
             async with self.room_lock(room["room_key"]):
                 # 기다리는 동안 친구가 말을 걸었거나 선톡이 나갔으면 보내지 않음
-                if not await self.store.proactive_due(self.s.proactive_quiet_days, 1, room_key=room["room_key"]):
+                if not await self.store.proactive_due(today, self.s.proactive_every_days, 1,
+                                                      room_key=room["room_key"]):
                     return 0
                 result = await self.deliver(room)
             if result["text"] is None or result.get("saved") is False:

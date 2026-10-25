@@ -2,7 +2,7 @@
 대화 원문·요약·메모는 쌓기만 하고 지우거나 고치지 않는다. 봇 계정(marong)에는 그 권한 자체가 없다(schema.sql)."""
 import hashlib
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
@@ -246,15 +246,17 @@ class Store:
 
     # ── 선톡(먼저 말 걸기) ──────────────────────────────────────
 
-    async def proactive_due(self, quiet_days: int, limit: int, room_key: str | None = None) -> list[dict]:
-        """선톡할 1:1 방(오래 조용한 친구부터): 선톡을 켜 둔 방에서 친구의 마지막 말이 quiet_days 일보다 오래됐고,
-        그 뒤로 선톡을 아직 안 보낸 방(보냈다가 전달에 실패한 것도 보낸 것으로 침). room_key 를 주면 그 방만 확인."""
+    async def proactive_due(self, today: datetime, every_days: int, limit: int,
+                            room_key: str | None = None) -> list[dict]:
+        """선톡할 1:1 방(오래 조용한 친구부터): 선톡을 켜 둔 방에서 친구가 오늘(today = 한국 시각 0시) 아직 말하지
+        않았고, 최근 every_days 일(오늘 포함) 안에 선톡을 안 보냈고, 지난 선톡에 친구가 답한(또는 선톡을 받은 적 없는)
+        방. 보냈다가 전달에 실패한 것도 보낸 것으로 친다. room_key 를 주면 그 방만 확인."""
         return await self._all(
-            CHANNEL_ROOMS + "AND r.proactive AND u.created_at < now() - %s * interval '1 day' "
-            "AND NOT EXISTS (SELECT 1 FROM marong.messages x "
-            "  WHERE x.room_key = r.room_key AND x.id > u.id AND x.meta->>'proactive' = 'true') "
-            "AND (%s::text IS NULL OR r.room_key = %s) ORDER BY u.created_at LIMIT %s",
-            (quiet_days, room_key, room_key, limit))
+            CHANNEL_ROOMS + "AND r.proactive AND u.created_at < %(today)s "
+            "AND NOT EXISTS (SELECT 1 FROM marong.messages x WHERE x.room_key = r.room_key "
+            "  AND x.meta->>'proactive' = 'true' AND (x.id > u.id OR x.created_at >= %(since)s)) "
+            "AND (%(room)s::text IS NULL OR r.room_key = %(room)s) ORDER BY u.created_at LIMIT %(n)s",
+            {"today": today, "since": today - timedelta(days=every_days - 1), "room": room_key, "n": limit})
 
     async def proactive_count(self, since: datetime) -> int:
         """since 뒤로 보낸(전달 실패 포함) 선톡 수."""

@@ -100,7 +100,7 @@ SET_SHARE_TOOL = {
 }
 # 선톡: 친구가 아무 말도 안 했는데 마롱이가 먼저 보낼 말을 만들 때 '지금 상황' 끝에 붙이는 안내
 PROACTIVE_GUIDE = """# 먼저 말 걸기
-- 친구가 한동안 말이 없어서, 이번엔 마롱이가 먼저 카톡을 보내는 거야. 친구에게 보낼 첫 메시지만 써.
+- 오늘은 친구가 아직 말이 없어서, 이번엔 마롱이가 먼저 카톡을 보내는 거야. 친구에게 보낼 첫 메시지만 써.
 - 1~2문장, 말풍선 하나(빈 줄 없이). 질문은 하나만 해.
 - 기억 메모·요약·최근 대화에 이어 갈 얘기가 있으면 하나만 골라 자연스럽게 물어봐(예: 시험 본다던 친구에게 시험 어땠는지). 없으면 지금 시각에 맞게 마롱이 일상이나 취향 얘기로 가볍게 시작해.
 - 최근 대화에서 이미 물어본 걸 똑같이 다시 묻지 마.
@@ -279,7 +279,7 @@ class Agent:
                 lines.append("- 이 친구는 선톡을 꺼 뒀어(마롱이가 먼저 말 걸지 않음). 다시 해 달라고 하면 "
                              "set_proactive 로 켜.")
             else:
-                lines.append("- 마롱이는 이 친구가 며칠 조용하면 가끔 먼저 카톡을 보내(선톡). 친구가 선톡이 싫다거나 "
+                lines.append("- 마롱이는 이 친구에게 가끔 먼저 카톡을 보내(선톡). 친구가 선톡이 싫다거나 "
                              "먼저 연락하지 말라고 하면 set_proactive 로 끄고 알겠다고 가볍게 말해.")
         if (person or {}).get("share") is False:
             lines.append("- 이 친구는 자기 얘기를 다른 친구에게 하지 말라고 했어. 다시 해도 된다고 하면 set_share 로 켜.")
@@ -435,7 +435,7 @@ class Agent:
                     "is_error": True}
         log.info("set_proactive room=%s on=%s", short_key(msg.room_key), on)
         if on:
-            return {**result, "content": "선톡을 다시 켰어. 이 친구가 며칠 조용하면 가끔 먼저 말 걸게."}
+            return {**result, "content": "선톡을 다시 켰어. 이제 가끔 먼저 말 걸게."}
         return {**result, "content": "선톡을 껐어. 이제 이 방에는 먼저 말 걸지 않아. 친구에게 알겠다고 가볍게 말해."}
 
     async def _add_friendship(self, block, msg: Incoming, result: dict) -> dict:
