@@ -2,7 +2,7 @@
 
 동희와 친구들이 카카오톡에서 같이 수다 떠는 챗봇이에요. 반말로 이름을 불러 주고, 예전에 나눈 얘기를 기억해서 이어 가요.
 
-- 모델: Claude Haiku 5.5, 답장 effort `xhigh` (요약은 `low`)
+- 모델: Claude Haiku 5.5, effort `xhigh`(답장·선톡, 그리고 뒤에서 하는 요약·메모·공유 메모까지. 2026-10-25 동희님 "마롱이 xhigh로 바꿔줘")
 - 서버: 싱가포르 OVH(`ko-family`)의 `/opt/marong`, systemd 서비스 `marong`
 - 저장: 같은 서버의 Postgres 16 + pgvector(`marong` DB). 대화 원문·요약·친구별 기억 메모·임베딩
 - 카카오: 앱 1620899(이름 '마롱이')의 카카오톡 봇. 게이트웨이(웹소켓)로 메시지를 받고 콜백 API 로 답해요
@@ -57,6 +57,7 @@ bash deploy/ovh.sh logs          # 로그 보기(Ctrl+C 로 나옴)
 - `BOT_TOKEN`: 카카오 디벨로퍼스 > 앱 > [제품 설정] > [카카오톡 봇] > [봇]
 - `ANTHROPIC_API_KEY`(필수), `ANTHROPIC_API_KEY_BACKUP`(선택, 주 키가 실패하면 씀)
 - `ANTHROPIC_EFFORT`: 답장 effort. 기본 `xhigh`. 답이 느리면 `high`
+- `SUMMARY_EFFORT`: 뒤에서 하는 요약·메모·공유 메모 effort. 줄이 없으면 `low`, 서버는 `xhigh`
 - `GROUP_TRIGGER`: 단체방에서 이 말(예: `마롱`)이 들어간 메시지에만 답해요. 비우면 받은 메시지 모두에 답해요
 - 단체방은 카카오가 마롱이를 태그(@마롱이)한 메시지만 보내 줘요(태그 글자는 빼고). 그래서 단체방에서는 태그해야 답하고, 태그 없이 한 말은 마롱이가 못 봐요. 태그만 하면 부른 것으로 알아들어요
 
