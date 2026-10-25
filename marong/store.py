@@ -2,7 +2,7 @@
 대화 원문·요약·메모는 쌓기만 하고 지우거나 고치지 않는다. 봇 계정(marong)에는 그 권한 자체가 없다(schema.sql)."""
 import hashlib
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
@@ -246,22 +246,25 @@ class Store:
 
     # ── 선톡(먼저 말 걸기) ──────────────────────────────────────
 
-    async def proactive_due(self, today: datetime, every_days: int, quiet_hours: int, limit: int,
+    async def proactive_due(self, quiet: timedelta, recent: timedelta, limit: int,
                             room_key: str | None = None) -> list[dict]:
-        """선톡할 1:1 방(오래 조용한 친구부터): 선톡을 켜 둔 방에서 친구가 quiet_hours 시간 넘게 조용하고, 최근
-        every_days 일(today = 한국 시각 오늘 0시, 오늘 포함) 안에 선톡을 안 보냈고, 지난 선톡에 친구가 답한(또는 선톡을
-        받은 적 없는) 방. 보냈다가 전달에 실패한 것도 보낸 것으로 친다. room_key 를 주면 그 방만 확인."""
+        """선톡할 1:1 방(오래 조용한 친구부터): 선톡을 켜 둔 방에서 친구가 quiet 넘게 조용하고, 최근 recent 안에 선톡을
+        안 보낸 방(시각은 DB 시계 now() 에서 거꾸로 잼). 지난 선톡에 친구가 답하지 않았어도 대상이다. 보냈다가 전달에
+        실패한 것도 보낸 것으로 치고, 친구가 마지막으로 말한 뒤로 전달 실패가 두 번이면(차단 등) 친구가 다시 말할 때까지
+        뺀다. room_key 를 주면 그 방만 확인."""
         return await self._all(
-            CHANNEL_ROOMS + "AND r.proactive AND u.created_at < now() - %(quiet)s * interval '1 hour' "
+            CHANNEL_ROOMS + "AND r.proactive AND u.created_at < now() - %(quiet)s "
             "AND NOT EXISTS (SELECT 1 FROM marong.messages x WHERE x.room_key = r.room_key "
-            "  AND x.meta->>'proactive' = 'true' AND (x.id > u.id OR x.created_at >= %(since)s)) "
+            "  AND x.meta->>'proactive' = 'true' AND x.created_at >= now() - %(recent)s) "
+            "AND (SELECT count(*) FROM marong.messages f WHERE f.room_key = r.room_key AND f.id > u.id "
+            "  AND f.meta->>'proactive' = 'true' AND f.meta->>'delivered' = 'false') < 2 "
             "AND (%(room)s::text IS NULL OR r.room_key = %(room)s) ORDER BY u.created_at LIMIT %(n)s",
-            {"quiet": quiet_hours, "since": today - timedelta(days=every_days - 1), "room": room_key, "n": limit})
+            {"quiet": quiet, "recent": recent, "room": room_key, "n": limit})
 
-    async def proactive_count(self, since: datetime) -> int:
-        """since 뒤로 보낸(전달 실패 포함) 선톡 수."""
+    async def proactive_count(self, within: timedelta) -> int:
+        """최근 within 안에 보낸(전달 실패 포함) 선톡 수(시각은 DB 시계에서 거꾸로 잼)."""
         row = await self._one("SELECT count(*) AS n FROM marong.messages "
-                              "WHERE meta->>'proactive' = 'true' AND created_at >= %s", (since,))
+                              "WHERE meta->>'proactive' = 'true' AND created_at >= now() - %s", (within,))
         return row["n"]
 
     async def channel_rooms(self, who: str) -> list[dict]:

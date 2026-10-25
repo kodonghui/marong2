@@ -57,8 +57,9 @@ async def check(s, store: Store, emb: Embeddings, llm: LLM, agent: Agent, worker
     print("단체방:", f"{', '.join(s.group_triggers)} 이(가) 들어간 메시지에만 답함" if s.group_triggers
           else "받은 메시지 모두에 답함", "(카카오는 태그한 메시지만 보내 줌)")
     start, end = s.proactive_hours
-    print("선톡:", f"켜짐(1:1 친구에게 {s.proactive_every_days}일에 한 번쯤 {start}~{end}시에. 친구가 {QUIET_HOURS}시간 안에 "
-                 f"말했거나 지난 선톡에 답이 없으면 안 보냄. 하루 최대 {s.proactive_daily_max}개)" if s.proactive
+    print("선톡:", f"켜짐(1:1 친구에게 하루 {s.proactive_per_day}번쯤, {start}~{end}시를 {s.proactive_per_day}칸으로 나눠 "
+                 f"칸마다 한 번. 답이 없어도 보내고, 친구가 {QUIET_HOURS}시간 안에 말했으면 기다림. "
+                 f"하루 최대 {s.proactive_daily_max}개)" if s.proactive
           else "꺼짐(PROACTIVE=off)")
 
     try:

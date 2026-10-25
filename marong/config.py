@@ -57,10 +57,10 @@ class Settings:
     summary_turns: int             # 이만큼 쌓이면 뒤에서 요약 한 개를 만듦
     recall_min_similarity: float   # 이보다 덜 비슷한 예전 대화는 넣지 않음(0~1)
     group_triggers: tuple[str, ...]  # 단체방에서는 이 말이 들어간 메시지에만 답함. 비면 받은 메시지 모두에 답함
-    proactive: bool                # 선톡: 1:1 친구에게 마롱이가 가끔 먼저 말 걸기. 기본 꺼짐
-    proactive_every_days: int      # 선톡 간격(일): 2 면 이틀에 한 번(선톡한 다음다음 날부터 다시)
+    proactive: bool                # 선톡: 1:1 친구에게 마롱이가 먼저 말 걸기. 기본 꺼짐
+    proactive_per_day: int         # 친구 한 명에게 하루 선톡 수: PROACTIVE_HOURS 를 이만큼 칸으로 나눠 칸마다 한 번
     proactive_hours: tuple[int, int]  # 이 시간에만 보냄(한국 시각, 시작 시 이상 끝 시 미만)
-    proactive_daily_max: int       # 하루에 보내는 선톡 상한(카카오 전송 API 는 하루 1,000건)
+    proactive_daily_max: int       # 하루에 보내는 선톡 상한(모든 친구 합. 카카오 전송 API 는 하루 1,000건)
 
     def problems(self) -> list[str]:
         """실행 전에 비어 있거나 잘못된 값을 알려 준다(값 자체는 출력하지 않음)."""
@@ -80,8 +80,8 @@ class Settings:
         start, end = self.proactive_hours
         if not 0 <= start < end <= 24:
             out.append("PROACTIVE_HOURS 는 '12-21' 처럼 시작-끝 시(0~24, 시작이 끝보다 앞)")
-        if self.proactive_every_days < 1 or self.proactive_daily_max < 1:
-            out.append("PROACTIVE_EVERY_DAYS·PROACTIVE_DAILY_MAX 는 1 이상")
+        if self.proactive_per_day < 1 or self.proactive_daily_max < 1:
+            out.append("PROACTIVE_PER_DAY·PROACTIVE_DAILY_MAX 는 1 이상")
         return out
 
     def anthropic_keys(self) -> list[tuple[str, str]]:
@@ -117,7 +117,7 @@ def load_settings() -> Settings:
         recall_min_similarity=float(_env("RECALL_MIN_SIMILARITY", "0.4")),
         group_triggers=tuple(t.strip() for t in _env("GROUP_TRIGGER").split(",") if t.strip()),
         proactive=_env("PROACTIVE", "off").lower() in ("on", "true", "1", "yes"),
-        proactive_every_days=int(_env("PROACTIVE_EVERY_DAYS", "2")),
+        proactive_per_day=int(_env("PROACTIVE_PER_DAY", "2")),
         proactive_hours=_hours(_env("PROACTIVE_HOURS", "12-21")),
         proactive_daily_max=int(_env("PROACTIVE_DAILY_MAX", "10")),
     )
