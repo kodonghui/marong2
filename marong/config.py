@@ -47,7 +47,6 @@ class Settings:
     summary_turns: int             # 이만큼 쌓이면 뒤에서 요약 한 개를 만듦
     recall_min_similarity: float   # 이보다 덜 비슷한 예전 대화는 넣지 않음(0~1)
     group_triggers: tuple[str, ...]  # 단체방에서는 이 말이 들어간 메시지에만 답함. 비면 받은 메시지 모두에 답함
-    event_chance: float = 0.03     # 답 하나마다 깜짝 주제곡 이벤트가 열릴 확률(방마다 20시간에 한 번까지). 0 이면 끔
 
     def problems(self) -> list[str]:
         """실행 전에 비어 있거나 잘못된 값을 알려 준다(값 자체는 출력하지 않음)."""
@@ -64,8 +63,6 @@ class Settings:
             out.append("DATABASE_URL 이 비어 있음")
         if self.recent_turns < 1 or self.summary_turns < 2:
             out.append("RECENT_TURNS 는 1 이상, SUMMARY_TURNS 는 2 이상")
-        if not 0 <= self.event_chance <= 1:
-            out.append("EVENT_CHANCE 는 0~1(예: 0.03)")
         return out
 
     def anthropic_keys(self) -> list[tuple[str, str]]:
@@ -99,5 +96,4 @@ def load_settings() -> Settings:
         summary_turns=int(_env("SUMMARY_TURNS", "10")),
         recall_min_similarity=float(_env("RECALL_MIN_SIMILARITY", "0.4")),
         group_triggers=tuple(t.strip() for t in _env("GROUP_TRIGGER").split(",") if t.strip()),
-        event_chance=float(_env("EVENT_CHANCE", "0.03")),
     )

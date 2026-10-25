@@ -46,7 +46,7 @@ async def main():
         "ANTHROPIC_API_KEY": "good", "ANTHROPIC_BASE_URL": fake.url, "DATABASE_URL": db.app_url,
         "PROMPT_PATH": str(ROOT / "prompt.md"), "WELCOME_PATH": str(ROOT / "welcome.txt"),
         "EMBED_MODEL": "google/embeddinggemma-300m" if cache else "", "EMBED_CACHE_DIR": cache or "",
-        "BOT_TOKEN": "", "LLM_TIMEOUT_SECONDS": "10", "EVENT_CHANCE": "0.03",
+        "BOT_TOKEN": "", "LLM_TIMEOUT_SECONDS": "10",
     })
     checks = 0
 
@@ -55,7 +55,6 @@ async def main():
     assert code == 0, out
     for line in ("모델: claude-haiku-5-5 / 답장 effort xhigh / 요약 effort low", "Claude 주 키: 정상",
                  "BOT_TOKEN: 비어 있음", "표 버전 1(코드 1)", "기록 지우기·고치기 권한: 없음",
-                 "이벤트: 깜짝 주제곡 3%(방마다 20시간에 한 번까지)",
                  "답장 시험: 안녕! 나는 마롱이야", "요약 시험: 동희가 토익", "메모: - 마라탕 좋아함"):
         assert line in out, f"'{line}' 없음\n{out}"
     assert ("준비됨: 768차원" in out) if cache else ("임베딩: 꺼짐" in out), out

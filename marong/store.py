@@ -101,14 +101,6 @@ class Store:
             "JOIN marong.people p ON p.user_key = n.user_key WHERE n.room_key = %s "
             "ORDER BY n.user_key, n.id DESC", (room_key,))
 
-    async def room_events(self, room_key: str) -> dict:
-        """이벤트용: 이 방에서 친구들이 보낸 메시지 수, 마지막 이벤트 뒤 지난 초(없으면 None), 했던 이벤트 이름."""
-        return await self._one(
-            "SELECT count(*) FILTER (WHERE role = 'user') AS said, "
-            "  extract(epoch FROM now() - max(created_at) FILTER (WHERE meta ? 'event'))::float8 AS since_s, "
-            "  coalesce(array_agg(DISTINCT meta->>'event') FILTER (WHERE meta ? 'event'), '{}') AS events "
-            "FROM marong.messages WHERE room_key = %s", (room_key,))
-
     async def set_name(self, user_key: str, name: str) -> None:
         async with self.pool.connection() as c:
             await c.execute("UPDATE marong.people SET name = %s, name_set_at = now() WHERE user_key = %s",
