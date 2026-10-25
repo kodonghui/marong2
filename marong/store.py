@@ -89,13 +89,16 @@ class Store:
             (room_key, user_key, role, content, kakao_id, reply_to, Jsonb(meta or {})))
         return row["id"] if row else None
 
-    async def recent(self, room_key: str, limit: int) -> list[dict]:
-        """방의 최근 메시지(오래된 것부터). 친구에게 전달되지 못한 마롱이 답은 뺀다."""
+    async def recent(self, room_key: str, limit: int, since_id: int | None = None) -> list[dict]:
+        """방의 최근 메시지(오래된 것부터). since_id 가 있으면 그 메시지부터는 limit 을 넘어도 다 넣는다.
+        친구에게 전달되지 못한 마롱이 답은 뺀다."""
         rows = await self._all(
             "SELECT m.id, m.role, m.user_key, p.name, m.content, m.created_at FROM marong.messages m "
             "LEFT JOIN marong.people p ON p.user_key = m.user_key "
             "WHERE m.room_key = %s AND m.meta->>'delivered' IS DISTINCT FROM 'false' "
-            "ORDER BY m.id DESC LIMIT %s", (room_key, limit))
+            "ORDER BY m.id DESC LIMIT greatest(%s, "
+            "(SELECT count(*) FROM marong.messages WHERE room_key = %s AND id >= %s))",
+            (room_key, limit, room_key, since_id))
         return rows[::-1]
 
     async def summaries(self, room_key: str, limit: int) -> list[dict]:

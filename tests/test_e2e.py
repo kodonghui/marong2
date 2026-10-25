@@ -282,13 +282,19 @@ async def main():
     await asyncio.sleep(1)
     assert [c["cb"] for c in CALLBACKS[14:]] == ["cb16"], [c["cb"] for c in CALLBACKS[14:]]
     assert "한 마디\n두 마디" in chats()[-1]["body"]["messages"][-1]["content"], chats()[-1]["body"]["messages"][-1]
+    # 단체방에서 다른 친구가 바로 이어 말하면 묶지 않고 친구마다 답함(도구는 말한 친구에게 걸려서)
+    await dispatch(c1["ws"], 18, "MESSAGE_CREATE", msg(16, "나 먼저", "cb17", room="group_1", channel=False))
+    await dispatch(c1["ws"], 19, "MESSAGE_CREATE", msg(17, "나도", "cb18", room="group_1", user="user_2",
+                                                         channel=False))
+    await wait_for(lambda: len(CALLBACKS) == 17, what="친구마다 답장")
+    assert [c["cb"] for c in CALLBACKS[15:]] == ["cb17", "cb18"], [c["cb"] for c in CALLBACKS[15:]]
     checks += 1
 
     # 14) 서버 재시작(1001) → RESUME(session_id, 마지막 seq)
     await c1["ws"].close(1001)
     c2 = await asyncio.wait_for(CONNS.get(), 5)
     f = await asyncio.wait_for(c2["frames"].get(), 5)
-    assert f == {"op": 6, "d": {"token": "tok-secret", "session_id": "S1", "seq": 17}}, f
+    assert f == {"op": 6, "d": {"token": "tok-secret", "session_id": "S1", "seq": 19}}, f
     checks += 1
 
     # 15) 세션 만료(4009) → 새 IDENTIFY

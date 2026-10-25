@@ -241,6 +241,15 @@ async def main():
     t0 = asyncio.get_running_loop().time()
     r = await waiting.handle(Incoming("r7", "u7", "넷째", kakao_id="b4"), send, superseded=lambda: False)
     ok(r == "응답:넷째" and asyncio.get_running_loop().time() - t0 >= 0.3, "더 안 오면 기다렸다가 답함")
+    # 묶은 말이 최근 대화 길이(RECENT_TURNS 2 → 4개)보다 많아도 첫 말부터 다 보고 답함
+    words = ["하나", "둘", "셋", "넷", "다섯", "여섯"]
+    for i, w in enumerate(words):
+        r = await agent.handle(Incoming("r8", "u8", w, kakao_id=f"h{i}"), send,
+                               superseded=lambda last=(i == len(words) - 1): not last)
+    last = llm.bodies[-1]["messages"][-1]["content"]
+    ok(r == "응답:여섯" and last.endswith("\n".join(words)) and not agent._held, f"묶은 말 여섯 개를 다 넣음: {last!r}")
+    await agent.handle(Incoming("r8", "u8", "일곱", kakao_id="h6"), send, superseded=lambda: False)
+    ok("하나" not in json.dumps(llm.bodies[-1]["messages"], ensure_ascii=False), "답한 뒤엔 다시 최근 대화 길이만큼")
 
     # ── 뒤 작업: 요약·메모·임베딩 → 기억 찾기 ──
     for role, t in (("user", "나 다음 주에 토익 시험 봐"), ("assistant", "화이팅이야 📚"),
