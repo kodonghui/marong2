@@ -23,6 +23,8 @@ FALLBACK_TEXT = "앗 잠깐 머리가 하얘졌어 😵 조금 있다가 다시 
 REFUSAL_TEXT = "음 그건 내가 같이 하기 어려운 얘기야 😅 우리 다른 얘기 하자!"
 LATE_TEXT = "헉 답이 너무 밀렸어 🙏 한 번만 다시 말해줄래?"
 EMPTY_TEXT = "메시지가 비어 있어 👀 다시 보내줄래?"
+# 카카오는 단체방에서 마롱이를 태그한 메시지만 보내 주고 태그 글자는 뺀다. 태그만 하면 빈 글로 와서 부른 것으로 받는다
+CALLED_TEXT = "@마롱이"
 # xhigh 에서 가끔 답을 생각 속에만 쓰고 글 없이 끝냄 → 한 번만 다시 쓰게 함
 EMPTY_NUDGE = "방금 답이 글로 나오지 않았어. 생각한 내용을 바탕으로 친구에게 보낼 답을 지금 글로 써."
 
@@ -141,11 +143,23 @@ class Agent:
         knowledge = load_knowledge(self.s.knowledge_dir)
         return f"{prompt}\n\n{knowledge}".strip() if knowledge else prompt
 
-    async def handle(self, msg: Incoming, send, deadline: float | None = None) -> str | None:
-        """메시지 하나를 처리하고 보낸 답을 돌려준다. 이미 처리한 카카오 메시지면 None.
-        send: async (text) -> bool(전달 성공). deadline: 이 시각(loop.time) 전에 답을 보내야 함."""
-        loop = asyncio.get_running_loop()
+    @staticmethod
+    def _text(msg: Incoming) -> str:
         text = (msg.text or "").strip()[:MAX_INPUT_CHARS]
+        return text or ("" if msg.is_channel else CALLED_TEXT)
+
+    def answers(self, msg: Incoming) -> bool:
+        """이 메시지에 Claude 로 답하는지(빈 1:1 메시지와 단체방에서 GROUP_TRIGGER 가 없는 말은 답하지 않음)."""
+        text = self._text(msg)
+        return bool(text) and (msg.is_channel or not self.s.group_triggers
+                               or any(t in text for t in self.s.group_triggers))
+
+    async def handle(self, msg: Incoming, send, deadline: float | None = None, superseded=None) -> str | None:
+        """메시지 하나를 처리하고 보낸 답을 돌려준다. 이미 처리한 카카오 메시지거나 답하지 않으면 None.
+        send: async (text) -> bool(전달 성공). deadline: 이 시각(loop.time) 전에 답을 보내야 함.
+        superseded: () -> bool. 같은 방에 답할 말이 뒤에 더 왔으면 True. 그러면 저장만 하고, 뒤의 말에 한 번에 답한다."""
+        loop = asyncio.get_running_loop()
+        text = self._text(msg)
         if not text:
             await send(EMPTY_TEXT)
             return EMPTY_TEXT
@@ -161,9 +175,17 @@ class Agent:
             db_ok = False
             log.error("db_error %s", brief(e))
 
-        if not msg.is_channel and self.s.group_triggers and not any(t in text for t in self.s.group_triggers):
+        if not self.answers(msg):
             self.on_saved()  # 단체방에서 마롱이를 부르지 않은 말: 대화 흐름으로 저장만 하고 답하지 않음
             return None
+        if db_ok and superseded is not None:
+            # 친구가 몇 마디를 연달아 보내면 말마다 따로 답하지 않고 마지막 말에 한 번에 답한다(저장된 앞 말도 같이 봄)
+            if not superseded() and self.s.reply_wait_s > 0:
+                await asyncio.sleep(self.s.reply_wait_s)
+            if superseded():
+                log.info("뒤에 말이 더 와서 묶어 답함 room=%s", short_key(msg.room_key))
+                self.on_saved()
+                return None
 
         budget = (deadline - loop.time()) if deadline else self.s.llm_timeout_s
         if budget < MIN_BUDGET_S:
@@ -266,7 +288,8 @@ class Agent:
         if msg.is_channel:
             lines.append("- 1:1 채팅이야.")
         else:
-            lines.append("- 단체 채팅방이야. 친구 메시지 앞에 '이름: '을 붙여 뒀어.")
+            lines.append("- 단체 채팅방이야. 친구 메시지 앞에 '이름: '을 붙여 뒀어. 카카오는 친구가 마롱이를 태그한 메시지만 "
+                         "보내 줘서(태그 글자는 빠짐) 태그 없이 한 말은 마롱이가 못 봐. '@마롱이'만 있으면 태그만 해서 부른 거야.")
         if name:
             lines.append(f"- 지금 말 건 친구: {name}")
         else:

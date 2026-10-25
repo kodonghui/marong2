@@ -10,7 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 
 log = logging.getLogger("store")
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 # 'ㅋㅋㅋ'·'ㅇㅇ'·이모티콘만 있는 말은 검색해도 쓸모가 없어 임베딩하지 않음(한글 음절·영문·숫자가 2개 이상 이어진 말만)
 MEANINGFUL = "[가-힣A-Za-z0-9]{2}"
 # 카카오에서 온 1:1 방(채널채팅)마다 친구의 마지막 말. 터미널 대화('terminal' 방)는 카카오 id 가 없어서 빠짐
@@ -332,6 +332,25 @@ class Store:
                         "INSERT INTO marong.notes (room_key, user_key, content, summary_id) VALUES (%s, %s, %s, %s)",
                         (room_key, user_key, text, row["id"]))
                 return row["id"]
+
+    async def rooms_to_note(self) -> list[dict]:
+        """마지막 요약과 마지막으로 메모를 먼저 고친 때(noted_id) 뒤로 친구 말이 새로 있는 방(오래 기다린 방부터)."""
+        rows = await self._all(
+            "SELECT r.room_key FROM marong.rooms r CROSS JOIN LATERAL (SELECT min(m.id) AS first_new FROM marong.messages m "
+            "  WHERE m.room_key = r.room_key AND m.role = 'user' AND m.id > greatest(r.noted_id, coalesce("
+            "    (SELECT max(s.last_id) FROM marong.summaries s WHERE s.room_key = r.room_key), 0))) x "
+            "WHERE x.first_new IS NOT NULL ORDER BY x.first_new")
+        return [r["room_key"] for r in rows]
+
+    async def add_notes(self, room_key: str, notes: dict[str, str], last_id: int) -> None:
+        """요약 없이 바뀐 친구 메모를 쓰고, 그 방을 last_id 까지 메모를 고친 것으로 적는다(한 트랜잭션)."""
+        async with self.pool.connection() as c:
+            async with c.transaction():
+                for user_key, text in notes.items():
+                    await c.execute("INSERT INTO marong.notes (room_key, user_key, content) VALUES (%s, %s, %s)",
+                                    (room_key, user_key, text))
+                await c.execute("UPDATE marong.rooms SET noted_id = greatest(noted_id, %s) WHERE room_key = %s",
+                                (last_id, room_key))
 
     async def friend_notes(self) -> list[dict]:
         """공유를 켠 친구마다 방·키별 지금 메모(공유 메모를 거를 재료). friend_id, name, note_id, content, is_channel."""

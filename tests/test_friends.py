@@ -156,7 +156,7 @@ async def main():
     # 방: c1 동희 1:1(d1), c2 현경 1:1(h1), c3 이름만 같은 다른 동희 1:1(x1), g1 단체방(동희 d2·현경 h2),
     #     g2 단체방(동희라고 한 d3 혼자), term 터미널 대화(t1), c4 민수 1:1(m1)·g3 단체방(m2)은 옛 기록
     # ── 키 묶기 ──
-    ok(await store.schema_version() == 3, "표 버전 3")
+    ok(await store.schema_version() == 4, "표 버전 4")
     await say("c1", "d1", "안녕 내 이름은 동희")
     f_dh = fid("d1")
     ok(f_dh is not None, "1:1 에서 이름을 알려 주면 친구 한 명으로 저장")
@@ -294,6 +294,47 @@ async def main():
     ok(len(lines) == 6 and len(lines[0]) == 62 and lines[0].endswith("…") and lines[-1] == "- 취미4",
        f"6줄까지, 한 줄 60자까지: {lines}")
 
+    # ── 요약(10턴)을 기다리지 않음: 1:1 에서 한 얘기를 단체방 친구가 자기 1:1 에서 바로 물어봐도 앎 ──
+    await say("g4", "p1", "내 이름은 지수", channel=False)
+    await say("g4", "p2", "내 이름은 유나", channel=False)
+    await say("c5", "p1", "내 이름은 지수")
+    await say("c5", "p1", "응")
+    await say("c6", "p2", "내 이름은 유나")
+    await settle()
+    f_js = fid("p1")
+    sums = db.admin("SELECT count(*) FROM marong.summaries WHERE room_key = 'c5'")[0][0]
+    n = len(llm.bodies)
+    await say("c5", "p1", "메모:피자 좋아함")
+    await settle()
+    notes_req = [b for b in llm.bodies[n:] if b.get("output_config", {}).get("format")
+                 and "summary" not in b["output_config"]["format"]["schema"]["properties"]
+                 and "items" not in b["output_config"]["format"]["schema"]["properties"]]
+    ok(len(notes_req) == 1 and notes_req[0]["system"] == memory.NOTES_SYSTEM and "피자" in notes_req[0]["messages"][0]["content"],
+       "메모만 먼저 고치는 요청(요약 없이 notes 만)")
+    ok(db.admin("SELECT count(*) FROM marong.summaries WHERE room_key = 'c5'")[0][0] == sums, "요약은 아직 안 만듦")
+    ok(db.admin("SELECT content, summary_id FROM marong.notes WHERE room_key = 'c5' ORDER BY id DESC LIMIT 1")
+       == [("- 피자 좋아함", None)], "메모는 바로 생김(요약 없이)")
+    ok(db.admin("SELECT noted_id = (SELECT max(id) FROM marong.messages WHERE room_key = 'c5') FROM marong.rooms "
+                "WHERE room_key = 'c5'") == [(True,)], "어디까지 메모했는지 남김")
+    ok(shared(f_js)[0] == "- 피자 좋아함", f"공유 메모도 바로: {shared(f_js)}")
+    await say("c6", "p2", "지수 뭐 좋아해?")
+    ok("- 지수(같은 단체방): 피자 좋아함" in friends_part(llm.bodies[-1]), friends_part(llm.bodies[-1]))
+    n = len(llm.bodies)
+    await worker.step()
+    ok(not any("format" in b.get("output_config", {}) and "피자" in b["messages"][0]["content"] for b in llm.bodies[n:]),
+       "새 말이 없으면 메모를 다시 고치지 않음")
+
+    # 같은 방 메모는 1분에 한 번까지(미룬 방은 그만큼 뒤에 다시 봄)
+    await store.add_message("c5", "user", "메모:치킨 좋아함", user_key="p1", kakao_id="burst-1")
+    n = len(llm.bodies)
+    await worker.step()
+    ok(not any("치킨" in b["messages"][0]["content"] for b in llm.bodies[n:] if "format" in b.get("output_config", {}))
+       and worker._later is not None and 0 < worker._later <= memory.NOTE_GAP_S, f"1분 안이면 미룸: {worker._later}")
+    worker._noted_at["c5"] -= memory.NOTE_GAP_S
+    await settle()
+    ok("치킨" in db.admin("SELECT content FROM marong.notes WHERE room_key = 'c5' ORDER BY id DESC LIMIT 1")[0][0]
+       and "- 치킨 좋아함" in shared(f_js)[0].splitlines(), f"간격이 지나면 고침: {shared(f_js)}")
+
     # ── 선톡에는 다른 친구 얘기를 넣지 않음 ──
     n = len(llm.bodies)
     await agent.proactive_message({"room_key": "c1", "user_key": "d1", "name": "동희",
@@ -323,9 +364,9 @@ async def main():
        and "민수(대학 친구)" in block and f"{short('h1')} 1:1" in block and f"{short('h2')} 단체" in block, out)
     ok("넣을 만한 게 없음" in friend_block(out, "민수") and "친구에 안 묶인 키 2개" in out, out)
     code, out = admin("people")
-    ok(code == 0 and "카카오 키 10개" in out and "친구 현경" in out, out)
+    ok(code == 0 and "카카오 키 12개" in out and "친구 현경" in out, out)
     code, out = admin("stats")
-    ok(code == 0 and "friends 5" in out and "friendships 2" in out and "shared_notes" in out, out)
+    ok(code == 0 and "friends 7" in out and "friendships 2" in out and "shared_notes" in out, out)
 
     code, out = admin("link", short("d3"), "동희")
     ok(code == 1 and "여럿이라" in out, f"같은 이름이 여럿이면 #키로: {out}")
@@ -357,8 +398,10 @@ async def main():
 
     # ── 로그에는 내용·이름이 없음 ──
     joined = "\n".join(LOGS)
-    ok("add_friendship user=" in joined and "set_share user=" in joined and "공유 메모 저장 friend=" in joined, "로그는 남음")
-    for word in ("마라탕", "보드게임", "우울", "이직", "토익", "SECRET_RAW_TEXT", "회사 동기", "현경", "민수", "등산"):
+    ok("add_friendship user=" in joined and "set_share user=" in joined and "공유 메모 저장 friend=" in joined
+       and "메모 먼저 저장 room=" in joined, "로그는 남음")
+    for word in ("마라탕", "보드게임", "우울", "이직", "토익", "SECRET_RAW_TEXT", "회사 동기", "현경", "민수", "등산",
+                 "피자", "치킨", "지수"):
         ok(word not in joined, f"로그에 '{word}' 없음")
 
     await store.close()
