@@ -136,6 +136,7 @@ class Agent:
         self.emb = embeddings
         self.llm = llm
         self.on_saved = on_saved or (lambda: None)  # 메시지가 쌓일 때마다 뒤 작업(임베딩·요약)을 깨움
+        self._held: dict[tuple[str, str], int] = {}  # (방, 친구) → 묶어 답하려고 저장만 해 둔 첫 말의 id
 
     def persona(self) -> str:
         p = Path(self.s.prompt_path)
@@ -157,7 +158,7 @@ class Agent:
     async def handle(self, msg: Incoming, send, deadline: float | None = None, superseded=None) -> str | None:
         """메시지 하나를 처리하고 보낸 답을 돌려준다. 이미 처리한 카카오 메시지거나 답하지 않으면 None.
         send: async (text) -> bool(전달 성공). deadline: 이 시각(loop.time) 전에 답을 보내야 함.
-        superseded: () -> bool. 같은 방에 답할 말이 뒤에 더 왔으면 True. 그러면 저장만 하고, 뒤의 말에 한 번에 답한다."""
+        superseded: () -> bool. 같은 친구가 같은 방에 답할 말을 뒤에 더 보냈으면 True. 그러면 저장만 하고, 뒤의 말에 한 번에 답한다."""
         loop = asyncio.get_running_loop()
         text = self._text(msg)
         if not text:
@@ -184,15 +185,17 @@ class Agent:
                 await asyncio.sleep(self.s.reply_wait_s)
             if superseded():
                 log.info("뒤에 말이 더 와서 묶어 답함 room=%s", short_key(msg.room_key))
+                self._held.setdefault((msg.room_key, msg.user_key), user_id)
                 self.on_saved()
                 return None
+        held = self._held.pop((msg.room_key, msg.user_key), None)
 
         budget = (deadline - loop.time()) if deadline else self.s.llm_timeout_s
         if budget < MIN_BUDGET_S:
             reply, meta = LATE_TEXT, {"late": True}
         else:
             reply, meta = await self._reply(msg, person, user_id, text, min(self.s.llm_timeout_s, budget - 5),
-                                            use_memory=db_ok)
+                                            use_memory=db_ok, held=held)
         ok = await send(reply)
         if db_ok:
             try:
@@ -204,11 +207,11 @@ class Agent:
         return reply
 
     async def _reply(self, msg: Incoming, person: dict | None, user_id: int | None, text: str,
-                     timeout: float, use_memory: bool = True) -> tuple[str, dict]:
+                     timeout: float, use_memory: bool = True, held: int | None = None) -> tuple[str, dict]:
         system = messages = None
         if use_memory:  # 방금 저장소가 고장 났으면 기억 모으기를 건너뜀(연결을 또 기다리지 않게)
             try:
-                system, messages = await self._context(msg, person, user_id, text)
+                system, messages = await self._context(msg, person, user_id, text, held)
             except Exception as e:  # 기억을 못 모아도 지금 말에는 답함
                 log.error("context_error %s", brief(e))
         if system is None:
@@ -224,8 +227,9 @@ class Agent:
     # ── 기억 모으기 ──────────────────────────────────────────
 
     async def _context(self, msg: Incoming, person: dict | None, user_id: int | None,
-                       text: str) -> tuple[list[dict], list[dict]]:
-        rows = await self.store.recent(msg.room_key, self.s.recent_turns * 2)
+                       text: str, held: int | None = None) -> tuple[list[dict], list[dict]]:
+        # held: 묶어 답할 첫 말. 몇 마디든 그 말부터는 최근 대화에 다 넣음(빠지면 답 없이 묻힘)
+        rows = await self.store.recent(msg.room_key, self.s.recent_turns * 2, since_id=held)
         summaries = await self.store.summaries(msg.room_key, RECENT_SUMMARIES)
         notes = await self.store.notes(msg.room_key)
         shown = [s for s in summaries if s["content"]]  # 요약에 실패한 구간은 빈 요약으로 남아 있음
