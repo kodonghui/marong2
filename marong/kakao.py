@@ -1,9 +1,14 @@
-"""카카오톡 봇 메시지 콜백 API(답장).
-POST {KAKAO_API_URL}/v1/bot/callback
+"""카카오톡 봇 메시지 API.
+답장(콜백): POST {KAKAO_API_URL}/v1/bot/callback
   Authorization: KakaoAK {봇 인증 토큰}
   X-Bot-Callback-Token: {이벤트 d.callbackToken}  ← 1회용, 5분 안에 써야 함
   본문: {"skillResponse": {"version": "2.0", "template": {"outputs": [...] }}}
-주의: 이 API는 앱의 '호출 허용 IP'에 등록된 서버에서만 호출됨."""
+먼저 보내기(전송, 선톡): POST {KAKAO_API_URL}/v1/bot/send_message
+  Authorization: KakaoAK {봇 인증 토큰}
+  본문: {"botUserKey": …(채널채팅) 또는 "botGroupKey": …(단체·오픈채팅), "skillResponse": {…}}
+  채널채팅은 그 친구가 채널 친구여야 하고(-877), 알림을 끈 친구에게는 안 감(-879).
+  일반·오픈채팅은 봇이 그 방에 초대돼 있어야 함(-880). 하루 1,000건까지.
+주의: 이 API들은 앱의 '호출 허용 IP'에 등록된 서버에서만 호출됨."""
 import logging
 import re
 
@@ -54,3 +59,30 @@ async def send_callback(http: httpx.AsyncClient, s: Settings, callback_token: st
         if r.status_code < 500:
             return False  # -401(IP·토큰), -878(말풍선 형식), -881(만료·재사용) 등은 재시도해도 같음
     return False
+
+
+async def send_message(http: httpx.AsyncClient, s: Settings, skill_response: dict, *, user_key: str | None = None,
+                       group_key: str | None = None) -> tuple[bool, int | None]:
+    """봇이 먼저 보낸다. 채널채팅(1:1)은 user_key, 단체·오픈채팅은 group_key.
+    콜백과 달리 중복을 막는 토큰이 없어서 다시 보내지 않는다(두 번 갈 수 있음).
+    돌려주는 것: (전달 성공, 카카오 오류 코드. 성공이거나 응답이 없으면 None)."""
+    target = {"botUserKey": user_key} if user_key else {"botGroupKey": group_key}
+    try:
+        r = await http.post(
+            f"{s.kakao_api_url}/v1/bot/send_message",
+            headers={"Authorization": f"KakaoAK {s.bot_token}"},
+            json={**target, "skillResponse": skill_response},
+            timeout=10,
+        )
+    except httpx.HTTPError as e:
+        log.warning("send_message_error %s", type(e).__name__)
+        return False, None
+    if r.status_code == 200:
+        return True, None
+    try:
+        data = r.json()
+    except ValueError:
+        data = None
+    code = data.get("code") if isinstance(data, dict) else None
+    log.error("send_message_failed status=%d body=%s", r.status_code, r.text[:300])
+    return False, code if isinstance(code, int) else None

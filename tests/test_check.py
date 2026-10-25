@@ -54,7 +54,7 @@ async def main():
     code, out = await run_check()
     assert code == 0, out
     for line in ("모델: claude-haiku-5-5 / 답장 effort xhigh / 요약 effort low", "Claude 주 키: 정상",
-                 "BOT_TOKEN: 비어 있음", "표 버전 1(코드 1)", "기록 지우기·고치기 권한: 없음",
+                 "BOT_TOKEN: 비어 있음", "표 버전 2(코드 2)", "선톡: 꺼짐(PROACTIVE=off)", "기록 지우기·고치기 권한: 없음",
                  "답장 시험: 안녕! 나는 마롱이야", "요약 시험: 동희가 토익", "메모: - 마라탕 좋아함"):
         assert line in out, f"'{line}' 없음\n{out}"
     assert ("준비됨: 768차원" in out) if cache else ("임베딩: 꺼짐" in out), out

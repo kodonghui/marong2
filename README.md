@@ -16,6 +16,7 @@
 2. 카카오는 이름을 알려 주지 않아서, 처음 만난 친구에게는 이름을 물어보고 `set_name` 도구로 저장해요. 그다음부터는 "동희야"처럼 이름으로 불러요.
 3. 답은 빈 줄마다 말풍선이 나뉘어요(최대 3개).
 4. 기억은 방마다 따로예요. 1:1 에서 한 얘기는 단체방에서 보이지 않아요(이름만 같이 써요).
+5. 선톡을 켜면 며칠 조용한 1:1 친구에게 먼저 한 번 말을 걸어요(아래 '선톡').
 
 ## 기록은 지워지지 않아요
 
@@ -65,6 +66,26 @@ bash deploy/ovh.sh logs          # 로그 보기(Ctrl+C 로 나옴)
 
 고친 뒤 `bash deploy/ovh.sh prompt` 로 올리면 재시작 없이 다음 메시지부터 반영돼요. `bash deploy/ovh.sh chat` 으로 서버에서 카카오 없이 말투를 시험할 수 있어요.
 
+## 선톡(마롱이가 먼저 말 걸기)
+
+기본은 꺼져 있어요(`PROACTIVE=off`). 켜면 이렇게 움직여요.
+
+- 대상: 카카오 1:1 방에서 친구가 사흘(`PROACTIVE_QUIET_DAYS`) 넘게 말이 없는 방. 친구가 답하기 전에는 다시 보내지 않아요. 단체방에는 보내지 않아요.
+- 때: 한국 시각 12시~21시(`PROACTIVE_HOURS`)에 30분마다 확인해요. 대상이 있어도 매번 보내지는 않아서 보내는 시각이 매번 달라요. 한 번에 한 명.
+- 양: 하루 최대 10개(`PROACTIVE_DAILY_MAX`). 카카오 전송 API 한도는 하루 1,000건이에요.
+- 내용: 그 방의 최근 대화·요약·메모를 보고 1~2문장으로 말을 걸어요. 왜 연락 안 했냐고 서운해하거나 답을 조르지 않아요.
+- 친구가 "먼저 연락하지 마"라고 하면 그 방은 꺼요(`set_proactive`). 다시 해 달라고 하면 켜요. `admin rooms` 에 '선톡 끔'으로 보여요.
+- 기록: 보낸 선톡은 대화 기록에 마롱이 말로 남아요(`admin show` 에 '(선톡)'). 전달에 실패해도 남겨서 같은 방에 다시 시도하지 않아요.
+
+| 할 일 | 명령 |
+|---|---|
+| 한 명에게 시험으로 보내기 | `bash deploy/ovh.sh proactive 동희` (`--dry` 를 붙이면 만든 말만 보여 주고 안 보냄) |
+| 켜기 | `bash deploy/ovh.sh env` 에서 `PROACTIVE=on` → `bash deploy/ovh.sh restart` → `check` 에 '선톡: 켜짐' |
+| 끄기(되돌리기) | `PROACTIVE=off` → `restart`. 이미 보낸 선톡은 기록에 남아요 |
+| 확인 | `bash deploy/ovh.sh logs` 의 `선톡 room=… ok=True` 줄, `admin show <이름>` 의 '(선톡)' |
+
+카카오 1:1 방에 먼저 보내려면 친구가 마롱이 채널을 친구로 추가했어야 하고(-877), 알림을 끈 친구에게는 가지 않아요(-879).
+
 ## 기록 보기·백업
 
 ```bash
@@ -105,6 +126,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements.txt
 .venv/Scripts/python tests/test_memory.py   # 저장소 권한·기억 모으기·요약·임베딩 검색·초기화가 안 지움·기록 보기
 .venv/Scripts/python tests/test_llm.py      # 주 키 실패 → 백업 키, 400 은 바로 실패
 .venv/Scripts/python tests/test_check.py    # run.py --check: 정상이면 0, 키·요약·지우기 권한·DB 문제면 1
+.venv/Scripts/python tests/test_proactive.py  # 선톡: 대상 고르기·시간·하루 상한·전송·끄기·실패 기록·시험 명령
 ```
 
 (맥·리눅스는 `.venv/bin/python`.) 노트북에서 `python run.py`(봇 모드)는 켜지 마세요. 서버의 봇과 같은 토큰이라 서로 끊어 내요.
@@ -113,13 +135,14 @@ uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements.txt
 
 | 파일 | 하는 일 |
 |---|---|
-| `run.py` | 실행(`--check` 점검, `--chat` 터미널 대화) |
+| `run.py` | 실행(`--check` 점검, `--chat` 터미널 대화, `--proactive` 선톡 시험) |
 | `marong/agent.py` | 본체: 저장 → 기억 모으기 → Claude → 답 → 저장, `set_name` |
 | `marong/memory.py` | 뒤 작업: 10턴마다 요약·친구별 메모, 임베딩 |
+| `marong/proactive.py` | 선톡: 며칠 조용한 1:1 친구에게 먼저 말 걸기 |
 | `marong/store.py`, `marong/schema.sql` | Postgres 저장소와 표·권한 |
 | `marong/embed.py` | 서버 CPU 임베딩(embeddinggemma-300m) |
 | `marong/llm.py` | Claude 호출(주 키 → 백업 키) |
-| `marong/gateway.py`, `marong/kakao.py`, `marong/app.py` | 카카오 게이트웨이·콜백·이벤트 처리 |
+| `marong/gateway.py`, `marong/kakao.py`, `marong/app.py` | 카카오 게이트웨이·콜백·전송·이벤트 처리 |
 | `deploy/` | 서버 설치·운영(`ovh.sh`), systemd, env 옮기기 |
 | `tools/admin.py` | 기록 보기(읽기만) |
 | `docs/design.md` | 저장 설계와 이유 |

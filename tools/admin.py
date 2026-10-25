@@ -1,6 +1,6 @@
 """마롱이 기록 보기(읽기만). 노트북에서: bash deploy/ovh.sh admin <명령>
   people                       친구 목록(이름·메시지 수·처음/마지막으로 본 때)
-  rooms                        방 목록(1:1·단체, 친구들, 메시지 수, 마지막 대화)
+  rooms                        방 목록(1:1·단체, 친구들, 메시지 수, 마지막 대화, 선톡 끔)
   show <이름 또는 #키> [개수]   그 친구가 있는 방들의 최근 대화(기본 30개)와 기억 메모
   stats                        전체 개수와 최근 7일 토큰 사용량(대략의 비용)
 기록을 지우거나 고치는 명령은 없다(봇 계정에는 그 권한도 없다). 카카오 키 원문 대신 #짧은키 로 보여 준다."""
@@ -42,7 +42,7 @@ def people(c, tz, _args):
 
 def rooms(c, tz, _args):
     rows = c.execute(
-        "SELECT r.room_key, r.is_channel, count(m.id) AS n, max(m.created_at) AS last, "
+        "SELECT r.room_key, r.is_channel, r.proactive, count(m.id) AS n, max(m.created_at) AS last, "
         "  string_agg(DISTINCT coalesce(p.name, '?'), ', ') FILTER (WHERE m.user_key IS NOT NULL) AS who "
         "FROM marong.rooms r "
         "LEFT JOIN marong.messages m ON m.room_key = r.room_key "
@@ -50,7 +50,8 @@ def rooms(c, tz, _args):
         "GROUP BY r.room_key ORDER BY last DESC NULLS LAST").fetchall()
     for r in rows:
         kind = "1:1 " if r["is_channel"] else "단체"
-        print(f"{key(r['room_key'])}  {kind}  메시지 {r['n']:>5}  마지막 {when(r['last'], tz)}  {r['who'] or ''}")
+        off = "  (선톡 끔)" if r["is_channel"] and not r["proactive"] else ""
+        print(f"{key(r['room_key'])}  {kind}  메시지 {r['n']:>5}  마지막 {when(r['last'], tz)}  {r['who'] or ''}{off}")
 
 
 def show(c, tz, args):
@@ -75,8 +76,9 @@ def show(c, tz, args):
                 "ORDER BY m.id DESC LIMIT %s", (room, limit)).fetchall()
             for r in reversed(rows):
                 speaker = "마롱이" if r["role"] == "assistant" else (r["name"] or key(r["user_key"]))
+                tag = " (선톡)" if r["meta"].get("proactive") else ""
                 lost = " (전달 안 됨)" if r["meta"].get("delivered") is False else ""
-                print(f"{when(r['created_at'], tz)} {speaker}: {r['content']}{lost}")
+                print(f"{when(r['created_at'], tz)} {speaker}: {r['content']}{tag}{lost}")
 
 
 def stats(c, tz, _args):

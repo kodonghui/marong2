@@ -12,6 +12,7 @@
 #   logs         로그 보기(Ctrl+C 로 나옴)
 #   prompt       prompt.md·welcome.txt·knowledge/ 만 올림. 재시작 없이 다음 메시지부터 반영
 #   admin …      기록 보기(읽기만): admin people | admin rooms | admin show <이름 또는 #키> [개수] | admin stats
+#   proactive <이름 또는 #키> [--dry]  그 친구의 1:1 방에 선톡 한 개를 지금 보냄(시험용). --dry 면 만든 말만 보여 줌
 #   backup       DB 백업 파일을 서버의 /var/backups/marong 에 만듦(자동 백업은 하지 않음)
 #   chat         서버에서 터미널로 마롱이와 대화(카카오 없이. 'terminal' 방으로 저장됨)
 set -euo pipefail
@@ -80,6 +81,10 @@ case "${1:-}" in
                f=/var/backups/marong/marong-$(date +%Y%m%d-%H%M).dump &&
                sudo -u postgres pg_dump -Fc -f "$f" marong && sudo ls -lh "$f"'
     ;;
+  proactive)
+    shift
+    on_server "$AS_MARONG 'cd $DEST && exec .venv/bin/python run.py --proactive \"\$@\"' _ $(printf '%q ' "$@")"
+    ;;
   chat) "${SSH[@]}" -t "$HOST" "$AS_MARONG 'cd $DEST && .venv/bin/python run.py --chat'" ;;
-  *) sed -n '2,16p' "$0"; exit 1 ;;
+  *) sed -n '2,17p' "$0"; exit 1 ;;
 esac

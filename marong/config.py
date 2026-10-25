@@ -23,6 +23,15 @@ def _env(name: str, default: str = "") -> str:
     return (os.getenv(name) or default).strip()
 
 
+def _hours(raw: str) -> tuple[int, int]:
+    """'12-21' → (12, 21). 형식이 틀리면 (-1, -1)이고 problems() 가 알려 준다."""
+    try:
+        start, end = (int(x) for x in raw.split("-", 1))
+    except ValueError:
+        return -1, -1
+    return start, end
+
+
 @dataclass(frozen=True)
 class Settings:
     bot_token: str
@@ -47,6 +56,10 @@ class Settings:
     summary_turns: int             # 이만큼 쌓이면 뒤에서 요약 한 개를 만듦
     recall_min_similarity: float   # 이보다 덜 비슷한 예전 대화는 넣지 않음(0~1)
     group_triggers: tuple[str, ...]  # 단체방에서는 이 말이 들어간 메시지에만 답함. 비면 받은 메시지 모두에 답함
+    proactive: bool                # 선톡: 1:1 친구가 며칠 조용하면 마롱이가 먼저 한 번 말 걸기. 기본 꺼짐
+    proactive_quiet_days: int      # 친구가 이만큼(일) 말이 없으면 선톡 대상
+    proactive_hours: tuple[int, int]  # 이 시간에만 보냄(한국 시각, 시작 시 이상 끝 시 미만)
+    proactive_daily_max: int       # 하루에 보내는 선톡 상한(카카오 전송 API 는 하루 1,000건)
 
     def problems(self) -> list[str]:
         """실행 전에 비어 있거나 잘못된 값을 알려 준다(값 자체는 출력하지 않음)."""
@@ -63,6 +76,11 @@ class Settings:
             out.append("DATABASE_URL 이 비어 있음")
         if self.recent_turns < 1 or self.summary_turns < 2:
             out.append("RECENT_TURNS 는 1 이상, SUMMARY_TURNS 는 2 이상")
+        start, end = self.proactive_hours
+        if not 0 <= start < end <= 24:
+            out.append("PROACTIVE_HOURS 는 '12-21' 처럼 시작-끝 시(0~24, 시작이 끝보다 앞)")
+        if self.proactive_quiet_days < 1 or self.proactive_daily_max < 1:
+            out.append("PROACTIVE_QUIET_DAYS·PROACTIVE_DAILY_MAX 는 1 이상")
         return out
 
     def anthropic_keys(self) -> list[tuple[str, str]]:
@@ -96,4 +114,8 @@ def load_settings() -> Settings:
         summary_turns=int(_env("SUMMARY_TURNS", "10")),
         recall_min_similarity=float(_env("RECALL_MIN_SIMILARITY", "0.4")),
         group_triggers=tuple(t.strip() for t in _env("GROUP_TRIGGER").split(",") if t.strip()),
+        proactive=_env("PROACTIVE", "off").lower() in ("on", "true", "1", "yes"),
+        proactive_quiet_days=int(_env("PROACTIVE_QUIET_DAYS", "3")),
+        proactive_hours=_hours(_env("PROACTIVE_HOURS", "12-21")),
+        proactive_daily_max=int(_env("PROACTIVE_DAILY_MAX", "10")),
     )

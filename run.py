@@ -2,7 +2,10 @@
   python run.py           봇 실행(카카오 게이트웨이 연결). 서버의 systemd(marong.service)가 이걸 켬
   python run.py --check   설정·Claude 키·Postgres·임베딩·요약을 점검하고 이 서버의 공인 IPv4 를 출력. 하나라도 실패하면 종료 코드 1
   python run.py --chat    카카오 없이 터미널에서 마롱이와 대화(말투 다듬기용). 대화는 'terminal' 방으로 저장됨
-같은 봇 토큰으로 두 곳에서 run.py 를 켜지 않는다(서로 끊어 냄. 4004)."""
+  python run.py --proactive <이름|#키> [--dry]
+                          그 친구의 1:1 방에 선톡 한 개를 지금 보냄(시험용. 조용한 날수·시간·PROACTIVE 설정과 상관없이).
+                          --dry 면 만든 말만 보여 주고 보내지 않음
+같은 봇 토큰으로 두 곳에서 run.py 를 켜지 않는다(서로 끊어 냄. 4004). --proactive 는 게이트웨이에 붙지 않아서 봇이 켜져 있어도 됨."""
 import asyncio
 import logging
 import os
@@ -18,6 +21,7 @@ from marong.gateway import FatalGatewayError, Gateway
 from marong.knowledge import knowledge_files
 from marong.llm import LLM, brief
 from marong.memory import MemoryWorker
+from marong.proactive import Proactive
 from marong.store import SCHEMA_VERSION, Store
 
 # 설정 오류·토큰 오류·다른 연결로 대체됨(4004)은 '정상 종료(0)'로 끝낸다.
@@ -52,6 +56,9 @@ async def check(s, store: Store, emb: Embeddings, llm: LLM, agent: Agent, worker
     print("첫 인사(welcome.txt):", "있음" if os.path.exists(s.welcome_path) else "없음(채팅방에 들어와도 인사하지 않음)")
     print("단체방:", f"{', '.join(s.group_triggers)} 이(가) 들어간 메시지에만 답함" if s.group_triggers
           else "받은 메시지 모두에 답함")
+    start, end = s.proactive_hours
+    print("선톡:", f"켜짐(1:1 친구가 {s.proactive_quiet_days}일 조용하면 {start}~{end}시에 한 번, 하루 최대 "
+                 f"{s.proactive_daily_max}개)" if s.proactive else "꺼짐(PROACTIVE=off)")
 
     try:
         await store.open(wait=True, timeout=10)
@@ -127,9 +134,39 @@ async def chat(agent: Agent) -> None:
         await agent.handle(Incoming(room_key="terminal", user_key="terminal", text=text), show)
 
 
-async def main(mode: str) -> int:
+async def proactive_once(s, store: Store, agent: Agent, http: httpx.AsyncClient, args: list[str]) -> int:
+    dry = "--dry" in args
+    who = next((a for a in args if a != "--dry"), "")
+    if not who:
+        print("사용: run.py --proactive <이름|#키> [--dry]")
+        return 1
+    await store.open(wait=True, timeout=10)
+    rooms = await store.channel_rooms(who)
+    if len(rooms) != 1:
+        print(f"'{who}' 의 1:1 방을 하나로 못 정함(찾은 방 {len(rooms)}개). tools/admin.py people 의 #키로 다시 해 봐요")
+        return 1
+    room = rooms[0]
+    if not room["proactive"]:
+        print("이 친구는 선톡을 꺼 뒀어요(친구가 마롱이에게 다시 켜 달라고 해야 함). 보내지 않음")
+        return 1
+    result = await Proactive(s, store, agent, http).deliver(room, dry=dry)
+    if result["text"] is None:
+        print("선톡 말을 만들지 못함(로그 확인)")
+        return 1
+    if dry:
+        print(f"미리 보기(보내지 않음): {result['text']}")
+        return 0
+    if result["ok"]:
+        print(f"보냄: {result['text']}")
+        return 0
+    print(f"전달 실패(카카오 코드 {result['code']}): {result['text']}")
+    return 1
+
+
+async def main(mode: str, args: list[str] | None = None) -> int:
     s = load_settings()
-    problems = s.problems() if mode == "run" else [p for p in s.problems() if "BOT_TOKEN" not in p]
+    sends = mode == "run" or (mode == "proactive" and "--dry" not in (args or []))
+    problems = s.problems() if sends else [p for p in s.problems() if "BOT_TOKEN" not in p]
     if problems:
         for p in problems:
             logging.error("설정 오류: %s", p)
@@ -145,6 +182,8 @@ async def main(mode: str) -> int:
         async with httpx.AsyncClient() as http:
             if mode == "check":
                 return await check(s, store, emb, llm, agent, worker, http)
+            if mode == "proactive":
+                return await proactive_once(s, store, agent, http, args or [])
             # DB 가 아직 안 떠 있어도 봇은 켜지고, 연결은 뒤에서 계속 시도(그동안은 기억 없이 답함)
             await store.open(wait=False)
             emb.start()
@@ -153,6 +192,8 @@ async def main(mode: str) -> int:
                 await chat(agent)
                 return 0
             app = BotApp(s, agent, http)
+            if s.proactive:
+                tasks.append(asyncio.create_task(Proactive(s, store, agent, http, app.room_lock).run()))
             gateway = Gateway(s.gateway_url, s.bot_token, app.on_dispatch)
             try:
                 await gateway.run_forever()
@@ -174,10 +215,12 @@ if __name__ == "__main__":
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
     for noisy in ("httpx", "httpcore", "httpx2", "psycopg.pool", "huggingface_hub"):
         logging.getLogger(noisy).setLevel(logging.WARNING)  # 요청마다 찍히는 줄은 숨김(오류는 그대로 남음)
-    mode = "check" if "--check" in sys.argv else "chat" if "--chat" in sys.argv else "run"
+    mode = ("check" if "--check" in sys.argv else "chat" if "--chat" in sys.argv
+            else "proactive" if "--proactive" in sys.argv else "run")
+    rest = [a for a in sys.argv[1:] if a not in ("--check", "--chat", "--proactive")]
     # psycopg 비동기는 윈도우 기본 이벤트 루프(Proactor)에서 돌지 않음
     options = {"loop_factory": asyncio.SelectorEventLoop} if sys.platform == "win32" else {}
     try:
-        sys.exit(asyncio.run(main(mode), **options))
+        sys.exit(asyncio.run(main(mode, rest), **options))
     except KeyboardInterrupt:
         print("\n종료")

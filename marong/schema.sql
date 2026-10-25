@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS marong.meta (
   key   text PRIMARY KEY,
   value text NOT NULL
 );
-INSERT INTO marong.meta (key, value) VALUES ('schema_version', '1')
+INSERT INTO marong.meta (key, value) VALUES ('schema_version', '2')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- 채팅방. 채널채팅(1:1)도 방 하나로 친다.
@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS marong.rooms (
   first_seen timestamptz NOT NULL DEFAULT now(),
   last_seen  timestamptz NOT NULL DEFAULT now()
 );
+-- 2: 선톡(마롱이가 먼저 말 걸기) 받기. 친구가 그만하라고 하면 false(마롱이가 set_proactive 로 바꿈)
+ALTER TABLE marong.rooms ADD COLUMN IF NOT EXISTS proactive boolean NOT NULL DEFAULT true;
 
 -- 친구. 이름은 본인이 알려 준 것만 저장한다(카카오가 이름을 주지 않음).
 CREATE TABLE IF NOT EXISTS marong.people (
@@ -50,8 +52,8 @@ CREATE TABLE IF NOT EXISTS marong.messages (
   role       text NOT NULL CHECK (role IN ('user', 'assistant')),
   content    text NOT NULL,
   kakao_id   text,                                        -- 카카오 메시지 id: 같은 메시지를 두 번 저장하지 않음
-  reply_to   bigint REFERENCES marong.messages (id),     -- 마롱이 답이 어느 메시지에 대한 것인지
-  meta       jsonb NOT NULL DEFAULT '{}'::jsonb,          -- 모델·effort·stop_reason·토큰 수·전달 여부
+  reply_to   bigint REFERENCES marong.messages (id),     -- 마롱이 답이 어느 메시지에 대한 것인지(선톡은 비움)
+  meta       jsonb NOT NULL DEFAULT '{}'::jsonb,          -- 모델·effort·stop_reason·토큰 수·전달 여부·선톡(proactive)
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (room_key, kakao_id)
 );

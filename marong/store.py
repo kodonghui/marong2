@@ -2,6 +2,7 @@
 대화 원문·요약·메모는 쌓기만 하고 지우거나 고치지 않는다. 봇 계정(marong)에는 그 권한 자체가 없다(schema.sql)."""
 import hashlib
 import logging
+from datetime import datetime
 
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
@@ -9,9 +10,16 @@ from psycopg_pool import AsyncConnectionPool
 
 log = logging.getLogger("store")
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 # 'ㅋㅋㅋ'·'ㅇㅇ'·이모티콘만 있는 말은 검색해도 쓸모가 없어 임베딩하지 않음(한글 음절·영문·숫자가 2개 이상 이어진 말만)
 MEANINGFUL = "[가-힣A-Za-z0-9]{2}"
+# 카카오에서 온 1:1 방(채널채팅)마다 친구의 마지막 말. 터미널 대화('terminal' 방)는 카카오 id 가 없어서 빠짐
+CHANNEL_ROOMS = (
+    "SELECT r.room_key, u.user_key, p.name, u.created_at AS last_said, r.proactive FROM marong.rooms r "
+    "CROSS JOIN LATERAL (SELECT m.id, m.user_key, m.kakao_id, m.created_at FROM marong.messages m "
+    "  WHERE m.room_key = r.room_key AND m.role = 'user' ORDER BY m.id DESC LIMIT 1) u "
+    "LEFT JOIN marong.people p ON p.user_key = u.user_key "
+    "WHERE r.is_channel AND u.kakao_id IS NOT NULL ")
 
 
 def vec(values) -> str:
@@ -56,17 +64,20 @@ class Store:
     # ── 답장할 때 ──────────────────────────────────────────────
 
     async def touch(self, room_key: str, is_channel: bool, user_key: str) -> dict:
-        """방·친구를 처음 보면 만들고 마지막으로 본 시각을 바꾼다. 친구 줄(이름 포함)을 돌려준다."""
+        """방·친구를 처음 보면 만들고 마지막으로 본 시각을 바꾼다.
+        친구 줄(user_key, name)에 이 방의 선톡 받기(proactive)를 붙여 돌려준다."""
         async with self.pool.connection() as c:
-            await c.execute(
+            cur = await c.execute(
                 "INSERT INTO marong.rooms (room_key, is_channel) VALUES (%s, %s) "
-                "ON CONFLICT (room_key) DO UPDATE SET last_seen = now(), is_channel = EXCLUDED.is_channel",
+                "ON CONFLICT (room_key) DO UPDATE SET last_seen = now(), is_channel = EXCLUDED.is_channel "
+                "RETURNING proactive",
                 (room_key, is_channel))
+            room = await cur.fetchone()
             cur = await c.execute(
                 "INSERT INTO marong.people (user_key) VALUES (%s) "
                 "ON CONFLICT (user_key) DO UPDATE SET last_seen = now() RETURNING user_key, name",
                 (user_key,))
-            return await cur.fetchone()
+            return {**await cur.fetchone(), "proactive": room["proactive"]}
 
     async def add_message(self, room_key: str, role: str, content: str, user_key: str | None = None,
                           kakao_id: str | None = None, reply_to: int | None = None, meta: dict | None = None) -> int | None:
@@ -106,6 +117,10 @@ class Store:
             await c.execute("UPDATE marong.people SET name = %s, name_set_at = now() WHERE user_key = %s",
                             (name, user_key))
 
+    async def set_proactive(self, room_key: str, on: bool) -> None:
+        async with self.pool.connection() as c:
+            await c.execute("UPDATE marong.rooms SET proactive = %s WHERE room_key = %s", (on, room_key))
+
     async def similar(self, model: str, room_key: str, vector, before_id: int, skip_summary_ids: list[int],
                       limit: int) -> list[dict]:
         """같은 방에서 지금 말과 비슷한 예전 메시지·요약(비슷한 순). 최근 원문 구간과 이미 넣은 요약은 뺀다."""
@@ -124,6 +139,33 @@ class Store:
             "LEFT JOIN marong.summaries s ON h.source_type = 'summary' AND s.id = h.source_id "
             "ORDER BY h.similarity DESC",
             (vec(vector), model, room_key, before_id, list(skip_summary_ids), limit))
+
+    # ── 선톡(먼저 말 걸기) ──────────────────────────────────────
+
+    async def proactive_due(self, quiet_days: int, limit: int, room_key: str | None = None) -> list[dict]:
+        """선톡할 1:1 방(오래 조용한 친구부터): 선톡을 켜 둔 방에서 친구의 마지막 말이 quiet_days 일보다 오래됐고,
+        그 뒤로 선톡을 아직 안 보낸 방(보냈다가 전달에 실패한 것도 보낸 것으로 침). room_key 를 주면 그 방만 확인."""
+        return await self._all(
+            CHANNEL_ROOMS + "AND r.proactive AND u.created_at < now() - %s * interval '1 day' "
+            "AND NOT EXISTS (SELECT 1 FROM marong.messages x "
+            "  WHERE x.room_key = r.room_key AND x.id > u.id AND x.meta->>'proactive' = 'true') "
+            "AND (%s::text IS NULL OR r.room_key = %s) ORDER BY u.created_at LIMIT %s",
+            (quiet_days, room_key, room_key, limit))
+
+    async def proactive_count(self, since: datetime) -> int:
+        """since 뒤로 보낸(전달 실패 포함) 선톡 수."""
+        row = await self._one("SELECT count(*) AS n FROM marong.messages "
+                              "WHERE meta->>'proactive' = 'true' AND created_at >= %s", (since,))
+        return row["n"]
+
+    async def channel_rooms(self, who: str) -> list[dict]:
+        """이름이나 #짧은키(tools/admin.py 와 같은 표시)로 찾은 친구의 1:1 방들(선톡 시험용)."""
+        people = await self._all("SELECT user_key, name FROM marong.people")
+        keys = [p["user_key"] for p in people
+                if p["name"] == who or "#" + hashlib.sha1(p["user_key"].encode()).hexdigest()[:8] == who]
+        if not keys:
+            return []
+        return await self._all(CHANNEL_ROOMS + "AND u.user_key = ANY(%s) ORDER BY u.created_at DESC", (keys,))
 
     # ── 뒤에서 하는 일(임베딩·요약) ─────────────────────────────
 
