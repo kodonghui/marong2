@@ -6,6 +6,7 @@
 채팅으로 기록을 지우는 기능은 없다. '초기화'·'처음부터'도 보통 말로 받는다."""
 import asyncio
 import logging
+import random
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,6 +36,14 @@ RECALL_SUMMARIES = 3
 RECALL_MESSAGES = 4
 RECALL_MIN_CHARS = 4     # '응'·'ㅋㅋ' 같은 짧은 말로는 예전 대화를 찾지 않음
 GAP_S = 3600             # 앞 메시지와 이만큼 떨어진 친구 말에는 시각을 붙임
+
+# 이벤트: 주제곡(prompt.md 의 '톡톡 마롱이')을 마롱이가 먼저 부르는 때. 했던 이벤트는 답의 meta.event 에 남음
+MILESTONES = (100, 300, 500, 1000, 2000, 3000, 5000, 10000)  # 방에서 친구들이 보낸 메시지 수 기념
+MILESTONE_WINDOW = 20    # 기념 숫자를 넘은 뒤 이 메시지 수 안에서만 축하(이 기능을 켜기 전에 넘은 기념은 건너뜀)
+EVENT_GAP_S = 20 * 3600  # 깜짝 이벤트는 방마다 이만큼에 한 번까지
+MILESTONE_EVENT = "기념 이벤트: 이 방에서 친구들이 보낸 메시지가 {n}개를 넘었어! 다 같이 축하하면서 주제곡을 불러 줘."
+SONG_EVENT = ("깜짝 이벤트: 이번 답 끝에 주제곡 후렴을 신나게 불러 줘. "
+              "대화가 무겁거나 슬픈 분위기면 부르지 말고 평소처럼 답해.")
 
 SET_NAME_TOOL = {
     "name": "set_name",
@@ -69,12 +78,14 @@ def clean_name(raw) -> str:
 
 
 class Agent:
-    def __init__(self, settings: Settings, store: Store, embeddings: Embeddings, llm: LLM, on_saved=None):
+    def __init__(self, settings: Settings, store: Store, embeddings: Embeddings, llm: LLM, on_saved=None,
+                 rng: random.Random | None = None):
         self.s = settings
         self.store = store
         self.emb = embeddings
         self.llm = llm
         self.on_saved = on_saved or (lambda: None)  # 메시지가 쌓일 때마다 뒤 작업(임베딩·요약)을 깨움
+        self.rng = rng or random.Random()
 
     def persona(self) -> str:
         p = Path(self.s.prompt_path)
@@ -124,10 +135,10 @@ class Agent:
 
     async def _reply(self, msg: Incoming, person: dict | None, user_id: int | None, text: str,
                      timeout: float, use_memory: bool = True) -> tuple[str, dict]:
-        system = messages = None
+        system = messages = event = None
         if use_memory:  # 방금 저장소가 고장 났으면 기억 모으기를 건너뜀(연결을 또 기다리지 않게)
             try:
-                system, messages = await self._context(msg, person, user_id, text)
+                system, messages, event = await self._context(msg, person, user_id, text)
             except Exception as e:  # 기억을 못 모아도 지금 말에는 답함
                 log.error("context_error %s", brief(e))
         if system is None:
@@ -135,15 +146,20 @@ class Agent:
             messages = [{"role": "user", "content": self._user_line(msg, person, text)}]
         end = asyncio.get_running_loop().time() + timeout
         try:
-            return await asyncio.wait_for(self.ask(system, messages, msg, end), timeout + 2)
+            reply, meta = await asyncio.wait_for(self.ask(system, messages, msg, end), timeout + 2)
         except Exception as e:  # 시간 초과·네트워크·API 오류는 대체 문구로
             log.warning("llm_error %s", brief(e))
             return FALLBACK_TEXT, {"error": type(e).__name__}
+        if event:
+            meta["event"] = event
+            log.info("event %s room=%s", event, short_key(msg.room_key))
+        return reply, meta
 
     # ── 기억 모으기 ──────────────────────────────────────────
 
     async def _context(self, msg: Incoming, person: dict | None, user_id: int | None,
-                       text: str) -> tuple[list[dict], list[dict]]:
+                       text: str) -> tuple[list[dict], list[dict], str | None]:
+        """(system, messages, 이번에 여는 이벤트 이름 또는 None)"""
         rows = await self.store.recent(msg.room_key, self.s.recent_turns * 2)
         summaries = await self.store.summaries(msg.room_key, RECENT_SUMMARIES)
         notes = await self.store.notes(msg.room_key)
@@ -158,10 +174,29 @@ class Agent:
                 recalled = self._pick(hits)
             except Exception as e:
                 log.warning("recall_error %s", brief(e))
+        event, event_text = None, None
+        try:
+            event, event_text = await self._event(msg.room_key) or (None, None)
+        except Exception as e:
+            log.warning("event_error %s", brief(e))
         messages = self._messages(rows, group=not msg.is_channel)
         if not rows or rows[-1]["id"] != user_id:  # 저장이 안 됐어도 지금 말은 꼭 넣음
             messages.append({"role": "user", "content": self._user_line(msg, person, text)})
-        return self._system(self._situation(msg, person, notes, shown, recalled)), messages
+        situation = self._situation(msg, person, notes, shown, recalled, event_text)
+        return self._system(situation), messages, event
+
+    async def _event(self, room_key: str) -> tuple[str, str] | None:
+        """마롱이가 먼저 주제곡을 부를 때인지 정한다. (기록용 이름, '지금 상황'에 넣을 글) 또는 None.
+        방 메시지 수가 기념 숫자를 막 넘었으면 기념 노래, 아니면 EVENT_CHANCE 확률로 깜짝 노래(방마다 20시간에 한 번까지)."""
+        stats = await self.store.room_events(room_key)
+        said, done = stats["said"], set(stats["events"])
+        reached = max((m for m in MILESTONES if said >= m), default=0)
+        if reached and said - reached < MILESTONE_WINDOW and f"milestone:{reached}" not in done:
+            return f"milestone:{reached}", MILESTONE_EVENT.format(n=reached)
+        quiet = stats["since_s"] is None or stats["since_s"] >= EVENT_GAP_S
+        if quiet and self.s.event_chance > 0 and self.rng.random() < self.s.event_chance:
+            return "song", SONG_EVENT
+        return None
 
     def _pick(self, hits: list[dict]) -> list[dict]:
         good = [h for h in hits if h["content"] and h["similarity"] >= self.s.recall_min_similarity]
@@ -195,7 +230,7 @@ class Agent:
         return out
 
     def _situation(self, msg: Incoming, person: dict | None, notes: list[dict], summaries: list[dict],
-                   recalled: list[dict]) -> str:
+                   recalled: list[dict], event: str | None = None) -> str:
         tz = self.s.timezone
         name = (person or {}).get("name")
         lines = ["# 지금 상황", f"- 지금 시각: {now_line(tz)} (한국 시간)"]
@@ -226,6 +261,8 @@ class Agent:
                 else:
                     who = speaker_label(h["user_key"], h["name"])
                 lines.append(f"- ({short_time(h['created_at'], tz)}) {who}: {h['content']}")
+        if event:
+            lines += ["", "# 이벤트", event]
         return "\n".join(lines)
 
     def _system(self, situation: str) -> list[dict]:

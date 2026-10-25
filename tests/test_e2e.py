@@ -151,7 +151,7 @@ async def main():
         "ANTHROPIC_API_KEY": "primary", "ANTHROPIC_API_KEY_BACKUP": "backup", "DATABASE_URL": db.app_url,
         "EMBED_MODEL": "", "PROMPT_PATH": str(ROOT / "prompt.md"), "WELCOME_PATH": str(ROOT / "welcome.txt"),
         "KNOWLEDGE_DIR": str(tmp / "knowledge"), "RECENT_TURNS": "2", "SUMMARY_TURNS": "2",
-        "LLM_TIMEOUT_SECONDS": "10",
+        "LLM_TIMEOUT_SECONDS": "10", "EVENT_CHANCE": "0",
     })
     import run  # noqa: E402
     bot = asyncio.create_task(run.main("run"))

@@ -82,7 +82,7 @@ async def main():
     os.environ.update({
         "BOT_TOKEN": "t", "ANTHROPIC_API_KEY": "k", "DATABASE_URL": db.app_url,
         "PROMPT_PATH": str(ROOT / "prompt.md"), "KNOWLEDGE_DIR": str(tmp / "knowledge"),
-        "RECENT_TURNS": "2", "SUMMARY_TURNS": "2", "EMBED_MODEL": "fake-bigram",
+        "RECENT_TURNS": "2", "SUMMARY_TURNS": "2", "EMBED_MODEL": "fake-bigram", "EVENT_CHANCE": "0",
     })
     from marong.agent import (EMPTY_NUDGE, FALLBACK_TEXT, LATE_TEXT, REFUSAL_TEXT, Agent, Incoming, clean_name)
     from marong.config import load_settings
@@ -250,6 +250,33 @@ async def main():
     await worker.step()
     ok(db.admin("SELECT count(*) FROM marong.summaries WHERE room_key = 'r5' AND content = ''")[0][0] == 2,
        "형식 오류 2번째 → 빈 요약으로 넘김")
+
+    # ── 이벤트: 깜짝 주제곡·기념 노래 ──
+    party = Agent(replace(s, event_chance=1.0), store, emb, llm)
+    await party.handle(Incoming("e1", "u1", "심심해"), send)
+    b = llm.bodies[-1]
+    ok("톡톡 마롱이" in b["system"][0]["text"] and "# 이벤트" in situation(b) and "주제곡 후렴" in situation(b),
+       "깜짝 이벤트: 주제곡 가사는 말투 지시문에, 부르라는 안내는 지금 상황에")
+    ok(db.admin("SELECT meta->>'event' FROM marong.messages WHERE room_key = 'e1' AND role = 'assistant'")
+       == [("song",)], "이벤트는 답 기록(meta.event)에 남음")
+    await party.handle(Incoming("e1", "u1", "또 심심해"), send)
+    ok("# 이벤트" not in situation(llm.bodies[-1]), "깜짝 이벤트는 방마다 20시간에 한 번")
+    await party.handle(Incoming("e3", "u1", "안녕"), send)
+    ok("# 이벤트" in situation(llm.bodies[-1]), "다른 방은 따로 셈")
+
+    await store.touch("e2", False, "u1")
+    for i in range(99):
+        await store.add_message("e2", "user", f"수다 {i}", user_key="u1")
+    await agent.handle(Incoming("e2", "u1", "백 번째 말", is_channel=False), send)
+    sit = situation(llm.bodies[-1])
+    ok("# 이벤트" in sit and "100개" in sit, "방 메시지 100개 기념 노래(EVENT_CHANCE=0 이어도)")
+    await agent.handle(Incoming("e2", "u1", "백한 번째 말", is_channel=False), send)
+    ok("# 이벤트" not in situation(llm.bodies[-1]), "기념 노래는 한 번만")
+    await store.touch("e4", False, "u1")
+    for i in range(125):
+        await store.add_message("e4", "user", f"옛 수다 {i}", user_key="u1")
+    await agent.handle(Incoming("e4", "u1", "이 기능 켜진 뒤 첫 말", is_channel=False), send)
+    ok("# 이벤트" not in situation(llm.bodies[-1]), "기능을 켜기 전에 지난 기념은 건너뜀")
 
     # ── 기록 보기(tools/admin.py, 읽기만) ──
     def admin(*args):

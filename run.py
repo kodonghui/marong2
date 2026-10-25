@@ -52,6 +52,8 @@ async def check(s, store: Store, emb: Embeddings, llm: LLM, agent: Agent, worker
     print("첫 인사(welcome.txt):", "있음" if os.path.exists(s.welcome_path) else "없음(채팅방에 들어와도 인사하지 않음)")
     print("단체방:", f"{', '.join(s.group_triggers)} 이(가) 들어간 메시지에만 답함" if s.group_triggers
           else "받은 메시지 모두에 답함")
+    print("이벤트:", f"깜짝 주제곡 {s.event_chance:.0%}(방마다 20시간에 한 번까지)" if s.event_chance else "깜짝 주제곡 꺼짐",
+          "· 방 메시지 100·300·500·1000개… 기념 노래")
 
     try:
         await store.open(wait=True, timeout=10)
