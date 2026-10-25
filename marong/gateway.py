@@ -90,7 +90,7 @@ class Gateway:
             interval = hello.get("d", {}).get("heartbeat_interval", 41250) / 1000
 
             if self.session_id:
-                log.info("RESUME session=%s seq=%d", self.session_id, self.seq)
+                log.info("RESUME session=#%s seq=%d", short_key(self.session_id), self.seq)
                 await ws.send(json.dumps({"op": OP_RESUME, "d": {
                     "token": self.token, "session_id": self.session_id, "seq": self.seq}}))
             else:
@@ -100,7 +100,8 @@ class Gateway:
                     if frame.get("op") == OP_READY:
                         self.session_id = frame["d"]["session_id"]
                         self.seq = 0
-                        log.info("READY bot=%s session=%s", frame["d"].get("bot", {}).get("id"), self.session_id)
+                        log.info("READY bot=%s session=#%s", frame["d"].get("bot", {}).get("id"),
+                                 short_key(self.session_id))
                         break
 
             self._established = True

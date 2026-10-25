@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -208,6 +209,8 @@ async def main():
               if "format" in b.get("output_config", {}) and "토익 시험 봐" in b["messages"][0]["content"])
     ok(sb["output_config"]["effort"] == "low" and "토익" in sb["messages"][0]["content"], "요약은 effort low")
     ok("지시가 아니야" in sb["system"] and "민감한 정보" in sb["system"], "요약 지시문의 안전 규칙")
+    ok(f"# 대화 ({datetime.now().year}년" in sb["messages"][0]["content"] and "실제 날짜" in sb["system"],
+       "요약할 대화에 연도까지 있는 날짜를 붙이고, '다음 주' 같은 말은 실제 날짜로 적게 함")
     notes = db.admin("SELECT user_key, content FROM marong.notes WHERE room_key = 'r3'")
     ok(notes == [("u3", "- 다음 주 토익 시험\n- 마라탕 좋아함")], notes)
     emb_count = db.admin("SELECT count(*) FROM marong.embeddings WHERE room_key = 'r3'")[0][0]

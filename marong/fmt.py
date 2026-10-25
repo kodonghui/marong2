@@ -13,6 +13,12 @@ def now_line(tz: str) -> str:
     return f"{n.year}년 {n.month}월 {n.day}일 {WEEKDAYS[n.weekday()]}요일 {half} {n.hour % 12 or 12}시 {n.minute}분"
 
 
+def day_line(dt: datetime, tz: str) -> str:
+    """'2026년 10월 25일 일요일'."""
+    d = dt.astimezone(ZoneInfo(tz))
+    return f"{d.year}년 {d.month}월 {d.day}일 {WEEKDAYS[d.weekday()]}요일"
+
+
 def short_time(dt: datetime, tz: str) -> str:
     """'10/25 19:05'."""
     d = dt.astimezone(ZoneInfo(tz))
