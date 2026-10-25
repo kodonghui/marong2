@@ -51,6 +51,7 @@ class Settings:
     welcome_path: str
     timezone: str
     llm_timeout_s: float
+    reply_wait_s: float            # 답하기 전에 친구가 연달아 보내는 말을 기다리는 시간. 그사이 더 오면 한 번에 답함
     llm_max_tokens: int            # 생각(thinking)까지 포함한 출력 상한. 답 길이는 prompt.md 로 조절
     recent_turns: int              # 원문 그대로 다시 넣는 최근 대화(질문+답 한 쌍이 1턴)
     summary_turns: int             # 이만큼 쌓이면 뒤에서 요약 한 개를 만듦
@@ -109,6 +110,7 @@ def load_settings() -> Settings:
         welcome_path=_env("WELCOME_PATH", "welcome.txt"),
         timezone=_env("TIMEZONE", "Asia/Seoul"),
         llm_timeout_s=float(_env("LLM_TIMEOUT_SECONDS", "120")),
+        reply_wait_s=float(_env("REPLY_WAIT_SECONDS", "2")),
         llm_max_tokens=int(_env("LLM_MAX_TOKENS", "16000")),
         recent_turns=int(_env("RECENT_TURNS", "10")),
         summary_turns=int(_env("SUMMARY_TURNS", "10")),

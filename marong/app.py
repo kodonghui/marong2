@@ -24,6 +24,8 @@ class BotApp:
         self.http = http
         self._seen: OrderedDict[str, None] = OrderedDict()  # RESUME 뒤 같은 메시지가 다시 와도 한 번만 답함
         self._locks: dict[str, asyncio.Lock] = {}  # 같은 방의 메시지는 받은 순서대로 처리(room_lock)
+        self._arrived = 0
+        self._latest: dict[str, int] = {}  # 방 → 가장 최근에 받은 '답할 말'의 순번(연달아 온 말을 묶어 답하기)
 
     async def on_dispatch(self, t: str, d: dict) -> None:
         token = d.get("callbackToken")
@@ -57,12 +59,17 @@ class BotApp:
             return
         msg = Incoming(room_key=room_key, user_key=user_key, text=content,
                        is_channel=bool(d.get("isChannelChatroom")), kakao_id=mid or None)
+        self._arrived += 1
+        seq = self._arrived
+        if self.agent.answers(msg):
+            self._latest[room_key] = seq
 
         async def send(text: str) -> bool:
             return await send_callback(self.http, self.s, token, skill_text(text))
 
         async with self.room_lock(room_key):  # 답장까지 묶음: 앞 답이 늦어도 뒤 답이 앞지르지 않음
-            reply = await self.agent.handle(msg, send, deadline=received + CALLBACK_TTL_S - SAFETY_S)
+            reply = await self.agent.handle(msg, send, deadline=received + CALLBACK_TTL_S - SAFETY_S,
+                                            superseded=lambda: self._latest.get(room_key, 0) > seq)
         if reply is not None:
             log.info("reply id=%s len=%d", mid, len(reply))
 

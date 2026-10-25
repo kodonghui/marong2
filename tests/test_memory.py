@@ -94,7 +94,8 @@ async def main():
         "PROMPT_PATH": str(ROOT / "prompt.md"), "KNOWLEDGE_DIR": str(tmp / "knowledge"),
         "RECENT_TURNS": "2", "SUMMARY_TURNS": "2", "EMBED_MODEL": "fake-bigram",
     })
-    from marong.agent import (EMPTY_NUDGE, FALLBACK_TEXT, LATE_TEXT, REFUSAL_TEXT, Agent, Incoming, clean_name)
+    from marong.agent import (CALLED_TEXT, EMPTY_NUDGE, EMPTY_TEXT, FALLBACK_TEXT, LATE_TEXT, REFUSAL_TEXT, Agent,
+                              Incoming, clean_name)
     from marong.config import load_settings
     from marong.memory import BadOutput, MemoryWorker
     from marong.store import Store
@@ -118,7 +119,7 @@ async def main():
         return await agent.handle(Incoming(room, user, t, is_channel=channel, kakao_id=kakao_id), send_fn, deadline)
 
     # ── 저장소 ──
-    ok(await store.schema_version() == 3, "표 버전")
+    ok(await store.schema_version() == 4, "표 버전")
     ok(await store.can_delete() is False, "봇 계정은 기록을 지우거나 고칠 수 없음(can_delete)")
     ok(clean_name("  동희  ") == "동희" and clean_name("") == "" and clean_name("가" * 21) == "", "이름 다듬기")
 
@@ -208,6 +209,38 @@ async def main():
     r = await trig.handle(Incoming("g2", "u1", "마롱아 오늘 뭐해", is_channel=False), send)
     ok(r is not None and "오늘 뭐해\\n" in json.dumps(llm.bodies[-1]["messages"], ensure_ascii=False),
        "부르면 앞의 말까지 보고 답함")
+    ok("태그한 메시지만" in situation(llm.bodies[-1]) and "태그 없이 한 말은 마롱이가 못 봐" in situation(llm.bodies[-1]),
+       "단체방은 태그한 말만 온다고 알려 줌(태그 안 해도 된다고 하지 않게)")
+
+    # 단체방에서 태그만 하면 카카오가 태그 글자를 빼서 빈 글로 옴 → 부른 것으로 받음. 1:1 빈 글은 그대로
+    calls = len(llm.bodies)
+    r = await say("g1", "u1", "  ", channel=False)
+    ok(r == f"응답:동희: {CALLED_TEXT}" and len(llm.bodies) == calls + 1, f"태그만 → 부른 것으로 답함: {r}")
+    ok(db.admin("SELECT content FROM marong.messages WHERE room_key = 'g1' AND role = 'user' ORDER BY id DESC LIMIT 1")
+       == [(CALLED_TEXT,)], "태그만 한 말은 '@마롱이'로 저장")
+    ok(await trig.handle(Incoming("g2", "u1", "", is_channel=False), send) is not None, "GROUP_TRIGGER 가 '마롱'이어도 태그만 하면 답함")
+    ok(await say("r6", "u6", "") == EMPTY_TEXT and len(llm.bodies) == calls + 2, "1:1 빈 글은 다시 보내 달라고 함")
+    ok(agent.answers(Incoming("g2", "u1", "오늘 뭐해", is_channel=False))
+       and not trig.answers(Incoming("g2", "u1", "오늘 뭐해", is_channel=False))
+       and not agent.answers(Incoming("r6", "u6", "")), "answers: 답할 말인지")
+
+    # 연달아 온 말: 뒤에 답할 말이 더 왔으면 저장만 하고, 마지막 말에 한 번에 답함
+    calls = len(llm.bodies)
+    r = await agent.handle(Incoming("r7", "u7", "첫 마디", kakao_id="b1"), send, superseded=lambda: True)
+    ok(r is None and len(llm.bodies) == calls, "뒤에 말이 더 왔으면 답하지 않음(Claude 도 안 부름)")
+    ok(db.admin("SELECT content FROM marong.messages WHERE room_key = 'r7'") == [("첫 마디",)], "그래도 저장은 함")
+    r = await agent.handle(Incoming("r7", "u7", "둘째 마디", kakao_id="b2"), send, superseded=lambda: False)
+    last = llm.bodies[-1]["messages"][-1]["content"]
+    ok(r == "응답:둘째 마디" and "첫 마디" in last and last.endswith("둘째 마디"), f"마지막 말에 앞 말까지 묶어 답함: {last}")
+    waiting = Agent(replace(s, reply_wait_s=0.3), store, emb, llm)
+    later = {"v": False}
+    asyncio.get_running_loop().call_later(0.1, later.__setitem__, "v", True)
+    calls = len(llm.bodies)
+    r = await waiting.handle(Incoming("r7", "u7", "셋째", kakao_id="b3"), send, superseded=lambda: later["v"])
+    ok(r is None and len(llm.bodies) == calls, "답하기 전에 잠깐 기다리는 사이 말이 더 오면 묶음")
+    t0 = asyncio.get_running_loop().time()
+    r = await waiting.handle(Incoming("r7", "u7", "넷째", kakao_id="b4"), send, superseded=lambda: False)
+    ok(r == "응답:넷째" and asyncio.get_running_loop().time() - t0 >= 0.3, "더 안 오면 기다렸다가 답함")
 
     # ── 뒤 작업: 요약·메모·임베딩 → 기억 찾기 ──
     for role, t in (("user", "나 다음 주에 토익 시험 봐"), ("assistant", "화이팅이야 📚"),

@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS marong.meta (
   key   text PRIMARY KEY,
   value text NOT NULL
 );
-INSERT INTO marong.meta (key, value) VALUES ('schema_version', '3')
+INSERT INTO marong.meta (key, value) VALUES ('schema_version', '4')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- 채팅방. 채널채팅(1:1)도 방 하나로 친다.
@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS marong.rooms (
 );
 -- 2: 선톡(마롱이가 먼저 말 걸기) 받기. 친구가 그만하라고 하면 false(마롱이가 set_proactive 로 바꿈)
 ALTER TABLE marong.rooms ADD COLUMN IF NOT EXISTS proactive boolean NOT NULL DEFAULT true;
+-- 4: 요약(10턴)을 기다리지 않고 친구 메모를 먼저 고친 마지막 메시지 id. 이 뒤로 친구 말이 오면 메모를 다시 고침(memory.py note_due)
+ALTER TABLE marong.rooms ADD COLUMN IF NOT EXISTS noted_id bigint NOT NULL DEFAULT 0;
 
 -- 친구의 카카오 키 하나(같은 사람도 1:1 과 단체방에서 키가 다름). 이름은 본인이 알려 준 것만 저장한다(카카오가 이름을 주지 않음).
 CREATE TABLE IF NOT EXISTS marong.people (
@@ -111,7 +113,7 @@ CREATE TABLE IF NOT EXISTS marong.notes (
   room_key   text NOT NULL REFERENCES marong.rooms (room_key),
   user_key   text NOT NULL REFERENCES marong.people (user_key),
   content    text NOT NULL,
-  summary_id bigint REFERENCES marong.summaries (id),     -- 이 메모를 만든 요약
+  summary_id bigint REFERENCES marong.summaries (id),     -- 이 메모를 만든 요약(요약 전에 먼저 고친 메모는 비움)
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS notes_room_idx ON marong.notes (room_key, user_key, id);

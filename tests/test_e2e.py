@@ -27,11 +27,16 @@ SLOW: set[str] = set()  # 이 콜백 토큰의 답장은 1초 늦게 받음(카�
 LOGS: list[str] = []
 
 
+def chats() -> list[dict]:
+    """Claude 요청 중 답장만(뒤에서 하는 요약·메모·공유 메모 거르기는 output_config.format 이 있어서 뺌)."""
+    return [c for c in CLAUDE if "format" not in c["body"].get("output_config", {})]
+
+
 def claude(key: str, body: dict):
     fmt = body.get("output_config", {}).get("format")
     if fmt and "items" in fmt["schema"]["properties"]:  # 뒤에서 하는 공유 메모 거르기
         return 200, message([text(json.dumps({"items": ["마라탕 좋아함"]}, ensure_ascii=False))])
-    if fmt:  # 뒤에서 하는 요약
+    if fmt:  # 뒤에서 하는 요약(메모만 먼저 고칠 때는 notes 만 읽음)
         tags = body["output_config"]["format"]["schema"]["properties"]["notes"]["items"]["properties"]["who"]["enum"]
         return 200, message([text(json.dumps({"summary": "동희가 마라탕을 좋아한다고 함",
                                               "notes": [{"who": tags[0], "note": "- 마라탕 좋아함"}]},
@@ -154,7 +159,7 @@ async def main():
         "ANTHROPIC_API_KEY": "primary", "ANTHROPIC_API_KEY_BACKUP": "backup", "DATABASE_URL": db.app_url,
         "EMBED_MODEL": "", "PROMPT_PATH": str(ROOT / "prompt.md"), "WELCOME_PATH": str(ROOT / "welcome.txt"),
         "KNOWLEDGE_DIR": str(tmp / "knowledge"), "RECENT_TURNS": "2", "SUMMARY_TURNS": "2",
-        "LLM_TIMEOUT_SECONDS": "10",
+        "LLM_TIMEOUT_SECONDS": "10", "REPLY_WAIT_SECONDS": "0.5",
     })
     import run  # noqa: E402
     bot = asyncio.create_task(run.main("run"))
@@ -175,10 +180,10 @@ async def main():
     await wait_for(lambda: len(CALLBACKS) == 1, what="첫 답장")
     assert CALLBACKS[0]["auth"] == "KakaoAK tok-secret" and CALLBACKS[0]["cb"] == "cb1"
     assert text_of(CALLBACKS[0]) == "안녕! 너 이름이 뭐야? 🙂", text_of(CALLBACKS[0])
-    b = CLAUDE[-1]["body"]
+    b = chats()[-1]["body"]
     assert b["model"] == "claude-haiku-5-5" and b["output_config"] == {"effort": "xhigh"} and b["max_tokens"] == 16000, b
     assert b["tools"][0]["name"] == "set_name" and b["system"][0]["cache_control"] == {"type": "ephemeral"}
-    assert CLAUDE[-1]["version"], "anthropic-version 헤더"
+    assert chats()[-1]["version"], "anthropic-version 헤더"
     checks += 1
 
     # 3) HEARTBEAT
@@ -192,16 +197,16 @@ async def main():
     checks += 1
 
     # 5) 이름을 알려 주면 set_name → 생각 블록·도구 호출을 그대로 돌려주고 이름으로 부름
-    n = len(CLAUDE)
+    n = len(chats())
     await dispatch(c1["ws"], 3, "MESSAGE_CREATE", msg(2, "내 이름은 동희야", "cb2"))
     await wait_for(lambda: len(CALLBACKS) == 2, what="이름 답장")
     assert text_of(CALLBACKS[1]) == "동희야 반가워 😆", text_of(CALLBACKS[1])
-    asst = CLAUDE[n + 1]["body"]["messages"][-2]
+    asst = chats()[n + 1]["body"]["messages"][-2]
     th, tu = asst["content"]
     assert asst["role"] == "assistant" and th["type"] == "thinking" and th["thinking"] == "이름 저장", asst
     assert th["signature"] == thinking("이름 저장")["signature"], "생각 블록 서명을 그대로 돌려줌"
     assert tu["type"] == "tool_use" and tu["id"] == "toolu_1" and tu["input"] == {"name": "동희"}, tu
-    assert CLAUDE[n + 1]["body"]["messages"][-1]["content"][0]["tool_use_id"] == "toolu_1"
+    assert chats()[n + 1]["body"]["messages"][-1]["content"][0]["tool_use_id"] == "toolu_1"
     assert db.admin("SELECT name FROM marong.people WHERE user_key = 'user_1'") == [("동희",)]
     checks += 1
 
@@ -228,8 +233,9 @@ async def main():
     # 9) '초기화'·'처음부터'는 그냥 대화. 기록은 늘기만 함
     before = count("SELECT count(*) FROM marong.messages")
     await dispatch(c1["ws"], 7, "MESSAGE_CREATE", msg(6, "초기화", "cb6"))
+    await wait_for(lambda: len(CALLBACKS) == 6, what="초기화 답장")
     await dispatch(c1["ws"], 8, "MESSAGE_CREATE", msg(7, "처음부터", "cb7"))
-    await wait_for(lambda: len(CALLBACKS) == 7, what="초기화 답장")
+    await wait_for(lambda: len(CALLBACKS) == 7, what="처음부터 답장")
     assert "답(primary): 초기화" in text_of(CALLBACKS[5]) and "답(primary): 처음부터" in text_of(CALLBACKS[6]), (text_of(CALLBACKS[5]), text_of(CALLBACKS[6]))
     assert count("SELECT count(*) FROM marong.messages") == before + 4
     assert count("SELECT min(id) FROM marong.messages") == 1, "첫 메시지가 그대로 있음"
@@ -251,8 +257,8 @@ async def main():
     # 11) 단체방: 말한 친구 표시
     await dispatch(c1["ws"], 12, "MESSAGE_CREATE", msg(11, "다들 안녕", "cb11", room="group_1", channel=False))
     await wait_for(lambda: len(CALLBACKS) == 11, what="단체방 답장")
-    convo = json.dumps(CLAUDE[-1]["body"]["messages"], ensure_ascii=False)
-    assert "동희: 다들 안녕" in convo and "단체 채팅방" in CLAUDE[-1]["body"]["system"][-1]["text"], convo
+    convo = json.dumps(chats()[-1]["body"]["messages"], ensure_ascii=False)
+    assert "동희: 다들 안녕" in convo and "단체 채팅방" in chats()[-1]["body"]["system"][-1]["text"], convo
     checks += 1
 
     # 12) 채팅방 입장(CHAT_JOIN) → welcome.txt 인사
@@ -262,19 +268,27 @@ async def main():
     assert text_of(CALLBACKS[11]).startswith("안녕! 나는 마롱이야"), text_of(CALLBACKS[11])
     checks += 1
 
-    # 13) 같은 방에서는 앞 답장이 늦게 가도 받은 순서대로 답함
+    # 13) 같은 방에서는 앞 답장이 늦게 가도 받은 순서대로 답함. 연달아 보낸 말은 마지막 말에 한 번에 답함
     SLOW.add("cb13")
+    n = len(chats())
     await dispatch(c1["ws"], 14, "MESSAGE_CREATE", msg(12, "느린 질문", "cb13"))
+    await wait_for(lambda: len(chats()) > n, what="앞 말 답장 시작")
     await dispatch(c1["ws"], 15, "MESSAGE_CREATE", msg(13, "다음 질문", "cb14"))
     await wait_for(lambda: len(CALLBACKS) == 14, what="순서대로 답장")
     assert [c["cb"] for c in CALLBACKS[12:]] == ["cb13", "cb14"], [c["cb"] for c in CALLBACKS[12:]]
+    await dispatch(c1["ws"], 16, "MESSAGE_CREATE", msg(14, "한 마디", "cb15"))
+    await dispatch(c1["ws"], 17, "MESSAGE_CREATE", msg(15, "두 마디", "cb16"))
+    await wait_for(lambda: len(CALLBACKS) == 15, what="묶어서 답장")
+    await asyncio.sleep(1)
+    assert [c["cb"] for c in CALLBACKS[14:]] == ["cb16"], [c["cb"] for c in CALLBACKS[14:]]
+    assert "한 마디\n두 마디" in chats()[-1]["body"]["messages"][-1]["content"], chats()[-1]["body"]["messages"][-1]
     checks += 1
 
     # 14) 서버 재시작(1001) → RESUME(session_id, 마지막 seq)
     await c1["ws"].close(1001)
     c2 = await asyncio.wait_for(CONNS.get(), 5)
     f = await asyncio.wait_for(c2["frames"].get(), 5)
-    assert f == {"op": 6, "d": {"token": "tok-secret", "session_id": "S1", "seq": 15}}, f
+    assert f == {"op": 6, "d": {"token": "tok-secret", "session_id": "S1", "seq": 17}}, f
     checks += 1
 
     # 15) 세션 만료(4009) → 새 IDENTIFY
