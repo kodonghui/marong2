@@ -134,6 +134,7 @@ async def main():
        "말투 지시문은 캐시 블록")
     ok("이름을 아직 몰라" in situation(b) and "1:1" in situation(b), "이름 모를 때 물어보라고 알려 줌")
     ok("다시 묻지 말고" in situation(b) and "조르지 말고" in b["system"][0]["text"], "이름은 한 번만 묻고 조르지 않음")
+    ok("# 마롱이 취향" in b["system"][0]["text"] and "군밤" in b["system"][0]["text"], "좋아하는 음식·간식·취미")
     ok(b["messages"][0]["content"].startswith("(") and b["messages"][0]["content"].endswith(") 안녕"),
        "첫 말 앞에 시각")
     ok(await say("r1", "u1", "안녕", kakao_id="k1") is None, "같은 카카오 메시지는 한 번만 답함")
