@@ -134,7 +134,7 @@ async def main():
         db.admin("UPDATE marong.messages SET created_at = created_at - make_interval(days => %s) "
                  "WHERE room_key = %s", (days, room))
 
-    # 방: p1 동희 1:1(4일 조용, 메모·요약 있음), p2 1:1(오늘 말함), g1 단체방(4일), terminal(카카오 id 없음, 4일),
+    # 방: p1 동희 1:1(4일 조용, 메모·요약 있음), p2 1:1(방금 말함), g1 단체방(4일), terminal(카카오 id 없음, 4일),
     #     p3 1:1(5일, 선톡 끔), p4 1:1(6일, 이름 모름)
     await say("p1", "u1", "나 다음 주 토익 시험 봐", kid="a1")
     await store.set_name("u1", "동희")
@@ -153,13 +153,23 @@ async def main():
     today = datetime.now(kst).replace(hour=0, minute=0, second=0, microsecond=0)
 
     async def due_rooms(every=2):
-        return [r["room_key"] for r in await store.proactive_due(today, every, 10)]
+        return [r["room_key"] for r in await store.proactive_due(today, every, 6, 10)]
 
-    due = await store.proactive_due(today, 2, 10)
-    ok([r["room_key"] for r in due] == ["p4", "p1"], f"대상은 오늘 아직 말 안 한 1:1 방만, 오래 조용한 순: {due}")
+    due = await store.proactive_due(today, 2, 6, 10)
+    ok([r["room_key"] for r in due] == ["p4", "p1"], f"대상은 6시간 넘게 조용한 1:1 방만, 오래 조용한 순: {due}")
     ok(due[0]["name"] is None and due[1]["name"] == "동희" and due[1]["user_key"] == "u1", due)
-    ok(await store.proactive_due(today, 2, 10, room_key="p1") == [due[1]]
-       and not await store.proactive_due(today, 2, 10, room_key="p2"), "방 하나만 다시 확인")
+    ok(await store.proactive_due(today, 2, 6, 10, room_key="p1") == [due[1]]
+       and not await store.proactive_due(today, 2, 6, 10, room_key="p2"), "방 하나만 다시 확인")
+
+    def shift_hours(room, hours):
+        db.admin("UPDATE marong.messages SET created_at = created_at - make_interval(hours => %s) WHERE room_key = %s",
+                 (hours, room))
+
+    shift_hours("p2", 5)
+    ok("p2" not in await due_rooms(), "6시간 안에 말한 친구는 대상 아님(이야기 중일 수 있음)")
+    shift_hours("p2", 2)
+    ok("p2" in await due_rooms(), "6시간 넘게 조용하면 대상(새벽에 얘기한 친구도 그날 낮에)")
+    shift_hours("p2", -7)
 
     async with httpx.AsyncClient() as http:
         pro = Proactive(s, store, agent, http, chance=1.0)
@@ -194,13 +204,13 @@ async def main():
         ok("- 친구: 동희" in sit and "토익 시험 준비 중" in sit and "다음 주 토익 시험을 본다고" in sit,
            "그 방의 메모·요약을 보고 말 검")
         ok(await pro.step(noon) == 0 and len(SENT) == 2,
-           "같은 날 다시 안 보냄. 오늘 말한 친구·단체방·터미널·선톡 끈 방은 대상 아님")
+           "같은 날 다시 안 보냄. 방금 말한 친구·단체방·터미널·선톡 끈 방은 대상 아님")
 
         # ── 친구가 답하면 선톡이 앞 문맥, 이틀에 한 번 ──
         await say("p1", "u1", "시험 망했어 ㅠ", kid="a2")
         convo = json.dumps(llm.bodies[-1]["messages"], ensure_ascii=False)
         ok("동희 선톡 2 🌰" in convo and convo.index("동희 선톡 2") < convo.index("시험 망했어"), "선톡에 답하면 선톡이 앞 문맥")
-        ok(await due_rooms() == [], "오늘 말한 친구는 대상 아님")
+        ok(await due_rooms() == [], "방금 말한 친구는 대상 아님")
         age("p1", 1)
         ok(await due_rooms() == [], "선톡한 다음 날은 안 보냄(답했어도)")
         age("p1", 1)

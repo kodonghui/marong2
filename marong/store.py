@@ -246,17 +246,17 @@ class Store:
 
     # ── 선톡(먼저 말 걸기) ──────────────────────────────────────
 
-    async def proactive_due(self, today: datetime, every_days: int, limit: int,
+    async def proactive_due(self, today: datetime, every_days: int, quiet_hours: int, limit: int,
                             room_key: str | None = None) -> list[dict]:
-        """선톡할 1:1 방(오래 조용한 친구부터): 선톡을 켜 둔 방에서 친구가 오늘(today = 한국 시각 0시) 아직 말하지
-        않았고, 최근 every_days 일(오늘 포함) 안에 선톡을 안 보냈고, 지난 선톡에 친구가 답한(또는 선톡을 받은 적 없는)
-        방. 보냈다가 전달에 실패한 것도 보낸 것으로 친다. room_key 를 주면 그 방만 확인."""
+        """선톡할 1:1 방(오래 조용한 친구부터): 선톡을 켜 둔 방에서 친구가 quiet_hours 시간 넘게 조용하고, 최근
+        every_days 일(today = 한국 시각 오늘 0시, 오늘 포함) 안에 선톡을 안 보냈고, 지난 선톡에 친구가 답한(또는 선톡을
+        받은 적 없는) 방. 보냈다가 전달에 실패한 것도 보낸 것으로 친다. room_key 를 주면 그 방만 확인."""
         return await self._all(
-            CHANNEL_ROOMS + "AND r.proactive AND u.created_at < %(today)s "
+            CHANNEL_ROOMS + "AND r.proactive AND u.created_at < now() - %(quiet)s * interval '1 hour' "
             "AND NOT EXISTS (SELECT 1 FROM marong.messages x WHERE x.room_key = r.room_key "
             "  AND x.meta->>'proactive' = 'true' AND (x.id > u.id OR x.created_at >= %(since)s)) "
             "AND (%(room)s::text IS NULL OR r.room_key = %(room)s) ORDER BY u.created_at LIMIT %(n)s",
-            {"today": today, "since": today - timedelta(days=every_days - 1), "room": room_key, "n": limit})
+            {"quiet": quiet_hours, "since": today - timedelta(days=every_days - 1), "room": room_key, "n": limit})
 
     async def proactive_count(self, since: datetime) -> int:
         """since 뒤로 보낸(전달 실패 포함) 선톡 수."""
