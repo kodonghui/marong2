@@ -11,7 +11,8 @@
 #   restart      마롱이 다시 켜기 / stop  마롱이 끄기 / status  상태 보기
 #   logs         로그 보기(Ctrl+C 로 나옴)
 #   prompt       prompt.md·welcome.txt·knowledge/ 만 올림. 재시작 없이 다음 메시지부터 반영
-#   admin …      기록 보기(읽기만): admin people | admin rooms | admin show <이름 또는 #키> [개수] | admin stats
+#   admin …      기록 보기: admin friends | people | rooms | show <이름 또는 #키> [개수] | stats
+#                친구 고치기: admin link <#키> <친구> | unlink <#키> | share <친구> on|off (기록은 안 지움)
 #   proactive <이름 또는 #키> [--dry]  그 친구의 1:1 방에 선톡 한 개를 지금 보냄(시험용). --dry 면 만든 말만 보여 줌
 #   backup       DB 백업 파일을 서버의 /var/backups/marong 에 만듦(자동 백업은 하지 않음)
 #   chat         서버에서 터미널로 마롱이와 대화(카카오 없이. 'terminal' 방으로 저장됨)
@@ -86,5 +87,5 @@ case "${1:-}" in
     on_server "$AS_MARONG 'cd $DEST && exec .venv/bin/python run.py --proactive \"\$@\"' _ $(printf '%q ' "$@")"
     ;;
   chat) "${SSH[@]}" -t "$HOST" "$AS_MARONG 'cd $DEST && .venv/bin/python run.py --chat'" ;;
-  *) sed -n '2,17p' "$0"; exit 1 ;;
+  *) sed -n '2,18p' "$0"; exit 1 ;;
 esac

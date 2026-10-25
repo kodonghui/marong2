@@ -15,8 +15,9 @@
    - 지금 말과 비슷한 예전 대화(임베딩 검색, 같은 방 안에서만)
 2. 카카오는 이름을 알려 주지 않아서, 처음 만난 친구에게는 이름을 물어보고 `set_name` 도구로 저장해요. 그다음부터는 "동희야"처럼 이름으로 불러요.
 3. 답은 빈 줄마다 말풍선이 나뉘어요(최대 3개).
-4. 기억은 방마다 따로예요. 1:1 에서 한 얘기는 단체방에서 보이지 않아요(이름만 같이 써요).
-5. 선톡을 켜면 며칠 조용한 1:1 친구에게 먼저 한 번 말을 걸어요(아래 '선톡').
+4. 기억은 방마다 따로예요. 1:1 에서 한 얘기는 단체방에서 그대로 보이지 않아요.
+5. 친구들끼리는 마롱이를 같이 알아요. 아는 사이인 친구에게는 다른 친구의 가벼운 얘기(취향·하는 일)만 해요(아래 '친구들').
+6. 선톡을 켜면 며칠 조용한 1:1 친구에게 먼저 한 번 말을 걸어요(아래 '선톡').
 
 ## 기록은 지워지지 않아요
 
@@ -66,6 +67,22 @@ bash deploy/ovh.sh logs          # 로그 보기(Ctrl+C 로 나옴)
 
 고친 뒤 `bash deploy/ovh.sh prompt` 로 올리면 재시작 없이 다음 메시지부터 반영돼요. `bash deploy/ovh.sh chat` 으로 서버에서 카카오 없이 말투를 시험할 수 있어요.
 
+## 친구들(서로 아는 사이)
+
+- 친구가 이름을 알려 주면 1:1 과 단체방의 키(카카오는 방마다 키가 달라요)를 이름으로 묶어 친구 한 명으로 봐요.
+- 같은 단체방에서 말한 친구끼리, 그리고 친구가 말해 준 사이("현경이는 내 회사 동기야" → `add_friendship`)는 아는 사이예요. 아는 사이면 그 친구의 가벼운 얘기를 할 수 있고, 아니면 이름만 알아요("응 알아, 어떻게 알아?").
+- 다른 친구에게 하는 얘기는 방별 메모에서 뒤 작업이 다시 거른 '공유 메모'뿐이에요. 음식·취미·하는 일 같은 것만 넣고, 고민·건강·연애·돈·시험·비밀은 빼요. 대화 원문·요약은 다른 방으로 넘어가지 않아요.
+- 친구가 "내 얘기 다른 친구한테 하지 마"라고 하면 그 친구 얘기는 안 해요(`set_share`). 그 친구 이름도 다른 친구에게 안 보여요.
+
+| 할 일 | 명령 |
+|---|---|
+| 누가 누구랑 아는 사이인지, 공유 메모 보기 | `bash deploy/ovh.sh admin friends` |
+| 이름이 달라 따로 잡힌 같은 사람 묶기 | `bash deploy/ovh.sh admin link <#키> <친구 이름 또는 #키>` |
+| 이름이 같아 잘못 묶인 다른 사람 떼기 | `bash deploy/ovh.sh admin unlink <#키>` |
+| 그 친구 얘기를 다른 친구에게 안 하기·다시 하기 | `bash deploy/ovh.sh admin share <친구 이름 또는 #키> off`(또는 `on`) |
+
+`#키` 는 `admin friends`·`admin people` 에 나오는 짧은 키예요. 셸에서 `#` 은 주석이라 `'#1a2b3c4d'` 처럼 따옴표로 감싸거나 `#` 을 빼고 써요.
+
 ## 선톡(마롱이가 먼저 말 걸기)
 
 기본은 꺼져 있어요(`PROACTIVE=off`). 켜면 이렇게 움직여요.
@@ -89,7 +106,8 @@ bash deploy/ovh.sh logs          # 로그 보기(Ctrl+C 로 나옴)
 ## 기록 보기·백업
 
 ```bash
-bash deploy/ovh.sh admin people          # 친구 목록
+bash deploy/ovh.sh admin friends         # 친구 목록(카카오 키들, 아는 사이, 공유 메모)
+bash deploy/ovh.sh admin people          # 카카오 키 목록
 bash deploy/ovh.sh admin rooms           # 방 목록
 bash deploy/ovh.sh admin show 동희 30    # 그 친구가 있는 방의 최근 대화 30개와 기억 메모
 bash deploy/ovh.sh admin stats           # 개수와 최근 7일 토큰·대략의 비용
@@ -127,6 +145,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements.txt
 .venv/Scripts/python tests/test_llm.py      # 주 키 실패 → 백업 키, 400 은 바로 실패
 .venv/Scripts/python tests/test_check.py    # run.py --check: 정상이면 0, 키·요약·지우기 권한·DB 문제면 1
 .venv/Scripts/python tests/test_proactive.py  # 선톡: 대상 고르기·시간·하루 상한·전송·끄기·실패 기록·시험 명령
+.venv/Scripts/python tests/test_friends.py    # 친구들: 키 묶기·아는 사이·공유 메모 거르기·다른 방 안 샘·도구·관리 명령
 ```
 
 (맥·리눅스는 `.venv/bin/python`.) 노트북에서 `python run.py`(봇 모드)는 켜지 마세요. 서버의 봇과 같은 토큰이라 서로 끊어 내요.
@@ -136,13 +155,13 @@ uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements.txt
 | 파일 | 하는 일 |
 |---|---|
 | `run.py` | 실행(`--check` 점검, `--chat` 터미널 대화, `--proactive` 선톡 시험) |
-| `marong/agent.py` | 본체: 저장 → 기억 모으기 → Claude → 답 → 저장, `set_name` |
-| `marong/memory.py` | 뒤 작업: 10턴마다 요약·친구별 메모, 임베딩 |
+| `marong/agent.py` | 본체: 저장 → 기억·친구 모으기 → Claude → 답 → 저장, 도구(`set_name`·`add_friendship`·`set_share`·`set_proactive`) |
+| `marong/memory.py` | 뒤 작업: 10턴마다 요약·친구별 메모, 공유 메모 거르기, 임베딩 |
 | `marong/proactive.py` | 선톡: 며칠 조용한 1:1 친구에게 먼저 말 걸기 |
 | `marong/store.py`, `marong/schema.sql` | Postgres 저장소와 표·권한 |
 | `marong/embed.py` | 서버 CPU 임베딩(embeddinggemma-300m) |
 | `marong/llm.py` | Claude 호출(주 키 → 백업 키) |
 | `marong/gateway.py`, `marong/kakao.py`, `marong/app.py` | 카카오 게이트웨이·콜백·전송·이벤트 처리 |
 | `deploy/` | 서버 설치·운영(`ovh.sh`), systemd, env 옮기기 |
-| `tools/admin.py` | 기록 보기(읽기만) |
+| `tools/admin.py` | 기록 보기, 친구 키 묶기·풀기·공유 끄기(기록은 안 지움) |
 | `docs/design.md` | 저장 설계와 이유 |

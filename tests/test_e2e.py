@@ -28,7 +28,10 @@ LOGS: list[str] = []
 
 
 def claude(key: str, body: dict):
-    if "format" in body.get("output_config", {}):  # 뒤에서 하는 요약
+    fmt = body.get("output_config", {}).get("format")
+    if fmt and "items" in fmt["schema"]["properties"]:  # 뒤에서 하는 공유 메모 거르기
+        return 200, message([text(json.dumps({"items": ["마라탕 좋아함"]}, ensure_ascii=False))])
+    if fmt:  # 뒤에서 하는 요약
         tags = body["output_config"]["format"]["schema"]["properties"]["notes"]["items"]["properties"]["who"]["enum"]
         return 200, message([text(json.dumps({"summary": "동희가 마라탕을 좋아한다고 함",
                                               "notes": [{"who": tags[0], "note": "- 마라탕 좋아함"}]},

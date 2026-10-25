@@ -65,8 +65,9 @@ async def check(s, store: Store, emb: Embeddings, llm: LLM, agent: Agent, worker
         version = await store.schema_version()
         counts = await store.counts()
         (print if version == SCHEMA_VERSION else bad)(
-            f"Postgres: 연결됨, 표 버전 {version}(코드 {SCHEMA_VERSION}) / 방 {counts['rooms']} · 친구 {counts['people']}"
-            f" · 메시지 {counts['messages']} · 요약 {counts['summaries']} · 임베딩 {counts['embeddings']}")
+            f"Postgres: 연결됨, 표 버전 {version}(코드 {SCHEMA_VERSION}) / 방 {counts['rooms']} · 친구 {counts['friends']}"
+            f"(카카오 키 {counts['people']}) · 메시지 {counts['messages']} · 요약 {counts['summaries']}"
+            f" · 임베딩 {counts['embeddings']}")
         if await store.can_delete():
             bad("  봇 계정이 대화 기록을 지우거나 고칠 수 있음: schema.sql 권한을 다시 적용하세요")
         else:
@@ -105,11 +106,18 @@ async def check(s, store: Store, emb: Embeddings, llm: LLM, agent: Agent, worker
         {"id": 3, "role": "user", "user_key": "a", "name": "동희", "content": "끝나면 마라탕 먹으러 갈 거야. 나 마라탕 진짜 좋아함", "created_at": now},
         {"id": 4, "role": "assistant", "user_key": None, "name": None, "content": "완전 좋다 🌶️", "created_at": now},
     ]
+    notes = {}
     try:
         summary, notes, _ = await worker.summarize(sample, {})
         print(f"요약 시험: {summary}\n  메모: {notes.get('a', '(없음)')}")
     except Exception as e:
         bad(f"요약 시험: 실패 {brief(e)}")
+    if notes.get("a"):
+        try:
+            shared, _ = await worker.share_filter("동희", [{"is_channel": True, "content": notes["a"]}])
+            print(f"공유 메모 시험(시험 얘기는 빠져야 함): {shared.replace(chr(10), ' / ') or '(없음)'}")
+        except Exception as e:
+            bad(f"공유 메모 시험: 실패 {brief(e)}")
 
     try:
         ip = (await http.get("https://api.ipify.org", timeout=10)).text.strip()

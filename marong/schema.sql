@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS marong.meta (
   key   text PRIMARY KEY,
   value text NOT NULL
 );
-INSERT INTO marong.meta (key, value) VALUES ('schema_version', '2')
+INSERT INTO marong.meta (key, value) VALUES ('schema_version', '3')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- 채팅방. 채널채팅(1:1)도 방 하나로 친다.
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS marong.rooms (
 -- 2: 선톡(마롱이가 먼저 말 걸기) 받기. 친구가 그만하라고 하면 false(마롱이가 set_proactive 로 바꿈)
 ALTER TABLE marong.rooms ADD COLUMN IF NOT EXISTS proactive boolean NOT NULL DEFAULT true;
 
--- 친구. 이름은 본인이 알려 준 것만 저장한다(카카오가 이름을 주지 않음).
+-- 친구의 카카오 키 하나(같은 사람도 1:1 과 단체방에서 키가 다름). 이름은 본인이 알려 준 것만 저장한다(카카오가 이름을 주지 않음).
 CREATE TABLE IF NOT EXISTS marong.people (
   user_key    text PRIMARY KEY,                   -- 카카오 botUserKey
   name        text,
@@ -43,6 +43,38 @@ CREATE TABLE IF NOT EXISTS marong.people (
   first_seen  timestamptz NOT NULL DEFAULT now(),
   last_seen   timestamptz NOT NULL DEFAULT now()
 );
+
+-- 3: 친구 한 명(사람). 카카오는 같은 사람에게 1:1 과 단체방에서 다른 botUserKey 를 줘서, 키(people) 여럿을 친구 한 명으로
+-- 묶는다. 이름을 알게 되면 같은 이름 친구에 묶는다(store.py set_name). 잘못 묶이면 tools/admin.py link·unlink 로 고친다.
+CREATE TABLE IF NOT EXISTS marong.friends (
+  id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name       text NOT NULL,                          -- 본인이 알려 준 이름(가장 최근)
+  share      boolean NOT NULL DEFAULT true,          -- 가벼운 얘기를 이 친구를 아는 다른 친구에게 해도 되는지(본인이 끄면 false)
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE marong.people ADD COLUMN IF NOT EXISTS friend_id bigint REFERENCES marong.friends (id);
+
+-- 3: 친구가 말해 준 아는 사이. 같은 단체방에서 말한 친구끼리는 이 표에 없어도 아는 사이로 친다.
+CREATE TABLE IF NOT EXISTS marong.friendships (
+  friend_a   bigint NOT NULL REFERENCES marong.friends (id),  -- 둘 중 작은 id
+  friend_b   bigint NOT NULL REFERENCES marong.friends (id),  -- 둘 중 큰 id
+  label      text,                                           -- 친구·회사 동기·동생 같은 관계(말해 준 대로)
+  told_by    bigint REFERENCES marong.friends (id),           -- 말해 준 친구
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (friend_a, friend_b),
+  CHECK (friend_a < friend_b)
+);
+
+-- 3: 다른 친구에게 해도 되는 가벼운 얘기(취향·하는 일 같은 것). 친구의 방별 메모(notes)를 걸러서 만든다.
+-- 새 줄을 쌓고 가장 최근 줄이 지금 것. 비어 있으면 나눌 얘기가 없음.
+CREATE TABLE IF NOT EXISTS marong.shared_notes (
+  id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  friend_id  bigint NOT NULL REFERENCES marong.friends (id),
+  content    text NOT NULL,
+  meta       jsonb NOT NULL DEFAULT '{}'::jsonb,          -- 거른 메모 id(note_ids)·모델·토큰 수
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS shared_notes_friend_idx ON marong.shared_notes (friend_id, id);
 
 -- 대화 원문. 한 번 쓰면 바꾸지 않는다.
 CREATE TABLE IF NOT EXISTS marong.messages (
@@ -58,6 +90,8 @@ CREATE TABLE IF NOT EXISTS marong.messages (
   UNIQUE (room_key, kakao_id)
 );
 CREATE INDEX IF NOT EXISTS messages_room_idx ON marong.messages (room_key, id);
+-- 3: 친구 키가 말한 방 찾기(아는 사이·키 묶기)
+CREATE INDEX IF NOT EXISTS messages_user_idx ON marong.messages (user_key, room_key);
 
 -- 방마다 대화 구간 요약(필받음 chat_summary 와 같은 생각: 일정 턴마다 한 개).
 CREATE TABLE IF NOT EXISTS marong.summaries (
@@ -96,7 +130,7 @@ CREATE INDEX IF NOT EXISTS embeddings_room_idx ON marong.embeddings (model, room
 
 GRANT USAGE ON SCHEMA marong TO marong;
 GRANT SELECT ON marong.meta TO marong;
-GRANT SELECT, INSERT, UPDATE ON marong.rooms, marong.people TO marong;
-GRANT SELECT, INSERT ON marong.messages, marong.summaries, marong.notes, marong.embeddings TO marong;
+GRANT SELECT, INSERT, UPDATE ON marong.rooms, marong.people, marong.friends, marong.friendships TO marong;
+GRANT SELECT, INSERT ON marong.messages, marong.summaries, marong.notes, marong.shared_notes, marong.embeddings TO marong;
 
 RESET ROLE;

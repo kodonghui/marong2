@@ -73,8 +73,17 @@ def summary_reply(body):
                                     ensure_ascii=False))])
 
 
+def share_reply(body):
+    """가짜 Claude(공유 메모 거르기): 메모에 '마라탕'이 있으면 그것만 남김."""
+    return message([text(json.dumps({"items": ["마라탕 좋아함"] if "마라탕" in body["messages"][0]["content"] else []},
+                                    ensure_ascii=False))])
+
+
 def respond(body):
-    return summary_reply(body) if "format" in body.get("output_config", {}) else chat_reply(body)
+    fmt = body.get("output_config", {}).get("format")
+    if not fmt:
+        return chat_reply(body)
+    return share_reply(body) if "items" in fmt["schema"]["properties"] else summary_reply(body)
 
 
 async def main():
@@ -109,7 +118,7 @@ async def main():
         return await agent.handle(Incoming(room, user, t, is_channel=channel, kakao_id=kakao_id), send_fn, deadline)
 
     # ── 저장소 ──
-    ok(await store.schema_version() == 2, "표 버전")
+    ok(await store.schema_version() == 3, "표 버전")
     ok(await store.can_delete() is False, "봇 계정은 기록을 지우거나 고칠 수 없음(can_delete)")
     ok(clean_name("  동희  ") == "동희" and clean_name("") == "" and clean_name("가" * 21) == "", "이름 다듬기")
 
@@ -117,7 +126,9 @@ async def main():
     await say("r1", "u1", "안녕", kakao_id="k1")
     for sql in ("DELETE FROM marong.messages", "UPDATE marong.messages SET content = 'x'",
                 "TRUNCATE marong.messages", "DELETE FROM marong.people", "DELETE FROM marong.summaries",
-                "DROP TABLE marong.messages", "UPDATE marong.notes SET content = 'x'"):
+                "DROP TABLE marong.messages", "UPDATE marong.notes SET content = 'x'",
+                "DELETE FROM marong.friends", "DELETE FROM marong.friendships", "DELETE FROM marong.shared_notes",
+                "UPDATE marong.shared_notes SET content = 'x'", "TRUNCATE marong.shared_notes"):
         try:
             with psycopg.connect(db.app_url, autocommit=True) as c:
                 c.execute(sql)

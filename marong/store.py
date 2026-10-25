@@ -10,7 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 
 log = logging.getLogger("store")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 # 'ㅋㅋㅋ'·'ㅇㅇ'·이모티콘만 있는 말은 검색해도 쓸모가 없어 임베딩하지 않음(한글 음절·영문·숫자가 2개 이상 이어진 말만)
 MEANINGFUL = "[가-힣A-Za-z0-9]{2}"
 # 카카오에서 온 1:1 방(채널채팅)마다 친구의 마지막 말. 터미널 대화('terminal' 방)는 카카오 id 가 없어서 빠짐
@@ -64,8 +64,8 @@ class Store:
     # ── 답장할 때 ──────────────────────────────────────────────
 
     async def touch(self, room_key: str, is_channel: bool, user_key: str) -> dict:
-        """방·친구를 처음 보면 만들고 마지막으로 본 시각을 바꾼다.
-        친구 줄(user_key, name)에 이 방의 선톡 받기(proactive)를 붙여 돌려준다."""
+        """방·친구를 처음 보면 만들고 마지막으로 본 시각을 바꾼다. 친구 줄(user_key, name, friend_id, share)에
+        이 방의 선톡 받기(proactive)를 붙여 돌려준다. share 는 친구에 안 묶인 키(이름을 모름)면 None."""
         async with self.pool.connection() as c:
             cur = await c.execute(
                 "INSERT INTO marong.rooms (room_key, is_channel) VALUES (%s, %s) "
@@ -75,7 +75,8 @@ class Store:
             room = await cur.fetchone()
             cur = await c.execute(
                 "INSERT INTO marong.people (user_key) VALUES (%s) "
-                "ON CONFLICT (user_key) DO UPDATE SET last_seen = now() RETURNING user_key, name",
+                "ON CONFLICT (user_key) DO UPDATE SET last_seen = now() RETURNING user_key, name, friend_id, "
+                "(SELECT f.share FROM marong.friends f WHERE f.id = people.friend_id) AS share",
                 (user_key,))
             return {**await cur.fetchone(), "proactive": room["proactive"]}
 
@@ -112,14 +113,117 @@ class Store:
             "JOIN marong.people p ON p.user_key = n.user_key WHERE n.room_key = %s "
             "ORDER BY n.user_key, n.id DESC", (room_key,))
 
-    async def set_name(self, user_key: str, name: str) -> None:
+    async def set_name(self, user_key: str, name: str) -> int | None:
+        """이름을 저장하고 이 키를 친구 한 명(friends)에 묶는다. 묶은 친구 id(카카오에서 말한 적 없는 키면 None)."""
         async with self.pool.connection() as c:
-            await c.execute("UPDATE marong.people SET name = %s, name_set_at = now() WHERE user_key = %s",
-                            (name, user_key))
+            async with c.transaction():
+                await c.execute("UPDATE marong.people SET name = %s, name_set_at = now() WHERE user_key = %s",
+                                (name, user_key))
+                return await self._link(c, user_key, name)
 
     async def set_proactive(self, room_key: str, on: bool) -> None:
         async with self.pool.connection() as c:
             await c.execute("UPDATE marong.rooms SET proactive = %s WHERE room_key = %s", (on, room_key))
+
+    # ── 친구들(서로 아는 사이) ───────────────────────────────────
+
+    @staticmethod
+    async def _link(c, user_key: str, name: str) -> int | None:
+        """키를 친구에 묶는다(이미 묶였으면 친구 이름만 바꿈). 같은 이름 친구가 하나뿐이면 그 친구에, 아니면 새 친구로.
+        사람마다 1:1 방은 하나라서 1:1 키는 이미 1:1 키가 있는 친구에게는 묶지 않는다. 터미널 대화 키는 묶지 않는다."""
+        await c.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("marong.friend:" + name,))
+        cur = await c.execute("SELECT friend_id FROM marong.people WHERE user_key = %s FOR UPDATE", (user_key,))
+        row = await cur.fetchone()
+        if row is None:
+            return None
+        if row["friend_id"]:
+            await c.execute("UPDATE marong.friends SET name = %s WHERE id = %s", (name, row["friend_id"]))
+            return row["friend_id"]
+        cur = await c.execute(
+            "SELECT bool_or(r.is_channel) AS channel FROM marong.messages m "
+            "JOIN marong.rooms r ON r.room_key = m.room_key WHERE m.user_key = %s AND m.kakao_id IS NOT NULL",
+            (user_key,))
+        channel = (await cur.fetchone())["channel"]
+        if channel is None:
+            return None
+        cur = await c.execute(
+            "SELECT f.id FROM marong.friends f WHERE f.name = %s AND NOT (%s AND EXISTS ("
+            "  SELECT 1 FROM marong.people p JOIN marong.messages m ON m.user_key = p.user_key "
+            "  JOIN marong.rooms r ON r.room_key = m.room_key WHERE p.friend_id = f.id AND r.is_channel))",
+            (name, channel))
+        found = await cur.fetchall()
+        if len(found) == 1:
+            friend_id = found[0]["id"]
+        else:
+            cur = await c.execute("INSERT INTO marong.friends (name) VALUES (%s) RETURNING id", (name,))
+            friend_id = (await cur.fetchone())["id"]
+        await c.execute("UPDATE marong.people SET friend_id = %s WHERE user_key = %s", (friend_id, user_key))
+        return friend_id
+
+    async def link_unlinked(self) -> int:
+        """이름은 있는데 친구에 안 묶인 키를 묶는다(표 버전 3 으로 올린 뒤 한 번. 그 뒤엔 set_name 이 묶음)."""
+        rows = await self._all("SELECT user_key, name FROM marong.people WHERE name IS NOT NULL AND friend_id IS NULL "
+                               "ORDER BY first_seen")
+        linked = 0
+        for r in rows:
+            async with self.pool.connection() as c:
+                async with c.transaction():
+                    linked += await self._link(c, r["user_key"], r["name"]) is not None
+        return linked
+
+    async def friend_circle(self, user_key: str, limit: int) -> list[dict]:
+        """지금 말하는 친구 말고 마롱이가 아는 친구들(공유를 끈 친구는 뺌). 아는 사이(같은 단체방에서 말함·말해 준 관계)
+        먼저, 그다음 최근에 본 순. 줄마다 name, told(말해 준 사이)·label(그 관계), same_group, shared(다른 친구에게 해도 되는 얘기)."""
+        return await self._all(
+            "WITH me AS (SELECT friend_id FROM marong.people WHERE user_key = %(k)s), "
+            "keys AS (SELECT user_key FROM marong.people WHERE friend_id = (SELECT friend_id FROM me) "
+            "  UNION SELECT %(k)s::text), "
+            "mates AS (SELECT DISTINCT p.friend_id AS id FROM marong.messages m "
+            "  JOIN marong.people p ON p.user_key = m.user_key WHERE p.friend_id IS NOT NULL AND m.room_key IN ("
+            "    SELECT m2.room_key FROM marong.messages m2 JOIN marong.rooms r ON r.room_key = m2.room_key "
+            "    WHERE NOT r.is_channel AND m2.user_key IN (SELECT user_key FROM keys))), "
+            "told AS (SELECT CASE WHEN fs.friend_a = me.friend_id THEN fs.friend_b ELSE fs.friend_a END AS id, fs.label "
+            "  FROM marong.friendships fs JOIN me ON me.friend_id IN (fs.friend_a, fs.friend_b)) "
+            "SELECT f.id, f.name, t.id IS NOT NULL AS told, t.label, g.id IS NOT NULL AS same_group, s.content AS shared, "
+            "  (SELECT max(p.last_seen) FROM marong.people p WHERE p.friend_id = f.id) AS last_seen "
+            "FROM marong.friends f LEFT JOIN told t ON t.id = f.id LEFT JOIN mates g ON g.id = f.id "
+            "LEFT JOIN LATERAL (SELECT x.content FROM marong.shared_notes x WHERE x.friend_id = f.id "
+            "  ORDER BY x.id DESC LIMIT 1) s ON true "
+            "WHERE f.share AND f.id IS DISTINCT FROM (SELECT friend_id FROM me) "
+            "  AND EXISTS (SELECT 1 FROM marong.people p WHERE p.friend_id = f.id) "
+            "ORDER BY (t.id IS NOT NULL OR g.id IS NOT NULL) DESC, last_seen DESC NULLS LAST LIMIT %(n)s",
+            {"k": user_key, "n": limit})
+
+    async def add_friendship(self, user_key: str, name: str, label: str) -> tuple[str, str | None]:
+        """지금 말하는 친구와 name 친구를 아는 사이로 저장한다. 돌려주는 것: (결과, 말하는 친구 이름).
+        결과: ok | no_speaker(이름을 몰라 친구에 안 묶인 키) | unknown(그 이름 친구 없음) | ambiguous(여럿) | self"""
+        async with self.pool.connection() as c:
+            async with c.transaction():
+                cur = await c.execute("SELECT f.id, f.name FROM marong.people p JOIN marong.friends f ON f.id = p.friend_id "
+                                      "WHERE p.user_key = %s", (user_key,))
+                me = await cur.fetchone()
+                if not me:
+                    return "no_speaker", None
+                cur = await c.execute(
+                    "SELECT f.id FROM marong.friends f WHERE f.name = %s AND f.id <> %s "
+                    "AND EXISTS (SELECT 1 FROM marong.people p WHERE p.friend_id = f.id)", (name, me["id"]))
+                others = await cur.fetchall()
+                if not others:
+                    return ("self" if name == me["name"] else "unknown"), me["name"]
+                if len(others) > 1:
+                    return "ambiguous", me["name"]
+                a, b = sorted((me["id"], others[0]["id"]))
+                await c.execute(
+                    "INSERT INTO marong.friendships (friend_a, friend_b, label, told_by) VALUES (%s, %s, %s, %s) "
+                    "ON CONFLICT (friend_a, friend_b) DO UPDATE SET label = EXCLUDED.label, told_by = EXCLUDED.told_by",
+                    (a, b, label or None, me["id"]))
+                return "ok", me["name"]
+
+    async def set_share(self, user_key: str, on: bool) -> bool:
+        """지금 말하는 친구의 공유(가벼운 얘기를 아는 친구에게 해도 되는지)를 바꾼다. 친구에 안 묶인 키면 False."""
+        row = await self._one("UPDATE marong.friends f SET share = %s FROM marong.people p "
+                              "WHERE p.user_key = %s AND p.friend_id = f.id RETURNING f.id", (on, user_key))
+        return row is not None
 
     async def similar(self, model: str, room_key: str, vector, before_id: int, skip_summary_ids: list[int],
                       limit: int) -> list[dict]:
@@ -227,6 +331,26 @@ class Store:
                         (room_key, user_key, text, row["id"]))
                 return row["id"]
 
+    async def friend_notes(self) -> list[dict]:
+        """공유를 켠 친구마다 방·키별 지금 메모(공유 메모를 거를 재료). friend_id, name, note_id, content, is_channel."""
+        return await self._all(
+            "SELECT * FROM (SELECT DISTINCT ON (n.room_key, n.user_key) p.friend_id, f.name, n.id AS note_id, "
+            "  n.content, r.is_channel FROM marong.notes n JOIN marong.people p ON p.user_key = n.user_key "
+            "  JOIN marong.friends f ON f.id = p.friend_id JOIN marong.rooms r ON r.room_key = n.room_key "
+            "  WHERE f.share ORDER BY n.room_key, n.user_key, n.id DESC) x ORDER BY friend_id, note_id")
+
+    async def shared_sources(self) -> dict[int, list[int]]:
+        """공유를 켠 친구마다 가장 최근 공유 메모를 만들 때 거른 메모 id 들."""
+        rows = await self._all(
+            "SELECT DISTINCT ON (s.friend_id) s.friend_id, s.meta->'note_ids' AS note_ids FROM marong.shared_notes s "
+            "JOIN marong.friends f ON f.id = s.friend_id WHERE f.share ORDER BY s.friend_id, s.id DESC")
+        return {r["friend_id"]: list(r["note_ids"] or []) for r in rows}
+
+    async def add_shared_note(self, friend_id: int, content: str, meta: dict) -> int:
+        row = await self._one("INSERT INTO marong.shared_notes (friend_id, content, meta) VALUES (%s, %s, %s) "
+                              "RETURNING id", (friend_id, content, Jsonb(meta)))
+        return row["id"]
+
     async def can_delete(self) -> bool:
         """--check 용: 봇 계정이 대화 원문을 지우거나 고칠 수 있는지(정상이면 False)."""
         row = await self._one(
@@ -238,5 +362,7 @@ class Store:
         """--check·관리 도구용 개수."""
         return await self._one(
             "SELECT (SELECT count(*) FROM marong.rooms) AS rooms, (SELECT count(*) FROM marong.people) AS people, "
+            "(SELECT count(*) FROM marong.friends f WHERE EXISTS (SELECT 1 FROM marong.people p "
+            "  WHERE p.friend_id = f.id)) AS friends, "
             "(SELECT count(*) FROM marong.messages) AS messages, (SELECT count(*) FROM marong.summaries) AS summaries, "
             "(SELECT count(*) FROM marong.embeddings) AS embeddings")

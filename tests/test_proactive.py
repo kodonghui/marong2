@@ -239,7 +239,7 @@ async def main():
         # ── 친구가 그만하라면 끄고, 다시 해 달라면 켬(1:1 에서만 도구) ──
         await say("p5", "u5", "안녕", kid="f1")
         b = llm.bodies[-1]
-        ok([t["name"] for t in b["tools"]] == ["set_name", "set_proactive"] and "가끔 먼저 카톡을 보내(선톡)" in situation(b),
+        ok([t["name"] for t in b["tools"]] == ["set_name", "set_proactive", "add_friendship", "set_share"] and "가끔 먼저 카톡을 보내(선톡)" in situation(b),
            "선톡이 켜져 있으면 1:1 에서 끄기 도구와 안내")
         ok(await say("p5", "u5", "선톡 그만 보내", kid="f2") == "알겠어 👌"
            and db.admin("SELECT proactive FROM marong.rooms WHERE room_key = 'p5'") == [(False,)], "그만하라면 끔")
@@ -249,11 +249,11 @@ async def main():
         ok("선톡을 꺼 뒀어" in situation(llm.bodies[-2])
            and db.admin("SELECT proactive FROM marong.rooms WHERE room_key = 'p5'") == [(True,)], "다시 켜기")
         await say("g1", "u1g", "마롱아", channel=False, kid="c2")
-        ok([t["name"] for t in llm.bodies[-1]["tools"]] == ["set_name"] and "선톡" not in situation(llm.bodies[-1]),
+        ok([t["name"] for t in llm.bodies[-1]["tools"]] == ["set_name", "add_friendship", "set_share"] and "선톡" not in situation(llm.bodies[-1]),
            "단체방에서는 선톡 도구·안내 없음")
         off = Agent(replace(s, proactive=False), store, FakeEmbeddings(), llm)
         await say("p5", "u5", "안녕 또", kid="f4", ag=off)
-        ok([t["name"] for t in llm.bodies[-1]["tools"]] == ["set_name"] and "선톡" not in situation(llm.bodies[-1]),
+        ok([t["name"] for t in llm.bodies[-1]["tools"]] == ["set_name", "add_friendship", "set_share"] and "선톡" not in situation(llm.bodies[-1]),
            "PROACTIVE=off 면 도구·안내 없음")
 
         # ── 단체방 전송 형식(지금은 안 씀) ──
