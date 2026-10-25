@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS marong.shared_notes (
   id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   friend_id  bigint NOT NULL REFERENCES marong.friends (id),
   content    text NOT NULL,
-  meta       jsonb NOT NULL DEFAULT '{}'::jsonb,          -- 거른 메모 id(note_ids)·모델·토큰 수
+  meta       jsonb NOT NULL DEFAULT '{}'::jsonb,          -- 거른 메모 id(note_ids)·거른 규칙(rules)·모델·토큰 수
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS shared_notes_friend_idx ON marong.shared_notes (friend_id, id);

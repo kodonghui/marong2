@@ -339,12 +339,13 @@ class Store:
             "  JOIN marong.friends f ON f.id = p.friend_id JOIN marong.rooms r ON r.room_key = n.room_key "
             "  WHERE f.share ORDER BY n.room_key, n.user_key, n.id DESC) x ORDER BY friend_id, note_id")
 
-    async def shared_sources(self) -> dict[int, list[int]]:
-        """공유를 켠 친구마다 가장 최근 공유 메모를 만들 때 거른 메모 id 들."""
+    async def shared_sources(self) -> dict[int, tuple[list[int], str | None]]:
+        """공유를 켠 친구마다 가장 최근 공유 메모를 만들 때 거른 메모 id 들과 거른 규칙(memory.SHARE_RULES)."""
         rows = await self._all(
-            "SELECT DISTINCT ON (s.friend_id) s.friend_id, s.meta->'note_ids' AS note_ids FROM marong.shared_notes s "
-            "JOIN marong.friends f ON f.id = s.friend_id WHERE f.share ORDER BY s.friend_id, s.id DESC")
-        return {r["friend_id"]: list(r["note_ids"] or []) for r in rows}
+            "SELECT DISTINCT ON (s.friend_id) s.friend_id, s.meta->'note_ids' AS note_ids, s.meta->>'rules' AS rules "
+            "FROM marong.shared_notes s JOIN marong.friends f ON f.id = s.friend_id WHERE f.share "
+            "ORDER BY s.friend_id, s.id DESC")
+        return {r["friend_id"]: (list(r["note_ids"] or []), r["rules"]) for r in rows}
 
     async def add_shared_note(self, friend_id: int, content: str, meta: dict) -> int:
         row = await self._one("INSERT INTO marong.shared_notes (friend_id, content, meta) VALUES (%s, %s, %s) "

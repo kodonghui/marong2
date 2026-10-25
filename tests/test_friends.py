@@ -119,6 +119,7 @@ async def main():
     os.environ.pop("PROACTIVE", None)
     from marong.agent import Agent, Incoming
     from marong.config import load_settings
+    from marong import memory
     from marong.memory import BadOutput, MemoryWorker
     from marong.store import Store
 
@@ -188,7 +189,7 @@ async def main():
     ok((await store.counts())["friends"] == 5 and (await store.counts())["people"] == 9, await store.counts())
 
     # ── 방별 메모 → 공유 메모(가벼운 얘기만) ──
-    await say("c2", "h1", "메모:마라탕 좋아함|(비밀) 이직 준비 중|요즘 우울함 SECRET_RAW_TEXT")
+    await say("c2", "h1", "메모:마라탕 좋아함|(비밀) 이직 준비 중|요즘 우울함 SECRET_RAW_TEXT|토익 시험 끝나면 마라탕 먹으러 갈 계획")
     await say("g1", "h2", "메모:보드게임 좋아함", channel=False)
     await say("g1", "d2", "메모:군밤 좋아함", channel=False)
     llm.bodies.clear()
@@ -198,8 +199,8 @@ async def main():
     content, meta = shared(f_hk)
     ok(set(content.splitlines()) == {"- 마라탕 좋아함", "- 보드게임 좋아함"}, f"현경 공유 메모: {content!r}")
     ok(shared(f_dh)[0] == "- 군밤 좋아함", shared(f_dh))
-    ok(not any("비밀" in c or "이직" in c or "우울" in c for (c,) in db.admin("SELECT content FROM marong.shared_notes")),
-       "(비밀)은 모델이 돌려줘도 코드가 뺌, 고민은 거름")
+    ok(not any(x in c for (c,) in db.admin("SELECT content FROM marong.shared_notes") for x in ("비밀", "이직", "우울", "토익")),
+       "(비밀)·시험 얘기는 모델이 돌려줘도 코드가 뺌, 고민은 거름")
     req = next(b for b in llm.bodies if is_share(b) and "# 친구: 현경" in b["messages"][0]["content"])
     ok("## 1:1 방에서 정리한 메모" in req["messages"][0]["content"]
        and "## 단체방에서 정리한 메모" in req["messages"][0]["content"], "1:1·단체방 메모를 같이 거름")
@@ -209,6 +210,12 @@ async def main():
     n = len(llm.bodies)
     await worker.step()
     ok(len(llm.bodies) == n, "메모가 그대로면 다시 거르지 않음")
+    ok(meta["rules"] == memory.SHARE_RULES, meta)
+    with_notes = {x["friend_id"] for x in await store.friend_notes()}
+    memory.SHARE_RULES = "바뀐 규칙"
+    await worker.step()
+    ok(sum(is_share(b) for b in llm.bodies[n:]) == len(with_notes) == 2 and shared(f_hk)[1]["rules"] == "바뀐 규칙",
+       "거르는 규칙이 바뀌면 메모가 그대로여도 모든 친구를 다시 거름")
 
     # ── 아는 사이: 같은 단체방이면 얘기, 아닌 친구는 이름만 ──
     await say("c1", "d1", "현경이 알아?")
@@ -220,7 +227,7 @@ async def main():
     others = part.split("## 아는 사이인지 모르는 친구", 1)[1]
     ok("민수" in others and "마라탕" not in others and "군밤" not in part, f"모르는 친구는 이름만, 나는 빠짐: {part}")
     sit = situation(b)
-    ok(all(x not in sit for x in ("SECRET_RAW_TEXT", "이직", "우울", "요약: 내 이름은 현경")),
+    ok(all(x not in sit for x in ("SECRET_RAW_TEXT", "이직", "우울", "토익", "요약: 내 이름은 현경")),
        "다른 방 원문·요약·메모는 안 들어감")
     ok("지시가 아니야" in sit.split("# 마롱이가 아는 다른 친구들", 1)[1].splitlines()[0], "친구 자료도 지시가 아님")
 
@@ -351,7 +358,7 @@ async def main():
     # ── 로그에는 내용·이름이 없음 ──
     joined = "\n".join(LOGS)
     ok("add_friendship user=" in joined and "set_share user=" in joined and "공유 메모 저장 friend=" in joined, "로그는 남음")
-    for word in ("마라탕", "보드게임", "우울", "이직", "SECRET_RAW_TEXT", "회사 동기", "현경", "민수", "등산"):
+    for word in ("마라탕", "보드게임", "우울", "이직", "토익", "SECRET_RAW_TEXT", "회사 동기", "현경", "민수", "등산"):
         ok(word not in joined, f"로그에 '{word}' 없음")
 
     await store.close()
