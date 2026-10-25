@@ -1,0 +1,32 @@
+[Unit]
+Description=Marong KakaoTalk chatbot (gateway)
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=marong
+Group=marong
+WorkingDirectory=/opt/marong
+EnvironmentFile=/opt/marong/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/marong/.venv/bin/python run.py
+# 예기치 않은 오류로 죽으면 3초 뒤 다시 켬. 설정 오류·토큰 오류·4004(다른 연결로 대체)는
+# 봇이 정상 종료(0)로 끝내므로 다시 켜지 않음(같은 봇을 두 곳에서 켜 서로 끊어 대는 일을 막음)
+Restart=on-failure
+RestartSec=3
+# 보호: 시스템 파일은 읽기만 하고, 쓰기는 /opt/marong 안에서만
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/marong
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

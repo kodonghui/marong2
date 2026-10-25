@@ -1,0 +1,2 @@
+# 서버(리눅스)에서 도는 코드라 Windows에서 받아도 줄 끝을 LF로 둠(CRLF면 bash 스크립트·systemd 설정이 깨짐)
+* text=auto eol=lf

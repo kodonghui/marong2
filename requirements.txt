@@ -1,0 +1,7 @@
+anthropic==2.3.0
+websockets==15.0.1
+httpx==0.28.1
+psycopg[binary]==3.3.6
+psycopg-pool==3.3.3
+fastembed==0.9.1
+tzdata==2026.5
