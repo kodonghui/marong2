@@ -184,12 +184,17 @@ def check_tabs(report, db, i):
     ok(readme[:2] == ["기간: 2026-10-26 19:00:00 ~ 2026-10-27 19:00:00 (한국 시각, 끝 시각은 빼고)",
                       "마지막 갱신: 2026-10-27 19:30:00"], f"읽는 법 기간·갱신 시각: {readme[:2]}")
     ok(any("12개" in x and "0.4 이상" in x and "요약 3개·메시지 4개" in x for x in readme), "읽는 법에 기억 넣는 순서")
-    ok(not any("지금 새로고침" in x for x in readme), "엑셀 읽는 법에는 시트 메뉴 얘기가 없음")
+    ok(not any("지금 새로고침" in x or "필터" in x for x in readme), "엑셀 읽는 법에는 시트 메뉴·필터 얘기가 없음")
+    ok("- 탭마다 최신이 맨 위예요." in readme
+       and any(x.startswith("- '모름(기록 시작 전)'은") and "2026-10-26" in x for x in readme), "읽는 법: 최신이 위, '모름' 뜻")
 
-    # 대화: 기간 안 메시지만(시작 시각은 넣고 끝 시각은 뺌)
+    # 대화: 기간 안 메시지만(시작 시각은 넣고 끝 시각은 뺌), 최신이 위. 줄 색은 친구 말(분홍)·마롱이 말(파랑)
     talk = by["대화"]["rows"]
     ids = [r[0] for r in talk]
-    ok(ids == [i[k] for k in ("b0", "m1", "r1", "m2", "r2", "p1", "g1", "gr1", "g2", "gl")], f"기간 안 메시지만: {ids}")
+    ok(ids == [i[k] for k in ("gl", "g2", "gr1", "g1", "p1", "r2", "m2", "r1", "m1", "b0")], f"기간 안 메시지만, 최신이 위: {ids}")
+    colors = by["대화"]["colors"]
+    ok(colors == ["#e8f0fe" if r[3] == "마롱이" else "#fce8e6" for r in talk] and len(set(colors)) == 2, f"줄 색: {colors}")
+    ok(all("colors" not in x for x in tabs if x["name"] != "대화"), "다른 탭은 줄 색 없음")
     t = {r[0]: r for r in talk}
     ok(t[i["m1"]][1] == "2026-10-27 09:00:00" and t[i["b0"]][1] == "2026-10-26 19:00:00", "시각은 한국 시각 글")
     ok(t[i["m1"]][2] == f"1:1 {short('room-dm')} 동희", t[i["m1"]][2])
@@ -199,20 +204,22 @@ def check_tabs(report, db, i):
     ok(t[i["r1"]][6] == i["m1"] and t[i["r1"]][7] == "예" and t[i["m1"]][7] == "-", "답한 메시지·전달됨")
     ok(t[i["r1"]][8:14] == ["claude-haiku-5-5", "xhigh", 5000, 800, 4000, 0], f"모델·토큰: {t[i['r1']][8:14]}")
     used = {k: t[i[k]][14] for k in ("m1", "r1", "r2", "p1", "gr1", "gl")}
-    ok(used == {"m1": None, "r1": 2, "r2": 0, "p1": "선톡(검색 안 함)", "gr1": "기록 전", "gl": "기억 없이(늦음·오류)"},
+    ok(used == {"m1": None, "r1": 2, "r2": 0, "p1": "선톡(검색 안 함)", "gr1": "모름(기록 시작 전)", "gl": "기억 없이(늦음·오류)"},
        f"들어간 예전 기억 수: {used}")
     ok(t[i["g1"]][5] == "=SUM(1,2) 이거 수식이야? 벨소리", f"제어 문자는 뺌: {t[i['g1']][5]!r}")
 
-    # 임베딩: 기간 안에서 만든 것만, 벡터 전체(엑셀용)
+    # 임베딩: 기간 안에서 만든 것만(최신이 위), 벡터 전체(엑셀용)
     emb = by["임베딩"]["rows"]
     ok(len(emb) == 2 and by["임베딩"]["headers"][-1] == "벡터 전체", f"임베딩 2개(기간 밖 1개는 뺌): {emb}")
-    ok(emb[0][1:3] == ["메시지", i["m1"]] and emb[0][5] == 4 and emb[0][6] == "제주도 또 가고 싶다", f"{emb[0]}")
-    ok(emb[0][7] == "0.1, 0.2, 0.3, 0.4" and emb[0][8] == "[0.1,0.2,0.3,0.4]", f"벡터: {emb[0][7:]}")
-    ok(emb[1][1:3] == ["요약", i["s_new"]] and emb[1][6] == "동희가 제주도에 또 가고 싶어 함", f"{emb[1]}")
+    ok(emb[0][1:3] == ["요약", i["s_new"]] and emb[0][6] == "동희가 제주도에 또 가고 싶어 함", f"{emb[0]}")
+    ok(emb[1][1:3] == ["메시지", i["m1"]] and emb[1][5] == 4 and emb[1][6] == "제주도 또 가고 싶다", f"{emb[1]}")
+    ok(emb[1][7] == "0.1, 0.2, 0.3, 0.4" and emb[1][8] == "[0.1,0.2,0.3,0.4]", f"벡터: {emb[1][7:]}")
 
-    # 들어간 기억: 찾은 것마다 한 줄, 넣음·안 넣음
+    # 들어간 기억: 찾은 것마다 한 줄, 넣음·안 넣음. 최신 답이 위, 한 답 안에서는 순위대로
     mem = by["들어간 기억"]["rows"]
     ok(len(mem) == 8, f"r1 후보 4줄 + r2·p1·gr1·gl 한 줄씩: {len(mem)}")
+    ok([r[0] for r in mem] == [i[k] for k in ("gl", "gr1", "p1", "r2")] + [i["r1"]] * 4
+       and [r[7] for r in mem[4:]] == [1, 2, 3, 4], f"순서: {[(r[0], r[7]) for r in mem]}")
     r1 = [r for r in mem if r[0] == i["r1"]]
     got = [(r[8], r[9], r[11], r[12]) for r in r1]
     ok(got == [("요약", i["s_old"], 0.812, "넣음"), ("메시지", i["o1"], 0.734, "넣음"),
@@ -226,12 +233,13 @@ def check_tabs(report, db, i):
     ok(one[i["r2"]][5] == "안 함(말이 짧아서)" and one[i["r2"]][7] is None, f"짧은 말: {one[i['r2']]}")
     ok(one[i["p1"]][3] == "(선톡)" and one[i["p1"]][5] == "선톡(검색 안 함)"
        and one[i["p1"]][6] == f"최근 대화 #{i['m1']}~#{i['r2']} · 요약 1개 · 메모 1개", f"선톡: {one[i['p1']]}")
-    ok(one[i["gr1"]][5] == "기록 전" and one[i["gl"]][5] == "기억 없이(늦음·오류)", "기억 기록이 없는 답")
+    ok(one[i["gr1"]][5] == "모름(기록 시작 전)" and one[i["gl"]][5] == "기억 없이(늦음·오류)", "기억 기록이 없는 답")
 
-    # 요약·메모(compact)
+    # 요약·메모(compact): 셋을 섞어 만든 시각이 최신인 것부터(같은 시각이면 요약이 먼저)
+    made = [(r[0], r[1]) for r in by["요약·메모"]["rows"]]
+    ok(made == [("요약", i["s_skip"]), ("공유 메모", i["sh1"]), ("요약", i["s_new"]), ("친구 메모", i["n1"])],
+       f"기간 안 요약·메모만, 최신이 위: {made}")
     comp = {(r[0], r[1]): r for r in by["요약·메모"]["rows"]}
-    ok(set(comp) == {("요약", i["s_new"]), ("요약", i["s_skip"]), ("친구 메모", i["n1"]), ("공유 메모", i["sh1"])},
-       f"기간 안 요약·메모만: {sorted(comp)}")
     s_new = comp[("요약", i["s_new"])]
     ok(s_new[4] == "동희가 제주도에 또 가고 싶어 함" and s_new[5] == f"메시지 #{i['m1']}~#{i['r2']}"
        and s_new[6:10] == ["claude-haiku-5-5", "low", 1200, 300], f"요약: {s_new}")
@@ -258,10 +266,15 @@ def check_xlsx(report, tabs, i, tmp):
         xml = [z.read(n) for n in z.namelist() if n.startswith("xl/worksheets/sheet")]
     ok(xml and not any(b"<f>" in x or b"<f " in x for x in xml), "수식으로 저장된 칸이 없음")
     ok(all(wb[n].freeze_panes == "A2" for n in SHEETS) and ws.auto_filter.ref, "머리줄 고정·거르기")
+    paint = [({c.fill.fgColor.rgb[-6:] for c in r}, r[3].value) for r in ws.iter_rows(min_row=2)]
+    ok(len(paint) == 10 and all(got == ({"E8F0FE"} if who == "마롱이" else {"FCE8E6"}) for got, who in paint)
+       and ws["A1"].fill.fgColor.rgb.endswith("E8E3F3"), f"대화 줄 색(칸마다): {paint}")
+    ok(all(c.fill.fill_type is None for n in SHEETS[2:] for r in wb[n].iter_rows(min_row=2) for c in r),
+       "다른 탭은 줄 색 없음")
 
     out6 = tmp / "six.xlsx"
     ok(run(report, ["--hours", "6", "--until", UNTIL, "--out", str(out6)])[0] == 0, "6시간 리포트")
-    ok([r[0] for r in rows(load_workbook(out6)["대화"])] == [i[k] for k in ("g1", "gr1", "g2", "gl")], "6시간 기간")
+    ok([r[0] for r in rows(load_workbook(out6)["대화"])] == [i[k] for k in ("gl", "g2", "gr1", "g1")], "6시간 기간")
     empty = tmp / "empty.xlsx"
     ok(run(report, ["--until", "2026-10-01T00:00+09:00", "--out", str(empty)])[0] == 0, "빈 기간도 만듦")
     ok(all(load_workbook(empty)[n].max_row == 1 for n in SHEETS[1:]), "빈 기간은 머리줄만")
@@ -301,11 +314,19 @@ def check_sheet(report, i):
     ok(all(v is None or type(v) in (str, int, float) for v in values), "칸 값은 글·정수·실수·빈칸만")
     talk = {r[0]: r for r in tabs["대화"]["rows"]}
     ok(talk[i["o1"]][1] == "2026-10-20 20:00:00" and i["z1"] not in talk, "30일 안의 예전 대화는 넣고 끝 시각은 뺌")
+    first, last = tabs["대화"]["rows"][0], tabs["대화"]["rows"][-1]
+    ok(first[0] == i["gl"] and last[0] == i["o1"], f"최신이 위: {first[0]} … {last[0]}")
+    colors = tabs["대화"]["colors"]
+    ok(len(colors) == len(tabs["대화"]["rows"]) and colors[0] == "#e8f0fe" and colors[-1] == "#fce8e6"
+       and all(re.fullmatch(r"#[0-9a-f]{6}", c) for c in colors)
+       and all("colors" not in t for n, t in tabs.items() if n != "대화"), "대화 탭만 줄마다 색을 보냄")
     ok("벡터 전체" not in tabs["임베딩"]["headers"] and all(len(r) == 8 for r in tabs["임베딩"]["rows"])
        and "0.1, 0.2, 0.3, 0.4" in [r[7] for r in tabs["임베딩"]["rows"]],
        "시트에는 벡터 전체를 안 보냄(무거워서). 앞 8개 값은 보냄")
     ok(tabs["읽는 법"]["rows"][1][0] == f"마지막 갱신: {payload['updated']}", "읽는 법에 갱신 시각")
     ok(any("'마롱이 > 지금 새로고침'" in r[0] for r in tabs["읽는 법"]["rows"]), "시트 읽는 법에 '지금 새로고침' 안내")
+    ok(any("필터는 새로 채운 뒤에도 그대로" in r[0] and "지워져요" in r[0] for r in tabs["읽는 법"]["rows"]),
+       "시트 읽는 법에 필터는 남고 손으로 칠한 색은 지워진다는 안내")
 
     os.environ["SHEET_DAYS"] = "1"
     transport, seen = web_app(lambda r: httpx.Response(200, json={"ok": True}))

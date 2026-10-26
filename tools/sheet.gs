@@ -8,11 +8,14 @@
 //   3. 노트북에서 bash deploy/ovh.sh sheet url (주소 붙여넣기) → bash deploy/ovh.sh sheet on
 // 웹 앱 주소는 비밀번호와 같다(아는 사람은 이 시트에 쓸 수 있음). 채팅·문서에 붙여 두지 않는다.
 // 받은 탭 이름·칸대로 쓰므로 탭이 바뀌어도 이 스크립트는 다시 배포하지 않아도 된다. 받은 적 없는 탭은 건드리지 않는다.
+// 줄 색(대화 탭의 친구 말·마롱이 말)은 서버가 줄마다 보낸 대로 칠한다. 시트에 걸어 둔 필터는 새로 채운 뒤 같은 조건으로
+// 다시 걸고, 손으로 칠한 색·서식·조건부 서식은 새로 채울 때 지워진다(줄 순서가 바뀌어 엉뚱한 줄에 남지 않게).
 // 이 스크립트를 고쳤을 때만: 저장 > 배포 > 배포 관리 > 연필 > 버전: 새 버전 > 배포(주소는 그대로) > 시트 새로 고침(메뉴가 생김).
 
 var MAX_CHARS = 49000;   // 칸 하나는 5만 자까지
 var CHUNK = 5000;        // 한 번에 쓰는 줄 수
 var HEADER_COLOR = '#e8e3f3';
+var COLOR = /^#[0-9a-fA-F]{6}$/;
 var WAIT_MS = 150000;    // '지금 새로고침'을 누르고 채워질 때까지 기다리는 시간(서버는 1분마다 물어봄)
 
 function onOpen() {
@@ -79,6 +82,7 @@ function writeTab(ss, tab, index) {
     return out;
   });
   var sheet = sheetFor(ss, String(tab.name), index);
+  var kept = keepFilter(sheet);  // 걸어 둔 필터는 떼어 두었다가 다 쓰고 다시 검
   sheet.setFrozenRows(0);  // 줄 수를 맞추는 동안은 풀어 둠
   fit(sheet, values.length + 1, width);  // 데이터 + 빈 줄 하나(고정한 줄만 남길 수는 없어서)
   sheet.clear();
@@ -93,12 +97,58 @@ function writeTab(ss, tab, index) {
       sheet.getRange(1, col, values.length, 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
     }
   });
+  paint(sheet, tab.colors, values.length - 1, width);
   sheet.getRange(1, 1, 1, width).setFontWeight('bold').setBackground(HEADER_COLOR)
     .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
   sheet.setFrozenRows(1);
   (tab.widths || []).forEach(function (w, i) {
     if (i < width && w > 0) sheet.setColumnWidth(i + 1, Math.round(w * 7.5));  // 글자 수 → 픽셀
   });
+  putFilter(sheet, kept, values.length, width);
+}
+
+// 줄마다 바탕색('#rrggbb', 머리줄 아래 첫 줄부터). 색이 없거나 모양이 틀리면 흰색
+function paint(sheet, colors, count, width) {
+  if (!Array.isArray(colors) || count < 1) return;
+  colors = colors.slice(0, count);
+  for (var i = 0; i < colors.length; i += CHUNK) {
+    var part = colors.slice(i, i + CHUNK).map(function (c) {
+      var color = COLOR.test(c) ? c : '#ffffff', row = [];
+      for (var j = 0; j < width; j++) row.push(color);
+      return row;
+    });
+    sheet.getRange(i + 2, 1, part.length, width).setBackgrounds(part);
+  }
+}
+
+// 걸어 둔 필터의 칸별 조건을 기억하고 필터를 뗌. 필터가 없으면 null. 못 떼도 내용 쓰기는 계속함
+function keepFilter(sheet) {
+  try {
+    var filter = sheet.getFilter();
+    if (!filter) return null;
+    var range = filter.getRange(), kept = {};
+    for (var col = range.getColumn(); col <= range.getLastColumn(); col++) {
+      var criteria = filter.getColumnFilterCriteria(col);
+      if (criteria) kept[col] = criteria.copy().build();
+    }
+    filter.remove();
+    return kept;
+  } catch (err) {
+    return null;
+  }
+}
+
+// 새로 쓴 표 전체(머리줄 포함)에 필터를 다시 걸고 기억한 조건을 그대로 넣음
+function putFilter(sheet, kept, rows, width) {
+  if (!kept) return;
+  try {
+    var filter = sheet.getRange(1, 1, rows, width).createFilter();
+    Object.keys(kept).forEach(function (col) {
+      if (Number(col) <= width) filter.setColumnFilterCriteria(Number(col), kept[col]);
+    });
+  } catch (err) {
+    // 필터를 다시 못 걸어도 쓴 내용은 그대로
+  }
 }
 
 function sheetFor(ss, name, index) {

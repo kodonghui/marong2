@@ -40,8 +40,10 @@ SHEET_PREFIX = "https://script.google.com/"  # Apps Script 웹 앱이 아닌 곳
 SHEET_TIMEOUT_S = 120
 ASK_TIMEOUT_S = 30
 HEADER_FILL = PatternFill("solid", fgColor="E8E3F3")
+FRIEND_COLOR, MARONG_COLOR = "#fce8e6", "#e8f0fe"  # 대화 탭 줄 색: 친구 말(분홍)·마롱이 말(파랑)
 TOP, TOP_WRAP = Alignment(vertical="top"), Alignment(vertical="top", wrap_text=True)
 RECALL = {"short": "안 함(말이 짧아서)", "off": "안 함(임베딩 준비 안 됨)", "error": "오류(검색 실패)"}
+UNRECORDED = "모름(기록 시작 전)"  # 답마다 넣은 기억을 적기 시작한 2026-10-26 밤 전의 답
 
 
 def key(k: str | None) -> str:
@@ -75,10 +77,13 @@ def plain(v):
     return ILLEGAL_CHARACTERS_RE.sub("", v)
 
 
-def tab(name: str, headers: list[str], rows: list[list], widths: list[float], wrap=()) -> dict:
-    """탭 하나. widths(칸 너비, 글자 수)·wrap(줄바꿈할 칸 번호, 1부터)은 보기용."""
-    return {"name": name, "headers": headers, "rows": [[plain(v) for v in r] for r in rows],
-            "widths": widths, "wrap": sorted(wrap)}
+def tab(name: str, headers: list[str], rows: list[list], widths: list[float], wrap=(), colors=None) -> dict:
+    """탭 하나. widths(칸 너비, 글자 수)·wrap(줄바꿈할 칸 번호, 1부터)·colors(줄마다 바탕색 '#rrggbb')는 보기용."""
+    t = {"name": name, "headers": headers, "rows": [[plain(v) for v in r] for r in rows],
+         "widths": widths, "wrap": sorted(wrap)}
+    if colors is not None:
+        t["colors"] = colors
+    return t
 
 
 def hits(memory: dict, field: str) -> list[tuple[str, int, float | None]]:
@@ -159,7 +164,7 @@ def fetch(c, start: datetime, until: datetime, vectors: bool = True) -> dict:
 
 def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, threshold: float = 0.4,
           recent_turns: int = 10, vectors: bool = True) -> tuple[list[dict], dict]:
-    """기간 [start, until) 의 탭들(엑셀·시트 공용)과 개수. threshold·recent_turns 는 봇 설정(읽는 법 설명용).
+    """기간 [start, until) 의 탭들(엑셀·시트 공용)과 개수. 탭마다 최신이 위. threshold·recent_turns 는 봇 설정(읽는 법 설명용).
     vectors 가 False 면 임베딩 벡터 전체 칸을 뺌(시트는 30일치를 30분마다 통째로 보내서 무거움)."""
     now = now or datetime.now(tz)
     data = fetch(c, start, until, vectors)
@@ -197,7 +202,7 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         return "답장"
 
     def no_memory(meta):
-        return "기억 없이(늦음·오류)" if meta.get("late") or meta.get("error") else "기록 전"
+        return "기억 없이(늦음·오류)" if meta.get("late") or meta.get("error") else UNRECORDED
 
     def used(m):
         """그 답에 실제로 들어간 예전 기억(임베딩 검색) 수."""
@@ -213,23 +218,24 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
 
     tabs = []
 
-    # ── 대화 ──
-    rows = []
-    for m in msgs:
+    # ── 대화: 친구 말과 마롱이 말은 줄 색을 다르게 ──
+    rows, colors = [], []
+    for m in reversed(msgs):
         meta = m["meta"] or {}
         mine = m["role"] == "assistant"
         rows.append([m["id"], at(m["created_at"]), room(m["room_key"]), speaker(m), kind(m), m["content"],
                      m["reply_to"], yes(meta.get("delivered")) if mine else "-", meta.get("model"), meta.get("effort"),
                      meta.get("input_tokens"), meta.get("output_tokens"), meta.get("cache_read_tokens"),
                      meta.get("cache_write_tokens"), used(m)])
+        colors.append(MARONG_COLOR if mine else FRIEND_COLOR)
     tabs.append(tab("대화", ["번호", "시각(한국)", "방", "보낸 쪽", "종류", "내용", "답한 메시지 번호", "전달됨", "모델",
                            "effort", "입력 토큰", "출력 토큰(생각 포함)", "캐시에서 읽은 토큰", "캐시에 쓴 토큰",
                            "들어간 예전 기억 수"],
-                    rows, [7, 19, 22, 9, 10, 70, 9, 7, 17, 7, 9, 10, 10, 9, 12], wrap={6}))
+                    rows, [7, 19, 22, 9, 10, 70, 9, 7, 17, 7, 9, 10, 10, 9, 12], wrap={6}, colors=colors))
 
     # ── 임베딩 ──
     rows = []
-    for e in embs:
+    for e in reversed(embs):
         values = (e["vector"] or "").strip("[]{}").split(",")  # vector '[…]' 나 real[] '{…}'
         row = [e["model"], "메시지" if e["source_type"] == "message" else "요약", e["source_id"], room(e["room_key"]),
                at(e["created_at"]), e["dims"], e["content"], ", ".join(v.strip() for v in values[:8])]
@@ -239,11 +245,11 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
     tabs.append(tab("임베딩", headers + ["벡터 전체"] if vectors else headers, rows,
                     widths + [40] if vectors else widths, wrap={7}))
 
-    # ── 들어간 기억: 답마다 임베딩 검색 결과 한 줄씩 ──
+    # ── 들어간 기억: 답마다 임베딩 검색 결과 한 줄씩(최신 답이 위, 한 답 안에서는 순위대로) ──
     rows = []
     with_memory = 0
     blank = [None] * 7  # 순위 ~ 찾은 것 원문
-    for m in msgs:
+    for m in reversed(msgs):
         if m["role"] != "assistant":
             continue
         meta = m["meta"] or {}
@@ -286,25 +292,29 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
                                 "비슷함(0~1)", "답에 넣었나", "찾은 것 원문"],
                     rows, [7, 19, 22, 40, 40, 16, 30, 6, 9, 9, 9, 10, 18, 60], wrap={4, 5, 14}))
 
-    # ── 요약·메모(compact) ──
-    rows = []
-    for s in data["summaries"]:
+    # ── 요약·메모(compact): 세 가지를 섞어 만든 시각이 최신인 것부터(같은 시각이면 요약·친구 메모·공유 메모 순) ──
+    made = []
+    for s in reversed(data["summaries"]):
         meta = s["meta"] or {}
-        rows.append(["요약", s["id"], at(s["created_at"]), room(s["room_key"]), s["content"] or "(빈 요약)",
-                     f"메시지 #{s['first_id']}~#{s['last_id']}" + (f" (건너뜀: {meta['skipped']})" if meta.get("skipped") else ""),
-                     meta.get("model"), meta.get("effort"), meta.get("input_tokens"), meta.get("output_tokens")])
-    for n in data["notes"]:
-        rows.append(["친구 메모", n["id"], at(n["created_at"]), f"{room(n['room_key'])} · {n['name'] or key(n['user_key'])}",
-                     n["content"], f"요약 #{n['summary_id']}" if n["summary_id"] else "요약 전에 먼저 고침",
-                     None, None, None, None])
-    for s in data["shared"]:
+        made.append((s["created_at"], [
+            "요약", s["id"], at(s["created_at"]), room(s["room_key"]), s["content"] or "(빈 요약)",
+            f"메시지 #{s['first_id']}~#{s['last_id']}" + (f" (건너뜀: {meta['skipped']})" if meta.get("skipped") else ""),
+            meta.get("model"), meta.get("effort"), meta.get("input_tokens"), meta.get("output_tokens")]))
+    for n in reversed(data["notes"]):
+        made.append((n["created_at"], [
+            "친구 메모", n["id"], at(n["created_at"]), f"{room(n['room_key'])} · {n['name'] or key(n['user_key'])}",
+            n["content"], f"요약 #{n['summary_id']}" if n["summary_id"] else "요약 전에 먼저 고침",
+            None, None, None, None]))
+    for s in reversed(data["shared"]):
         meta = s["meta"] or {}
-        rows.append(["공유 메모", s["id"], at(s["created_at"]), s["name"], s["content"] or "(다른 친구에게 할 얘기 없음)",
-                     "거른 메모 " + (", ".join(f"#{x}" for x in meta.get("note_ids") or []) or "-"),
-                     meta.get("model"), meta.get("effort"), meta.get("input_tokens"), meta.get("output_tokens")])
+        made.append((s["created_at"], [
+            "공유 메모", s["id"], at(s["created_at"]), s["name"], s["content"] or "(다른 친구에게 할 얘기 없음)",
+            "거른 메모 " + (", ".join(f"#{x}" for x in meta.get("note_ids") or []) or "-"),
+            meta.get("model"), meta.get("effort"), meta.get("input_tokens"), meta.get("output_tokens")]))
+    made.sort(key=lambda x: x[0], reverse=True)  # 같은 시각은 넣은 순서 그대로(정렬이 안정적)
     tabs.append(tab("요약·메모", ["종류", "번호", "만든 시각", "방 또는 친구", "내용", "구간·재료", "모델", "effort",
                               "입력 토큰", "출력 토큰"],
-                    rows, [9, 7, 19, 26, 80, 24, 17, 7, 9, 9], wrap={5}))
+                    [r for _, r in made], [9, 7, 19, 26, 80, 24, 17, 7, 9, 9], wrap={5}))
 
     # ── 읽는 법(맨 앞) ──
     replies = [m for m in msgs if m["role"] == "assistant" and not (m["meta"] or {}).get("proactive")]
@@ -318,7 +328,8 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         "",
         "■ 탭",
         f"대화: 이 기간에 오간 메시지 {len(msgs)}개(친구 말 {len(msgs) - len(replies) - len(proactive)}, "
-        f"마롱이 답 {len(replies)}, 선톡 {len(proactive)}). 마지막 칸은 그 답에 임베딩 검색으로 실제로 넣은 예전 기억 수예요.",
+        f"마롱이 답 {len(replies)}, 선톡 {len(proactive)}). 친구 말은 분홍, 마롱이 말은 파랑 줄이에요. "
+        "마지막 칸은 그 답에 임베딩 검색으로 실제로 넣은 예전 기억 수예요.",
         f"임베딩: 이 기간에 만든 임베딩 {len(embs)}개. 메시지·요약을 숫자 벡터로 바꾼 것이고, 뜻이 비슷한 글끼리 숫자도 비슷해요."
         + ("" if vectors else " 벡터 전체는 엑셀(bash deploy/ovh.sh report)에만 있어요."),
         f"들어간 기억: 기억 기록이 있는 마롱이 말 {with_memory}개. 답마다 임베딩 검색으로 찾은 예전 대화를 한 줄씩 적고, "
@@ -335,11 +346,15 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         "- 선톡은 그 방의 최근 대화·요약·메모만 보고 임베딩 검색은 하지 않아요.",
         "",
         "■ 참고",
-        "- '기록 전'은 기억 기록을 남기기 전에 보낸 답이에요. '안 함(말이 짧아서)'은 'ㅋㅋ'처럼 짧은 말이라 검색하지 않은 것.",
+        "- 탭마다 최신이 맨 위예요.",
+        f"- '{UNRECORDED}'은 답마다 넣은 기억을 적기 시작한 2026-10-26 밤 11시쯤 전에 보낸 답이에요. "
+        "그때도 임베딩 검색은 했지만 무엇을 찾아 넣었는지는 적지 않았어요.",
+        "- '안 함(말이 짧아서)'은 'ㅋㅋ'처럼 짧은 말이라 검색하지 않은 것.",
         "- 시각은 모두 한국 시각이에요. 카카오 키 원문 대신 관리 명령(admin)과 같은 #짧은키를 적었어요.",
     ]
     if not vectors:
         lines.append("- 시트 메뉴 '마롱이 > 지금 새로고침'을 누르면 1분쯤 뒤에 새로 채워요. 안 눌러도 30분마다 새로 채워요.")
+        lines.append("- 걸어 둔 필터는 새로 채운 뒤에도 그대로예요. 손으로 칠한 색·서식은 새로 채울 때 지워져요.")
     tabs.insert(0, tab("읽는 법", ["마롱이 기록 리포트"], [[line] for line in lines], [130], wrap={1}))
     return tabs, counts
 
@@ -360,12 +375,17 @@ def workbook(tabs: list[dict]) -> Workbook:
             c.fill = HEADER_FILL
             c.alignment = Alignment(vertical="center", wrap_text=True)
         wrap = set(t["wrap"])
-        for row in t["rows"]:
+        colors, fills = t.get("colors") or [], {}
+        for j, row in enumerate(t["rows"]):
             ws.append([clean(v) for v in row])
+            color = colors[j] if j < len(colors) else None
+            fill = fills.setdefault(color, PatternFill("solid", fgColor=color.lstrip("#").upper())) if color else None
             for c in ws[ws.max_row]:
                 if isinstance(c.value, str) and c.value.startswith("="):
                     c.data_type = "s"  # '=' 로 시작하는 말을 수식으로 읽지 않게
                 c.alignment = TOP_WRAP if c.column in wrap else TOP
+                if fill:
+                    c.fill = fill
         for i, w in enumerate(t["widths"], 1):
             ws.column_dimensions[get_column_letter(i)].width = w
         ws.freeze_panes = "A2"
