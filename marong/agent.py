@@ -4,9 +4,12 @@
   3) 지금 말과 비슷한 예전 대화(임베딩 검색, 같은 방 안에서만)
 그리고 다른 방 친구들: 지금 친구와 아는 사이인 친구의 가벼운 얘기(공유 메모)만 넣는다. 다른 방 원문·요약·메모는 안 넣는다.
 저장소나 임베딩이 고장 나도 답은 보낸다(그 기억만 빠짐). prompt.md·knowledge/ 는 메시지마다 다시 읽는다.
+답마다 어떤 기억을 넣었는지(최근 대화 범위·요약·메모 id, 임베딩 검색 후보와 넣은 것)를 마롱이 답의 meta.memory 에 남긴다.
+사진은 받자마자 Claude 에게 보여 짧은 설명을 받아 '[사진] 설명'으로 저장하고, 그 사진에 답할 때는 사진 자체도 보여 준다.
 채팅으로 기록을 지우는 기능은 없다. '초기화'·'처음부터'도 보통 말로 받는다."""
 import asyncio
 import logging
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,6 +18,7 @@ from .embed import Embeddings
 from .fmt import now_line, short_key, short_time
 from .knowledge import load_knowledge
 from .llm import LLM, brief, text_of
+from .photo import Photo
 from .store import Store, speaker_label
 
 log = logging.getLogger("agent")
@@ -38,6 +42,14 @@ RECALL_SUMMARIES = 3
 RECALL_MESSAGES = 4
 RECALL_MIN_CHARS = 4     # '응'·'ㅋㅋ' 같은 짧은 말로는 예전 대화를 찾지 않음
 GAP_S = 3600             # 앞 메시지와 이만큼 떨어진 친구 말에는 시각을 붙임
+PHOTO_MARK = "[사진]"     # 사진 메시지의 기록은 '[사진] 설명'
+PHOTOS_KEPT = 8          # 묶어 답할 때 다시 보여 주려고 잠깐 들고 있는 사진 수(메시지 id 별, 답하면 버림)
+CAPTION_TIMEOUT_S = 40
+CAPTION_PROMPT = ("친구가 카카오톡으로 보낸 사진이야. 대화 기록에 남길 설명을 한국어로 써. 무엇이 찍혔는지, 눈에 띄는 것, "
+                  "어디·언제쯤 같은지, 중요한 글자가 있으면 그 글자를 한두 문장, 200자 안쪽으로. 사람은 무엇을 하는지만 쓰고 "
+                  "생김새를 평가하지 마. 설명만 써.")
+PHOTO_PROBLEMS = {"big": "(사진이 너무 커서 못 열었어)", "type": "(사진이 아닌 파일이라 못 열었어)",
+                  "error": "(사진이 안 열렸어)", "caption": "(사진은 왔는데 설명을 못 남겼어)"}
 
 SET_NAME_TOOL = {
     "name": "set_name",
@@ -58,13 +70,18 @@ SET_NAME_TOOL = {
 SET_PROACTIVE_TOOL = {
     "name": "set_proactive",
     "description": (
-        "마롱이가 이 1:1 방에 먼저 말을 거는 것(선톡)을 끄거나 다시 켠다. 친구가 먼저 연락하지 말라거나 선톡이 "
-        "싫다고 분명하게 말하면 on=false, 다시 먼저 말 걸어 달라고 하면 on=true 로 부른다. 바쁘다거나 나중에 "
+        "마롱이가 이 1:1 방에 먼저 말을 거는 것(선톡)을 끄거나 다시 켜고, 하루에 몇 번 먼저 말 걸지 바꾼다. 친구가 먼저 "
+        "연락하지 말라거나 선톡이 싫다고 분명하게 말하면 on=false, 다시 먼저 말 걸어 달라고 하면 on=true 로 부른다. "
+        "너무 자주 온다거나 더 자주 말 걸어 달라고 하면 on=true 와 per_day 를 같이 넣는다. 바쁘다거나 나중에 "
         "얘기하자는 말만으로는 부르지 않는다."
     ),
     "input_schema": {
         "type": "object",
-        "properties": {"on": {"type": "boolean", "description": "선톡을 받으면 true, 그만 받으면 false"}},
+        "properties": {
+            "on": {"type": "boolean", "description": "선톡을 받으면 true, 그만 받으면 false"},
+            "per_day": {"type": "integer", "minimum": 1, "maximum": 24,
+                        "description": "하루에 먼저 말 거는 횟수(1~24). 친구가 횟수를 바꿔 달라고 할 때만 넣어"},
+        },
         "required": ["on"],
         "additionalProperties": False,
     },
@@ -102,13 +119,15 @@ SET_SHARE_TOOL = {
 }
 # 선톡: 친구가 아무 말도 안 했는데 마롱이가 먼저 보낼 말을 만들 때 '지금 상황' 끝에 붙이는 안내
 PROACTIVE_GUIDE = """# 먼저 말 걸기
-- 이번엔 마롱이가 먼저 카톡을 보내는 거야(마롱이는 하루에 두어 번 이렇게 먼저 말을 걸어). 친구에게 보낼 첫 메시지만 써.
-- 1~2문장, 말풍선 하나(빈 줄 없이). 질문은 하나만 해.
-- 기억 메모·요약·최근 대화에 이어 갈 얘기가 있으면 하나만 골라 자연스럽게 물어봐(예: 시험 본다던 친구에게 시험 어땠는지). 없으면 지금 시각에 맞게 마롱이 일상이나 취향 얘기로 가볍게 시작해.
+- 이번엔 마롱이가 먼저 카톡을 보내는 거야(마롱이는 이 친구에게 하루 {per_day}번쯤 이렇게 먼저 말을 걸어). 친구에게 보낼 말만 써.
+- 사람이 카톡을 연달아 보내듯 짧은 말 2~3개를 빈 줄로 나눠 써(많아야 4개). 빈 줄로 나눈 말은 몇 초 간격으로 따로 가. 말 하나는 한 문장 안팎으로 짧게(예: '야 뭐해' / '나 방금 군밤 사 왔는데 엄청 뜨거워 🌰' / '너는 점심 먹었어?').
+- 질문은 하나만 해.
+- 기억 메모·요약·최근 대화에 이어 갈 얘기가 있으면 하나만 골라 자연스럽게 물어봐(예: 시험 본다던 친구에게 시험 어땠는지). 없으면 지금 시각에 맞게 마롱이 일상이나 취향 얘기로 가볍게 시작해. 매번 같은 얘기(밥, 간식)로 시작하지 말고 최근 선톡과 다른 얘기로 해.
 - 최근 대화에서 이미 물어보거나 꺼낸 얘기를 또 하지 마. 마롱이가 먼저 보낸 말에 아직 답이 없으면 그 얘기는 다시 꺼내지 말고 다른 가벼운 얘기로 해.
 - 왜 연락 안 했냐고, 왜 답이 없냐고 서운해하거나 답을 조르지 마. '선톡', '알림', '며칠째' 같은 말도 쓰지 마.
+- 19금이나 야한 얘기로 먼저 말 걸지 마.
 - 친구가 힘든 얘기를 하던 중이었으면 장난치지 말고 다정하게 안부를 물어."""
-PROACTIVE_TRIGGER = "(알림: 친구가 보낸 말이 아니야. 지금 친구에게 먼저 보낼 카톡 한 개를 써.)"
+PROACTIVE_TRIGGER = "(알림: 친구가 보낸 말이 아니야. 지금 친구에게 먼저 보낼 카톡을 써. 짧은 말 2~3개를 빈 줄로 나눠서.)"
 PROACTIVE_LINE_CHARS = 500  # 선톡을 만들 때 최근 대화 한 줄에서 읽는 최대 글자 수
 FRIENDS_SHOWN = 12       # 지금 친구와 아는 사이인 친구를 이만큼까지(최근에 본 순)
 OTHERS_SHOWN = 20        # 아는 사이인지 모르는 친구 이름을 이만큼까지
@@ -122,6 +141,7 @@ class Incoming:
     text: str
     is_channel: bool = True  # 채널채팅(1:1)이면 True
     kakao_id: str | None = None
+    photo: Photo | None = None  # 사진 메시지면 내려받은 사진(못 열었으면 problem 만). text 는 비움
 
 
 def clean_name(raw) -> str:
@@ -137,6 +157,8 @@ class Agent:
         self.llm = llm
         self.on_saved = on_saved or (lambda: None)  # 메시지가 쌓일 때마다 뒤 작업(임베딩·요약)을 깨움
         self._held: dict[tuple[str, str], int] = {}  # (방, 친구) → 묶어 답하려고 저장만 해 둔 첫 말의 id
+        # (방, 사진 메시지 id) → 사진 블록. 사진에 답할 때(뒤에 온 말과 묶어 답할 때도) 사진 자체를 다시 보여 줌
+        self._photos: OrderedDict[tuple[str, int], dict] = OrderedDict()
 
     def persona(self) -> str:
         p = Path(self.s.prompt_path)
@@ -146,6 +168,8 @@ class Agent:
 
     @staticmethod
     def _text(msg: Incoming) -> str:
+        if msg.photo is not None:  # 저장할 글('[사진] 설명')은 handle 에서 사진을 보고 만듦
+            return PHOTO_MARK
         text = (msg.text or "").strip()[:MAX_INPUT_CHARS]
         return text or ("" if msg.is_channel else CALLED_TEXT)
 
@@ -164,14 +188,22 @@ class Agent:
         if not text:
             await send(EMPTY_TEXT)
             return EMPTY_TEXT
+        saved_meta = None
+        if msg.photo is not None:  # 기록은 고칠 수 없어서 사진 설명을 먼저 받아 '[사진] 설명'으로 저장
+            text, saved_meta = await self._caption(msg.photo)
         person, user_id, db_ok = None, None, True
         try:
             person = await self.store.touch(msg.room_key, msg.is_channel, msg.user_key)
             user_id = await self.store.add_message(msg.room_key, "user", text, user_key=msg.user_key,
-                                                   kakao_id=msg.kakao_id)
+                                                   kakao_id=msg.kakao_id, meta=saved_meta)
             if user_id is None:
                 log.info("이미 저장된 메시지라 답하지 않음 kakao_id=%s", msg.kakao_id)
                 return None
+            block = msg.photo.block() if msg.photo is not None else None
+            if block:
+                self._photos[(msg.room_key, user_id)] = block
+                while len(self._photos) > PHOTOS_KEPT:
+                    self._photos.popitem(last=False)
         except Exception as e:  # 저장소가 고장 나도 답은 함(기억 없이)
             db_ok = False
             log.error("db_error %s", brief(e))
@@ -196,6 +228,8 @@ class Agent:
         else:
             reply, meta = await self._reply(msg, person, user_id, text, min(self.s.llm_timeout_s, budget - 5),
                                             use_memory=db_ok, held=held)
+        for k in [k for k in self._photos if k[0] == msg.room_key and user_id is not None and k[1] <= user_id]:
+            del self._photos[k]  # 답한 사진은 이제 '[사진] 설명'으로만 기억
         ok = await send(reply)
         if db_ok:
             try:
@@ -208,33 +242,63 @@ class Agent:
 
     async def _reply(self, msg: Incoming, person: dict | None, user_id: int | None, text: str,
                      timeout: float, use_memory: bool = True, held: int | None = None) -> tuple[str, dict]:
-        system = messages = None
+        system = messages = memory = None
         if use_memory:  # 방금 저장소가 고장 났으면 기억 모으기를 건너뜀(연결을 또 기다리지 않게)
             try:
-                system, messages = await self._context(msg, person, user_id, text, held)
+                system, messages, memory = await self._context(msg, person, user_id, text, held)
             except Exception as e:  # 기억을 못 모아도 지금 말에는 답함
                 log.error("context_error %s", brief(e))
         if system is None:
             system = self._system(self._situation(msg, person, [], [], []))
-            messages = [{"role": "user", "content": self._user_line(msg, person, text)}]
+            messages = [{"role": "user", "content": self._current(msg, person, text)}]
         end = asyncio.get_running_loop().time() + timeout
         try:
-            return await asyncio.wait_for(self.ask(system, messages, msg, end), timeout + 2)
+            reply, meta = await asyncio.wait_for(self.ask(system, messages, msg, end), timeout + 2)
         except Exception as e:  # 시간 초과·네트워크·API 오류는 대체 문구로
             log.warning("llm_error %s", brief(e))
-            return FALLBACK_TEXT, {"error": type(e).__name__}
+            reply, meta = FALLBACK_TEXT, {"error": type(e).__name__}
+        if memory is not None:
+            meta["memory"] = memory
+        return reply, meta
+
+    async def _caption(self, photo: Photo) -> tuple[str, dict]:
+        """사진 메시지로 저장할 글('[사진] 설명')과 meta(image: 종류·크기·설명에 쓴 토큰, 못 열었으면 problem)."""
+        block = photo.block()
+        if block is None:
+            problem = photo.problem or "error"
+            return f"{PHOTO_MARK} {PHOTO_PROBLEMS.get(problem, PHOTO_PROBLEMS['error'])}", {"image": {"problem": problem}}
+        info: dict = {"type": photo.media, "bytes": len(photo.data or b"")}
+        body = {"model": self.s.anthropic_model, "max_tokens": 4000, "output_config": {"effort": "low"},
+                "messages": [{"role": "user", "content": [block, {"type": "text", "text": CAPTION_PROMPT}]}]}
+        caption = ""
+        try:
+            resp = await self.llm.create(body, CAPTION_TIMEOUT_S)
+            info["tokens"] = [resp.usage.input_tokens or 0, resp.usage.output_tokens or 0]
+            if resp.stop_reason != "refusal":
+                caption = " ".join(text_of(resp).split())[:400]
+        except Exception as e:  # 설명을 못 받아도 사진은 답할 때 보여 줌
+            log.warning("caption_error %s", brief(e))
+        if not caption:
+            info["problem"] = "caption"
+            return f"{PHOTO_MARK} {PHOTO_PROBLEMS['caption']}", {"image": info}
+        return f"{PHOTO_MARK} {caption}", {"image": info}
 
     # ── 기억 모으기 ──────────────────────────────────────────
 
     async def _context(self, msg: Incoming, person: dict | None, user_id: int | None,
-                       text: str, held: int | None = None) -> tuple[list[dict], list[dict]]:
+                       text: str, held: int | None = None) -> tuple[list[dict], list[dict], dict]:
+        """(system, messages, 넣은 기억 기록). 기억 기록은 답의 meta.memory 로 저장된다."""
         # held: 묶어 답할 첫 말. 몇 마디든 그 말부터는 최근 대화에 다 넣음(빠지면 답 없이 묻힘)
         rows = await self.store.recent(msg.room_key, self.s.recent_turns * 2, since_id=held)
         summaries = await self.store.summaries(msg.room_key, RECENT_SUMMARIES)
         notes = await self.store.notes(msg.room_key)
         shown = [s for s in summaries if s["content"]]  # 요약에 실패한 구간은 빈 요약으로 남아 있음
-        recalled = []
-        if self.emb.ready and rows and len(text) >= RECALL_MIN_CHARS:
+        hits, recalled, recall = [], [], "ok"
+        if not self.emb.ready:
+            recall = "off"
+        elif not rows or len(text) < RECALL_MIN_CHARS:
+            recall = "short"
+        else:
             try:
                 vector = await self.emb.query(text)
                 hits = await self.store.similar(self.emb.model, msg.room_key, vector, before_id=rows[0]["id"],
@@ -242,16 +306,23 @@ class Agent:
                                                 limit=RECALL_CANDIDATES)
                 recalled = self._pick(hits)
             except Exception as e:
+                recall = "error"
                 log.warning("recall_error %s", brief(e))
         circle = []
         try:
             circle = await self.store.friend_circle(msg.user_key, FRIENDS_SHOWN + OTHERS_SHOWN)
         except Exception as e:  # 친구들을 못 모아도 이 방 기억으로 답함
             log.warning("friends_error %s", brief(e))
-        messages = self._messages(rows, group=not msg.is_channel)
+        first = held or user_id  # 이번에 답하는 말들의 사진만 다시 보여 줌
+        photos = {i: b for (room, i), b in self._photos.items()
+                  if room == msg.room_key and first is not None and i >= first}
+        messages = self._messages(rows, group=not msg.is_channel, photos=photos)
         if not rows or rows[-1]["id"] != user_id:  # 저장이 안 됐어도 지금 말은 꼭 넣음
-            messages.append({"role": "user", "content": self._user_line(msg, person, text)})
-        return self._system(self._situation(msg, person, notes, shown, recalled, circle)), messages
+            messages.append({"role": "user", "content": self._current(msg, person, text)})
+        memory = {"recent": [rows[0]["id"], rows[-1]["id"]] if rows else [], "summaries": [s["id"] for s in shown],
+                  "notes": [n["id"] for n in notes], "recall": recall, "candidates": [self._hit(h) for h in hits],
+                  "recalled": [self._hit(h) for h in recalled], "friends": [c["id"] for c in self._known(circle)]}
+        return self._system(self._situation(msg, person, notes, shown, recalled, circle)), messages, memory
 
     def _pick(self, hits: list[dict]) -> list[dict]:
         good = [h for h in hits if h["content"] and h["similarity"] >= self.s.recall_min_similarity]
@@ -259,13 +330,24 @@ class Agent:
         messages = [h for h in good if h["source_type"] == "message"][:RECALL_MESSAGES]
         return sorted(summaries + messages, key=lambda h: h["created_at"])
 
+    @staticmethod
+    def _hit(h: dict) -> dict:
+        return {"type": h["source_type"], "id": h["source_id"], "similarity": round(float(h["similarity"]), 3)}
+
     def _user_line(self, msg: Incoming, person: dict | None, text: str) -> str:
         if msg.is_channel:
             return text
         return f"{speaker_label(msg.user_key, (person or {}).get('name'))}: {text}"
 
-    def _messages(self, rows: list[dict], group: bool) -> list[dict]:
-        """저장된 최근 대화를 Claude messages 로. 단체방은 친구 말 앞에 '이름: ', 오래 쉰 뒤의 말 앞에 시각."""
+    def _current(self, msg: Incoming, person: dict | None, text: str):
+        """저장된 기록 대신 바로 넣는 지금 말. 사진이면 사진 블록도 같이."""
+        line = self._user_line(msg, person, text)
+        block = msg.photo.block() if msg.photo is not None else None
+        return [block, {"type": "text", "text": line}] if block else line
+
+    def _messages(self, rows: list[dict], group: bool, photos: dict[int, dict] | None = None) -> list[dict]:
+        """저장된 최근 대화를 Claude messages 로. 단체방은 친구 말 앞에 '이름: ', 오래 쉰 뒤의 말 앞에 시각.
+        photos(메시지 id → 사진 블록)에 있는 말은 사진을 앞에 붙인다."""
         out: list[dict] = []
         prev = None
         for r in rows:
@@ -276,12 +358,23 @@ class Agent:
                 if prev is None or (r["created_at"] - prev).total_seconds() >= GAP_S:
                     content = f"({short_time(r['created_at'], self.s.timezone)}) {content}"
             prev = r["created_at"]
-            if out and out[-1]["role"] == r["role"]:  # 같은 역할이 이어지면 한 덩어리로
-                out[-1]["content"] += "\n" + content
+            blocks = [{"type": "text", "text": content}]
+            if photos and r["id"] in photos:
+                blocks.insert(0, photos[r["id"]])
+            if out and out[-1]["role"] == r["role"]:  # 같은 역할이 이어지면 한 덩어리로(글은 줄을 바꿔 이어 붙임)
+                for b in blocks:
+                    last = out[-1]["content"][-1]
+                    if b["type"] == "text" and last["type"] == "text":
+                        out[-1]["content"][-1] = {"type": "text", "text": last["text"] + "\n" + b["text"]}
+                    else:
+                        out[-1]["content"].append(b)
             else:
-                out.append({"role": r["role"], "content": content})
+                out.append({"role": r["role"], "content": blocks})
         while out and out[0]["role"] != "user":  # 첫 메시지는 친구 말이어야 함
             out.pop(0)
+        for m in out:  # 사진이 없으면 글 하나로
+            if len(m["content"]) == 1 and m["content"][0]["type"] == "text":
+                m["content"] = m["content"][0]["text"]
         return out
 
     def _situation(self, msg: Incoming, person: dict | None, notes: list[dict], summaries: list[dict],
@@ -306,15 +399,22 @@ class Agent:
                 lines.append("- 이 친구는 선톡을 꺼 뒀어(마롱이가 먼저 말 걸지 않음). 다시 해 달라고 하면 "
                              "set_proactive 로 켜.")
             else:
-                lines.append(f"- 마롱이는 이 친구에게 하루 {self.s.proactive_per_day}번쯤 먼저 카톡을 보내(선톡). "
-                             "친구가 선톡이 싫다거나 먼저 연락하지 말라고 하면 set_proactive 로 끄고 알겠다고 가볍게 말해.")
+                per_day = (person or {}).get("per_day") or self.s.proactive_per_day
+                lines.append(f"- 마롱이는 이 친구에게 하루 {per_day}번쯤 먼저 카톡을 보내(선톡). "
+                             "친구가 선톡이 싫다거나 먼저 연락하지 말라고 하면 set_proactive 로 끄고 알겠다고 가볍게 말해. "
+                             "너무 자주 온다거나 더 자주 보내 달라고 하면 set_proactive 의 per_day 로 횟수를 바꿔.")
         if (person or {}).get("share") is False:
             lines.append("- 이 친구는 자기 얘기를 다른 친구에게 하지 말라고 했어. 다시 해도 된다고 하면 set_share 로 켜.")
         return "\n".join(lines + self._memory_lines(notes, summaries, recalled) + self._friend_lines(circle or []))
 
+    @staticmethod
+    def _known(circle: list[dict]) -> list[dict]:
+        """지금 친구와 아는 사이인 친구(공유 메모를 넣는 친구)."""
+        return [c for c in circle if c["told"] or c["same_group"]][:FRIENDS_SHOWN]
+
     def _friend_lines(self, circle: list[dict]) -> list[str]:
         """다른 방 친구들: 지금 친구와 아는 사이면 이름·관계·공유 메모, 아는 사이인지 모르면 이름만."""
-        known = [c for c in circle if c["told"] or c["same_group"]][:FRIENDS_SHOWN]
+        known = self._known(circle)
         others = [c["name"] for c in circle if not (c["told"] or c["same_group"])][:OTHERS_SHOWN]
         if not known and not others:
             return []
@@ -451,19 +551,24 @@ class Agent:
         return {**result, "content": f"저장했어. 이제부터 '{name}'(이)라고 불러."}
 
     async def _set_proactive(self, block, msg: Incoming, result: dict) -> dict:
-        on = (block.input or {}).get("on")
+        inp = block.input or {}
+        on, per_day = inp.get("on"), inp.get("per_day")
         if not isinstance(on, bool):
             return {**result, "content": "on 은 true 나 false 여야 해.", "is_error": True}
+        if per_day is not None and (isinstance(per_day, bool) or not isinstance(per_day, int) or not 1 <= per_day <= 24):
+            return {**result, "content": "per_day 는 1~24 사이 정수여야 해.", "is_error": True}
         try:
-            await self.store.set_proactive(msg.room_key, on)
+            await self.store.set_proactive(msg.room_key, on, per_day)
         except Exception as e:
             log.error("db_error %s", brief(e))
             return {**result, "content": "저장소 오류로 바꾸지 못했어. 친구에게 나중에 다시 말해 달라고 해.",
                     "is_error": True}
-        log.info("set_proactive room=%s on=%s", short_key(msg.room_key), on)
-        if on:
-            return {**result, "content": "선톡을 다시 켰어. 이제 가끔 먼저 말 걸게."}
-        return {**result, "content": "선톡을 껐어. 이제 이 방에는 먼저 말 걸지 않아. 친구에게 알겠다고 가볍게 말해."}
+        log.info("set_proactive room=%s on=%s per_day=%s", short_key(msg.room_key), on, per_day)
+        if not on:
+            return {**result, "content": "선톡을 껐어. 이제 이 방에는 먼저 말 걸지 않아. 친구에게 알겠다고 가볍게 말해."}
+        if per_day:
+            return {**result, "content": f"바꿨어. 이제 하루 {per_day}번쯤 먼저 말 걸게. 친구에게 알겠다고 가볍게 말해."}
+        return {**result, "content": "선톡을 다시 켰어. 이제 가끔 먼저 말 걸게."}
 
     async def _add_friendship(self, block, msg: Incoming, result: dict) -> dict:
         inp = block.input or {}
@@ -510,8 +615,8 @@ class Agent:
     # ── 선톡(먼저 말 걸기) ──────────────────────────────────────
 
     async def proactive_message(self, room: dict) -> tuple[str, dict] | None:
-        """1:1 방에 먼저 보낼 말을 만든다(보내지는 않음). 오류·거절·빈 답이면 None.
-        room: store.proactive_due 의 한 줄(room_key, user_key, name, last_said)."""
+        """1:1 방에 먼저 보낼 말을 만든다(보내지는 않음). 오류·거절·빈 답이면 None. 넣은 기억은 meta.memory 로.
+        room: store.proactive_rooms 의 한 줄(room_key, user_key, name, last_said, per_day …)."""
         rows = await self.store.recent(room["room_key"], self.s.recent_turns * 2)
         summaries = [x for x in await self.store.summaries(room["room_key"], RECENT_SUMMARIES) if x["content"]]
         notes = await self.store.notes(room["room_key"])
@@ -528,6 +633,8 @@ class Agent:
         if text in (FALLBACK_TEXT, REFUSAL_TEXT) or not text.strip():
             log.info("proactive_skipped room=%s refusal=%s", short_key(room["room_key"]), meta.get("refusal"))
             return None
+        meta["memory"] = {"recent": [rows[0]["id"], rows[-1]["id"]] if rows else [],
+                          "summaries": [x["id"] for x in summaries], "notes": [n["id"] for n in notes]}
         return text.strip(), meta
 
     def _proactive_situation(self, room: dict, notes: list[dict], summaries: list[dict], rows: list[dict]) -> str:
@@ -544,4 +651,4 @@ class Agent:
                 if len(text) > PROACTIVE_LINE_CHARS:
                     text = text[:PROACTIVE_LINE_CHARS - 1] + "…"
                 lines.append(f"- ({short_time(r['created_at'], tz)}) {who}: {text}")
-        return "\n".join(lines + ["", PROACTIVE_GUIDE])
+        return "\n".join(lines + ["", PROACTIVE_GUIDE.format(per_day=room.get("per_day") or self.s.proactive_per_day)])

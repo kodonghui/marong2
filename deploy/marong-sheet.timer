@@ -1,0 +1,10 @@
+[Unit]
+Description=Send Marong records to Google Sheet every 30 minutes
+
+[Timer]
+# 켠 뒤(또는 서버가 켜지고 5분 뒤) 한 번, 그 뒤로는 지난 실행 30분 뒤마다
+OnBootSec=5min
+OnUnitActiveSec=30min
+
+[Install]
+WantedBy=timers.target

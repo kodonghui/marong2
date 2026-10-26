@@ -36,5 +36,9 @@ if ! sudo test -f "$DEST/.env"; then
 fi
 sudo chmod 600 "$DEST/.env"
 sudo cp deploy/marong.service /etc/systemd/system/marong.service
+# 시트 보내기(bash deploy/ovh.sh sheet on)를 켠 적 있는 서버면 그 유닛도 새것으로. 켠 적 없으면 그대로 둠
+if [ -f /etc/systemd/system/marong-sheet.timer ]; then
+  sudo cp deploy/marong-sheet.service deploy/marong-sheet.timer /etc/systemd/system/
+fi
 sudo systemctl daemon-reload
 echo "설치 끝(봇은 켜지 않음). 다음: bash deploy/ovh.sh check"

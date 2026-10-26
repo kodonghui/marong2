@@ -3,7 +3,7 @@
   python run.py --check   설정·Claude 키·Postgres·임베딩·요약을 점검하고 이 서버의 공인 IPv4 를 출력. 하나라도 실패하면 종료 코드 1
   python run.py --chat    카카오 없이 터미널에서 마롱이와 대화(말투 다듬기용). 대화는 'terminal' 방으로 저장됨
   python run.py --proactive <이름|#키> [--dry]
-                          그 친구의 1:1 방에 선톡 한 개를 지금 보냄(시험용. 선톡 간격·시간·PROACTIVE 설정과 상관없이).
+                          그 친구의 1:1 방에 선톡 한 번(짧은 말 몇 개)을 지금 보냄(시험용. 선톡 일정·PROACTIVE 설정과 상관없이).
                           --dry 면 만든 말만 보여 주고 보내지 않음
 같은 봇 토큰으로 두 곳에서 run.py 를 켜지 않는다(서로 끊어 냄. 4004). --proactive 는 게이트웨이에 붙지 않아서 봇이 켜져 있어도 됨."""
 import asyncio
@@ -57,10 +57,10 @@ async def check(s, store: Store, emb: Embeddings, llm: LLM, agent: Agent, worker
     print("단체방:", f"{', '.join(s.group_triggers)} 이(가) 들어간 메시지에만 답함" if s.group_triggers
           else "받은 메시지 모두에 답함", "(카카오는 태그한 메시지만 보내 줌)")
     start, end = s.proactive_hours
-    print("선톡:", f"켜짐(1:1 친구에게 하루 {s.proactive_per_day}번쯤, {start}~{end}시를 {s.proactive_per_day}칸으로 나눠 "
-                 f"칸마다 한 번. 답이 없어도 보내고, 친구가 {QUIET_HOURS}시간 안에 말했으면 기다림. "
-                 f"하루 최대 {s.proactive_daily_max}개)" if s.proactive
-          else "꺼짐(PROACTIVE=off)")
+    print("선톡:", f"켜짐(1:1 친구에게 기본 하루 {s.proactive_per_day}번쯤, {start}~{end}시를 {s.proactive_per_day}칸으로 나눠 "
+                 f"칸마다 한 번, 짧은 말 2~3개를 연달아. 방마다 일정을 따로 정할 수 있음(admin schedule). 답이 없어도 "
+                 f"보내고, 친구가 조금 전(최대 {QUIET_HOURS}시간)에 말했으면 기다림. 하루 최대 {s.proactive_daily_max}번)"
+          if s.proactive else "꺼짐(PROACTIVE=off)")
 
     try:
         await store.open(wait=True, timeout=10)
@@ -163,11 +163,13 @@ async def proactive_once(s, store: Store, agent: Agent, http: httpx.AsyncClient,
     if result["text"] is None:
         print("선톡 말을 만들지 못함(로그 확인)")
         return 1
+    done, total = result["parts"]
     if dry:
-        print(f"미리 보기(보내지 않음): {result['text']}")
+        print(f"미리 보기(보내지 않음, 말 {total}개):\n{result['text']}")
         return 0
     if result["ok"]:
-        print(f"보냄: {result['text']}")
+        rest = "" if done == total else f", 나머지는 전달 실패(카카오 코드 {result['code']})"
+        print(f"보냄(말 {done}/{total}개{rest}):\n{result['text']}")
         return 0
     print(f"전달 실패(카카오 코드 {result['code']}): {result['text']}")
     return 1

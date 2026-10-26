@@ -10,6 +10,7 @@ from .agent import Agent, Incoming
 from .config import Settings
 from .fmt import short_key
 from .kakao import send_callback, skill_text
+from .photo import Photo, download, photo_url
 
 log = logging.getLogger("app")
 
@@ -54,13 +55,17 @@ class BotApp:
             log.warning("botGroupKey·botUserKey 없음 → 건너뜀 id=%s", mid)
             return
         content = str(d.get("content") or "")
-        log.info("MESSAGE_CREATE id=%s room=%s user=%s channel=%s len=%d", mid, short_key(room_key),
-                 short_key(user_key), d.get("isChannelChatroom"), len(content))
+        url = photo_url(content)  # 사진은 서명된 카카오 CDN 주소 하나로 옴(주소는 저장·로그에 안 남김)
+        log.info("MESSAGE_CREATE id=%s room=%s user=%s channel=%s len=%d photo=%s", mid, short_key(room_key),
+                 short_key(user_key), d.get("isChannelChatroom"), len(content), bool(url))
         if not token:
             log.warning("callbackToken 없음 → 답장 불가 id=%s", mid)
             return
-        msg = Incoming(room_key=room_key, user_key=user_key, text=content,
-                       is_channel=bool(d.get("isChannelChatroom")), kakao_id=mid or None)
+        # 사진 주소는 곧 만료돼서 방 차례를 기다리지 않고 바로 내려받기 시작함(await 는 방 잠금 안에서: 답은 받은 순서대로)
+        fetch = asyncio.create_task(download(self.http, url)) if url else None
+        msg = Incoming(room_key=room_key, user_key=user_key, text="" if url else content,
+                       is_channel=bool(d.get("isChannelChatroom")), kakao_id=mid or None,
+                       photo=Photo() if url else None)
         self._arrived += 1
         seq = self._arrived
         if self.agent.answers(msg):
@@ -70,6 +75,12 @@ class BotApp:
             return await send_callback(self.http, self.s, token, skill_text(text))
 
         async with self.room_lock(room_key):  # 답장까지 묶음: 앞 답이 늦어도 뒤 답이 앞지르지 않음
+            if fetch is not None:
+                try:
+                    msg.photo = await fetch
+                except Exception as e:  # 내려받기에서 예상 못 한 오류: 사진이 안 열린 것으로
+                    log.warning("photo_error %s", type(e).__name__)
+                    msg.photo = Photo(problem="error")
             reply = await self.agent.handle(msg, send, deadline=received + CALLBACK_TTL_S - SAFETY_S,
                                             superseded=lambda: self._latest.get((room_key, user_key), 0) > seq)
         if reply is not None:

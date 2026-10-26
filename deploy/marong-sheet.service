@@ -1,0 +1,27 @@
+[Unit]
+Description=Marong records to Google Sheet (run by marong-sheet.timer every 30 minutes)
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+# 최근 SHEET_DAYS 일(기본 30) 기록을 .env 의 SHEET_URL(tools/sheet.gs 웹 앱)로 보내고 끝남.
+# 켜기·끄기는 노트북에서 bash deploy/ovh.sh sheet on|off
+Type=oneshot
+User=marong
+Group=marong
+WorkingDirectory=/opt/marong
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/marong/.venv/bin/python tools/report.py --sheet
+TimeoutStartSec=5min
+# 보호: 시스템 파일은 읽기만 하고, 쓰기는 /opt/marong 안에서만
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/marong
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true

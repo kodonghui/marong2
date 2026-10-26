@@ -156,7 +156,7 @@ async def main():
     # 방: c1 동희 1:1(d1), c2 현경 1:1(h1), c3 이름만 같은 다른 동희 1:1(x1), g1 단체방(동희 d2·현경 h2),
     #     g2 단체방(동희라고 한 d3 혼자), term 터미널 대화(t1), c4 민수 1:1(m1)·g3 단체방(m2)은 옛 기록
     # ── 키 묶기 ──
-    ok(await store.schema_version() == 4, "표 버전 4")
+    ok(await store.schema_version() == 5, "표 버전 5")
     await say("c1", "d1", "안녕 내 이름은 동희")
     f_dh = fid("d1")
     ok(f_dh is not None, "1:1 에서 이름을 알려 주면 친구 한 명으로 저장")

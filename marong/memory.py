@@ -63,7 +63,7 @@ SHARE_SYSTEM = """너는 카카오톡 챗봇 '마롱이'의 기억 정리 담당
 - 다른 사람이 알아도 괜찮을 즐거운 계획(예: 여행, 공연)
 
 빼는 것:
-- 건강·몸 상태·병원·다이어트, 연애·썸·이별, 고민·힘든 일·스트레스·기분이나 감정
+- 건강·몸 상태·병원·다이어트, 연애·썸·이별, 성(性)·야한 얘기(19금), 고민·힘든 일·스트레스·기분이나 감정
 - 가족 일, 돈·월급·빚, 회사나 학교에서의 갈등, 그만두거나 옮기려는 생각, 시험·면접·취업 준비와 그 결과
 - 정치·종교, 연락처·주소·계좌 같은 민감한 정보, 다른 사람에 대한 얘기
 - '(비밀)'이 붙었거나 말하지 말라고 한 것
@@ -78,7 +78,7 @@ SHARE_SCHEMA = {
     "additionalProperties": False,
 }
 # 모델이 넣어도 공유 메모에서 한 번 더 빼는 낱말(빼는 것의 대표 낱말. 가벼운 얘기가 같이 빠져도 빼는 쪽이 안전)
-SHARE_BLOCK = re.compile(r"비밀|시험|토익|면접|취업|병원|이별|헤어[지졌짐]|우울|월급|이직|퇴사")
+SHARE_BLOCK = re.compile(r"비밀|시험|토익|면접|취업|병원|이별|헤어[지졌짐]|우울|월급|이직|퇴사|섹스|성관계|19금|야동")
 # 거르는 규칙(지시문·낱말)이 바뀌면 메모가 그대로여도 모든 친구를 다시 거른다
 SHARE_RULES = hashlib.sha1((SHARE_SYSTEM + SHARE_BLOCK.pattern).encode()).hexdigest()[:8]
 
@@ -300,7 +300,7 @@ class MemoryWorker:
             lines += ["", "## 1:1 방에서 정리한 메모" if n["is_channel"] else "## 단체방에서 정리한 메모", n["content"]]
         body = {
             "model": self.s.anthropic_model,
-            "max_tokens": 4000,
+            "max_tokens": 8000,  # 생각(effort)까지 포함한 상한: xhigh 에서 모자라면 빈 결과가 됨
             "system": SHARE_SYSTEM,
             "messages": [{"role": "user", "content": "\n".join(lines)}],
             "output_config": {"format": {"type": "json_schema", "schema": SHARE_SCHEMA}},
@@ -367,7 +367,7 @@ class MemoryWorker:
 
         body = {
             "model": self.s.anthropic_model,
-            "max_tokens": 8000,
+            "max_tokens": 16000,  # 생각(effort)까지 포함한 상한: xhigh 에서 모자라면 빈 결과가 됨
             "system": system,
             "messages": [{"role": "user", "content": "\n".join(lines)}],
             "output_config": {"format": {"type": "json_schema", "schema": schema(list(tags.values()) or ["친구1"])}},

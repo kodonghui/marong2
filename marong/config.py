@@ -60,7 +60,8 @@ class Settings:
     proactive: bool                # 선톡: 1:1 친구에게 마롱이가 먼저 말 걸기. 기본 꺼짐
     proactive_per_day: int         # 친구 한 명에게 하루 선톡 수: PROACTIVE_HOURS 를 이만큼 칸으로 나눠 칸마다 한 번
     proactive_hours: tuple[int, int]  # 이 시간에만 보냄(한국 시각, 시작 시 이상 끝 시 미만)
-    proactive_daily_max: int       # 하루에 보내는 선톡 상한(모든 친구 합. 카카오 전송 API 는 하루 1,000건)
+    # 방마다 따로 정한 일정(rooms.proactive_per_day·start·end)이 있으면 위 두 값 대신 그것을 씀(tools/admin.py schedule)
+    proactive_daily_max: int       # 하루에 보내는 선톡 상한(모든 친구 합, 연달아 보낸 말 묶음이 한 번. 카카오 전송 API 는 하루 1,000건)
 
     def problems(self) -> list[str]:
         """실행 전에 비어 있거나 잘못된 값을 알려 준다(값 자체는 출력하지 않음)."""
@@ -119,5 +120,5 @@ def load_settings() -> Settings:
         proactive=_env("PROACTIVE", "off").lower() in ("on", "true", "1", "yes"),
         proactive_per_day=int(_env("PROACTIVE_PER_DAY", "2")),
         proactive_hours=_hours(_env("PROACTIVE_HOURS", "12-21")),
-        proactive_daily_max=int(_env("PROACTIVE_DAILY_MAX", "10")),
+        proactive_daily_max=int(_env("PROACTIVE_DAILY_MAX", "30")),
     )

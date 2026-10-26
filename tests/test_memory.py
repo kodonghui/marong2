@@ -119,7 +119,7 @@ async def main():
         return await agent.handle(Incoming(room, user, t, is_channel=channel, kakao_id=kakao_id), send_fn, deadline)
 
     # ── 저장소 ──
-    ok(await store.schema_version() == 4, "표 버전")
+    ok(await store.schema_version() == 5, "표 버전")
     ok(await store.can_delete() is False, "봇 계정은 기록을 지우거나 고칠 수 없음(can_delete)")
     ok(clean_name("  동희  ") == "동희" and clean_name("") == "" and clean_name("가" * 21) == "", "이름 다듬기")
 
@@ -285,6 +285,27 @@ async def main():
     ok("# 지금 말과 비슷한 예전 대화" in sit and "나 다음 주에 토익 시험 봐" in sit, "비슷한 예전 말을 찾아 넣음")
     ok("날씨" not in sit.split("# 지금 말과 비슷한 예전 대화")[1], "관계없는 말은 넣지 않음")
 
+    # 답마다 넣은 기억을 meta.memory 로 남김(리포트의 '들어간 기억'): 최근 대화 구간, 요약·메모 id, 찾은 후보와 넣은 것
+    def memory_of(room):
+        return db.admin("SELECT meta->'memory' FROM marong.messages WHERE room_key = %s AND role = 'assistant' "
+                        "ORDER BY id DESC LIMIT 1", (room,))[0][0]
+
+    mem = memory_of("r3")
+    asked = db.admin("SELECT max(id) FROM marong.messages WHERE room_key = 'r3' AND role = 'user'")[0][0]
+    toeic = db.admin("SELECT id FROM marong.messages WHERE room_key = 'r3' AND content = '나 다음 주에 토익 시험 봐'")[0][0]
+    shown = [r[0] for r in db.admin("SELECT id FROM marong.summaries WHERE room_key = 'r3' AND content <> '' "
+                                    "ORDER BY last_id")]
+    note = db.admin("SELECT max(id) FROM marong.notes WHERE room_key = 'r3'")[0][0]
+    ok(mem["recall"] == "ok" and mem["recent"][1] == asked and mem["summaries"] == shown[-3:] and shown
+       and mem["notes"] == [note] and mem["friends"] == [], mem)
+    ok(any(h["type"] == "message" and h["id"] == toeic for h in mem["recalled"])
+       and all(h in mem["candidates"] for h in mem["recalled"])
+       and all(isinstance(h["similarity"], float) for h in mem["candidates"]), f"찾은 후보와 실제로 넣은 것: {mem}")
+    first = db.admin("SELECT meta->'memory' FROM marong.messages WHERE room_key = 'r1' AND role = 'assistant' "
+                     "ORDER BY id LIMIT 1")[0][0]
+    ok(first["recall"] == "short" and first["candidates"] == [] and first["recalled"] == [],
+       f"짧은 말('안녕')로는 예전 대화를 찾지 않았다고 남김: {first}")
+
     # 다른 방의 기억은 섞이지 않음
     await say("r4", "u3", "토익 시험 얘기 기억나?")
     sit = situation(llm.bodies[-1])
@@ -333,6 +354,13 @@ async def main():
     ok(code == 0 and "messages" in out and "최근 7일" in out, out)
     code, out = admin()
     ok(code == 1 and "people" in out, "명령이 없으면 사용법")
+
+    # 임베딩 모델이 아직 안 떴으면 찾지 않았다고 남김
+    cold = FakeEmbeddings()
+    cold.ready = False
+    await Agent(s, store, cold, llm).handle(Incoming("r10", "u10", "임베딩 모델이 아직 안 떴을 때"), send)
+    mem = memory_of("r10")
+    ok(mem["recall"] == "off" and mem["candidates"] == [] and len(mem["recent"]) == 2, mem)
 
     # 저장소가 죽어 있어도 답은 함(기억 없이)
     dead = Store("postgresql://marong@127.0.0.1:1/marong?connect_timeout=1", timeout=1)

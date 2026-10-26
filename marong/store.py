@@ -10,12 +10,21 @@ from psycopg_pool import AsyncConnectionPool
 
 log = logging.getLogger("store")
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 # 'ㅋㅋㅋ'·'ㅇㅇ'·이모티콘만 있는 말은 검색해도 쓸모가 없어 임베딩하지 않음(한글 음절·영문·숫자가 2개 이상 이어진 말만)
 MEANINGFUL = "[가-힣A-Za-z0-9]{2}"
-# 카카오에서 온 1:1 방(채널채팅)마다 친구의 마지막 말. 터미널 대화('terminal' 방)는 카카오 id 가 없어서 빠짐
+# 카카오에서 온 1:1 방(채널채팅)마다 친구의 마지막 말과 이 방의 선톡 일정·조건 재료. 터미널 대화('terminal' 방)는
+# 카카오 id 가 없어서 빠짐. 시각은 DB 시계 now() 에서 거꾸로 잰 길이: quiet_for(친구가 마지막으로 말한 뒤),
+# sent_ago(마지막 선톡 뒤. 없으면 NULL), failures(친구가 마지막으로 말한 뒤 전달에 실패한 선톡 수)
 CHANNEL_ROOMS = (
-    "SELECT r.room_key, u.user_key, p.name, u.created_at AS last_said, r.proactive FROM marong.rooms r "
+    "SELECT r.room_key, u.user_key, p.name, u.created_at AS last_said, r.proactive, "
+    "  r.proactive_per_day AS per_day, r.proactive_start AS start_hour, r.proactive_end AS end_hour, "
+    "  now() - u.created_at AS quiet_for, "
+    "  now() - (SELECT max(x.created_at) FROM marong.messages x WHERE x.room_key = r.room_key "
+    "    AND x.meta->>'proactive' = 'true') AS sent_ago, "
+    "  (SELECT count(*) FROM marong.messages f WHERE f.room_key = r.room_key AND f.id > u.id "
+    "    AND f.meta->>'proactive' = 'true' AND f.meta->>'delivered' = 'false') AS failures "
+    "FROM marong.rooms r "
     "CROSS JOIN LATERAL (SELECT m.id, m.user_key, m.kakao_id, m.created_at FROM marong.messages m "
     "  WHERE m.room_key = r.room_key AND m.role = 'user' ORDER BY m.id DESC LIMIT 1) u "
     "LEFT JOIN marong.people p ON p.user_key = u.user_key "
@@ -65,12 +74,13 @@ class Store:
 
     async def touch(self, room_key: str, is_channel: bool, user_key: str) -> dict:
         """방·친구를 처음 보면 만들고 마지막으로 본 시각을 바꾼다. 친구 줄(user_key, name, friend_id, share)에
-        이 방의 선톡 받기(proactive)를 붙여 돌려준다. share 는 친구에 안 묶인 키(이름을 모름)면 None."""
+        이 방의 선톡 받기(proactive)와 이 방만의 하루 선톡 수(per_day, 비면 None)를 붙여 돌려준다.
+        share 는 친구에 안 묶인 키(이름을 모름)면 None."""
         async with self.pool.connection() as c:
             cur = await c.execute(
                 "INSERT INTO marong.rooms (room_key, is_channel) VALUES (%s, %s) "
                 "ON CONFLICT (room_key) DO UPDATE SET last_seen = now(), is_channel = EXCLUDED.is_channel "
-                "RETURNING proactive",
+                "RETURNING proactive, proactive_per_day",
                 (room_key, is_channel))
             room = await cur.fetchone()
             cur = await c.execute(
@@ -78,7 +88,7 @@ class Store:
                 "ON CONFLICT (user_key) DO UPDATE SET last_seen = now() RETURNING user_key, name, friend_id, "
                 "(SELECT f.share FROM marong.friends f WHERE f.id = people.friend_id) AS share",
                 (user_key,))
-            return {**await cur.fetchone(), "proactive": room["proactive"]}
+            return {**await cur.fetchone(), "proactive": room["proactive"], "per_day": room["proactive_per_day"]}
 
     async def add_message(self, room_key: str, role: str, content: str, user_key: str | None = None,
                           kakao_id: str | None = None, reply_to: int | None = None, meta: dict | None = None) -> int | None:
@@ -112,7 +122,7 @@ class Store:
     async def notes(self, room_key: str) -> list[dict]:
         """방 안 친구마다 가장 최근 메모."""
         return await self._all(
-            "SELECT DISTINCT ON (n.user_key) n.user_key, p.name, n.content, n.created_at FROM marong.notes n "
+            "SELECT DISTINCT ON (n.user_key) n.id, n.user_key, p.name, n.content, n.created_at FROM marong.notes n "
             "JOIN marong.people p ON p.user_key = n.user_key WHERE n.room_key = %s "
             "ORDER BY n.user_key, n.id DESC", (room_key,))
 
@@ -124,9 +134,14 @@ class Store:
                                 (name, user_key))
                 return await self._link(c, user_key, name)
 
-    async def set_proactive(self, room_key: str, on: bool) -> None:
+    async def set_proactive(self, room_key: str, on: bool, per_day: int | None = None) -> None:
+        """선톡 받기를 켜거나 끈다. per_day 를 주면 이 방의 하루 선톡 수도 바꾼다."""
         async with self.pool.connection() as c:
-            await c.execute("UPDATE marong.rooms SET proactive = %s WHERE room_key = %s", (on, room_key))
+            if per_day is None:
+                await c.execute("UPDATE marong.rooms SET proactive = %s WHERE room_key = %s", (on, room_key))
+            else:
+                await c.execute("UPDATE marong.rooms SET proactive = %s, proactive_per_day = %s WHERE room_key = %s",
+                                (on, per_day, room_key))
 
     # ── 친구들(서로 아는 사이) ───────────────────────────────────
 
@@ -249,20 +264,11 @@ class Store:
 
     # ── 선톡(먼저 말 걸기) ──────────────────────────────────────
 
-    async def proactive_due(self, quiet: timedelta, recent: timedelta, limit: int,
-                            room_key: str | None = None) -> list[dict]:
-        """선톡할 1:1 방(오래 조용한 친구부터): 선톡을 켜 둔 방에서 친구가 quiet 넘게 조용하고, 최근 recent 안에 선톡을
-        안 보낸 방(시각은 DB 시계 now() 에서 거꾸로 잼). 지난 선톡에 친구가 답하지 않았어도 대상이다. 보냈다가 전달에
-        실패한 것도 보낸 것으로 치고, 친구가 마지막으로 말한 뒤로 전달 실패가 두 번이면(차단 등) 친구가 다시 말할 때까지
-        뺀다. room_key 를 주면 그 방만 확인."""
-        return await self._all(
-            CHANNEL_ROOMS + "AND r.proactive AND u.created_at < now() - %(quiet)s "
-            "AND NOT EXISTS (SELECT 1 FROM marong.messages x WHERE x.room_key = r.room_key "
-            "  AND x.meta->>'proactive' = 'true' AND x.created_at >= now() - %(recent)s) "
-            "AND (SELECT count(*) FROM marong.messages f WHERE f.room_key = r.room_key AND f.id > u.id "
-            "  AND f.meta->>'proactive' = 'true' AND f.meta->>'delivered' = 'false') < 2 "
-            "AND (%(room)s::text IS NULL OR r.room_key = %(room)s) ORDER BY u.created_at LIMIT %(n)s",
-            {"quiet": quiet, "recent": recent, "room": room_key, "n": limit})
+    async def proactive_rooms(self, room_key: str | None = None) -> list[dict]:
+        """선톡을 켜 둔 카카오 1:1 방(오래 조용한 친구부터)과 일정·조건 재료(CHANNEL_ROOMS). 보낼지는 proactive.py 가
+        방마다 일정으로 정한다. room_key 를 주면 그 방만."""
+        return await self._all(CHANNEL_ROOMS + "AND r.proactive AND (%(room)s::text IS NULL OR r.room_key = %(room)s) "
+                               "ORDER BY u.created_at", {"room": room_key})
 
     async def proactive_count(self, within: timedelta) -> int:
         """최근 within 안에 보낸(전달 실패 포함) 선톡 수(시각은 DB 시계에서 거꾸로 잼)."""
