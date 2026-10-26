@@ -1,8 +1,9 @@
-"""사진 시험: 카카오 CDN 주소 알아보기·사진 종류·내려받기(가짜 CDN)·설명 저장·답할 때 사진 보여 주기·묶어 답하기·
-BotApp 경로(받은 순서·주소가 저장·로그에 안 남음). 진짜 Postgres + 가짜 Claude.
+"""사진 시험: 카카오 CDN 주소 알아보기·사진 종류·내려받기(가짜 CDN)·큰 사진 줄이기·설명 저장·답할 때 사진 보여 주기·
+묶어 답하기·BotApp 경로(받은 순서·주소가 저장·로그에 안 남음). 진짜 Postgres + 가짜 Claude.
 실행(윈도우): .venv\\Scripts\\python tests\\test_photo.py   (리눅스·맥: .venv/bin/python tests/test_photo.py)"""
 import asyncio
 import base64
+import io
 import json
 import logging
 import os
@@ -47,6 +48,29 @@ def images(content) -> list[dict]:
     return [b for b in content if isinstance(b, dict) and b.get("type") == "image"] if isinstance(content, list) else []
 
 
+def noise_photo(w: int, h: int, fmt: str, orientation: int = 0) -> bytes:
+    """잡음 사진(잘 안 줄어드는 진짜 사진 파일). orientation 은 폰이 적어 두는 EXIF 회전 정보(6: 세워서 볼 것)."""
+    from PIL import Image
+    im = Image.frombytes("RGB", (w, h), os.urandom(w * h * 3))
+    buf = io.BytesIO()
+    if fmt == "JPEG":
+        exif = Image.Exif()
+        if orientation:
+            exif[0x0112] = orientation
+        im.save(buf, "JPEG", quality=95, exif=exif.tobytes())
+    else:
+        im.save(buf, fmt)
+    return buf.getvalue()
+
+
+def opened(data: bytes) -> tuple:
+    """사진 파일을 열어 (종류, 크기, 색 방식)."""
+    from PIL import Image
+    with Image.open(io.BytesIO(data)) as im:
+        im.load()
+        return im.format, im.size, im.mode
+
+
 def respond(body):
     """가짜 Claude: 사진 설명 요청이면 설명, 아니면 '응답:마지막 줄'."""
     from marong.agent import CAPTION_PROMPT
@@ -67,7 +91,9 @@ class Collect(logging.Handler):
 
 
 async def main():
-    from marong.photo import MAX_BYTES, Photo, download, photo_url, sniff
+    import marong.photo as photo_mod
+    from marong.photo import MAX_BYTES, MAX_DOWNLOAD, MAX_SIDE, Photo, download, photo_url, shrink, sniff
+    from PIL import Image
 
     # ── 카카오 CDN 주소 하나만 온 말이 사진 ──
     ok(photo_url(URL) == URL and photo_url(f"  {URL}\n") == URL.strip()
@@ -109,9 +135,37 @@ async def main():
     ok(p.media == "image/jpeg" and p.data == JPEG and not p.problem and seen == [URL],
        "서명된 주소 그대로 받고, 종류는 서버 말 대신 파일로 정함")
     p = await fetch({"/dna/abc/def/img.jpg": httpx.Response(200, content=b"\xff\xd8\xff" + b"0" * (MAX_BYTES - 3))})
-    ok(p.media == "image/jpeg" and len(p.data) == MAX_BYTES, "3.75MB 까지는 받음")
+    ok(p.media == "image/jpeg" and p.data == b"\xff\xd8\xff" + b"0" * (MAX_BYTES - 3), "3.75MB 까지는 손대지 않고 그대로")
     p = await fetch({"/dna/abc/def/img.jpg": httpx.Response(200, content=b"\xff\xd8\xff" + b"0" * MAX_BYTES)})
-    ok(p.problem == "big" and p.block() is None, "그보다 크면 big")
+    ok(p.problem == "error" and p.block() is None, "그보다 큰데 깨진 사진이면 error")
+    p = await fetch({"/dna/abc/def/img.jpg": httpx.Response(200, content=b"\xff\xd8\xff" + b"0" * MAX_DOWNLOAD)})
+    ok(p.problem == "big" and p.block() is None, "30MB 보다 크면 big")
+
+    # ── 큰 사진은 서버에서 줄여서(긴 변 1568px JPEG) ──
+    big = noise_photo(2600, 2000, "JPEG", orientation=6)  # 폰이 눕혀 저장하고 '세워서 보라'고 적어 둔 원본 사진
+    ok(len(big) > MAX_BYTES, f"시험 사진이 3.75MB 보다 큼({len(big)})")
+    p = await fetch({"/dna/abc/def/img.jpg": httpx.Response(200, content=big)})
+    fmt, size, mode = opened(p.data)
+    ok(p.media == "image/jpeg" and not p.problem and len(p.data) <= MAX_BYTES and fmt == "JPEG" and mode == "RGB"
+       and max(size) == MAX_SIDE and size[0] < size[1], f"폰 원본 사진은 줄여서 세운 채로 보냄: {size} {len(p.data)}")
+    clear = Image.new("RGBA", (3000, 1500), (255, 0, 0, 255))
+    clear.paste((0, 0, 0, 0), (0, 0, 1500, 1500))  # 왼쪽 반은 투명
+    buf = io.BytesIO()
+    clear.save(buf, "PNG")
+    with Image.open(io.BytesIO(shrink(buf.getvalue()))) as small:
+        left, right = small.getpixel((10, 10)), small.getpixel((small.width - 10, 10))
+        ok(small.format == "JPEG" and small.size == (1568, 784) and min(left) > 240
+           and right[0] > 200 and max(right[1:]) < 50, f"투명한 곳은 흰색으로: {small.size} {left} {right}")
+    gif = io.BytesIO()
+    Image.new("P", (2000, 1000), 3).save(gif, "GIF")
+    ok(opened(shrink(gif.getvalue()))[:2] == ("JPEG", (1568, 784)), "GIF 도 첫 장을 JPEG 로")
+    pixels, photo_mod.MAX_PIXELS = photo_mod.MAX_PIXELS, 100
+    ok(shrink(gif.getvalue()) is None, "JPEG 가 아닌데 화소가 너무 많으면 None(메모리)")
+    noise_png = noise_photo(1200, 1200, "PNG")
+    ok(len(noise_png) > MAX_BYTES, f"시험 PNG 가 3.75MB 보다 큼({len(noise_png)})")
+    p = await fetch({"/dna/abc/def/img.jpg": httpx.Response(200, content=noise_png)})
+    ok(p.problem == "big" and p.block() is None, "줄이지 못할 만큼 화소가 많으면 big")
+    photo_mod.MAX_PIXELS = pixels
     p = await fetch({"/dna/abc/def/img.jpg": httpx.Response(200, content=b"<html>login</html>")})
     ok(p.problem == "type", "사진이 아니면 type")
     for status in (403, 404, 500):
@@ -272,8 +326,9 @@ async def main():
     joined = "\n".join(LOGS)
     for secret in (SECRET, "kakaocdn", "SIGSIG", "떡볶이", "맛있어", "tok-secret"):
         ok(secret not in joined, f"로그에 '{secret}'이(가) 남음")
-    ok("photo=True" in joined and "photo_error RuntimeError" in joined and "photo_download status=404" in joined,
-       "로그 자체는 남음(상태 코드·오류 종류만)")
+    ok("photo=True" in joined and "photo_error RuntimeError" in joined and "photo_download status=404" in joined
+       and "photo_shrunk image/jpeg" in joined and "photo_shrink_error" in joined
+       and "photo_shrink too_many_pixels" in joined, "로그 자체는 남음(상태 코드·오류 종류·크기만)")
 
     await store.close()
     db.close()
