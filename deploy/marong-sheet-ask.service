@@ -1,0 +1,30 @@
+[Unit]
+Description=Marong records to Google Sheet when asked from the sheet (checked by marong-sheet-ask.timer every minute)
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+# 시트에서 '마롱이 > 지금 새로고침'을 눌렀는지 웹 앱(tools/sheet.gs)에 묻고, 눌렀으면 그때 한 번 보내고 끝남.
+# 1분마다 돌아서, 할 일이 없을 때의 시작·끝 기록은 남기지 않고(LogLevelMax) 보낸 결과만 남김(SyslogLevel).
+# 켜기·끄기는 30분 갱신과 같이: 노트북에서 bash deploy/ovh.sh sheet on|off
+Type=oneshot
+User=marong
+Group=marong
+WorkingDirectory=/opt/marong
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/marong/.venv/bin/python tools/report.py --sheet --if-asked
+TimeoutStartSec=5min
+SyslogLevel=notice
+LogLevelMax=notice
+# 보호: 시스템 파일은 읽기만 하고, 쓰기는 /opt/marong 안에서만
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/marong
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true

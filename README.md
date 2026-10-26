@@ -142,9 +142,11 @@ bash deploy/ovh.sh report 마롱이-리포트.xlsx 24   # 지난 24시간 대화
 
 마롱이는 받은 메시지를 모두 저장하고 동희는 위 명령으로 볼 수 있어요. 친구들에게 "마롱이랑 한 대화는 저장돼"라고 알려 주세요.
 
-## 구글 시트(30분마다 자동)
+## 구글 시트(30분마다 자동, 누르면 바로)
 
 서버가 30분마다 최근 30일 기록을 구글 시트 하나에 통째로 다시 써요(2026-10-26 동희님 "30m에 한번씩 스프레드시트에 업로드해주는걸로 바꿀수있나? 대화내용 임베딩된 내역 그게 언제 어떻게 먹여졌는지"). 노트북이 꺼져 있어도 돼요.
+
+기다리기 싫으면 시트 메뉴 **마롱이 > 지금 새로고침** 을 눌러요. 1분쯤 뒤에 새로 채워지고 시트 오른쪽 아래에 '새로 채웠어요'가 떠요(2026-10-26 동희님 "스프레드시트에서 새로고침 누르면 수동으로도 업데이트 되게 해줘"). 누르면 시트에 부탁만 적어 두고, 서버가 1분마다 물어보다가 가져가서 보내요. 그래서 서버에 들어오는 포트를 열지 않아요.
 
 - 탭: 읽는 법 · 대화(모든 메시지와 토큰 수) · 임베딩(언제 무엇을 임베딩했는지, 벡터 앞 8개 값) · 들어간 기억(답마다 임베딩 검색으로 찾은 예전 대화와 실제로 넣었는지, 같이 넣은 최근 대화·요약·메모) · 요약·메모
 - '들어간 기억'은 이번 배포부터 쌓여요. 그 전 답은 '기록 전'으로 보여요.
@@ -155,13 +157,20 @@ bash deploy/ovh.sh report 마롱이-리포트.xlsx 24   # 지난 24시간 대화
 1. 구글 시트를 새로 만들고 확장 프로그램 > Apps Script 에 `tools/sheet.gs` 내용을 그대로 붙여 넣고 저장해요.
 2. 배포 > 새 배포 > 유형: 웹 앱, 실행: 나, 액세스 권한: 모든 사용자 > 배포 > 액세스 승인('확인되지 않은 앱'이 나오면 고급 > 이동 > 허용) > 웹 앱 주소(…/exec) 복사.
 3. `bash deploy/ovh.sh sheet url` → 주소 붙여 넣기(화면엔 안 보여요). 서버 `.env` 의 `SHEET_URL` 에 들어가고 한 번 보내 봐요.
-4. `bash deploy/ovh.sh sheet on` → 그때 한 번, 그 뒤로 30분마다 보내요.
+4. `bash deploy/ovh.sh sheet on` → 그때 한 번, 그 뒤로 30분마다 보내요. '지금 새로고침' 묻기(1분마다)도 같이 켜져요.
+5. 시트를 새로 고치면 메뉴 **마롱이** 가 생겨요.
+
+메뉴가 없는 예전 시트(2026-10-26 전에 붙인 스크립트)
+
+1. 확장 프로그램(Extensions) > Apps Script 에서 내용을 새 `tools/sheet.gs` 로 통째로 바꾸고 저장해요.
+2. 배포(Deploy) > 배포 관리(Manage deployments) > 연필(Edit) > 버전(Version): 새 버전(New version) > 배포(Deploy). 새 배포(New deployment)를 만들면 주소가 바뀌어서 `sheet url` 을 다시 해야 하니, 꼭 있던 배포를 고쳐요.
+3. 시트를 새로 고치면 메뉴가 생겨요. 처음 누를 때 권한 확인이 나오면 전처럼 허용해요.
 
 | 할 일 | 명령 |
 |---|---|
-| 지금 한 번 보내기 | `bash deploy/ovh.sh sheet now` |
-| 타이머·최근 결과 | `bash deploy/ovh.sh sheet status` |
-| 끄기(되돌리기) | `bash deploy/ovh.sh sheet off` (시트 내용은 그대로. 주소까지 지우려면 `env` 에서 `SHEET_URL` 줄을 지움) |
+| 지금 한 번 보내기 | 시트 메뉴 마롱이 > 지금 새로고침, 또는 `bash deploy/ovh.sh sheet now` |
+| 타이머·최근 결과 | `bash deploy/ovh.sh sheet status` (30분 갱신과 '지금 새로고침' 둘 다) |
+| 끄기(되돌리기) | `bash deploy/ovh.sh sheet off` (30분 갱신과 '지금 새로고침' 둘 다 꺼짐. 시트 내용은 그대로. 주소까지 지우려면 `env` 에서 `SHEET_URL` 줄을 지움) |
 | 엑셀로 한 번 받기 | `bash deploy/ovh.sh report 마롱이-리포트.xlsx 24` (지난 24시간. 벡터 전체 포함) |
 
 ## 이 프로젝트(Claude)에 OVH 서버 연결하기
@@ -195,7 +204,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements.txt
 .venv/Scripts/python tests/test_proactive.py  # 선톡: 칸·친구마다 일정·대상 고르기·하루 상한·여러 말 연달아·끄기·횟수 도구·실패 기록·시험·일정 명령
 .venv/Scripts/python tests/test_friends.py    # 친구들: 키 묶기·아는 사이·공유 메모 거르기·다른 방 안 샘·도구·관리 명령
 .venv/Scripts/python tests/test_photo.py      # 사진: CDN 주소·종류·내려받기(옮김·크기)·설명 저장·답에 사진·묶어 답하기·주소가 안 남음
-.venv/Scripts/python tests/test_report.py     # 리포트: 엑셀·시트 탭 내용·들어간 기억·시트 주소가 안 새어 나감
+.venv/Scripts/python tests/test_report.py     # 리포트: 엑셀·시트 탭 내용·들어간 기억·'지금 새로고침' 묻기·시트 주소가 안 새어 나감
 ```
 
 (맥·리눅스는 `.venv/bin/python`.) 노트북에서 `python run.py`(봇 모드)는 켜지 마세요. 서버의 봇과 같은 토큰이라 서로 끊어 내요.
@@ -213,7 +222,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements.txt
 | `marong/embed.py` | 서버 CPU 임베딩(embeddinggemma-300m) |
 | `marong/llm.py` | Claude 호출(주 키 → 백업 키) |
 | `marong/gateway.py`, `marong/kakao.py`, `marong/app.py` | 카카오 게이트웨이·콜백·전송·이벤트 처리 |
-| `deploy/` | 서버 설치·운영(`ovh.sh`), systemd(`marong`, 시트 타이머 `marong-sheet`), env 옮기기 |
+| `deploy/` | 서버 설치·운영(`ovh.sh`), systemd(`marong`, 시트 타이머 `marong-sheet`·`marong-sheet-ask`), env 옮기기 |
 | `tools/admin.py` | 기록 보기, 친구 키 묶기·풀기·공유 끄기, 선톡 일정(기록은 안 지움) |
-| `tools/report.py`, `tools/sheet.gs` | 기록 리포트(엑셀)와 구글 시트 30분 갱신(서버가 보내고 시트의 Apps Script 가 씀) |
+| `tools/report.py`, `tools/sheet.gs` | 기록 리포트(엑셀)와 구글 시트 30분 갱신·메뉴 '지금 새로고침'(서버가 보내고 시트의 Apps Script 가 씀) |
 | `docs/design.md` | 저장 설계와 이유 |

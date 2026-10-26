@@ -184,6 +184,7 @@ def check_tabs(report, db, i):
     ok(readme[:2] == ["기간: 2026-10-26 19:00:00 ~ 2026-10-27 19:00:00 (한국 시각, 끝 시각은 빼고)",
                       "마지막 갱신: 2026-10-27 19:30:00"], f"읽는 법 기간·갱신 시각: {readme[:2]}")
     ok(any("12개" in x and "0.4 이상" in x and "요약 3개·메시지 4개" in x for x in readme), "읽는 법에 기억 넣는 순서")
+    ok(not any("지금 새로고침" in x for x in readme), "엑셀 읽는 법에는 시트 메뉴 얘기가 없음")
 
     # 대화: 기간 안 메시지만(시작 시각은 넣고 끝 시각은 뺌)
     talk = by["대화"]["rows"]
@@ -304,6 +305,7 @@ def check_sheet(report, i):
        and "0.1, 0.2, 0.3, 0.4" in [r[7] for r in tabs["임베딩"]["rows"]],
        "시트에는 벡터 전체를 안 보냄(무거워서). 앞 8개 값은 보냄")
     ok(tabs["읽는 법"]["rows"][1][0] == f"마지막 갱신: {payload['updated']}", "읽는 법에 갱신 시각")
+    ok(any("'마롱이 > 지금 새로고침'" in r[0] for r in tabs["읽는 법"]["rows"]), "시트 읽는 법에 '지금 새로고침' 안내")
 
     os.environ["SHEET_DAYS"] = "1"
     transport, seen = web_app(lambda r: httpx.Response(200, json={"ok": True}))
@@ -336,6 +338,67 @@ def check_sheet(report, i):
     os.environ.pop("SHEET_URL", None)
 
 
+def sheet_app(poll, upload=lambda: httpx.Response(200, json={"ok": True, "tabs": 5})):
+    """가짜 sheet.gs 웹 앱: 물어보기({"poll": true})에는 poll(), 탭을 받으면 upload() 로 답함(둘 다 302 를 따라온 GET 에).
+    받은 POST 내용을 차례로 남김."""
+    posts = []
+
+    def handle(request):
+        if request.method == "POST":
+            posts.append(json.loads(request.content))
+            return httpx.Response(302, headers={"Location": ECHO_URL})
+        return poll() if posts[-1].get("poll") else upload()
+    return httpx.MockTransport(handle), posts
+
+
+def check_ask(report):
+    """--sheet --if-asked: 시트에서 '지금 새로고침'을 눌렀을 때만 보내고, 할 일이 없거나 못 물으면 아무것도 안 남김."""
+    os.environ["SHEET_URL"] = SHEET_URL
+    argv = ["--sheet", "--if-asked", "--until", UNTIL]
+    transport, posts = sheet_app(lambda: httpx.Response(200, json={"ok": True, "asked": 0}))
+    code, out = run(report, argv, transport)
+    ok(code == 0 and out == "" and posts == [{"poll": True}], f"안 눌렀으면 묻기만 하고 조용히 끝: {posts} {out!r}")
+
+    transport, posts = sheet_app(lambda: httpx.Response(200, json={"ok": True, "asked": 1793023200000}))
+    code, out = run(report, argv, transport)
+    ok(code == 0 and len(posts) == 2 and posts[0] == {"poll": True} and set(posts[1]) == {"updated", "tabs"},
+       f"눌렀으면 물은 뒤 탭을 통째로 보냄: {[list(x) for x in posts]}")
+    ok(out.startswith("시트 갱신(시트에서 누름) ") and "대화 13줄 · 임베딩 3줄" in out and SECRET not in out,
+       f"보낸 결과만 남김: {out}")
+
+    def down():
+        raise httpx.ConnectError("연결 실패 " + SHEET_URL)
+    quiet = [
+        ("물어보기를 모르는 예전 sheet.gs", lambda: httpx.Response(200, json={"ok": False, "error": "tabs 없음"})),
+        ("JSON 아닌 답", lambda: httpx.Response(200, text=f"<html>로그인 {SECRET}</html>")),
+        ("HTTP 오류", lambda: httpx.Response(500, json={"ok": True, "asked": 1})),
+        ("연결 실패", down),
+        ("이상한 답", lambda: httpx.Response(200, json={"ok": True, "asked": "1793023200000"})),
+    ]
+    for what, poll in quiet:
+        transport, posts = sheet_app(poll)
+        code, out = run(report, argv, transport)
+        ok(code == 0 and out == "" and posts == [{"poll": True}], f"{what}: 보내지 않고 조용히 끝 {out!r}")
+
+    transport, posts = sheet_app(lambda: httpx.Response(200, json={"ok": True, "asked": 1793023200000}),
+                                 lambda: httpx.Response(200, json={"ok": False, "error": "비밀 " + SECRET}))
+    code, out = run(report, argv, transport)
+    ok(code == 1 and "시트 갱신(시트에서 누름) 실패: 시트 스크립트가 실패함" in out and SECRET not in out
+       and len(posts) == 2, f"눌렀는데 못 보내면 실패로 남김(다시 묻지는 않음): {out}")
+
+    del os.environ["SHEET_URL"]
+    transport, posts = sheet_app(lambda: httpx.Response(200, json={"ok": True, "asked": 1}))
+    code, out = run(report, argv, transport)
+    ok(code == 0 and out == "" and not posts, f"주소가 없으면 묻지 않고 조용히 끝(30분 갱신이 알림): {out!r}")
+    with contextlib.redirect_stderr(io.StringIO()):
+        try:
+            report.main(["--if-asked"])
+            exited = None
+        except SystemExit as e:
+            exited = e.code
+    ok(exited == 2, "--if-asked 는 --sheet 와 같이만")
+
+
 def main():
     db = TestDB()
     os.environ.update({"DATABASE_URL": db.app_url, "TIMEZONE": "Asia/Seoul"})  # 봇과 같은 marong 계정(읽기)
@@ -347,6 +410,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="marong-report-", ignore_cleanup_errors=True) as tmp:
         check_xlsx(report, tabs, i, Path(tmp))
     check_sheet(report, i)
+    check_ask(report)
     db.close()
     print(f"report: all {CHECKS} checks passed")
 

@@ -18,7 +18,8 @@
 #   report <저장할 파일.xlsx> [시간] [끝 시각]  지난 24시간(기본) 대화·임베딩·답에 들어간 기억·요약/메모를 엑셀로 받음
 #                끝 시각 예: 2026-10-27T19:00+09:00 (비우면 지금). 서버엔 파일을 남기지 않음
 #   sheet url|on|off|now|status  구글 시트에 최근 30일 기록을 30분마다 보냄(서버가 함, 노트북은 꺼져도 됨. tools/sheet.gs)
-#                url: 시트 웹 앱 주소 넣기(화면엔 안 보임)와 한 번 보내 보기 / on·off: 30분마다 보내기 켜기·끄기
+#                url: 시트 웹 앱 주소 넣기(화면엔 안 보임)와 한 번 보내 보기 / on·off: 30분마다 보내기와 시트 메뉴
+#                '마롱이 > 지금 새로고침'(서버가 1분마다 물어봄) 켜기·끄기
 #                now: 지금 한 번 보내기 / status: 타이머와 최근 결과
 #   backup       DB 백업 파일을 서버의 /var/backups/marong 에 만듦(자동 백업은 하지 않음)
 #   chat         서버에서 터미널로 마롱이와 대화(카카오 없이. 'terminal' 방으로 저장됨)
@@ -118,23 +119,27 @@ case "${1:-}" in
         echo "30분마다 보내려면: bash deploy/ovh.sh sheet on"
         ;;
       on)
-        on_server "sudo test -f $DEST/deploy/marong-sheet.timer || { echo '먼저 bash deploy/ovh.sh install'; exit 1; }
+        on_server "sudo test -f $DEST/deploy/marong-sheet-ask.timer || { echo '먼저 bash deploy/ovh.sh install'; exit 1; }
                    sudo -u marong grep -q '^SHEET_URL=https://script.google.com/' $DEST/.env ||
                      { echo '먼저 bash deploy/ovh.sh sheet url'; exit 1; }
-                   sudo cp $DEST/deploy/marong-sheet.service $DEST/deploy/marong-sheet.timer /etc/systemd/system/ &&
-                   sudo systemctl daemon-reload && sudo systemctl enable --now marong-sheet.timer &&
-                   systemctl list-timers marong-sheet.timer --no-pager"
+                   sudo cp $DEST/deploy/marong-sheet.service $DEST/deploy/marong-sheet.timer \
+                     $DEST/deploy/marong-sheet-ask.service $DEST/deploy/marong-sheet-ask.timer /etc/systemd/system/ &&
+                   sudo systemctl daemon-reload && sudo systemctl enable --now marong-sheet.timer marong-sheet-ask.timer &&
+                   systemctl list-timers 'marong-sheet*' --no-pager"
         ;;
-      off) on_server 'sudo systemctl disable --now marong-sheet.timer' && echo "시트 보내기를 끔(시트 내용은 그대로)" ;;
+      off)
+        on_server 'sudo systemctl disable --now marong-sheet.timer marong-sheet-ask.timer' &&
+          echo "시트 보내기와 '지금 새로고침'을 끔(시트 내용은 그대로)"
+        ;;
       now)
         on_server 'systemctl cat marong-sheet.service >/dev/null 2>&1 || { echo "먼저 bash deploy/ovh.sh sheet on"; exit 1; }
                    t=$(date +%s); sudo systemctl start marong-sheet.service; rc=$?
                    sudo journalctl -u marong-sheet --since "@$t" --no-pager -o cat; exit $rc'
         ;;
       status)
-        on_server 'echo "타이머: $(systemctl is-active marong-sheet.timer 2>/dev/null)"
-                   systemctl list-timers marong-sheet.timer --all --no-pager
-                   sudo journalctl -u marong-sheet -n 8 --no-pager -o short-iso'
+        on_server 'echo "30분 갱신: $(systemctl is-active marong-sheet.timer 2>/dev/null) · 지금 새로고침(1분마다 물어봄): $(systemctl is-active marong-sheet-ask.timer 2>/dev/null)"
+                   systemctl list-timers "marong-sheet*" --all --no-pager
+                   sudo journalctl -u marong-sheet -u marong-sheet-ask -n 8 --no-pager -o short-iso'
         ;;
       *) echo "사용법: bash deploy/ovh.sh sheet url|on|off|now|status"; exit 1 ;;
     esac
@@ -149,5 +154,5 @@ case "${1:-}" in
     on_server "$AS_MARONG 'cd $DEST && exec .venv/bin/python run.py --proactive \"\$@\"' _ $(printf '%q ' "$@")"
     ;;
   chat) "${SSH[@]}" -t "$HOST" "$AS_MARONG 'cd $DEST && .venv/bin/python run.py --chat'" ;;
-  *) sed -n '2,23p' "$0"; exit 1 ;;
+  *) sed -n '2,25p' "$0"; exit 1 ;;
 esac

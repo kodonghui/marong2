@@ -1,6 +1,7 @@
 """마롱이 기록 리포트: 대화 · 임베딩 · 들어간 기억(답마다 임베딩 검색으로 찾은 것과 실제로 넣은 것) · 요약·메모.
   python tools/report.py [--hours 24] [--until 2026-10-27T19:00+09:00] [--out 파일]   엑셀(--out 이 없으면 stdout)
   python tools/report.py --sheet [--until …]   구글 시트로 보냄(.env 의 SHEET_URL. 기간은 최근 SHEET_DAYS 일, 기본 30)
+  python tools/report.py --sheet --if-asked    시트에서 '마롱이 > 지금 새로고침'을 눌렀을 때만 보냄(서버가 1분마다 물어봄)
 노트북에서: bash deploy/ovh.sh report <저장할 파일.xlsx> [시간] [끝 시각] · bash deploy/ovh.sh sheet url|on|off|now|status
 기간은 [끝 시각 - 기간, 끝 시각)이고 끝 시각 기본값은 지금. 서버에 파일을 남기지 않는다.
 DB 는 읽기만 하고, 카카오 키 원문 대신 tools/admin.py 와 같은 #짧은키를 쓴다. SHEET_URL 은 비밀이라 출력하지 않는다."""
@@ -37,6 +38,7 @@ REPLY_CHARS = 100  # '들어간 기억'에는 마롱이 답의 앞부분만
 CELL_MAX = 32767   # 엑셀 칸 하나에 들어가는 최대 글자 수
 SHEET_PREFIX = "https://script.google.com/"  # Apps Script 웹 앱이 아닌 곳으로는 대화를 보내지 않음
 SHEET_TIMEOUT_S = 120
+ASK_TIMEOUT_S = 30
 HEADER_FILL = PatternFill("solid", fgColor="E8E3F3")
 TOP, TOP_WRAP = Alignment(vertical="top"), Alignment(vertical="top", wrap_text=True)
 RECALL = {"short": "안 함(말이 짧아서)", "off": "안 함(임베딩 준비 안 됨)", "error": "오류(검색 실패)"}
@@ -336,6 +338,8 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         "- '기록 전'은 기억 기록을 남기기 전에 보낸 답이에요. '안 함(말이 짧아서)'은 'ㅋㅋ'처럼 짧은 말이라 검색하지 않은 것.",
         "- 시각은 모두 한국 시각이에요. 카카오 키 원문 대신 관리 명령(admin)과 같은 #짧은키를 적었어요.",
     ]
+    if not vectors:
+        lines.append("- 시트 메뉴 '마롱이 > 지금 새로고침'을 누르면 1분쯤 뒤에 새로 채워요. 안 눌러도 30분마다 새로 채워요.")
     tabs.insert(0, tab("읽는 법", ["마롱이 기록 리포트"], [[line] for line in lines], [130], wrap={1}))
     return tabs, counts
 
@@ -370,13 +374,29 @@ def workbook(tabs: list[dict]) -> Workbook:
     return wb
 
 
+def post(url: str, payload: dict, timeout: float, transport=None) -> httpx.Response:
+    # 웹 앱은 302 로 결과 주소를 알려 주고, httpx 는 그 주소를 GET 으로 따라감
+    with httpx.Client(transport=transport, follow_redirects=True, timeout=timeout) as http:
+        return http.post(url, content=json.dumps(payload, ensure_ascii=False).encode(),
+                         headers={"Content-Type": "application/json"})
+
+
+def asked(url: str, transport=None) -> bool:
+    """시트에서 '마롱이 > 지금 새로고침'을 눌렀는지 웹 앱에 물어봄(웹 앱은 부탁을 넘기면서 지움).
+    못 물었거나 물어보기를 모르는 예전 sheet.gs 면 False. 1분마다 도는 거라 까닭은 남기지 않음(30분 갱신이 남김)."""
+    try:
+        r = post(url, {"poll": True}, ASK_TIMEOUT_S, transport)
+        answer = r.json() if r.status_code == 200 else None
+    except Exception:  # 연결 실패·JSON 아닌 답(로그인 페이지 등)
+        return False
+    return (isinstance(answer, dict) and answer.get("ok") is True
+            and isinstance(answer.get("asked"), (int, float)) and answer["asked"] > 0)
+
+
 def send(url: str, payload: dict, transport=None) -> str | None:
     """시트 웹 앱(tools/sheet.gs)에 탭을 보냄. 잘 되면 None, 아니면 짧은 까닭(주소와 구글의 답 내용은 적지 않음)."""
-    body = json.dumps(payload, ensure_ascii=False).encode()
     try:
-        # 웹 앱은 302 로 결과 주소를 알려 주고, httpx 는 그 주소를 GET 으로 따라감
-        with httpx.Client(transport=transport, follow_redirects=True, timeout=SHEET_TIMEOUT_S) as http:
-            r = http.post(url, content=body, headers={"Content-Type": "application/json"})
+        r = post(url, payload, SHEET_TIMEOUT_S, transport)
     except Exception as e:  # 오류 글에 주소가 들어 있을 수 있어서 종류만
         return type(e).__name__
     if r.status_code != 200:
@@ -397,7 +417,11 @@ def main(argv: list[str] | None = None, transport=None) -> int:
     out = p.add_mutually_exclusive_group()
     out.add_argument("--out", help="엑셀을 저장할 파일. 없으면 stdout 으로 보냄")
     out.add_argument("--sheet", action="store_true", help="엑셀 대신 구글 시트(.env 의 SHEET_URL)로. 기간은 최근 SHEET_DAYS 일(기본 30)")
+    p.add_argument("--if-asked", action="store_true",
+                   help="--sheet 와 같이: 시트에서 '마롱이 > 지금 새로고침'을 눌렀을 때만 보냄(누르지 않았으면 아무것도 안 함)")
     args = p.parse_args(argv)
+    if args.if_asked and not args.sheet:
+        p.error("--if-asked 는 --sheet 와 같이 씀")
     load_dotenv(str(ROOT / ".env"))
     tz = ZoneInfo(os.getenv("TIMEZONE") or "Asia/Seoul")
     now = datetime.now(tz)
@@ -407,8 +431,12 @@ def main(argv: list[str] | None = None, transport=None) -> int:
     start = until - (timedelta(days=float(os.getenv("SHEET_DAYS") or 30)) if args.sheet else timedelta(hours=args.hours))
     url = (os.getenv("SHEET_URL") or "").strip()
     if args.sheet and not url.startswith(SHEET_PREFIX):
+        if args.if_asked:  # 1분마다 같은 말을 남기지 않음(30분 갱신이 남김)
+            return 0
         print("SHEET_URL 이 비었거나 Apps Script 웹 앱 주소가 아님(노트북에서 bash deploy/ovh.sh sheet url)", file=sys.stderr)
         return 1
+    if args.if_asked and not asked(url, transport):
+        return 0
     threshold = float(os.getenv("RECALL_MIN_SIMILARITY") or 0.4)
     recent_turns = int(os.getenv("RECENT_TURNS") or 10)
     with psycopg.connect(os.getenv("DATABASE_URL") or "postgresql:///marong", row_factory=dict_row) as c:
@@ -416,11 +444,12 @@ def main(argv: list[str] | None = None, transport=None) -> int:
         tabs, n = build(c, start, until, tz, now, threshold, recent_turns, vectors=not args.sheet)
     span = f"{stamp(start, tz)[5:16]}~{stamp(until, tz)[5:16]}(한국)"
     if args.sheet:
+        what = "시트 갱신(시트에서 누름)" if args.if_asked else "시트 갱신"
         why = send(url, {"updated": stamp(now, tz), "tabs": tabs}, transport)
         if why:
-            print(f"시트 갱신 실패: {why}", file=sys.stderr)
+            print(f"{what} 실패: {why}", file=sys.stderr)
             return 1
-        print("시트 갱신 " + span + ": " + " · ".join(f"{t['name']} {len(t['rows'])}줄" for t in tabs[1:]))
+        print(f"{what} {span}: " + " · ".join(f"{t['name']} {len(t['rows'])}줄" for t in tabs[1:]))
         return 0
     buf = io.BytesIO()
     workbook(tabs).save(buf)

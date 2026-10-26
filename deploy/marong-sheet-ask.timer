@@ -1,0 +1,11 @@
+[Unit]
+Description=Ask the Marong records sheet every minute whether a refresh was requested
+
+[Timer]
+# 켠 뒤(또는 서버가 켜지고 2분 뒤) 한 번, 그 뒤로는 지난 실행 1분 뒤마다. 몇 초 안에 돌게 AccuracySec(기본은 1분)
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
