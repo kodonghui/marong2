@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 EFFORTS = ("", "low", "medium", "high", "xhigh", "max")
+PER_DAY_MAX = 48  # 방 하나의 하루 선톡 수 상한(admin schedule·set_proactive). schema.sql 의 rooms.proactive_per_day CHECK 와 같게
 
 
 def load_dotenv(path: str = ".env") -> None:
@@ -120,5 +121,5 @@ def load_settings() -> Settings:
         proactive=_env("PROACTIVE", "off").lower() in ("on", "true", "1", "yes"),
         proactive_per_day=int(_env("PROACTIVE_PER_DAY", "2")),
         proactive_hours=_hours(_env("PROACTIVE_HOURS", "12-21")),
-        proactive_daily_max=int(_env("PROACTIVE_DAILY_MAX", "30")),
+        proactive_daily_max=int(_env("PROACTIVE_DAILY_MAX", "60")),
     )

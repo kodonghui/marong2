@@ -13,7 +13,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import Settings
+from .config import PER_DAY_MAX, Settings
 from .embed import Embeddings
 from .fmt import now_line, short_key, short_time
 from .knowledge import load_knowledge
@@ -79,8 +79,8 @@ SET_PROACTIVE_TOOL = {
         "type": "object",
         "properties": {
             "on": {"type": "boolean", "description": "선톡을 받으면 true, 그만 받으면 false"},
-            "per_day": {"type": "integer", "minimum": 1, "maximum": 24,
-                        "description": "하루에 먼저 말 거는 횟수(1~24). 친구가 횟수를 바꿔 달라고 할 때만 넣어"},
+            "per_day": {"type": "integer", "minimum": 1, "maximum": PER_DAY_MAX,
+                        "description": f"하루에 먼저 말 거는 횟수(1~{PER_DAY_MAX}). 친구가 횟수를 바꿔 달라고 할 때만 넣어"},
         },
         "required": ["on"],
         "additionalProperties": False,
@@ -555,8 +555,9 @@ class Agent:
         on, per_day = inp.get("on"), inp.get("per_day")
         if not isinstance(on, bool):
             return {**result, "content": "on 은 true 나 false 여야 해.", "is_error": True}
-        if per_day is not None and (isinstance(per_day, bool) or not isinstance(per_day, int) or not 1 <= per_day <= 24):
-            return {**result, "content": "per_day 는 1~24 사이 정수여야 해.", "is_error": True}
+        if per_day is not None and (isinstance(per_day, bool) or not isinstance(per_day, int)
+                                    or not 1 <= per_day <= PER_DAY_MAX):
+            return {**result, "content": f"per_day 는 1~{PER_DAY_MAX} 사이 정수여야 해.", "is_error": True}
         try:
             await self.store.set_proactive(msg.room_key, on, per_day)
         except Exception as e:

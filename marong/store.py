@@ -10,7 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 
 log = logging.getLogger("store")
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 # 'ㅋㅋㅋ'·'ㅇㅇ'·이모티콘만 있는 말은 검색해도 쓸모가 없어 임베딩하지 않음(한글 음절·영문·숫자가 2개 이상 이어진 말만)
 MEANINGFUL = "[가-힣A-Za-z0-9]{2}"
 # 카카오에서 온 1:1 방(채널채팅)마다 친구의 마지막 말과 이 방의 선톡 일정·조건 재료. 터미널 대화('terminal' 방)는

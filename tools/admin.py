@@ -24,7 +24,7 @@ from psycopg.rows import dict_row
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from marong.config import load_dotenv  # noqa: E402
+from marong.config import PER_DAY_MAX, load_dotenv  # noqa: E402
 
 # Haiku 5.5 가격(1M 토큰당 달러, 프롬프트 10만 토큰 이하). 캐시 읽기는 입력의 0.1배, 캐시 쓰기(5분)는 1.25배
 PRICE_IN, PRICE_OUT, PRICE_CACHE_READ, PRICE_CACHE_WRITE = 0.10, 0.50, 0.01, 0.125
@@ -269,7 +269,7 @@ def share(c, _tz, args):
 
 
 def schedule(c, _tz, args):
-    usage = "사용: schedule <친구 이름 또는 #키> <하루 횟수 1~24> [시작-끝 시, 예: 7-24] | schedule <친구> default"
+    usage = f"사용: schedule <친구 이름 또는 #키> <하루 횟수 1~{PER_DAY_MAX}> [시작-끝 시, 예: 7-24] | schedule <친구> default"
     if len(args) not in (2, 3):
         sys.exit(usage)
     who = args[0]
@@ -289,7 +289,7 @@ def schedule(c, _tz, args):
             per_day = int(args[1])
         except ValueError:
             sys.exit(usage)
-        if not 1 <= per_day <= 24:
+        if not 1 <= per_day <= PER_DAY_MAX:
             sys.exit(usage)
         sets, values = "proactive_per_day = %s", (per_day,)
         if len(args) == 3:

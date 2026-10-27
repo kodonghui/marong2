@@ -119,7 +119,7 @@ async def main():
         return await agent.handle(Incoming(room, user, t, is_channel=channel, kakao_id=kakao_id), send_fn, deadline)
 
     # ── 저장소 ──
-    ok(await store.schema_version() == 5, "표 버전")
+    ok(await store.schema_version() == 6, "표 버전")
     ok(await store.can_delete() is False, "봇 계정은 기록을 지우거나 고칠 수 없음(can_delete)")
     ok(clean_name("  동희  ") == "동희" and clean_name("") == "" and clean_name("가" * 21) == "", "이름 다듬기")
 

@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS marong.meta (
   key   text PRIMARY KEY,
   value text NOT NULL
 );
-INSERT INTO marong.meta (key, value) VALUES ('schema_version', '5')
+INSERT INTO marong.meta (key, value) VALUES ('schema_version', '6')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- 채팅방. 채널채팅(1:1)도 방 하나로 친다.
@@ -38,9 +38,21 @@ ALTER TABLE marong.rooms ADD COLUMN IF NOT EXISTS proactive boolean NOT NULL DEF
 ALTER TABLE marong.rooms ADD COLUMN IF NOT EXISTS noted_id bigint NOT NULL DEFAULT 0;
 -- 5: 이 방만의 선톡 일정(하루 횟수, 한국 시각 시작·끝 시). 비우면 .env 의 PROACTIVE_PER_DAY·PROACTIVE_HOURS.
 -- 관리자가 admin schedule 로, 친구가 덜(더) 보내 달라고 하면 마롱이가 set_proactive 의 per_day 로 바꿈
-ALTER TABLE marong.rooms ADD COLUMN IF NOT EXISTS proactive_per_day smallint CHECK (proactive_per_day BETWEEN 1 AND 24);
+ALTER TABLE marong.rooms ADD COLUMN IF NOT EXISTS proactive_per_day smallint;
 ALTER TABLE marong.rooms ADD COLUMN IF NOT EXISTS proactive_start smallint CHECK (proactive_start BETWEEN 0 AND 23);
 ALTER TABLE marong.rooms ADD COLUMN IF NOT EXISTS proactive_end smallint CHECK (proactive_end BETWEEN 1 AND 24);
+-- 6: 하루 횟수 1~24 → 1~48(config.py PER_DAY_MAX 와 같게). 표 버전 5 의 CHECK 는 Postgres 가 이름을 붙여서
+-- 이름 대신 내용으로 찾아 모두 지우고 하나만 다시 건다(설치할 때마다 같은 결과)
+DO $$
+DECLARE c text;
+BEGIN
+  FOR c IN SELECT conname FROM pg_constraint WHERE conrelid = 'marong.rooms'::regclass AND contype = 'c'
+             AND pg_get_constraintdef(oid) LIKE '%proactive_per_day%' LOOP
+    EXECUTE format('ALTER TABLE marong.rooms DROP CONSTRAINT %I', c);
+  END LOOP;
+END
+$$;
+ALTER TABLE marong.rooms ADD CONSTRAINT rooms_proactive_per_day_check CHECK (proactive_per_day BETWEEN 1 AND 48);
 
 -- 친구의 카카오 키 하나(같은 사람도 1:1 과 단체방에서 키가 다름). 이름은 본인이 알려 준 것만 저장한다(카카오가 이름을 주지 않음).
 CREATE TABLE IF NOT EXISTS marong.people (

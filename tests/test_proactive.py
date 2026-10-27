@@ -69,7 +69,7 @@ def respond(body):
     if "선톡 자주" in said:
         return message([tool_use("set_proactive", {"on": True, "per_day": 5})], "tool_use")
     if "선톡 엄청" in said:
-        return message([tool_use("set_proactive", {"on": True, "per_day": 30})], "tool_use")
+        return message([tool_use("set_proactive", {"on": True, "per_day": 60})], "tool_use")
     return message([text(f"응답:{said}")])
 
 
@@ -125,8 +125,8 @@ async def main():
 
     # ── 설정 ──
     s = load_settings()
-    ok(s.proactive and s.proactive_per_day == 2 and s.proactive_hours == (12, 21) and s.proactive_daily_max == 30,
-       "선톡 기본값: 친구마다 하루 2번, 12~21시, 하루 30번")
+    ok(s.proactive and s.proactive_per_day == 2 and s.proactive_hours == (12, 21) and s.proactive_daily_max == 60,
+       "선톡 기본값: 친구마다 하루 2번, 12~21시, 하루 60번")
     ok(s.problems() == [] and replace(s, proactive_hours=(21, 12)).problems()
        and replace(s, proactive_per_day=0).problems(), "선톡 설정 오류를 알려 줌")
     del os.environ["PROACTIVE"]
@@ -381,7 +381,7 @@ async def main():
         ok([x["name"] for x in b["tools"]] == ["set_name", "set_proactive", "add_friendship", "set_share"]
            and "하루 2번쯤 먼저 카톡을 보내(선톡)" in situation(b), "선톡이 켜져 있으면 1:1 에서 끄기 도구와 안내")
         props = next(x for x in b["tools"] if x["name"] == "set_proactive")["input_schema"]["properties"]
-        ok(props["per_day"] == {**props["per_day"], "type": "integer", "minimum": 1, "maximum": 24}, props)
+        ok(props["per_day"] == {**props["per_day"], "type": "integer", "minimum": 1, "maximum": 48}, props)
         ok(await say("p5", "u5", "선톡 그만 보내", kid="f2") == "알겠어 👌"
            and db.admin("SELECT proactive FROM marong.rooms WHERE room_key = 'p5'") == [(False,)], "그만하라면 끔")
         age("p5", 5)
@@ -396,9 +396,9 @@ async def main():
         ok("하루 5번쯤" in result["content"] and not result.get("is_error"), result)
         await say("p5", "u5", "선톡 엄청 많이 해줘", kid="f6")
         result = llm.bodies[-1]["messages"][-1]["content"][0]
-        ok(result.get("is_error") is True and "1~24" in result["content"]
+        ok(result.get("is_error") is True and "1~48" in result["content"]
            and db.admin("SELECT proactive_per_day FROM marong.rooms WHERE room_key = 'p5'") == [(5,)],
-           "1~24 밖이면 안 바꿈")
+           "1~48 밖이면 안 바꿈")
         await say("p5", "u5", "고마워", kid="f7")
         ok("하루 5번쯤 먼저 카톡을 보내(선톡)" in situation(llm.bodies[-1]), "바꾼 횟수가 안내에 보임")
         room5 = (await store.proactive_rooms("p5"))[0]
@@ -443,6 +443,25 @@ async def main():
         FAIL["code"] = None
         ok(code == 1 and "카카오 코드 -877" in out, out)
 
+        # ── 표 버전 5 에서 올리기: 하루 횟수 CHECK 가 1~24 였던 표도 schema.sql 을 다시 돌리면 1~48 하나만 남음 ──
+        def per_day_checks():
+            return db.admin("SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint "
+                            "WHERE conrelid = 'marong.rooms'::regclass AND pg_get_constraintdef(oid) LIKE %s",
+                            ("%proactive_per_day%",))
+
+        checks = per_day_checks()
+        ok(len(checks) == 1 and ">= 1" in checks[0][1] and "<= 48" in checks[0][1], checks)
+        db.admin("ALTER TABLE marong.rooms DROP CONSTRAINT rooms_proactive_per_day_check")
+        for _ in range(2):  # 표 버전 5 처럼 이름은 Postgres 가 붙임(같은 CHECK 가 두 번 붙은 표까지)
+            db.admin("ALTER TABLE marong.rooms ADD CHECK (proactive_per_day BETWEEN 1 AND 24)")
+        ok(len(per_day_checks()) == 2, per_day_checks())
+        db.apply_schema()
+        checks = per_day_checks()
+        ok(len(checks) == 1 and checks[0][0] == "rooms_proactive_per_day_check" and "<= 48" in checks[0][1]
+           and await store.schema_version() == 6
+           and db.admin("SELECT proactive_per_day FROM marong.rooms WHERE room_key = 'p5'") == [(5,)],
+           f"옛 CHECK 를 지우고 1~48 하나만, 표 버전 6, 정해 둔 횟수는 그대로: {checks}")
+
         # ── 방마다 일정(tools/admin.py schedule): 현경이에게는 7~24시에 하루 12번 ──
         def admin(*args):
             env = {**os.environ, "DATABASE_URL": db.app_url, "PYTHONIOENCODING": "utf-8"}
@@ -460,7 +479,7 @@ async def main():
         ok(code == 0 and "선톡 일정 하루 12번, 7~24시" in out and plan_row() == [(12, 7, 24)], out)
         code, out = admin("rooms")
         ok(code == 0 and "(선톡 일정 하루 12번, 7~24시)" in out, out)
-        for bad in (("현경", "30"), ("현경", "0"), ("현경", "많이"), ("현경", "5", "9-8"), ("현경", "5", "7-25"),
+        for bad in (("현경", "49"), ("현경", "0"), ("현경", "많이"), ("현경", "5", "9-8"), ("현경", "5", "7-25"),
                     ("현경",)):
             code, out = admin("schedule", *bad)
             ok(code != 0 and plan_row() == [(12, 7, 24)], f"잘못된 일정은 안 바꿈: {bad} {out}")
@@ -468,6 +487,10 @@ async def main():
         ok(code != 0 and "찾지 못함" in out, out)
         code, out = admin("schedule", "현경", "default")
         ok(code == 0 and ".env 기본값" in out and plan_row() == [(None, None, None)], out)
+        code, out = admin("schedule", "현경", "36", "7-24")  # 2026-10-27 동희님 "ㅇㅇ36번"
+        ok(code == 0 and "선톡 일정 하루 36번, 7~24시" in out and plan_row() == [(36, 7, 24)], out)
+        code, out = admin("schedule", "현경", "48")
+        ok(code == 0 and plan_row() == [(48, 7, 24)], f"상한 48번까지(시간은 그대로): {out}")
         code, out = admin("schedule", "현경", "12", "7-24")
         ok(code == 0 and plan_row() == [(12, 7, 24)], out)
 
