@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 EFFORTS = ("", "low", "medium", "high", "xhigh", "max")
-PER_DAY_MAX = 48  # 방 하나의 하루 선톡 수 상한(admin schedule·set_proactive). schema.sql 의 rooms.proactive_per_day CHECK 와 같게
+PER_DAY_MAX = 48  # 방 하나의 하루 선톡 수 상한(admin schedule·ask_owner 의 per_day). schema.sql 의 rooms.proactive_per_day CHECK 와 같게
 
 
 def load_dotenv(path: str = ".env") -> None:

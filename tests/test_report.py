@@ -32,7 +32,7 @@ CHECKS = 0
 TZ = ZoneInfo("Asia/Seoul")
 UNTIL = "2026-10-27T19:00+09:00"  # 기간: 10/26 19:00 ~ 10/27 19:00(한국)
 SHEETS = ["읽는 법", "대화", "임베딩", "들어간 기억", "요약·메모", "친구·공유"]
-RAW_KEYS = ("room-dm", "room-group", "room-g2", "u-dong", "u-hk", "u-anon", "u-ms")
+RAW_KEYS = ("room-dm", "room-group", "room-g2", "room-anon", "u-dong", "u-hk", "u-anon", "u-ms")
 SECRET = "AKfycbTESTSECRET"
 SHEET_URL = f"https://script.google.com/macros/s/{SECRET}/exec"
 ECHO_URL = "https://script.googleusercontent.com/macros/echo?user_content_key=abc"
@@ -127,6 +127,18 @@ def seed(db) -> dict:
     i = {}
     i["x1"] = msg("room-g2", "u-ms", "user", "다들 주말에 뭐 해", "2026-09-01T10:00")
     i["x2"] = msg("room-g2", "u-dong", "user", "난 집에 있을 듯", "2026-09-01T10:01")
+    # 대화로 한 요청(설정은 관리자만 정해서 남기기만 함): 친구 줄에 붙이고, 친구에 안 묶인 키는 따로 한 줄
+    db.admin("INSERT INTO marong.rooms (room_key, is_channel) VALUES ('room-anon', true)")
+
+    def ask(user, friend, room, kind, detail, at):
+        db.admin("INSERT INTO marong.requests (user_key, friend_id, room_key, kind, detail, created_at) "
+                 "VALUES (%s, %s, %s, %s, %s, %s)", (user, friend, room, kind, Jsonb(detail), kst(at)))
+
+    ask("u-hk", f_hk, None, "share_on", {}, "2026-10-28T09:00")
+    ask("u-dong", f_dong, "room-dm", "friendship", {"name": "민수", "label": "대학 친구", "with": f_ms}, "2026-10-28T09:10")
+    ask("u-dong", f_dong, "room-dm", "proactive_off", {}, "2026-10-28T09:20")
+    ask("u-anon", None, "room-group", "link", {"name": "동희"}, "2026-10-28T09:30")
+    ask("u-anon", None, "room-anon", "proactive_less", {"per_day": 3}, "2026-10-28T09:40")
     # 기간 밖(예전 기억)
     i["o1"] = msg("room-dm", "u-dong", "user", "작년에 제주도 가서 귤 따기 했어", "2026-10-20T20:00")
     i["o2"] = msg("room-dm", None, "assistant", "귤 따기 재밌었겠다 🍊", "2026-10-20T20:00:05", i["o1"])
@@ -263,18 +275,29 @@ def check_tabs(report, db, i):
     # 친구·공유(지금 기준, 기간과 상관없음): 공유 켬·끔, 아는 사이, 다른 친구에게 하는 얘기
     pals = by["친구·공유"]
     ok(pals["headers"] == ["친구", "공유", "아는 사이", "아는 친구 누구에게나: 가벼운 얘기", "가까운 사이에게만: 요즘 근황",
-                           "공유 메모 만든 시각", "마지막으로 본 때"], f"친구·공유 머리줄: {pals['headers']}")
+                           "대화로 한 요청(최근 5개)", "공유 메모 만든 시각", "마지막으로 본 때"],
+       f"친구·공유 머리줄: {pals['headers']}")
     pal = {r[0]: r for r in pals["rows"]}
-    ok(sorted(pal) == ["동희", "민수", "현경"], f"카카오 키가 묶인 친구만: {sorted(pal)}")
-    ok(pal["동희"][1:6] == ["켬", "민수(같은 단체방)\n현경(여자친구 · 가까운 사이 · 말해 준 친구 동희)",
-                          "제주도 여행을 좋아함", "- 발표 준비로 바쁨", "2026-10-27 11:05:00"]
-       and STAMP.fullmatch(pal["동희"][6]), f"동희: {pal['동희']}")
-    ok(pal["현경"][1:6] == ["끔", "동희(여자친구 · 가까운 사이 · 말해 준 친구 동희)", "(공유 끔: 아무에게도 안 함)",
-                          "(공유 끔: 아무에게도 안 함)", None], f"공유를 끈 현경은 아무에게도 안 함: {pal['현경']}")
-    ok(pal["민수"][1:6] == ["켬", "동희(같은 단체방)", "(아직 없음)", "(아직 없음)", None],
+    anon = "#" + hashlib.sha1(b"u-anon").hexdigest()[:8]
+    ok(sorted(pal) == ["동희", "민수", "이름 모름(" + anon + ", 친구에 안 묶인 키)", "현경"],
+       f"카카오 키가 묶인 친구, 그리고 요청을 남긴 안 묶인 키: {sorted(pal)}")
+    ok(pal["동희"][1:7] == ["켬", "민수(같은 단체방)\n현경(여자친구 · 가까운 사이 · 말해 준 친구 동희)",
+                          "제주도 여행을 좋아함", "- 발표 준비로 바쁨",
+                          f"10/28 09:30 단체방: {anon} 키가 '동희'(이)라고 함 → 정할 일: 같은 사람이면 admin link {anon} 동희, "
+                          f"다른 사람이면 admin unlink {anon}\n"
+                          "10/28 09:20 1:1: 선톡 그만 보내 달라고 함 → 정할 일: admin schedule 동희 off\n"
+                          "10/28 09:10 1:1: 민수(이)랑 '대학 친구' 사이라고 함 → 정할 일: admin friendship 동희 민수 "
+                          "\"대학 친구\" [close]", "2026-10-27 11:05:00"]
+       and STAMP.fullmatch(pal["동희"][7]), f"동희(요청은 최신 먼저, 할 명령까지): {pal['동희']}")
+    ok(pal["현경"][1:7] == ["끔", "동희(여자친구 · 가까운 사이 · 말해 준 친구 동희)", "(공유 끔: 아무에게도 안 함)",
+                          "(공유 끔: 아무에게도 안 함)", "10/28 09:00 방 모름: 공유 다시 켜 달라고 함 → 정할 일: "
+                          "admin share 현경 on", None], f"공유를 끈 현경은 아무에게도 안 함: {pal['현경']}")
+    ok(pal["민수"][1:7] == ["켬", "동희(같은 단체방)", "(아직 없음)", "(아직 없음)", "(없음)", None],
        f"기간 밖 단체방도 아는 사이, 공유 메모는 아직 없음: {pal['민수']}")
-    ok(any(x.startswith("친구·공유: 기간과 상관없이 지금 기준 친구 3명") and "공유를 끈 친구" in x for x in readme),
-       "읽는 법에 친구·공유")
+    ok(pal["이름 모름(" + anon + ", 친구에 안 묶인 키)"][5] == "10/28 09:40 1:1: 선톡 덜 보내 달라고 함(하루 3번) → "
+       f"지금 하루 횟수 기본값, 정할 일: admin schedule {anon} <하루 횟수>", pal)
+    ok(any(x.startswith("친구·공유: 기간과 상관없이 지금 기준 친구 3명") and "공유를 끈 친구" in x
+           and "관리자만 정하고 친구 말로는 안 바뀌어요" in x for x in readme), "읽는 법에 친구·공유")
     return tabs
 
 
@@ -306,7 +329,8 @@ def check_xlsx(report, tabs, i, tmp):
     empty = tmp / "empty.xlsx"
     ok(run(report, ["--until", "2026-10-01T00:00+09:00", "--out", str(empty)])[0] == 0, "빈 기간도 만듦")
     ok(all(load_workbook(empty)[n].max_row == 1 for n in SHEETS[1:-1])
-       and load_workbook(empty)["친구·공유"].max_row == 4, "빈 기간은 머리줄만(친구·공유는 지금 기준이라 친구 3명)")
+       and load_workbook(empty)["친구·공유"].max_row == 5,
+       "빈 기간은 머리줄만(친구·공유는 지금 기준이라 친구 3명과 요청을 남긴 안 묶인 키 1개)")
 
     # --out 이 없으면 stdout 으로(서버에서 ssh 로 받는 길). 요약 한 줄은 stderr
     p = subprocess.run([sys.executable, str(ROOT / "tools" / "report.py"), "--until", UNTIL],

@@ -5,15 +5,18 @@
   rooms                        방 목록(1:1·단체, 친구들, 메시지 수, 마지막 대화, 선톡 끔)
   show <이름 또는 #키> [개수]   그 친구가 있는 방들의 최근 대화(기본 30개)와 기억 메모
   stats                        전체 개수와 최근 7일 토큰 사용량(대략의 비용)
-  link <#키> <친구 이름 또는 #키>  그 키를 그 친구로 묶음(이름이 달라 따로 잡힌 같은 사람)
-  unlink <#키>                 그 키를 친구에서 떼어 따로 둠(이름이 같아 잘못 묶인 다른 사람)
+  link <#키> <친구 이름 또는 #키>  그 키를 그 친구로 묶음(같은 사람. 이름이 같은 친구가 이미 있으면 새 키는 묶이지 않고
+                               묶기 요청으로 남음)
+  unlink <#키>                 그 키를 다른 친구와 따로 둠(이름만 같은 다른 사람. 안 묶인 키면 그 이름의 새 친구로)
   share <친구 이름 또는 #키> on|off  그 친구 얘기를 다른 친구에게 해도 되는지
   friendship <친구> <친구> <관계> [close]  두 친구를 아는 사이로 저장하거나 관계를 고침(예: friendship 동희 현경 연인 close).
                                close 를 붙이면 가까운 사이(서로 요즘 근황까지 들음), 빼면 가벼운 얘기만
   schedule <친구 이름 또는 #키> <하루 횟수> [시작-끝 시]  그 친구 1:1 방의 선톡 일정(예: schedule 현경 12 7-24.
-                               시간을 빼면 횟수만 바꿈). schedule <친구> default 면 .env 기본값으로 되돌림
+                               시간을 빼면 횟수만 바꿈). schedule <친구> default 면 .env 기본값으로 되돌림,
+                               schedule <친구> off|on 이면 선톡을 끄거나 다시 켬
 기록을 지우는 명령은 없다(봇 계정에는 그 권한도 없다). link·unlink·share·friendship·schedule 은 키가 어느 친구인지, 공유,
-아는 사이, 선톡 일정만 바꾼다.
+아는 사이, 선톡만 바꾼다. 이 설정들은 관리자만 바꾸고 친구 말로는 안 바뀐다. 친구가 대화로 한 요청은 시트 '친구·공유' 탭과
+friends 에 보인다.
 카카오 키 원문 대신 #짧은키 로 보여 준다(# 은 빼고 써도 된다)."""
 import hashlib
 import os
@@ -251,7 +254,13 @@ def unlink(c, _tz, args):
     src = find_key(c, args[0])
     old = src["friend_id"]
     if old is None:
-        print("이미 어느 친구에도 안 묶여 있음")
+        if src["name"] is None:
+            print("이미 어느 친구에도 안 묶여 있음(이름을 모르는 키)")
+            return
+        # 같은 이름 친구가 있어서 묶이지 않은 키: 다른 사람이면 그 이름의 새 친구로 따로 둔다
+        new = c.execute("INSERT INTO marong.friends (name) VALUES (%s) RETURNING id", (src["name"],)).fetchone()["id"]
+        c.execute("UPDATE marong.people SET friend_id = %s WHERE user_key = %s", (new, src["user_key"]))
+        print(f"{key(src['user_key'])} 키를 '{src['name']}' 새 친구로 따로 둠")
         return
     if c.execute("SELECT count(*) AS n FROM marong.people WHERE friend_id = %s", (old,)).fetchone()["n"] == 1:
         print("이 키만 있는 친구라서 이미 따로임")
@@ -297,7 +306,8 @@ def friendship(c, _tz, args):
 
 
 def schedule(c, _tz, args):
-    usage = f"사용: schedule <친구 이름 또는 #키> <하루 횟수 1~{PER_DAY_MAX}> [시작-끝 시, 예: 7-24] | schedule <친구> default"
+    usage = (f"사용: schedule <친구 이름 또는 #키> <하루 횟수 1~{PER_DAY_MAX}> [시작-끝 시, 예: 7-24] | schedule <친구> default"
+             " | schedule <친구> off|on")
     if len(args) not in (2, 3):
         sys.exit(usage)
     who = args[0]
@@ -310,7 +320,9 @@ def schedule(c, _tz, args):
         "WHERE r.is_channel AND m.user_key = ANY(%s)", (users,)).fetchall()] if users else []
     if not rooms_:
         sys.exit(f"'{who}' 친구의 1:1 방을 찾지 못함(rooms·people 로 보기)")
-    if args[1] == "default" and len(args) == 2:
+    if args[1] in ("on", "off") and len(args) == 2:
+        sets, values = "proactive = %s", (args[1] == "on",)
+    elif args[1] == "default" and len(args) == 2:
         sets, values = "proactive_per_day = NULL, proactive_start = NULL, proactive_end = NULL", ()
     else:
         try:
@@ -328,7 +340,7 @@ def schedule(c, _tz, args):
     for room in rooms_:
         r = c.execute(f"UPDATE marong.rooms SET {sets} WHERE room_key = %s "
                       "RETURNING proactive, proactive_per_day, proactive_start, proactive_end", (*values, room)).fetchone()
-        off = " (친구가 선톡을 꺼 둬서 지금은 안 보냄)" if not r["proactive"] else ""
+        off = " (선톡 꺼짐: 지금은 안 보냄)" if not r["proactive"] else ""
         print(f"방 {key(room)}: 선톡 일정 " + (plan_text(r) if has_plan(r) else ".env 기본값") + off)
 
 
