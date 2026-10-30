@@ -35,7 +35,8 @@ def tool_use(name: str, inp: dict, tid: str = "toolu_1") -> dict:
 
 
 class FakeAnthropic:
-    """respond(key, body) → (상태 코드, JSON) 또는 'stall'(답 없이 멈춤)."""
+    """respond(key, body) → (상태 코드, JSON) 또는 'stall'(답 없이 멈춤). GET(Grok 모델 목록)이면 body 는 {'GET': 경로}.
+    xAI(Grok) 가짜 서버로도 쓴다(키와 경로 /v1/chat/completions 로 구분)."""
 
     def __init__(self, respond):
         self.calls: list[dict] = []
@@ -44,7 +45,12 @@ class FakeAnthropic:
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
-                body = json.loads(self.rfile.read(int(self.headers["content-length"])))
+                self.answer(json.loads(self.rfile.read(int(self.headers["content-length"]))))
+
+            def do_GET(self):
+                self.answer({"GET": self.path})
+
+            def answer(self, body):
                 key = api_key(self.headers)
                 fake.calls.append({"key": key, "path": self.path, "body": body})
                 out = fake.respond(key, body)
@@ -85,9 +91,11 @@ class ScriptedLLM:
     def __init__(self, fn):
         self.fn = fn
         self.bodies: list[dict] = []
+        self.grok: list[bool] = []  # 부를 때마다 Grok 에 먼저 보내라고 했는지
 
-    async def create(self, body: dict, timeout: float):
+    async def create(self, body: dict, timeout: float, grok: bool = False):
         self.bodies.append(body)
+        self.grok.append(grok)
         out = self.fn(body)
         if isinstance(out, Exception):
             raise out

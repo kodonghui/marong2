@@ -429,7 +429,8 @@ async def main():
 
     code, out = admin("friends")
     block = friend_block(out, "현경")
-    ok(code == 0 and block.startswith("현경  공유 켬") and "    - 등산 좋아함" in block and "동희(같은 단체방)" in block
+    ok(code == 0 and block.startswith("현경  공유 켬") and f"  친구 {f_hk}번\n" in block  # 친구 번호는 GROK_FRIENDS 에 씀
+       and "    - 등산 좋아함" in block and "동희(같은 단체방)" in block
        and "민수(대학 친구)" in block and f"{short('h1')} 1:1" in block and f"{short('h2')} 단체" in block, out)
     ok("넣을 만한 게 없음" in friend_block(out, "민수") and "친구에 안 묶인 키 2개" in out, out)
     code, out = admin("people")
