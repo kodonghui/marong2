@@ -63,18 +63,6 @@ class Settings:
     proactive_hours: tuple[int, int]  # 이 시간에만 보냄(한국 시각, 시작 시 이상 끝 시 미만)
     # 방마다 따로 정한 일정(rooms.proactive_per_day·start·end)이 있으면 위 두 값 대신 그것을 씀(tools/admin.py schedule)
     proactive_daily_max: int       # 하루에 보내는 선톡 상한(모든 친구 합, 연달아 보낸 말 묶음이 한 번. 카카오 전송 API 는 하루 1,000건)
-    xai_api_key: str               # Grok(xAI) 키(console.x.ai). 비우면 Grok 을 안 씀
-    xai_model: str                 # Grok 모델 이름. 쓸 수 있는 이름은 run.py --check 가 보여 줌. 비우면 Grok 을 안 씀
-    xai_base_url: str
-    grok_friends: tuple[str, ...]  # Grok 이 답할 친구 번호들(admin friends 의 '친구 N번'): 그 친구의 1:1 방 답만. all 이면 모든 방
-
-    def grok_for(self, friend_id, is_channel: bool) -> bool:
-        """이 방의 답을 Grok 이 하는지. 키나 모델이 비면 늘 Claude. 선톡·사진 설명·요약은 이 값과 상관없이 Claude."""
-        if not (self.xai_api_key and self.xai_model and self.grok_friends):
-            return False
-        if "all" in self.grok_friends:
-            return True
-        return is_channel and friend_id is not None and str(friend_id) in self.grok_friends
 
     def problems(self) -> list[str]:
         """실행 전에 비어 있거나 잘못된 값을 알려 준다(값 자체는 출력하지 않음)."""
@@ -134,8 +122,4 @@ def load_settings() -> Settings:
         proactive_per_day=int(_env("PROACTIVE_PER_DAY", "2")),
         proactive_hours=_hours(_env("PROACTIVE_HOURS", "12-21")),
         proactive_daily_max=int(_env("PROACTIVE_DAILY_MAX", "60")),
-        xai_api_key=_env("XAI_API_KEY"),
-        xai_model=_env("XAI_MODEL"),
-        xai_base_url=_env("XAI_BASE_URL", "https://api.x.ai/v1").rstrip("/"),
-        grok_friends=tuple(t.strip().lower() for t in _env("GROK_FRIENDS").split(",") if t.strip()),
     )
