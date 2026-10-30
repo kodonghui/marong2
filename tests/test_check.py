@@ -25,7 +25,8 @@ def respond(key, body):
     if fmt and "items" in fmt["schema"]["properties"]:  # 공유 메모 거르기
         if BROKEN["share"]:
             return 200, message([], "refusal")
-        return 200, message([text(json.dumps({"items": ["마라탕 좋아함", "토익 시험 끝나면 마라탕 먹으러 갈 계획"]},
+        return 200, message([text(json.dumps({"items": ["마라탕 좋아함", "토익 시험 끝나면 마라탕 먹으러 갈 계획"],
+                                              "close": ["다음 주 금요일 토익 시험", "다이어트 중"]},
                                              ensure_ascii=False))])
     if fmt:
         if BROKEN["summary"]:
@@ -60,13 +61,15 @@ async def main():
     code, out = await run_check()
     assert code == 0, out
     for line in ("모델: claude-haiku-5-5 / 답장 effort xhigh / 요약 effort low", "Claude 주 키: 정상",
-                 "BOT_TOKEN: 비어 있음", "표 버전 6(코드 6)", "선톡: 꺼짐(PROACTIVE=off)", "기록 지우기·고치기 권한: 없음",
+                 "BOT_TOKEN: 비어 있음", "표 버전 7(코드 7)", "선톡: 꺼짐(PROACTIVE=off)", "기록 지우기·고치기 권한: 없음",
                  "답장 시험: 안녕! 나는 마롱이야", "요약 시험: 동희가 토익", "메모: - 마라탕 좋아함",
                  "공유 메모 시험(시험 얘기는 빠져야 함): - 마라탕 좋아함"):
         assert line in out, f"'{line}' 없음\n{out}"
     assert ("준비됨: 768차원" in out) if cache else ("임베딩: 꺼짐" in out), out
     share_line = next(x for x in out.splitlines() if x.startswith("공유 메모 시험"))
     assert share_line == "공유 메모 시험(시험 얘기는 빠져야 함): - 마라탕 좋아함", share_line  # 모델이 넣어도 코드가 뺌
+    close_line = "  근황(가까운 사이에게만. 시험 얘기는 들어가도 됨): - 다음 주 금요일 토익 시험"
+    assert close_line in out.splitlines(), out  # 근황에는 시험이 남고, 몸 얘기(다이어트)는 코드가 뺌
     checks += 1
 
     # 2) 요약 형식이 깨지면 1, 공유 메모를 거절하면 1

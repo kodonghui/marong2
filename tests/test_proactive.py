@@ -458,9 +458,9 @@ async def main():
         db.apply_schema()
         checks = per_day_checks()
         ok(len(checks) == 1 and checks[0][0] == "rooms_proactive_per_day_check" and "<= 48" in checks[0][1]
-           and await store.schema_version() == 6
+           and await store.schema_version() == 7
            and db.admin("SELECT proactive_per_day FROM marong.rooms WHERE room_key = 'p5'") == [(5,)],
-           f"옛 CHECK 를 지우고 1~48 하나만, 표 버전 6, 정해 둔 횟수는 그대로: {checks}")
+           f"옛 CHECK 를 지우고 1~48 하나만, 표 버전 7, 정해 둔 횟수는 그대로: {checks}")
 
         # ── 방마다 일정(tools/admin.py schedule): 현경이에게는 7~24시에 하루 12번 ──
         def admin(*args):

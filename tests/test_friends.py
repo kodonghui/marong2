@@ -1,7 +1,8 @@
 """친구들(서로 아는 사이) 시험: 진짜 Postgres + 가짜 Claude.
 키 묶기(같은 이름·사람마다 1:1 키 하나·터미널 키·이름 바꾸기·옛 기록 묶기), 아는 사이(같은 단체방·말해 준 사이),
-공유 메모(방별 메모 거르기·비밀 빼기·바뀌면 다시 거르기·거절·형식 오류), 다른 방 원문·요약·메모가 안 새는지,
-도구(add_friendship·set_share), 선톡에는 친구 얘기 없음, 관리 명령(friends·link·unlink·share), 로그에 내용 없음.
+공유 메모(방별 메모 거르기·비밀 빼기·가벼운 얘기와 근황 나누기·바뀌면 다시 거르기·거절·형식 오류), 다른 방 원문·요약·메모가
+안 새는지, 도구(add_friendship·set_share), 가까운 사이에게만 근황, 관계를 지금 친구 쪽에서 보여 주기, 선톡에는 친구 얘기
+없음, 관리 명령(friends·link·unlink·share·friendship), 표 버전 7 옮기기(옛 관계 말로 가까운 사이 정하기), 로그에 내용 없음.
 실행(윈도우): .venv\\Scripts\\python tests\\test_friends.py   (리눅스·맥: .venv/bin/python tests/test_friends.py)"""
 import asyncio
 import hashlib
@@ -24,7 +25,7 @@ from pg import TestDB  # noqa: E402
 
 CHECKS = 0
 LOGS: list[str] = []
-LONG = "아주 긴 취미 설명 " * 8  # 60자를 넘는 공유 메모 한 줄
+LONG = "아주 긴 취미 설명 " * 8  # 60자를 넘는 공유 메모(가벼운 얘기) 한 줄
 
 
 def ok(cond, what):
@@ -52,9 +53,12 @@ def chat_reply(body):
     m = re.search(r"내 이름은 (\S+)", said)
     if m:
         return message([tool_use("set_name", {"name": m.group(1)})], "tool_use")
-    m = re.search(r"사이:([^:]+):(.+)$", said)
+    m = re.search(r"사이:([^:]+):([^:]+?)(:close)?$", said)
     if m:
-        return message([tool_use("add_friendship", {"name": m.group(1), "label": m.group(2)})], "tool_use")
+        inp = {"name": m.group(1), "label": m.group(2)}
+        if m.group(3):
+            inp["close"] = True
+        return message([tool_use("add_friendship", inp)], "tool_use")
     if "공유끄기" in said:
         return message([tool_use("set_share", {"on": False})], "tool_use")
     if "공유켜기" in said:
@@ -79,16 +83,19 @@ def summary_reply(body):
 
 
 def share_reply(body):
-    """가짜 Claude(공유 메모): 메모 줄을 거의 다 돌려줌. '우울'만 빼고 '(비밀)'·중복·긴 줄은 그대로(코드가 걸러야 함)."""
+    """가짜 Claude(공유 메모): 메모 줄을 거의 다 돌려줌. '근황 '으로 시작하는 줄은 close(가까운 사이에게만)로, 나머지는 items 로.
+    '우울'만 빼고 '(비밀)'·중복·긴 줄·막는 낱말은 그대로(코드가 걸러야 함)."""
     content = body["messages"][0]["content"]
     if "REFUSE_SHARE" in content:
         return message([], "refusal")
     if "BAD_SHARE" in content:
         return message([text("json 아님")])
-    items = [line[2:] for line in content.splitlines() if line.startswith("- ") and "우울" not in line]
+    lines = [line[2:] for line in content.splitlines() if line.startswith("- ") and "우울" not in line]
+    items = [x for x in lines if not x.startswith("근황 ")]
+    close = [x[3:] for x in lines if x.startswith("근황 ")]
     if items:
         items.append("- " + items[0])
-    return message([text(json.dumps({"items": items}, ensure_ascii=False))])
+    return message([text(json.dumps({"items": items, "close": close}, ensure_ascii=False))])
 
 
 def respond(body):
@@ -150,13 +157,24 @@ async def main():
                         (friend_id,))
         return rows[0] if rows else (None, None)
 
+    def close_of(friend_id):
+        """가까운 사이에게만 하는 요즘 근황(가장 최근 공유 메모)."""
+        rows = db.admin("SELECT close_content FROM marong.shared_notes WHERE friend_id = %s ORDER BY id DESC LIMIT 1",
+                        (friend_id,))
+        return rows[0][0] if rows else None
+
+    def last_memory(room):
+        """그 방 마지막 마롱이 답에 넣은 기억 기록(meta.memory)."""
+        return db.admin("SELECT meta->'memory' FROM marong.messages WHERE room_key = %s AND role = 'assistant' "
+                        "ORDER BY id DESC LIMIT 1", (room,))[0][0]
+
     def short(k):
         return "#" + hashlib.sha1(k.encode()).hexdigest()[:8]
 
     # 방: c1 동희 1:1(d1), c2 현경 1:1(h1), c3 이름만 같은 다른 동희 1:1(x1), g1 단체방(동희 d2·현경 h2),
     #     g2 단체방(동희라고 한 d3 혼자), term 터미널 대화(t1), c4 민수 1:1(m1)·g3 단체방(m2)은 옛 기록
     # ── 키 묶기 ──
-    ok(await store.schema_version() == 6, "표 버전 6")
+    ok(await store.schema_version() == 7, "표 버전 7")
     await say("c1", "d1", "안녕 내 이름은 동희")
     f_dh = fid("d1")
     ok(f_dh is not None, "1:1 에서 이름을 알려 주면 친구 한 명으로 저장")
@@ -188,8 +206,9 @@ async def main():
     ok(await store.link_unlinked() == 0 and fid("t1") is None, "다시 돌려도 그대로(터미널 키는 계속 안 묶음)")
     ok((await store.counts())["friends"] == 5 and (await store.counts())["people"] == 9, await store.counts())
 
-    # ── 방별 메모 → 공유 메모(가벼운 얘기만) ──
-    await say("c2", "h1", "메모:마라탕 좋아함|(비밀) 이직 준비 중|요즘 우울함 SECRET_RAW_TEXT|토익 시험 끝나면 마라탕 먹으러 갈 계획")
+    # ── 방별 메모 → 공유 메모(아는 친구 누구에게나 하는 가벼운 얘기 + 가까운 사이에게만 하는 근황) ──
+    await say("c2", "h1", "메모:마라탕 좋아함|(비밀) 이직 준비 중|요즘 우울함 SECRET_RAW_TEXT|토익 시험 끝나면 마라탕 먹으러 갈 계획"
+                          "|근황 팀장 때문에 야근이 잦음|근황 (비밀) 지역 옮긴 게 힘듦|근황 다이어트 중 48kg 목표|근황 다음 달 시험 준비 중")
     await say("g1", "h2", "메모:보드게임 좋아함", channel=False)
     await say("g1", "d2", "메모:군밤 좋아함", channel=False)
     llm.bodies.clear()
@@ -198,9 +217,14 @@ async def main():
     ok("이직" in hk_note and "우울" in hk_note, f"방별 메모에는 그대로 있음: {hk_note}")
     content, meta = shared(f_hk)
     ok(set(content.splitlines()) == {"- 마라탕 좋아함", "- 보드게임 좋아함"}, f"현경 공유 메모: {content!r}")
-    ok(shared(f_dh)[0] == "- 군밤 좋아함", shared(f_dh))
-    ok(not any(x in c for (c,) in db.admin("SELECT content FROM marong.shared_notes") for x in ("비밀", "이직", "우울", "토익")),
-       "(비밀)·시험 얘기는 모델이 돌려줘도 코드가 뺌, 고민은 거름")
+    ok(close_of(f_hk) == "- 팀장 때문에 야근이 잦음\n- 다음 달 시험 준비 중",
+       f"근황: 고민·시험은 넣고 (비밀)·몸무게·다이어트는 모델이 돌려줘도 코드가 뺌: {close_of(f_hk)!r}")
+    ok(shared(f_dh)[0] == "- 군밤 좋아함" and close_of(f_dh) == "", shared(f_dh))
+    ok(not any(x in c for (c,) in db.admin("SELECT content FROM marong.shared_notes") for x in ("비밀", "이직", "우울", "토익",
+                                                                                              "팀장", "시험")),
+       "가벼운 얘기: (비밀)·시험·고민은 모델이 돌려줘도 코드가 뺌")
+    ok(not any(x in c for (c,) in db.admin("SELECT close_content FROM marong.shared_notes") for x in ("비밀", "다이어트", "48kg")),
+       "근황에도 (비밀)·몸 얘기는 없음")
     req = next(b for b in llm.bodies if is_share(b) and "# 친구: 현경" in b["messages"][0]["content"])
     ok("## 1:1 방에서 정리한 메모" in req["messages"][0]["content"]
        and "## 단체방에서 정리한 메모" in req["messages"][0]["content"], "1:1·단체방 메모를 같이 거름")
@@ -226,6 +250,8 @@ async def main():
                                                     r"보드게임 좋아함 · 마라탕 좋아함)", part), part)
     others = part.split("## 아는 사이인지 모르는 친구", 1)[1]
     ok("민수" in others and "마라탕" not in others and "군밤" not in part, f"모르는 친구는 이름만, 나는 빠짐: {part}")
+    ok("요즘 근황:" not in part and "팀장" not in part, f"같은 단체방이기만 하면 근황은 안 들음: {part}")
+    ok(last_memory("c1")["close"] == [] and last_memory("c1")["friends"] == [f_hk], last_memory("c1"))
     sit = situation(b)
     ok(all(x not in sit for x in ("SECRET_RAW_TEXT", "이직", "우울", "토익", "요약: 내 이름은 현경")),
        "다른 방 원문·요약·메모는 안 들어감")
@@ -237,10 +263,13 @@ async def main():
     a, b_ = sorted((f_dh, f_ms))
     ok(db.admin("SELECT label, told_by FROM marong.friendships WHERE friend_a = %s AND friend_b = %s", (a, b_))
        == [("회사 동기", f_dh)], "아는 사이 저장(작은 id 먼저, 말해 준 친구)")
+    ok(db.admin("SELECT close FROM marong.friendships WHERE friend_a = %s AND friend_b = %s", (a, b_)) == [(False,)],
+       "close 를 안 주면 가까운 사이 아님")
     await say("c1", "d1", "그렇구나")
-    ok("- 민수(회사 동기): 아직 아는 얘기 없음" in friends_part(llm.bodies[-1]), friends_part(llm.bodies[-1]))
+    ok("- 민수(네 회사 동기): 아직 아는 얘기 없음" in friends_part(llm.bodies[-1]), friends_part(llm.bodies[-1]))
     await say("c4", "m1", "동희 알아?")
-    ok("- 동희(회사 동기): 군밤 좋아함" in friends_part(llm.bodies[-1]), "말해 준 사이는 양쪽 다 앎")
+    ok("- 동희(동희한테 너는 회사 동기): 군밤 좋아함" in friends_part(llm.bodies[-1]),
+       f"말해 준 사이는 양쪽 다 앎(관계는 지금 친구 쪽에서): {friends_part(llm.bodies[-1])}")
     ok("모른다고" in await say("c1", "d1", "사이:철수:친구"), "모르는 친구")
     ok("여러 명" in await say("c2", "h1", "사이:동희:대학 친구"), "같은 이름 친구가 여럿이면 저장 안 함")
     ok("자기 자신" in await say("c2", "h1", "사이:현경:나"), "자기 자신")
@@ -252,7 +281,8 @@ async def main():
     ok("현경(이)가 아주 오래된 소꿉친구이자 같은 회사인 걸" in r, f"긴 관계는 20자까지: {r}")
     await say("c4", "m1", "사이:현경:대학 친구")
     await say("c4", "m1", "그래서")
-    ok("- 현경(대학 친구): " in friends_part(llm.bodies[-1]), "다시 말하면 관계를 고침")
+    ok("- 현경(네 대학 친구): " in friends_part(llm.bodies[-1]), "다시 말하면 관계를 고침")
+    ok("요즘 근황:" not in friends_part(llm.bodies[-1]), "가까운 사이가 아니면 근황은 안 들음")
     db.admin("UPDATE marong.friendships SET label = NULL WHERE friend_a = %s AND friend_b = %s", (a, b_))
     await say("c1", "d1", "관계 없이")
     ok("- 민수(아는 사이): " in friends_part(llm.bodies[-1]), "관계가 비어도 말해 준 사이는 아는 사이")
@@ -291,8 +321,8 @@ async def main():
     await say("g2", "d3", "메모:" + "|".join([LONG] + [f"취미{i}" for i in range(8)]), channel=False)
     await settle()
     lines = shared(f_d3)[0].splitlines()
-    ok(len(lines) == 6 and len(lines[0]) == 62 and lines[0].endswith("…") and lines[-1] == "- 취미4",
-       f"6줄까지, 한 줄 60자까지: {lines}")
+    ok(len(lines) == 8 and len(lines[0]) == 62 and lines[0].endswith("…") and lines[-1] == "- 취미6",
+       f"8줄까지, 한 줄 60자까지: {lines}")
 
     # ── 요약(10턴)을 기다리지 않음: 1:1 에서 한 얘기를 단체방 친구가 자기 1:1 에서 바로 물어봐도 앎 ──
     await say("g4", "p1", "내 이름은 지수", channel=False)
@@ -396,12 +426,79 @@ async def main():
     code, out = admin("link", "동희", "현경")
     ok(code == 1 and "사용:" in out, "link 첫 칸은 #키")
 
+    # ── 가까운 사이(연인·가족·절친): 서로 요즘 근황까지. 같은 단체방·그냥 아는 사이는 가벼운 얘기만 ──
+    r = await say("c1", "d1", "사이:현경:여자친구:close")
+    ok("동희(이)랑 현경(이)가 여자친구" in r and "근황도" in r, r)
+    a, b_ = sorted((f_dh, f_hk))
+    ok(db.admin("SELECT label, told_by, close FROM marong.friendships WHERE friend_a = %s AND friend_b = %s", (a, b_))
+       == [("여자친구", f_dh, True)], "가까운 사이로 저장(있던 관계를 고침)")
+    await say("c2", "h1", "메모:등산 좋아함|근황 팀장 때문에 야근이 잦음|근황 (비밀) 동희한테는 말하지 마|근황 다이어트 중")
+    await say("c2", "h1", "응")
+    worker._noted_at.clear()
+    await settle()
+    ok(close_of(f_hk) == "- 팀장 때문에 야근이 잦음", f"현경 근황: {close_of(f_hk)!r}")
+    await say("c1", "d1", "현경이 요즘 어때?")
+    part = friends_part(llm.bodies[-1])
+    ok("- 현경(네 여자친구, 가까운 사이, 같은 단체방): " in part and "\n  요즘 근황: 팀장 때문에 야근이 잦음" in part,
+       f"가까운 사이는 근황까지: {part}")
+    ok(all(x not in part for x in ("비밀", "말하지 마", "다이어트")), f"근황에도 비밀·몸 얘기는 없음: {part}")
+    ok(last_memory("c1")["close"] == [f_hk] and f_hk in last_memory("c1")["friends"], last_memory("c1"))
+    await say("c2", "h1", "동희는 뭐 해?")
+    part = friends_part(llm.bodies[-1])
+    ok("- 동희(동희한테 너는 여자친구, 가까운 사이, 같은 단체방): 군밤 좋아함" in part and "요즘 근황:" not in part,
+       f"반대쪽은 '동희한테 너는 여자친구'(동희 근황이 없으면 줄도 없음): {part}")
+    await say("c4", "m1", "현경은?")
+    part = friends_part(llm.bodies[-1])
+    ok("- 현경(네 대학 친구): " in part and "요즘 근황:" not in part and "팀장" not in part, f"그냥 아는 사이: {part}")
+    await say("g1", "a1", "현경 어때", channel=False)
+    part = friends_part(llm.bodies[-1])
+    ok("- 현경(같은 단체방): " in part and "팀장" not in part, f"같은 단체방이기만 하면 가벼운 얘기만: {part}")
+
+    code, out = admin("friends")
+    block = friend_block(out, "현경")
+    ok(code == 0 and "동희(여자친구 · 가까운 사이, 같은 단체방)" in block
+       and "  요즘 근황(가까운 사이에게만):\n    - 팀장 때문에 야근이 잦음" in block, out)
+    code, out = admin("friendship", short("m1"), "현경", "베프", "close")
+    ok(code == 0 and "가까운 사이" in out, out)
+    a, b_ = sorted((f_ms, f_hk))
+    ok(db.admin("SELECT label, told_by, close FROM marong.friendships WHERE friend_a = %s AND friend_b = %s", (a, b_))
+       == [("베프", None, True)], "관리자가 정한 사이(말해 준 친구 없음)")
+    await say("c4", "m1", "현경은?")
+    part = friends_part(llm.bodies[-1])
+    ok("- 현경(베프, 가까운 사이): " in part and "\n  요즘 근황: 팀장 때문에 야근이 잦음" in part, part)
+    code, out = admin("friendship", short("m1"), "현경", "대학 친구")
+    await say("c4", "m1", "현경은?")
+    ok(code == 0 and "가벼운 얘기만" in out and "요즘 근황:" not in friends_part(llm.bodies[-1]), out)
+    for args in (("현경", "현경", "나"), (short("m1"), "현경", "친구", "가까움"), (short("m1"), "현경")):
+        code, out = admin("friendship", *args)
+        ok(code == 1 and "사용:" in out, f"friendship {args}: {out}")
+
+    # ── 표 버전 7 로 올릴 때: 그 전에 저장된 사이는 관계 말로 가까운 사이를 한 번만 정함 ──
+    db.admin("ALTER TABLE marong.friendships ALTER COLUMN close DROP NOT NULL")
+    db.admin("UPDATE marong.friendships SET close = NULL")
+    a, b_ = sorted((f_dh, f_ms))
+    db.admin("UPDATE marong.friendships SET label = '전 여자친구' WHERE friend_a = %s AND friend_b = %s", (a, b_))
+    db.apply_schema()
+
+    def closeness():
+        return {(x, y): c for x, y, c in db.admin("SELECT friend_a, friend_b, close FROM marong.friendships")}
+
+    got = closeness()
+    ok(got[tuple(sorted((f_dh, f_hk)))] is True and got[tuple(sorted((f_ms, f_hk)))] is False
+       and got[(a, b_)] is False, f"여자친구 → 가까운 사이, 대학 친구·전 여자친구 → 아님: {got}")
+    ok(db.admin("SELECT is_nullable FROM information_schema.columns WHERE table_schema = 'marong' "
+                "AND table_name = 'friendships' AND column_name = 'close'") == [("NO",)], "다시 비울 수 없음")
+    db.admin("UPDATE marong.friendships SET close = false WHERE friend_a = %s AND friend_b = %s", tuple(sorted((f_dh, f_hk))))
+    db.apply_schema()
+    ok(closeness()[tuple(sorted((f_dh, f_hk)))] is False and await store.schema_version() == 7,
+       "다시 설치해도 정해 둔 값은 그대로")
+
     # ── 로그에는 내용·이름이 없음 ──
     joined = "\n".join(LOGS)
     ok("add_friendship user=" in joined and "set_share user=" in joined and "공유 메모 저장 friend=" in joined
        and "메모 먼저 저장 room=" in joined, "로그는 남음")
     for word in ("마라탕", "보드게임", "우울", "이직", "토익", "SECRET_RAW_TEXT", "회사 동기", "현경", "민수", "등산",
-                 "피자", "치킨", "지수"):
+                 "피자", "치킨", "지수", "팀장", "야근", "여자친구", "다이어트"):
         ok(word not in joined, f"로그에 '{word}' 없음")
 
     await store.close()

@@ -12,7 +12,8 @@
 #   logs         로그 보기(Ctrl+C 로 나옴)
 #   prompt       prompt.md·welcome.txt·knowledge/ 만 올림. 재시작 없이 다음 메시지부터 반영
 #   admin …      기록 보기: admin friends | people | rooms | show <이름 또는 #키> [개수] | stats
-#                친구 고치기: admin link <#키> <친구> | unlink <#키> | share <친구> on|off (기록은 안 지움)
+#                친구 고치기: admin link <#키> <친구> | unlink <#키> | share <친구> on|off
+#                           | friendship <친구> <친구> <관계> [close] (close: 가까운 사이라 근황까지. 기록은 안 지움)
 #                선톡 일정: admin schedule <친구> <하루 횟수> [시작-끝 시] | schedule <친구> default
 #   proactive <이름 또는 #키> [--dry]  그 친구의 1:1 방에 선톡 한 개를 지금 보냄(시험용). --dry 면 만든 말만 보여 줌
 #   report <저장할 파일.xlsx> [시간] [끝 시각]  지난 24시간(기본) 대화·임베딩·답에 들어간 기억·요약/메모를 엑셀로 받음
@@ -154,5 +155,5 @@ case "${1:-}" in
     on_server "$AS_MARONG 'cd $DEST && exec .venv/bin/python run.py --proactive \"\$@\"' _ $(printf '%q ' "$@")"
     ;;
   chat) "${SSH[@]}" -t "$HOST" "$AS_MARONG 'cd $DEST && .venv/bin/python run.py --chat'" ;;
-  *) sed -n '2,25p' "$0"; exit 1 ;;
+  *) sed -n '2,26p' "$0"; exit 1 ;;
 esac

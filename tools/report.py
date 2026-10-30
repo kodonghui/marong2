@@ -105,7 +105,8 @@ def also(memory: dict) -> str:
     recent = memory.get("recent") or []
     if len(recent) == 2:
         parts.append(f"최근 대화 #{recent[0]}~#{recent[1]}")
-    for field, label, unit in (("summaries", "요약", "개"), ("notes", "메모", "개"), ("friends", "친구", "명")):
+    for field, label, unit in (("summaries", "요약", "개"), ("notes", "메모", "개"), ("friends", "친구", "명"),
+                               ("close", "근황", "명")):
         if memory.get(field):
             parts.append(f"{label} {len(memory[field])}{unit}")
     return " · ".join(parts) or "-"
@@ -135,7 +136,7 @@ def fetch(c, start: datetime, until: datetime, vectors: bool = True) -> dict:
             "LEFT JOIN marong.people p ON p.user_key = n.user_key "
             "WHERE n.created_at >= %(s)s AND n.created_at < %(u)s ORDER BY n.id", w).fetchall(),
         "shared": c.execute(
-            "SELECT s.id, s.friend_id, f.name, s.content, s.meta, s.created_at FROM marong.shared_notes s "
+            "SELECT s.id, s.friend_id, f.name, s.content, s.close_content, s.meta, s.created_at FROM marong.shared_notes s "
             "JOIN marong.friends f ON f.id = s.friend_id "
             "WHERE s.created_at >= %(s)s AND s.created_at < %(u)s ORDER BY s.id", w).fetchall(),
     }
@@ -307,8 +308,11 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
             None, None, None, None]))
     for s in reversed(data["shared"]):
         meta = s["meta"] or {}
+        told = s["content"] or "(다른 친구에게 할 얘기 없음)"
+        if s["close_content"]:
+            told += "\n[가까운 사이에게만: 요즘 근황]\n" + s["close_content"]
         made.append((s["created_at"], [
-            "공유 메모", s["id"], at(s["created_at"]), s["name"], s["content"] or "(다른 친구에게 할 얘기 없음)",
+            "공유 메모", s["id"], at(s["created_at"]), s["name"], told,
             "거른 메모 " + (", ".join(f"#{x}" for x in meta.get("note_ids") or []) or "-"),
             meta.get("model"), meta.get("effort"), meta.get("input_tokens"), meta.get("output_tokens")]))
     made.sort(key=lambda x: x[0], reverse=True)  # 같은 시각은 넣은 순서 그대로(정렬이 안정적)
@@ -342,7 +346,7 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         "- 그 방의 최근 요약 3개와 친구별 기억 메모",
         f"- 지금 말과 비슷한 예전 대화: 지금 말을 임베딩해서 같은 방의 예전 메시지·요약과 비교해요. 비슷한 순으로 12개를 찾고, "
         f"비슷함 {threshold:g} 이상인 것 중 요약 3개·메시지 4개까지 넣어요. 최근 대화와 이미 넣은 요약 3개는 빼고 찾아요.",
-        "- 지금 친구와 아는 친구들의 가벼운 얘기(공유 메모)",
+        "- 지금 친구와 아는 친구들의 가벼운 얘기(공유 메모). 연인·가족 같은 가까운 사이면 그 친구의 요즘 근황까지",
         "- 선톡은 그 방의 최근 대화·요약·메모만 보고 임베딩 검색은 하지 않아요.",
         "",
         "■ 참고",
