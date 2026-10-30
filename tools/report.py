@@ -1,4 +1,5 @@
-"""마롱이 기록 리포트: 대화 · 임베딩 · 들어간 기억(답마다 임베딩 검색으로 찾은 것과 실제로 넣은 것) · 요약·메모.
+"""마롱이 기록 리포트: 대화 · 임베딩 · 들어간 기억(답마다 임베딩 검색으로 찾은 것과 실제로 넣은 것) · 요약·메모
+· 친구·공유(지금 기준 공유 켬·끔, 아는 사이, 다른 친구에게 하는 얘기).
   python tools/report.py [--hours 24] [--until 2026-10-27T19:00+09:00] [--out 파일]   엑셀(--out 이 없으면 stdout)
   python tools/report.py --sheet [--until …]   구글 시트로 보냄(.env 의 SHEET_URL. 기간은 최근 SHEET_DAYS 일, 기본 30)
   python tools/report.py --sheet --if-asked    시트에서 '마롱이 > 지금 새로고침'을 눌렀을 때만 보냄(서버가 1분마다 물어봄)
@@ -139,6 +140,20 @@ def fetch(c, start: datetime, until: datetime, vectors: bool = True) -> dict:
             "SELECT s.id, s.friend_id, f.name, s.content, s.close_content, s.meta, s.created_at FROM marong.shared_notes s "
             "JOIN marong.friends f ON f.id = s.friend_id "
             "WHERE s.created_at >= %(s)s AND s.created_at < %(u)s ORDER BY s.id", w).fetchall(),
+        # 친구·공유 탭은 기간과 상관없이 지금 상태: 친구(카카오 키가 묶인 친구만), 말해 준 사이, 같은 단체방, 가장 최근 공유 메모
+        "friends": c.execute(
+            "SELECT f.id, f.name, f.share, max(p.last_seen) AS last FROM marong.friends f "
+            "JOIN marong.people p ON p.friend_id = f.id GROUP BY f.id ORDER BY last DESC, f.name").fetchall(),
+        "friendships": c.execute("SELECT friend_a, friend_b, label, close, told_by FROM marong.friendships").fetchall(),
+        "mates": c.execute(
+            "WITH rf AS (SELECT DISTINCT m.room_key, p.friend_id FROM marong.messages m "
+            "  JOIN marong.people p ON p.user_key = m.user_key JOIN marong.rooms r ON r.room_key = m.room_key "
+            "  WHERE NOT r.is_channel AND p.friend_id IS NOT NULL) "
+            "SELECT DISTINCT a.friend_id AS a, b.friend_id AS b FROM rf a "
+            "  JOIN rf b ON b.room_key = a.room_key AND b.friend_id <> a.friend_id").fetchall(),
+        "latest_shared": {r["friend_id"]: r for r in c.execute(
+            "SELECT DISTINCT ON (friend_id) friend_id, content, close_content, created_at FROM marong.shared_notes "
+            "ORDER BY friend_id, id DESC").fetchall()},
     }
     # 답에 넣은(또는 찾고 안 넣은) 예전 기억과 친구가 한 말은 기간 밖일 수 있어서 따로 읽음
     msg_ids, sum_ids = set(), set()
@@ -320,6 +335,37 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
                               "입력 토큰", "출력 토큰"],
                     [r for _, r in made], [9, 7, 19, 26, 80, 24, 17, 7, 9, 9], wrap={5}))
 
+    # ── 친구·공유(지금 기준): 누구와 아는 사이인지와 다른 친구에게 하는 얘기. 공유를 끈 친구 얘기는 아무에게도 안 함 ──
+    # (2026-10-30 현경 공유가 꺼져 있던 게 시트에 안 보여서 추가)
+    friend_name = {f["id"]: f["name"] for f in data["friends"]}
+    known: dict[int, dict[int, list[str]]] = {}
+    for fs in data["friendships"]:
+        if fs["friend_a"] not in friend_name or fs["friend_b"] not in friend_name:
+            continue
+        teller = (f"말해 준 친구 {friend_name[fs['told_by']]}" if fs["told_by"] in friend_name
+                  else "관리자가 정함" if fs["told_by"] is None else None)
+        parts = [x for x in (fs["label"] or "아는 사이", "가까운 사이" if fs["close"] else None, teller) if x]
+        for me, other in ((fs["friend_a"], fs["friend_b"]), (fs["friend_b"], fs["friend_a"])):
+            known.setdefault(me, {}).setdefault(other, []).extend(parts)
+    for m in data["mates"]:
+        if m["a"] in friend_name and m["b"] in friend_name:
+            known.setdefault(m["a"], {}).setdefault(m["b"], []).append("같은 단체방")
+    rows = []
+    for f in data["friends"]:
+        s = data["latest_shared"].get(f["id"])
+        knows = sorted((friend_name[o], " · ".join(parts)) for o, parts in (known.get(f["id"]) or {}).items())
+        if not f["share"]:
+            light = close = "(공유 끔: 아무에게도 안 함)"
+        elif s:
+            light, close = s["content"] or "(없음)", s["close_content"] or "(없음)"
+        else:
+            light = close = "(아직 없음)"
+        rows.append([f["name"], "켬" if f["share"] else "끔", "\n".join(f"{n}({how})" for n, how in knows) or "(아직 없음)",
+                     light, close, at(s["created_at"]) if s else None, at(f["last"])])
+    tabs.append(tab("친구·공유", ["친구", "공유", "아는 사이", "아는 친구 누구에게나: 가벼운 얘기",
+                               "가까운 사이에게만: 요즘 근황", "공유 메모 만든 시각", "마지막으로 본 때"],
+                    rows, [10, 6, 40, 50, 50, 19, 19], wrap={3, 4, 5}))
+
     # ── 읽는 법(맨 앞) ──
     replies = [m for m in msgs if m["role"] == "assistant" and not (m["meta"] or {}).get("proactive")]
     proactive = [m for m in msgs if m["role"] == "assistant" and (m["meta"] or {}).get("proactive")]
@@ -340,6 +386,9 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         "실제로 답에 넣었는지(넣음·안 넣음)와 그 원문을 보여 줘요.",
         f"요약·메모: 이 기간에 만든 요약 {len(data['summaries'])}개, 친구 메모 {len(data['notes'])}줄, "
         f"공유 메모 {len(data['shared'])}줄(compact 된 기억).",
+        f"친구·공유: 기간과 상관없이 지금 기준 친구 {len(data['friends'])}명. 친구마다 공유 켬·끔, 아는 사이(친구가 말해 준 관계와 "
+        "같은 단체방), 다른 친구에게 하는 얘기예요. 가까운 사이(연인·가족·절친)끼리는 요즘 근황까지 하고, 공유를 끈 친구"
+        "(자기 얘기를 하지 말라고 한 친구) 얘기는 아무에게도 안 해요.",
         "",
         "■ 마롱이가 답할 때 넣는 기억",
         f"- 최근 대화 원문(같은 방 최근 {recent_turns}턴)",
