@@ -473,6 +473,45 @@ def check_ask(report):
     ok(exited == 2, "--if-asked 는 --sheet 와 같이만")
 
 
+def check_moved(report, db):
+    """요청한 뒤 관리자가 키를 다른 친구로 옮기거나 떼어 낸 경우, 정해진 것과 다른 관계를 말한 경우(2026-10-30 리뷰)."""
+    one = lambda sql, params: db.admin(sql + " RETURNING id", params)[0][0]  # noqa: E731
+    f_dong, f_hk = (db.admin("SELECT id FROM marong.friends WHERE name = %s", (n,))[0][0] for n in ("동희", "현경"))
+
+    def ask(user, friend, room, kind, detail, at):
+        db.admin("INSERT INTO marong.requests (user_key, friend_id, room_key, kind, detail, created_at) "
+                 "VALUES (%s, %s, %s, %s, %s, %s)", (user, friend, room, kind, Jsonb(detail), kst(at)))
+
+    # 현경의 다른 키가 '현경이'라는 새 친구로 잡혀 요청을 남긴 뒤, 관리자가 그 키를 현경에 묶음 → '현경이'는 키가 없어 빠짐
+    f_hk2 = one("INSERT INTO marong.friends (name) VALUES (%s)", ("현경이",))
+    db.admin("INSERT INTO marong.people (user_key, name, friend_id) VALUES ('u-hk2', '현경이', %s)", (f_hk2,))
+    ask("u-hk2", f_hk2, None, "share_off", {}, "2026-10-29T10:00")
+    ask("u-hk2", f_hk2, None, "friendship", {"name": "동희", "label": "남자친구", "with": f_dong}, "2026-10-29T10:10")
+    ask("u-dong", f_dong, "room-dm", "friendship", {"name": "현경", "label": "여자친구", "with": f_hk}, "2026-10-29T10:20")
+    db.admin("UPDATE marong.people SET friend_id = %s WHERE user_key = 'u-hk2'", (f_hk,))
+    # 요청한 키를 관리자가 떼어 내 지금은 어느 친구에도 안 묶임(그 친구도 키가 없어 빠짐)
+    f_gone = one("INSERT INTO marong.friends (name) VALUES (%s)", ("지민",))
+    db.admin("INSERT INTO marong.people (user_key, name, friend_id) VALUES ('u-gone', '지민', %s)", (f_gone,))
+    ask("u-gone", f_gone, None, "share_off", {}, "2026-10-29T10:30")
+    db.admin("UPDATE marong.people SET friend_id = NULL WHERE user_key = 'u-gone'")
+
+    with psycopg.connect(db.app_url, row_factory=dict_row) as c:
+        c.read_only = True
+        tabs, _ = report.build(c, kst("2026-10-26T19:00"), kst("2026-10-27T19:00"), TZ, now=kst("2026-10-29T11:00"))
+    pal = {r[0]: r for r in next(t for t in tabs if t["name"] == "친구·공유")["rows"]}
+    gone = f"지민({short('u-gone')}, 친구에 안 묶인 키)"
+    ok("현경이" not in pal and gone in pal, f"키가 없는 친구는 빠지고, 떼어 낸 키는 따로 한 줄: {sorted(pal)}")
+    ok(pal["현경"][5] == "10/29 10:10 방 모름: 동희(이)랑 '남자친구' 사이라고 함 → 지금은 '여자친구 · 가까운 사이'(으)로 "
+       "정해져 있음, 바꾸려면: admin friendship 현경 동희 남자친구 [close]\n"
+       "10/29 10:00 방 모름: 공유 꺼 달라고 함 → 지금 꺼져 있음\n"
+       "10/28 09:00 방 모름: 공유 다시 켜 달라고 함 → 정할 일: admin share 현경 on",
+       f"옮긴 키의 요청은 키가 지금 묶인 친구에게, 다른 관계를 말하면 바꿀 명령까지: {pal['현경'][5]}")
+    ok(pal["동희"][5].startswith("10/29 10:20 1:1: 현경(이)랑 '여자친구' 사이라고 함 → 지금 '여자친구 · 가까운 사이'(으)로 "
+                                "정해져 있음\n"), f"정해진 관계와 같으면 명령 없이: {pal['동희'][5]}")
+    ok(pal[gone][5] == "10/29 10:30 방 모름: 공유 꺼 달라고 함 → 이 키는 지금 어느 친구에도 안 묶여 있음, "
+       f"정할 일: 먼저 admin link {short('u-gone')} <친구>", f"떼어 낸 키의 요청: {pal[gone]}")
+
+
 def main():
     db = TestDB()
     os.environ.update({"DATABASE_URL": db.app_url, "TIMEZONE": "Asia/Seoul"})  # 봇과 같은 marong 계정(읽기)
@@ -485,6 +524,7 @@ def main():
         check_xlsx(report, tabs, i, Path(tmp))
     check_sheet(report, i)
     check_ask(report)
+    check_moved(report, db)
     db.close()
     print(f"report: all {CHECKS} checks passed")
 
