@@ -1,5 +1,6 @@
 """마롱이 기록 보기. 노트북에서: bash deploy/ovh.sh admin <명령>
-  friends                      친구 목록(카카오 키들, 아는 사이, 다른 친구에게 하는 가벼운 얘기=공유 메모)
+  friends                      친구 목록(카카오 키들, 아는 사이, 다른 친구에게 하는 얘기=공유 메모: 가벼운 얘기와 가까운 사이에게만
+                               하는 요즘 근황)
   people                       카카오 키 목록(이름·친구·메시지 수·처음/마지막으로 본 때)
   rooms                        방 목록(1:1·단체, 친구들, 메시지 수, 마지막 대화, 선톡 끔)
   show <이름 또는 #키> [개수]   그 친구가 있는 방들의 최근 대화(기본 30개)와 기억 메모
@@ -7,9 +8,12 @@
   link <#키> <친구 이름 또는 #키>  그 키를 그 친구로 묶음(이름이 달라 따로 잡힌 같은 사람)
   unlink <#키>                 그 키를 친구에서 떼어 따로 둠(이름이 같아 잘못 묶인 다른 사람)
   share <친구 이름 또는 #키> on|off  그 친구 얘기를 다른 친구에게 해도 되는지
+  friendship <친구> <친구> <관계> [close]  두 친구를 아는 사이로 저장하거나 관계를 고침(예: friendship 동희 현경 연인 close).
+                               close 를 붙이면 가까운 사이(서로 요즘 근황까지 들음), 빼면 가벼운 얘기만
   schedule <친구 이름 또는 #키> <하루 횟수> [시작-끝 시]  그 친구 1:1 방의 선톡 일정(예: schedule 현경 12 7-24.
                                시간을 빼면 횟수만 바꿈). schedule <친구> default 면 .env 기본값으로 되돌림
-기록을 지우는 명령은 없다(봇 계정에는 그 권한도 없다). link·unlink·share·schedule 은 키가 어느 친구인지, 공유, 선톡 일정만 바꾼다.
+기록을 지우는 명령은 없다(봇 계정에는 그 권한도 없다). link·unlink·share·friendship·schedule 은 키가 어느 친구인지, 공유,
+아는 사이, 선톡 일정만 바꾼다.
 카카오 키 원문 대신 #짧은키 로 보여 준다(# 은 빼고 써도 된다)."""
 import hashlib
 import os
@@ -77,7 +81,7 @@ def friends(c, tz, _args):
             "LEFT JOIN marong.rooms r ON r.room_key = m.room_key WHERE p.friend_id = %s "
             "GROUP BY p.user_key ORDER BY p.first_seen", (f["id"],)).fetchall()
         told = c.execute(
-            "SELECT o.name, fs.label FROM marong.friendships fs JOIN marong.friends o "
+            "SELECT o.name, fs.label, fs.close FROM marong.friendships fs JOIN marong.friends o "
             "  ON o.id = CASE WHEN fs.friend_a = %(f)s THEN fs.friend_b ELSE fs.friend_a END "
             "WHERE %(f)s IN (fs.friend_a, fs.friend_b) "
             "  AND EXISTS (SELECT 1 FROM marong.people p WHERE p.friend_id = o.id) ORDER BY o.name",
@@ -88,11 +92,11 @@ def friends(c, tz, _args):
             "WHERE NOT r.is_channel AND o.id <> %(f)s AND m.room_key IN (SELECT m2.room_key FROM marong.messages m2 "
             "  JOIN marong.people p2 ON p2.user_key = m2.user_key WHERE p2.friend_id = %(f)s) ORDER BY o.name",
             {"f": f["id"]}).fetchall()
-        shared = c.execute("SELECT content, created_at FROM marong.shared_notes WHERE friend_id = %s "
+        shared = c.execute("SELECT content, close_content, created_at FROM marong.shared_notes WHERE friend_id = %s "
                            "ORDER BY id DESC LIMIT 1", (f["id"],)).fetchone()
         known: dict[str, list[str]] = {}
         for r in told:
-            known.setdefault(r["name"], []).append(r["label"] or "말해 준 사이")
+            known.setdefault(r["name"], []).append((r["label"] or "말해 준 사이") + (" · 가까운 사이" if r["close"] else ""))
         for r in mates:
             known.setdefault(r["name"], []).append("같은 단체방")
         print(f"{f['name']}  공유 {'켬' if f['share'] else '끔'}  마지막 {when(f['last'], tz)}")
@@ -108,6 +112,10 @@ def friends(c, tz, _args):
             print(f"  공유 메모({when(shared['created_at'], tz)}):" + ("" if shared["content"] else " 넣을 만한 게 없음"))
             for line in shared["content"].splitlines():
                 print(f"    {line}")
+            if shared["close_content"]:
+                print("  요즘 근황(가까운 사이에게만):")
+                for line in shared["close_content"].splitlines():
+                    print(f"    {line}")
     alone = c.execute("SELECT count(*) AS n FROM marong.people WHERE friend_id IS NULL").fetchone()["n"]
     print(f"친구 {len(rows)}명" + (f" · 친구에 안 묶인 키 {alone}개(이름을 아직 모르거나 터미널 대화, people 로 보기)"
                                   if alone else ""))
@@ -226,10 +234,10 @@ def link(c, _tz, args):
         if not c.execute("SELECT 1 FROM marong.people WHERE friend_id = %s LIMIT 1", (old,)).fetchone():
             # 옛 친구에 남은 키가 없으면 그 친구에 저장된 '아는 사이'를 묶은 친구로 옮긴다(옛 줄은 남지만 안 쓰임)
             c.execute(
-                "INSERT INTO marong.friendships (friend_a, friend_b, label, told_by) "
+                "INSERT INTO marong.friendships (friend_a, friend_b, label, told_by, close) "
                 "SELECT least(%(d)s, x.other), greatest(%(d)s, x.other), x.label, "
-                "  CASE WHEN x.told_by = %(o)s THEN %(d)s ELSE x.told_by END FROM ("
-                "  SELECT CASE WHEN friend_a = %(o)s THEN friend_b ELSE friend_a END AS other, label, told_by "
+                "  CASE WHEN x.told_by = %(o)s THEN %(d)s ELSE x.told_by END, x.close FROM ("
+                "  SELECT CASE WHEN friend_a = %(o)s THEN friend_b ELSE friend_a END AS other, label, told_by, close "
                 "  FROM marong.friendships WHERE %(o)s IN (friend_a, friend_b)) x WHERE x.other <> %(d)s "
                 "ON CONFLICT (friend_a, friend_b) DO NOTHING", {"o": old, "d": dst})
     name = c.execute("SELECT name, share FROM marong.friends WHERE id = %s", (dst,)).fetchone()
@@ -264,8 +272,28 @@ def share(c, _tz, args):
         sys.exit("사용: share <친구 이름 또는 #키> on|off")
     friend_id = find_friend(c, args[0])
     c.execute("UPDATE marong.friends SET share = %s WHERE id = %s", (args[1] == "on", friend_id))
-    print(f"공유 {'켬' if args[1] == 'on' else '끔'}: " + ("이 친구의 가벼운 얘기를 아는 친구에게 할 수 있음"
-                                                       if args[1] == "on" else "다른 친구에게 이 친구 얘기를 안 함"))
+    print(f"공유 {'켬' if args[1] == 'on' else '끔'}: " + ("이 친구의 가벼운 얘기는 아는 친구에게, 요즘 근황은 가까운 사이에게 "
+                                                       "할 수 있음" if args[1] == "on" else "다른 친구에게 이 친구 얘기를 안 함"))
+
+
+def friendship(c, _tz, args):
+    usage = "사용: friendship <친구 이름 또는 #키> <친구 이름 또는 #키> <관계> [close]"
+    if len(args) not in (3, 4) or (len(args) == 4 and args[3] != "close"):
+        sys.exit(usage)
+    one, other = find_friend(c, args[0]), find_friend(c, args[1])
+    label = " ".join(args[2].split())[:20].strip()
+    if one == other or not label:
+        sys.exit(usage + " (서로 다른 두 친구, 관계는 1~20자)")
+    close = len(args) == 4
+    a, b = sorted((one, other))
+    # 관리자가 정한 사이는 말해 준 친구 없이(told_by 비움) 저장한다. 관계는 방향 없는 말(연인·부부·친구·회사 동기)이 좋다
+    c.execute("INSERT INTO marong.friendships (friend_a, friend_b, label, told_by, close) VALUES (%s, %s, %s, NULL, %s) "
+              "ON CONFLICT (friend_a, friend_b) DO UPDATE SET label = EXCLUDED.label, told_by = NULL, "
+              "  close = EXCLUDED.close", (a, b, label, close))
+    names = [r["name"] for r in c.execute("SELECT name FROM marong.friends WHERE id IN (%s, %s) ORDER BY id",
+                                          (a, b)).fetchall()]
+    print(f"{names[0]} · {names[1]}: {label}" + (" · 가까운 사이(서로 요즘 근황까지 들음)" if close
+                                                 else " (서로 가벼운 얘기만 들음)"))
 
 
 def schedule(c, _tz, args):
@@ -305,8 +333,8 @@ def schedule(c, _tz, args):
 
 
 COMMANDS = {"friends": friends, "people": people, "rooms": rooms, "show": show, "stats": stats,
-            "link": link, "unlink": unlink, "share": share, "schedule": schedule}
-WRITES = {"link", "unlink", "share", "schedule"}
+            "link": link, "unlink": unlink, "share": share, "friendship": friendship, "schedule": schedule}
+WRITES = {"link", "unlink", "share", "friendship", "schedule"}
 
 
 def main() -> None:

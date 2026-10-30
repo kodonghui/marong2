@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS marong.meta (
   key   text PRIMARY KEY,
   value text NOT NULL
 );
-INSERT INTO marong.meta (key, value) VALUES ('schema_version', '6')
+INSERT INTO marong.meta (key, value) VALUES ('schema_version', '7')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- 채팅방. 채널채팅(1:1)도 방 하나로 친다.
@@ -83,8 +83,19 @@ CREATE TABLE IF NOT EXISTS marong.friendships (
   PRIMARY KEY (friend_a, friend_b),
   CHECK (friend_a < friend_b)
 );
+-- 7: 가까운 사이(연인·배우자·가족·절친). 서로 요즘 근황(shared_notes.close_content)까지 듣는다. 친구가 관계를 말해 줄 때
+-- 마롱이가 정하고(add_friendship 의 close), 관리자는 admin friendship 으로 고친다. 이 칸이 생기기 전에 저장된 사이는
+-- 관계 말(연인·여자친구·남편·가족 같은 말, '전 여자친구'는 빼고)로 한 번만 정한다(그 뒤 다시 실행해도 그대로)
+ALTER TABLE marong.friendships ADD COLUMN IF NOT EXISTS close boolean;
+UPDATE marong.friendships SET close = coalesce(
+    label ~ '연인|애인|여자 ?친구|남자 ?친구|여친|남친|커플|남편|아내|와이프|배우자|부부|약혼|가족|엄마|아빠|어머니|아버지|부모|형제|자매|남매|절친|베프|단짝'
+    AND label !~ '전 ?(여|남|애인|연인)', false)
+  WHERE close IS NULL;
+ALTER TABLE marong.friendships ALTER COLUMN close SET DEFAULT false;
+ALTER TABLE marong.friendships ALTER COLUMN close SET NOT NULL;
 
--- 3: 다른 친구에게 해도 되는 가벼운 얘기(취향·하는 일 같은 것). 친구의 방별 메모(notes)를 걸러서 만든다.
+-- 3: 다른 친구에게 해도 되는 얘기. 친구의 방별 메모(notes)를 걸러서 만든다. content 는 그 친구를 아는 친구 누구에게나 하는
+-- 가벼운 얘기(취향·하는 일 같은 것), close_content(7)는 가까운 사이에게만 하는 요즘 근황(일·학교 사정, 요즘 기분 같은 것).
 -- 새 줄을 쌓고 가장 최근 줄이 지금 것. 비어 있으면 나눌 얘기가 없음.
 CREATE TABLE IF NOT EXISTS marong.shared_notes (
   id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -93,6 +104,7 @@ CREATE TABLE IF NOT EXISTS marong.shared_notes (
   meta       jsonb NOT NULL DEFAULT '{}'::jsonb,          -- 거른 메모 id(note_ids)·거른 규칙(rules)·모델·토큰 수
   created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE marong.shared_notes ADD COLUMN IF NOT EXISTS close_content text NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS shared_notes_friend_idx ON marong.shared_notes (friend_id, id);
 
 -- 대화 원문. 한 번 쓰면 바꾸지 않는다.

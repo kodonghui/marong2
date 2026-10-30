@@ -138,7 +138,7 @@ def seed(db) -> dict:
                                   {"type": "message", "id": i["o3"], "similarity": 0.215}],
                    "recalled": [{"type": "summary", "id": i["s_old"], "similarity": 0.812},
                                 {"type": "message", "id": i["o1"], "similarity": 0.734}],
-                   "friends": [f_dong, f_hk]}})
+                   "friends": [f_dong, f_hk], "close": [f_hk]}})
     i["m2"] = msg("room-dm", "u-dong", "user", "ㅋㅋ", "2026-10-27T10:00")
     i["r2"] = msg("room-dm", None, "assistant", "ㅋㅋ 왜 웃어?", "2026-10-27T10:00:03", i["m2"], {
         "delivered": True, "memory": {"recent": [i["m1"], i["m2"]], "summaries": [i["s_old"]], "notes": [i["n_old"]],
@@ -146,8 +146,9 @@ def seed(db) -> dict:
     i["s_new"] = summary("room-dm", i["m1"], i["r2"], "동희가 제주도에 또 가고 싶어 함", "2026-10-27T11:00",
                          {"model": "claude-haiku-5-5", "effort": "low", "input_tokens": 1200, "output_tokens": 300})
     i["n1"] = note("room-dm", "u-dong", "제주도 좋아함 · 귤 따기", "2026-10-27T11:00", i["s_new"])
-    i["sh1"] = one("INSERT INTO marong.shared_notes (friend_id, content, meta, created_at) VALUES (%s, %s, %s, %s)",
-                   (f_dong, "제주도 여행을 좋아함", Jsonb({"note_ids": [i["n1"]], "model": "claude-haiku-5-5"}),
+    i["sh1"] = one("INSERT INTO marong.shared_notes (friend_id, content, close_content, meta, created_at) "
+                   "VALUES (%s, %s, %s, %s, %s)",
+                   (f_dong, "제주도 여행을 좋아함", "- 발표 준비로 바쁨", Jsonb({"note_ids": [i["n1"]], "model": "claude-haiku-5-5"}),
                     kst("2026-10-27T11:05")))
     i["p1"] = msg("room-dm", None, "assistant", "동희야, 점심 뭐 먹었어? 🍜", "2026-10-27T12:00", None, {
         "proactive": True, "delivered": True,
@@ -228,7 +229,7 @@ def check_tabs(report, db, i):
     ok([r[10] for r in r1] == ["요약", "동희", "마롱이", "동희"], "누구 말")
     ok(r1[0][13] == "동희는 제주도 여행과 귤 따기를 좋아함" and r1[1][13] == "작년에 제주도 가서 귤 따기 했어", "찾은 것 원문")
     ok(r1[0][3] == "제주도 또 가고 싶다" and len(r1[0][4]) == 100 and r1[0][4].endswith("…"), "친구 말·답 앞 100자")
-    ok(r1[0][5:7] == ["함", f"최근 대화 #{i['m1']}~#{i['m1']} · 메모 1개 · 친구 2명"], f"{r1[0][5:7]}")
+    ok(r1[0][5:7] == ["함", f"최근 대화 #{i['m1']}~#{i['m1']} · 메모 1개 · 친구 2명 · 근황 1명"], f"{r1[0][5:7]}")
     one = {r[0]: r for r in mem if r[0] != i["r1"]}
     ok(one[i["r2"]][5] == "안 함(말이 짧아서)" and one[i["r2"]][7] is None, f"짧은 말: {one[i['r2']]}")
     ok(one[i["p1"]][3] == "(선톡)" and one[i["p1"]][5] == "선톡(검색 안 함)"
@@ -247,6 +248,8 @@ def check_tabs(report, db, i):
     ok(comp[("친구 메모", i["n1"])][3] == f"1:1 {short('room-dm')} 동희 · 동희"
        and comp[("친구 메모", i["n1"])][5] == f"요약 #{i['s_new']}", f"{comp[('친구 메모', i['n1'])]}")
     ok(comp[("공유 메모", i["sh1"])][3] == "동희" and comp[("공유 메모", i["sh1"])][5] == f"거른 메모 #{i['n1']}", "공유 메모")
+    ok(comp[("공유 메모", i["sh1"])][4] == "제주도 여행을 좋아함\n[가까운 사이에게만: 요즘 근황]\n- 발표 준비로 바쁨",
+       f"공유 메모는 가벼운 얘기와 근황을 같이: {comp[('공유 메모', i['sh1'])][4]!r}")
     return tabs
 
 

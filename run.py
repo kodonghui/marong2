@@ -116,8 +116,9 @@ async def check(s, store: Store, emb: Embeddings, llm: LLM, agent: Agent, worker
         bad(f"요약 시험: 실패 {brief(e)}")
     if notes.get("a"):
         try:
-            shared, _ = await worker.share_filter("동희", [{"is_channel": True, "content": notes["a"]}])
+            shared, close, _ = await worker.share_filter("동희", [{"is_channel": True, "content": notes["a"]}])
             print(f"공유 메모 시험(시험 얘기는 빠져야 함): {shared.replace(chr(10), ' / ') or '(없음)'}")
+            print(f"  근황(가까운 사이에게만. 시험 얘기는 들어가도 됨): {close.replace(chr(10), ' / ') or '(없음)'}")
         except Exception as e:
             bad(f"공유 메모 시험: 실패 {brief(e)}")
 
