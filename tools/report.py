@@ -186,9 +186,9 @@ def fetch(c, start: datetime, until: datetime, vectors: bool = True) -> dict:
 REQUESTS_SHOWN = 5
 
 
-def request_text(q: dict, f: dict | None, friend_name: dict[int, str], pairs: set[tuple[int, int]], tz) -> str:
+def request_text(q: dict, f: dict | None, friend_name: dict[int, str], pairs: dict[tuple[int, int], dict], tz) -> str:
     """대화로 한 요청 한 줄: 언제·어느 방에서 무엇을 말했는지와, 지금 그렇게 돼 있는지 아니면 관리자가 할 명령.
-    f 는 요청을 붙인 친구 줄(친구에 안 묶인 키의 요청이면 None)."""
+    f 는 요청을 붙인 친구 줄(말한 키가 지금 어느 친구에도 안 묶여 있으면 None). pairs 는 (작은 id, 큰 id) → 정해진 사이."""
     where = "1:1" if q["is_channel"] else "단체방" if q["is_channel"] is not None else "방 모름"
     head = f"{q['created_at'].astimezone(tz).strftime('%m/%d %H:%M')} {where}: "
     who = f["name"] if f else key(q["user_key"])
@@ -203,18 +203,29 @@ def request_text(q: dict, f: dict | None, friend_name: dict[int, str], pairs: se
         now = f"하루 {q['proactive_per_day']}번" if q["proactive_per_day"] else "하루 횟수 기본값"
         return (head + f"선톡 {'더' if q['kind'] == 'proactive_more' else '덜'} 보내 달라고 함{said} → 지금 {now}, "
                 f"정할 일: admin schedule {who} <하루 횟수>")
-    if q["kind"] == "share_off":
-        return head + "공유 꺼 달라고 함 → " + ("지금 꺼져 있음" if not f["share"] else f"정할 일: admin share {f['name']} off")
-    if q["kind"] == "share_on":
-        return head + "공유 다시 켜 달라고 함 → " + ("지금 켜져 있음" if f["share"] else f"정할 일: admin share {f['name']} on")
-    if q["kind"] == "friendship":
-        other = q["detail"].get("with")
-        name = friend_name.get(other, q["detail"].get("name"))
-        label = q["detail"].get("label") or "아는 사이"
-        done = tuple(sorted((f["id"], other))) in pairs if other else False
+    if q["kind"] in ("share_off", "share_on", "friendship"):
+        on = q["kind"] == "share_on"
+        said = "공유 다시 켜 달라고 함" if on else "공유 꺼 달라고 함"
+        if q["kind"] == "friendship":
+            other = q["detail"].get("with")
+            name = friend_name.get(other, q["detail"].get("name"))
+            label = q["detail"].get("label") or "아는 사이"
+            said = f"{name}(이)랑 '{label}' 사이라고 함"
+        if f is None:  # 관리자가 그 키를 떼어 내서 지금은 어느 친구도 아님
+            return head + said + f" → 이 키는 지금 어느 친구에도 안 묶여 있음, 정할 일: 먼저 admin link {who} <친구>"
+        if q["kind"] != "friendship":
+            return head + said + " → " + (f"지금 {'켜져' if on else '꺼져'} 있음" if f["share"] == on
+                                          else f"정할 일: admin share {f['name']} {'on' if on else 'off'}")
+        now = pairs.get(tuple(sorted((f["id"], other)))) if other else None
         arg = f'"{label}"' if " " in label else label
-        return (head + f"{name}(이)랑 '{label}' 사이라고 함 → "
-                + ("아는 사이로 정해져 있음" if done else f"정할 일: admin friendship {f['name']} {name} {arg} [close]"))
+        todo = f"admin friendship {f['name']} {name} {arg} [close]"
+        if now is None:
+            return head + said + " → 정할 일: " + todo
+        stored = (now["label"] or "아는 사이") + (" · 가까운 사이" if now["close"] else "")
+        # 말한 관계가 정해진 것과 다르면(회사 동기 → 여자친구 같은) 바꿀 명령까지 보여 줌
+        if q["detail"].get("label") and q["detail"]["label"] != now["label"]:
+            return head + said + f" → 지금은 '{stored}'(으)로 정해져 있음, 바꾸려면: {todo}"
+        return head + said + f" → 지금 '{stored}'(으)로 정해져 있음"
     k, name = key(q["user_key"]), q["detail"].get("name")
     return (head + f"{k} 키가 '{name}'(이)라고 함 → "
             + ("이 친구에 묶여 있음" if f and q["key_friend"] == f["id"]
@@ -394,12 +405,18 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
     for m in data["mates"]:
         if m["a"] in friend_name and m["b"] in friend_name:
             known.setdefault(m["a"], {}).setdefault(m["b"], []).append("같은 단체방")
-    pairs = {(fs["friend_a"], fs["friend_b"]) for fs in data["friendships"]}
+    pairs = {(fs["friend_a"], fs["friend_b"]): fs for fs in data["friendships"]}
+    by_id = {f["id"]: f for f in data["friends"]}
     asked: dict[int, list[str]] = {}  # 친구 → 대화로 한 요청(최신 먼저). 묶기 요청은 그 이름 친구에게 붙임
     loose: dict[str, list[dict]] = {}  # 어느 친구 줄에도 못 붙인 요청(친구에 안 묶인 키) → 키마다 한 줄
     for q in data["requests"]:
-        owners = [f for f in data["friends"] if q["friend_id"] == f["id"] or (
-            q["kind"] == "link" and q["friend_id"] is None and q["detail"].get("name") == f["name"])]
+        if q["kind"] == "link":
+            owners = [f for f in data["friends"] if q["detail"].get("name") == f["name"]]
+        else:
+            # 말한 사람은 그 키가 지금 묶인 친구. 관리자가 키를 다른 친구로 옮기면(admin link) 요청 때 친구는 키가 없어
+            # 친구 목록에서 빠지므로 키 쪽을 먼저 본다
+            f = by_id.get(q["key_friend"]) or by_id.get(q["friend_id"])
+            owners = [f] if f else []
         for f in owners:
             asked.setdefault(f["id"], []).append(request_text(q, f, friend_name, pairs, tz))
         if not owners:
