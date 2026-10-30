@@ -31,8 +31,8 @@ from pg import TestDB  # noqa: E402
 CHECKS = 0
 TZ = ZoneInfo("Asia/Seoul")
 UNTIL = "2026-10-27T19:00+09:00"  # 기간: 10/26 19:00 ~ 10/27 19:00(한국)
-SHEETS = ["읽는 법", "대화", "임베딩", "들어간 기억", "요약·메모"]
-RAW_KEYS = ("room-dm", "room-group", "u-dong", "u-hk", "u-anon")
+SHEETS = ["읽는 법", "대화", "임베딩", "들어간 기억", "요약·메모", "친구·공유"]
+RAW_KEYS = ("room-dm", "room-group", "room-g2", "u-dong", "u-hk", "u-anon", "u-ms")
 SECRET = "AKfycbTESTSECRET"
 SHEET_URL = f"https://script.google.com/macros/s/{SECRET}/exec"
 ECHO_URL = "https://script.googleusercontent.com/macros/echo?user_content_key=abc"
@@ -117,7 +117,16 @@ def seed(db) -> dict:
     f_hk = one("INSERT INTO marong.friends (name) VALUES (%s)", ("현경",))
     db.admin("INSERT INTO marong.people (user_key, name, friend_id) VALUES ('u-dong', '동희', %s), ('u-hk', '현경', %s), "
              "('u-anon', NULL, NULL)", (f_dong, f_hk))
+    # 친구·공유 탭(지금 기준): 동희가 말해 준 가까운 사이, 현경은 공유 끔, 민수는 동희와 같은 단체방(기간 밖 대화)
+    db.admin("INSERT INTO marong.friendships (friend_a, friend_b, label, told_by, close) VALUES (%s, %s, '여자친구', %s, true)",
+             (min(f_dong, f_hk), max(f_dong, f_hk), f_dong))
+    db.admin("UPDATE marong.friends SET share = false WHERE id = %s", (f_hk,))
+    f_ms = one("INSERT INTO marong.friends (name) VALUES (%s)", ("민수",))
+    db.admin("INSERT INTO marong.people (user_key, name, friend_id) VALUES ('u-ms', '민수', %s)", (f_ms,))
+    db.admin("INSERT INTO marong.rooms (room_key, is_channel) VALUES ('room-g2', false)")
     i = {}
+    i["x1"] = msg("room-g2", "u-ms", "user", "다들 주말에 뭐 해", "2026-09-01T10:00")
+    i["x2"] = msg("room-g2", "u-dong", "user", "난 집에 있을 듯", "2026-09-01T10:01")
     # 기간 밖(예전 기억)
     i["o1"] = msg("room-dm", "u-dong", "user", "작년에 제주도 가서 귤 따기 했어", "2026-10-20T20:00")
     i["o2"] = msg("room-dm", None, "assistant", "귤 따기 재밌었겠다 🍊", "2026-10-20T20:00:05", i["o1"])
@@ -250,6 +259,22 @@ def check_tabs(report, db, i):
     ok(comp[("공유 메모", i["sh1"])][3] == "동희" and comp[("공유 메모", i["sh1"])][5] == f"거른 메모 #{i['n1']}", "공유 메모")
     ok(comp[("공유 메모", i["sh1"])][4] == "제주도 여행을 좋아함\n[가까운 사이에게만: 요즘 근황]\n- 발표 준비로 바쁨",
        f"공유 메모는 가벼운 얘기와 근황을 같이: {comp[('공유 메모', i['sh1'])][4]!r}")
+
+    # 친구·공유(지금 기준, 기간과 상관없음): 공유 켬·끔, 아는 사이, 다른 친구에게 하는 얘기
+    pals = by["친구·공유"]
+    ok(pals["headers"] == ["친구", "공유", "아는 사이", "아는 친구 누구에게나: 가벼운 얘기", "가까운 사이에게만: 요즘 근황",
+                           "공유 메모 만든 시각", "마지막으로 본 때"], f"친구·공유 머리줄: {pals['headers']}")
+    pal = {r[0]: r for r in pals["rows"]}
+    ok(sorted(pal) == ["동희", "민수", "현경"], f"카카오 키가 묶인 친구만: {sorted(pal)}")
+    ok(pal["동희"][1:6] == ["켬", "민수(같은 단체방)\n현경(여자친구 · 가까운 사이 · 말해 준 친구 동희)",
+                          "제주도 여행을 좋아함", "- 발표 준비로 바쁨", "2026-10-27 11:05:00"]
+       and STAMP.fullmatch(pal["동희"][6]), f"동희: {pal['동희']}")
+    ok(pal["현경"][1:6] == ["끔", "동희(여자친구 · 가까운 사이 · 말해 준 친구 동희)", "(공유 끔: 아무에게도 안 함)",
+                          "(공유 끔: 아무에게도 안 함)", None], f"공유를 끈 현경은 아무에게도 안 함: {pal['현경']}")
+    ok(pal["민수"][1:6] == ["켬", "동희(같은 단체방)", "(아직 없음)", "(아직 없음)", None],
+       f"기간 밖 단체방도 아는 사이, 공유 메모는 아직 없음: {pal['민수']}")
+    ok(any(x.startswith("친구·공유: 기간과 상관없이 지금 기준 친구 3명") and "공유를 끈 친구" in x for x in readme),
+       "읽는 법에 친구·공유")
     return tabs
 
 
@@ -280,7 +305,8 @@ def check_xlsx(report, tabs, i, tmp):
     ok([r[0] for r in rows(load_workbook(out6)["대화"])] == [i[k] for k in ("gl", "g2", "gr1", "g1")], "6시간 기간")
     empty = tmp / "empty.xlsx"
     ok(run(report, ["--until", "2026-10-01T00:00+09:00", "--out", str(empty)])[0] == 0, "빈 기간도 만듦")
-    ok(all(load_workbook(empty)[n].max_row == 1 for n in SHEETS[1:]), "빈 기간은 머리줄만")
+    ok(all(load_workbook(empty)[n].max_row == 1 for n in SHEETS[1:-1])
+       and load_workbook(empty)["친구·공유"].max_row == 4, "빈 기간은 머리줄만(친구·공유는 지금 기준이라 친구 3명)")
 
     # --out 이 없으면 stdout 으로(서버에서 ssh 로 받는 길). 요약 한 줄은 stderr
     p = subprocess.run([sys.executable, str(ROOT / "tools" / "report.py"), "--until", UNTIL],
