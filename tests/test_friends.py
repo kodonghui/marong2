@@ -443,6 +443,11 @@ async def main():
        f"가까운 사이는 근황까지: {part}")
     ok(all(x not in part for x in ("비밀", "말하지 마", "다이어트")), f"근황에도 비밀·몸 얘기는 없음: {part}")
     ok(last_memory("c1")["close"] == [f_hk] and f_hk in last_memory("c1")["friends"], last_memory("c1"))
+    await say("g1", "d2", "현경이 요즘 어때?", channel=False)
+    part = friends_part(llm.bodies[-1])
+    ok("- 현경(네 여자친구, 가까운 사이, 같은 단체방): " in part and "요즘 근황" not in part and "팀장" not in part,
+       f"단체방에서는 가까운 사이여도 근황은 안 넣음(다른 친구들도 봄): {part}")
+    ok(last_memory("g1")["close"] == [] and f_hk in last_memory("g1")["friends"], last_memory("g1"))
     await say("c2", "h1", "동희는 뭐 해?")
     part = friends_part(llm.bodies[-1])
     ok("- 동희(동희한테 너는 여자친구, 가까운 사이, 같은 단체방): 군밤 좋아함" in part and "요즘 근황:" not in part,

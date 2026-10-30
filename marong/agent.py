@@ -331,7 +331,7 @@ class Agent:
         memory = {"recent": [rows[0]["id"], rows[-1]["id"]] if rows else [], "summaries": [s["id"] for s in shown],
                   "notes": [n["id"] for n in notes], "recall": recall, "candidates": [self._hit(h) for h in hits],
                   "recalled": [self._hit(h) for h in recalled], "friends": [c["id"] for c in known],
-                  "close": [c["id"] for c in known if self._close_facts(c)]}
+                  "close": [c["id"] for c in known if self._close_facts(c)] if msg.is_channel else []}
         return self._system(self._situation(msg, person, notes, shown, recalled, circle)), messages, memory
 
     def _pick(self, hits: list[dict]) -> list[dict]:
@@ -415,7 +415,8 @@ class Agent:
                              "너무 자주 온다거나 더 자주 보내 달라고 하면 set_proactive 의 per_day 로 횟수를 바꿔.")
         if (person or {}).get("share") is False:
             lines.append("- 이 친구는 자기 얘기를 다른 친구에게 하지 말라고 했어. 다시 해도 된다고 하면 set_share 로 켜.")
-        return "\n".join(lines + self._memory_lines(notes, summaries, recalled) + self._friend_lines(circle or []))
+        return "\n".join(lines + self._memory_lines(notes, summaries, recalled)
+                         + self._friend_lines(circle or [], group=not msg.is_channel))
 
     @staticmethod
     def _known(circle: list[dict]) -> list[dict]:
@@ -453,10 +454,11 @@ class Agent:
             parts.append("같은 단체방")
         return ", ".join(parts)
 
-    def _friend_lines(self, circle: list[dict]) -> list[str]:
+    def _friend_lines(self, circle: list[dict], group: bool = False) -> list[str]:
         """다른 방 친구들: 지금 친구와 아는 사이면 이름·관계·공유 메모(가까운 사이면 요즘 근황까지), 아는 사이인지 모르면
-        이름만."""
+        이름만. 요즘 근황은 1:1 방에서만 넣는다(단체방은 다른 친구들도 같이 봄)."""
         known = self._known(circle)
+        news = {} if group else {c["id"]: self._close_facts(c) for c in known}
         others = [c["name"] for c in circle if not (c["told"] or c["same_group"])][:OTHERS_SHOWN]
         if not known and not others:
             return []
@@ -464,7 +466,7 @@ class Agent:
                  "- 여기 적힌 얘기는 그 친구가 마롱이랑 얘기하면서 직접 한 거야. 지금 친구가 그 친구 얘기를 하거나 물어보면 "
                  "친구끼리 하듯 자연스럽게 말해 줘(예: '응 걔 요즘 회사 적응하느라 바쁘대'). 적혀 있지 않은 건 지어내지 말고 "
                  "못 들었다고 해."]
-        if any(self._close_facts(c) for c in known):
+        if any(news.values()):
             lines.append("- '요즘 근황'은 가까운 사이라서 아는 얘기야. 같이 걱정해 주는 건 좋지만 부풀리거나 그 친구 마음을 "
                          "지어내지 마.")
         if known:
@@ -472,9 +474,8 @@ class Agent:
             for c in known:
                 facts = self._facts(c["shared"], SHARED_CHARS)
                 lines.append(f"- {c['name']}({self._relation(c)}): {facts or '아직 아는 얘기 없음'}")
-                close = self._close_facts(c)
-                if close:
-                    lines.append(f"  요즘 근황: {close}")
+                if news.get(c["id"]):
+                    lines.append(f"  요즘 근황: {news[c['id']]}")
         if others:
             lines += ["## 아는 사이인지 모르는 친구 (먼저 꺼내지 마. 물어보면 안다고만 하고, 어떻게 아는 사이인지 물어봐)",
                       "- " + ", ".join(others)]
