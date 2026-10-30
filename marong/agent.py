@@ -236,8 +236,9 @@ class Agent:
             system = self._system(self._situation(msg, person, [], [], []))
             messages = [{"role": "user", "content": self._current(msg, person, text)}]
         end = asyncio.get_running_loop().time() + timeout
+        grok = self.s.grok_for((person or {}).get("friend_id"), msg.is_channel)  # 관리자가 .env GROK_FRIENDS 로 정함
         try:
-            reply, meta = await asyncio.wait_for(self.ask(system, messages, msg, end), timeout + 2)
+            reply, meta = await asyncio.wait_for(self.ask(system, messages, msg, end, grok=grok), timeout + 2)
         except Exception as e:  # 시간 초과·네트워크·API 오류는 대체 문구로
             log.warning("llm_error %s", brief(e))
             reply, meta = FALLBACK_TEXT, {"error": type(e).__name__}
@@ -505,9 +506,10 @@ class Agent:
         return body
 
     async def ask(self, system: list[dict], messages: list[dict], msg: Incoming, end: float,
-                  tools: list[dict] | None = None) -> tuple[str, dict]:
+                  tools: list[dict] | None = None, grok: bool = False) -> tuple[str, dict]:
         """도구(set_name 등) 처리까지 해서 친구에게 보낼 글과 기록용 meta 를 돌려준다.
-        tools 를 안 주면 이 방에서 쓸 수 있는 도구 전부, [] 면 도구 없이."""
+        tools 를 안 주면 이 방에서 쓸 수 있는 도구 전부, [] 면 도구 없이. grok 이면 Grok 이 먼저 답한다(실패하면 Claude).
+        meta 의 model·effort 는 마지막에 실제로 답한 모델."""
         loop = asyncio.get_running_loop()
         tools = self._tools(msg) if tools is None else tools
         convo = list(messages)
@@ -516,7 +518,10 @@ class Agent:
         earlier: list[str] = []  # 도구를 부르기 전에 쓴 글(마지막 답이 비면 이걸 보냄)
         nudged = False
         for _ in range(MAX_STEPS):
-            resp = await self.llm.create(self._body(system, convo, tools), end - loop.time())
+            resp = await self.llm.create(self._body(system, convo, tools), end - loop.time(), grok=grok)
+            xai = getattr(resp, "provider", None) == "xai"
+            meta.update(model=resp.model if xai else self.s.anthropic_model,
+                        effort=None if xai else self.s.anthropic_effort or None)
             meta["calls"] += 1
             meta["stop_reason"] = resp.stop_reason
             usage = resp.usage

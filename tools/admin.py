@@ -1,6 +1,6 @@
 """마롱이 기록 보기. 노트북에서: bash deploy/ovh.sh admin <명령>
-  friends                      친구 목록(카카오 키들, 아는 사이, 다른 친구에게 하는 얘기=공유 메모: 가벼운 얘기와 가까운 사이에게만
-                               하는 요즘 근황)
+  friends                      친구 목록(친구 번호, 카카오 키들, 아는 사이, 다른 친구에게 하는 얘기=공유 메모: 가벼운 얘기와 가까운
+                               사이에게만 하는 요즘 근황). 친구 번호는 .env 의 GROK_FRIENDS 에 씀
   people                       카카오 키 목록(이름·친구·메시지 수·처음/마지막으로 본 때)
   rooms                        방 목록(1:1·단체, 친구들, 메시지 수, 마지막 대화, 선톡 끔)
   show <이름 또는 #키> [개수]   그 친구가 있는 방들의 최근 대화(기본 30개)와 기억 메모
@@ -102,7 +102,7 @@ def friends(c, tz, _args):
             known.setdefault(r["name"], []).append((r["label"] or "말해 준 사이") + (" · 가까운 사이" if r["close"] else ""))
         for r in mates:
             known.setdefault(r["name"], []).append("같은 단체방")
-        print(f"{f['name']}  공유 {'켬' if f['share'] else '끔'}  마지막 {when(f['last'], tz)}")
+        print(f"{f['name']}  공유 {'켬' if f['share'] else '끔'}  마지막 {when(f['last'], tz)}  친구 {f['id']}번")
         print("  카카오 키: " + ", ".join(
             f"{key(k['user_key'])} {'1:1' if k['one'] else '단체' if k['grp'] else '대화 없음'}"
             + (f"(이름 {k['name'] or '모름'})" if k["name"] != f["name"] else "") for k in keys))
@@ -207,7 +207,12 @@ def stats(c, tz, _args):
         "coalesce(sum((meta->>'output_tokens')::bigint), 0)::bigint AS o, "
         "coalesce(sum((meta->>'cache_read_tokens')::bigint), 0)::bigint AS cr, "
         "coalesce(sum((meta->>'cache_write_tokens')::bigint), 0)::bigint AS cw "
-        "FROM marong.messages WHERE role = 'assistant' AND created_at > now() - interval '7 days'").fetchone()
+        "FROM marong.messages WHERE role = 'assistant' AND created_at > now() - interval '7 days' "
+        "AND coalesce(meta->>'model', '') NOT LIKE 'grok%'").fetchone()
+    g = c.execute(
+        "SELECT count(*) AS replies, coalesce(sum((meta->>'input_tokens')::bigint), 0)::bigint AS i, "
+        "coalesce(sum((meta->>'output_tokens')::bigint), 0)::bigint AS o FROM marong.messages "
+        "WHERE role = 'assistant' AND created_at > now() - interval '7 days' AND meta->>'model' LIKE 'grok%'").fetchone()
     s = c.execute(
         "SELECT count(*) AS n, coalesce(sum((meta->>'input_tokens')::bigint), 0)::bigint AS i, "
         "coalesce(sum((meta->>'output_tokens')::bigint), 0)::bigint AS o FROM ("
@@ -218,6 +223,8 @@ def stats(c, tz, _args):
     print(f"최근 7일: 답장 {t['replies']}개(입력 {t['i']:,} · 캐시 읽기 {t['cr']:,} · 캐시 쓰기 {t['cw']:,} · "
           f"출력 {t['o']:,} 토큰), "
           f"요약·공유 메모 {s['n']}개(입력 {s['i']:,} · 출력 {s['o']:,} 토큰) → 대략 ${usd:.2f}")
+    if g["replies"]:
+        print(f"  Grok 답장 {g['replies']}개(입력 {g['i']:,} · 출력 {g['o']:,} 토큰, 위 금액에 안 들어감. 비용은 console.x.ai)")
 
 
 def link(c, _tz, args):

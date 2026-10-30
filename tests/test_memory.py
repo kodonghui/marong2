@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -351,7 +352,14 @@ async def main():
     code, out = admin("show", short("u3"))
     ok(code == 0 and "[기억 메모" in out and "마라탕 좋아함" in out, out)
     code, out = admin("stats")
-    ok(code == 0 and "messages" in out and "최근 7일" in out, out)
+    ok(code == 0 and "messages" in out and "최근 7일" in out and "Grok" not in out, out)
+    db.admin("INSERT INTO marong.rooms (room_key, is_channel) VALUES ('rg', true)")
+    db.admin("INSERT INTO marong.messages (room_key, role, content, meta) VALUES ('rg', 'assistant', '그록 답', "
+             "'{\"model\": \"grok-test\", \"input_tokens\": 1000, \"output_tokens\": 50}'::jsonb)")
+    code, again = admin("stats")
+    replies = re.search(r"답장 (\d+)개", out).group(1)
+    ok(code == 0 and "Grok 답장 1개(입력 1,000 · 출력 50 토큰" in again and f"답장 {replies}개(" in again,
+       f"Grok 답은 Claude 금액에 안 넣고 따로: {again}")
     code, out = admin()
     ok(code == 1 and "people" in out, "명령이 없으면 사용법")
 
