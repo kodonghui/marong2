@@ -5,7 +5,6 @@ import asyncio
 import hashlib
 import json
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -352,22 +351,7 @@ async def main():
     code, out = admin("show", short("u3"))
     ok(code == 0 and "[기억 메모" in out and "마라탕 좋아함" in out, out)
     code, out = admin("stats")
-    ok(code == 0 and "messages" in out and "최근 7일" in out and "Grok" not in out, out)
-    # Grok 이 끝까지 답한 것과, Grok 이 도구를 부른 뒤 실패해서 Claude 가 끝낸 것(토큰 합계에 Grok 몫이 섞임)
-    db.admin("INSERT INTO marong.rooms (room_key, is_channel) VALUES ('rg', true)")
-    for model, i, o, grok in (("grok-test", 1000, 50, [1000, 50, 0]), ("claude-haiku-5-5", 300, 30, [100, 10, 0])):
-        db.admin("INSERT INTO marong.messages (room_key, role, content, meta) VALUES ('rg', 'assistant', '답', %s)",
-                 (json.dumps({"model": model, "input_tokens": i, "output_tokens": o, "grok_tokens": grok}),))
-    code, again = admin("stats")
-
-    def claude(text):
-        m = re.search(r"답장 (\d+)개\(입력 ([\d,]+) .* 출력 ([\d,]+) 토큰\), 요약", text)
-        return [int(x.replace(",", "")) for x in m.groups()]
-
-    before, after = claude(out), claude(again)
-    ok(code == 0 and after == [before[0] + 1, before[1] + 200, before[2] + 20]
-       and "Grok 을 쓴 답장 2개(Grok 몫 입력 1,100 · 출력 60 토큰" in again,
-       f"Grok 몫은 Claude 금액에서 빼고 따로(섞인 답도): {before} → {after} / {again}")
+    ok(code == 0 and "messages" in out and "최근 7일" in out, out)
     code, out = admin()
     ok(code == 1 and "people" in out, "명령이 없으면 사용법")
 

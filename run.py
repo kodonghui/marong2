@@ -1,7 +1,6 @@
 """마롱이 실행
   python run.py           봇 실행(카카오 게이트웨이 연결). 서버의 systemd(marong.service)가 이걸 켬
-  python run.py --check   설정·Claude 키·Grok 키(있으면, 쓸 수 있는 모델 이름도)·Postgres·임베딩·요약을 점검하고
-                          이 서버의 공인 IPv4 를 출력. 하나라도 실패하면 종료 코드 1
+  python run.py --check   설정·Claude 키·Postgres·임베딩·요약을 점검하고 이 서버의 공인 IPv4 를 출력. 하나라도 실패하면 종료 코드 1
   python run.py --chat    카카오 없이 터미널에서 마롱이와 대화(말투 다듬기용). 대화는 'terminal' 방으로 저장됨
   python run.py --proactive <이름|#키> [--dry]
                           그 친구의 1:1 방에 선톡 한 번(짧은 말 몇 개)을 지금 보냄(시험용. 선톡 일정·PROACTIVE 설정과 상관없이).
@@ -50,17 +49,6 @@ async def check(s, store: Store, emb: Embeddings, llm: LLM, agent: Agent, worker
           f"요약 effort {s.summary_effort or '모델 기본값'} / 최대 출력 {s.llm_max_tokens}")
     for name, status in await llm.check_keys():
         (print if status.startswith("정상") else bad)(f"  Claude {name}: {status}")
-    status, models = await llm.check_grok()
-    rooms = ("모든 방" if "all" in s.grok_friends else f"친구 {', '.join(s.grok_friends)}번의 1:1 방" if s.grok_friends
-             else "없음(GROK_FRIENDS 비어 있음)")
-    if not status:
-        print("Grok: 꺼짐(XAI_API_KEY 비어 있음)" + (". GROK_FRIENDS 가 있어도 Claude 가 답함" if s.grok_friends else ""))
-    else:
-        # 키를 넣고 모델 이름·방을 아직 안 정했으면 실패로 치지 않음(모델 목록을 보려고 돌리는 때)
-        (print if status.startswith("정상") or not (s.xai_model and s.grok_friends) else bad)(
-            f"Grok({s.xai_model or '모델 이름 비어 있음'}): {status} / Grok 이 답하는 방: {rooms}")
-        if models:
-            print("  쓸 수 있는 Grok 모델:", ", ".join(models))
     print("BOT_TOKEN:", "설정됨" if s.bot_token else "비어 있음(봇 실행 전에 넣어야 함)")
     persona = agent.persona()
     (print if persona else bad)(f"말투 지시문: {f'{len(persona)}자' if persona else s.prompt_path + ' 없음'}"

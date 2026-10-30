@@ -3,7 +3,6 @@
 동희와 친구들이 카카오톡에서 같이 수다 떠는 챗봇이에요. 반말로 이름을 불러 주고, 예전에 나눈 얘기를 기억해서 이어 가요.
 
 - 모델: Claude Haiku 5.5, effort `xhigh`(답장·선톡, 그리고 뒤에서 하는 요약·메모·공유 메모까지. 2026-10-25 동희님 "마롱이 xhigh로 바꿔줘")
-- Grok(xAI, 선택): 관리자가 정한 친구의 1:1 방 답장만 Grok 이 해요(아래 'Grok 으로 답하기')
 - 서버: 싱가포르 OVH(`ko-family`)의 `/opt/marong`, systemd 서비스 `marong`
 - 저장: 같은 서버의 Postgres 16 + pgvector(`marong` DB). 대화 원문·요약·친구별 기억 메모·임베딩
 - 카카오: 앱 1620899(이름 '마롱이')의 카카오톡 봇. 게이트웨이(웹소켓)로 메시지를 받고 콜백 API 로 답해요
@@ -61,7 +60,6 @@ bash deploy/ovh.sh logs          # 로그 보기(Ctrl+C 로 나옴)
 - `ANTHROPIC_EFFORT`: 답장 effort. 기본 `xhigh`. 답이 느리면 `high`
 - `SUMMARY_EFFORT`: 뒤에서 하는 요약·메모·공유 메모 effort. 줄이 없으면 `low`, 서버는 `xhigh`
 - `GROUP_TRIGGER`: 단체방에서 이 말(예: `마롱`)이 들어간 메시지에만 답해요. 비우면 받은 메시지 모두에 답해요
-- `XAI_API_KEY`·`XAI_MODEL`·`GROK_FRIENDS`: Grok 으로 답할 때만(아래 'Grok 으로 답하기')
 - 단체방은 카카오가 마롱이를 태그(@마롱이)한 메시지만 보내 줘요(태그 글자는 빼고). 그래서 단체방에서는 태그해야 답하고, 태그 없이 한 말은 마롱이가 못 봐요. 태그만 하면 부른 것으로 알아들어요
 
 ## 말투·인사·참고 자료 바꾸기
@@ -78,24 +76,6 @@ bash deploy/ovh.sh logs          # 로그 보기(Ctrl+C 로 나옴)
 - 고민: 상담사·병원에 넘기지 않고 마롱이가 직접 들어 줘요. 스스로 해치고 싶다는 분명한 신호일 때만 자살예방상담전화 109 를 한 번 알려 줘요("전문가한테 이야기하라고 하지말고 지가 좀 상담해주라 해봐").
 - 19금(2026-10-30 동희님 문안): 연애·성 얘기와 수위 있는 농담에 피하거나 훈계하지 않고 적극적으로 대화해요. 마롱이가 먼저 꺼내도 되고, 단체방에서도 다 같이 그런 얘기를 할 때 적극적으로 해요. 선톡은 19금으로 시작하지 않아요(`marong/agent.py` 의 `PROACTIVE_GUIDE`). 다른 친구에게 옮기지 않아요(공유 메모에서도 빼요). 동희님 문안 중 '성행위를 자세히 묘사하거나 야한 상황극을 이어 가도 좋아'는 Anthropic 이용 정책(Do Not Generate Sexually Explicit Content: 성행위 묘사·에로틱 채팅 금지, 예외 없음)이 금지하는 걸 요청하는 문장이라 Claude 가 저장소에 넣지 않았어요. 그런 요청은 모델과 API 안전 검사가 막고, 막히면 `REFUSAL_TEXT` 가 나가요.
 - 창의성(temperature): Haiku 5.5 는 기본값(1.0, 가장 높은 값)만 받아요. 다른 값을 넣으면 API 가 거절해서, 답이 뻔하지 않게 하는 건 위 말투 규칙으로 해요.
-
-## Grok 으로 답하기
-
-2026-10-31 동희님 "grok api 받아오라해봐 이게 제일 가드레일이 적대". 관리자가 정한 친구의 1:1 방 답장은 Grok(xAI)이 하고, 나머지는 Claude 가 해요.
-
-- 누가: `.env` 의 `GROK_FRIENDS` 에 적은 친구 번호(`admin friends` 의 '친구 N번', 쉼표로 여러 명)의 1:1 방 답장만 Grok 이 해요. 단체방·다른 친구·이름을 모르는 키는 Claude 예요. `all` 이면 모든 방(단체방 포함). 친구 번호는 관리자가 묶은 친구라서, 친구가 대화로 이름을 바꿔도 Grok 방이 바뀌지 않아요.
-- 늘 Claude: 선톡, 사진 설명, 대화 요약·기억 메모·공유 메모. Grok 방에서 사진에 답할 때는 사진 자체를 Grok 이 봐요.
-- 말투: 같은 `prompt.md`·`knowledge/`·지금 상황·기억을 그대로 Grok 에게 보내요. 도구(`set_name`·`ask_owner`)도 똑같이 써요. effort 와 캐시 표시는 xAI 에 없어서 빼요.
-- 실패하면: Grok 이 실패(키·크레딧·모델 이름·장애)하거나 시간의 절반 안에 답하지 않으면 같은 요청을 Claude 키로 보내요. Grok 이 거절하면 Claude 로 다시 보내지 않고 `REFUSAL_TEXT` 가 나가요(시트에 '거절 문구', `meta.refusal` 은 `grok`).
-- 기록: 답의 `meta.model` 이 Grok 모델 이름이고 `effort` 는 비어요. `admin stats` 는 Grok 토큰을 따로 보여 주고 Claude 금액에 넣지 않아요(Grok 비용은 console.x.ai).
-- 그 방 대화는 xAI 로 가요. xAI 이용 정책도 따로 있어요(실존 인물의 음란한 묘사·미성년자 성적 대상화 금지 등).
-
-| 할 일 | 방법 |
-|---|---|
-| 키 넣기 | console.x.ai > API Keys 에서 만든 키를 `bash deploy/ovh.sh env` 로 `XAI_API_KEY=` 줄에 넣기 |
-| 쓸 수 있는 모델 이름 보기 | `bash deploy/ovh.sh check`('쓸 수 있는 Grok 모델') |
-| 모델·방 정하기 | `.env` 에 `XAI_MODEL=모델 이름`, `GROK_FRIENDS=친구 번호` → `bash deploy/ovh.sh restart` |
-| 끄기 | `GROK_FRIENDS=` 를 비우고 restart(키는 둬도 돼요) |
 
 ## 친구들(서로 아는 사이)
 
