@@ -175,6 +175,7 @@ async def main():
     reply, meta = await agent.ask(system, [{"role": "user", "content": "나 동희야"}], msg, loop.time() + 10, grok=True)
     assert reply == "반가워 동희!" and names.saved == ["동희"], (reply, names.saved)
     assert meta["model"] == "grok-test" and meta["effort"] is None and meta["calls"] == 2, meta
+    assert meta["grok_tokens"] == [800, 100, 1200] and meta["input_tokens"] == 800, meta
     second = fake.calls[1]["body"]["messages"]
     assert second[-2]["tool_calls"][0]["id"] == "call_1" and second[-1]["role"] == "tool", second
     assert second[-1]["tool_call_id"] == "call_1" and "동희" in second[-1]["content"], second[-1]
@@ -187,6 +188,8 @@ async def main():
     fake.calls.clear()
     reply, meta = await agent.ask(system, [{"role": "user", "content": "나 동희야"}], msg, loop.time() + 10, grok=True)
     assert reply == "클로드 답이야" and meta["model"] == "claude-haiku-5-5" and meta["effort"] == "xhigh", (reply, meta)
+    # 토큰 합계에는 두 회사 몫이 다 들고, Grok 몫은 따로(admin stats 가 Claude 금액에서 뺌)
+    assert meta["grok_tokens"] == [400, 50, 600] and (meta["input_tokens"], meta["output_tokens"]) == (500, 70), meta
     sent = fake.calls[-1]["body"]["messages"]
     assert [c["path"] for c in fake.calls] == ["/v1/chat/completions", "/v1/chat/completions", "/v1/messages"]
     assert sent[1] == {"role": "assistant", "content": [{"type": "tool_use", "id": "call_1", "name": "set_name",

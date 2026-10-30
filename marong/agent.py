@@ -529,6 +529,11 @@ class Agent:
             meta["output_tokens"] += usage.output_tokens or 0
             meta["cache_read_tokens"] += getattr(usage, "cache_read_input_tokens", None) or 0
             meta["cache_write_tokens"] += getattr(usage, "cache_creation_input_tokens", None) or 0
+            if xai:  # 위 합계 가운데 Grok 몫(입력·출력·캐시 읽기). 한 답에서 Grok 과 Claude 가 섞여도 admin stats 가 나눠 셈
+                part = meta.setdefault("grok_tokens", [0, 0, 0])
+                part[0] += usage.input_tokens or 0
+                part[1] += usage.output_tokens or 0
+                part[2] += usage.cache_read_input_tokens or 0
             if resp.stop_reason == "refusal":
                 details = getattr(resp, "stop_details", None)
                 meta["refusal"] = getattr(details, "category", None)

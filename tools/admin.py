@@ -202,17 +202,20 @@ def stats(c, tz, _args):
         "(SELECT count(*) FROM marong.notes) AS notes, (SELECT count(*) FROM marong.shared_notes) AS shared_notes, "
         "(SELECT count(*) FROM marong.embeddings) AS embeddings").fetchone()
     print("  ".join(f"{k} {v}" for k, v in n.items()))
+    # 답 하나의 토큰 합계(meta.input_tokens 등)에는 Grok 몫(meta.grok_tokens: 입력·출력·캐시 읽기)이 섞일 수 있어서 빼고 셈
     t = c.execute(
-        "SELECT count(*) AS replies, coalesce(sum((meta->>'input_tokens')::bigint), 0)::bigint AS i, "
-        "coalesce(sum((meta->>'output_tokens')::bigint), 0)::bigint AS o, "
-        "coalesce(sum((meta->>'cache_read_tokens')::bigint), 0)::bigint AS cr, "
+        "SELECT count(*) FILTER (WHERE coalesce(meta->>'model', '') NOT LIKE 'grok%') AS replies, "
+        "coalesce(sum((meta->>'input_tokens')::bigint - coalesce((meta->'grok_tokens'->>0)::bigint, 0)), 0)::bigint AS i, "
+        "coalesce(sum((meta->>'output_tokens')::bigint - coalesce((meta->'grok_tokens'->>1)::bigint, 0)), 0)::bigint AS o, "
+        "coalesce(sum((meta->>'cache_read_tokens')::bigint "
+        "  - coalesce((meta->'grok_tokens'->>2)::bigint, 0)), 0)::bigint AS cr, "
         "coalesce(sum((meta->>'cache_write_tokens')::bigint), 0)::bigint AS cw "
-        "FROM marong.messages WHERE role = 'assistant' AND created_at > now() - interval '7 days' "
-        "AND coalesce(meta->>'model', '') NOT LIKE 'grok%'").fetchone()
+        "FROM marong.messages WHERE role = 'assistant' AND created_at > now() - interval '7 days'").fetchone()
     g = c.execute(
-        "SELECT count(*) AS replies, coalesce(sum((meta->>'input_tokens')::bigint), 0)::bigint AS i, "
-        "coalesce(sum((meta->>'output_tokens')::bigint), 0)::bigint AS o FROM marong.messages "
-        "WHERE role = 'assistant' AND created_at > now() - interval '7 days' AND meta->>'model' LIKE 'grok%'").fetchone()
+        "SELECT count(*) AS replies, coalesce(sum((meta->'grok_tokens'->>0)::bigint), 0)::bigint AS i, "
+        "coalesce(sum((meta->'grok_tokens'->>1)::bigint), 0)::bigint AS o FROM marong.messages "
+        "WHERE role = 'assistant' AND created_at > now() - interval '7 days' AND meta->'grok_tokens' IS NOT NULL"
+    ).fetchone()
     s = c.execute(
         "SELECT count(*) AS n, coalesce(sum((meta->>'input_tokens')::bigint), 0)::bigint AS i, "
         "coalesce(sum((meta->>'output_tokens')::bigint), 0)::bigint AS o FROM ("
@@ -224,7 +227,8 @@ def stats(c, tz, _args):
           f"출력 {t['o']:,} 토큰), "
           f"요약·공유 메모 {s['n']}개(입력 {s['i']:,} · 출력 {s['o']:,} 토큰) → 대략 ${usd:.2f}")
     if g["replies"]:
-        print(f"  Grok 답장 {g['replies']}개(입력 {g['i']:,} · 출력 {g['o']:,} 토큰, 위 금액에 안 들어감. 비용은 console.x.ai)")
+        print(f"  Grok 을 쓴 답장 {g['replies']}개(Grok 몫 입력 {g['i']:,} · 출력 {g['o']:,} 토큰, 위 금액에 안 들어감. "
+              "비용은 console.x.ai)")
 
 
 def link(c, _tz, args):
