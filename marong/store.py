@@ -126,29 +126,22 @@ class Store:
             "JOIN marong.people p ON p.user_key = n.user_key WHERE n.room_key = %s "
             "ORDER BY n.user_key, n.id DESC", (room_key,))
 
-    async def set_name(self, user_key: str, name: str) -> int | None:
-        """이름을 저장하고 이 키를 친구 한 명(friends)에 묶는다. 묶은 친구 id(카카오에서 말한 적 없는 키면 None)."""
+    async def set_name(self, user_key: str, name: str, room_key: str | None = None) -> int | None:
+        """이름을 저장하고 이 키를 친구 한 명(friends)에 묶는다. 묶은 친구 id(카카오에서 말한 적 없는 키이거나 같은 이름
+        친구가 이미 있어서 묶지 않았으면 None)."""
         async with self.pool.connection() as c:
             async with c.transaction():
                 await c.execute("UPDATE marong.people SET name = %s, name_set_at = now() WHERE user_key = %s",
                                 (name, user_key))
-                return await self._link(c, user_key, name)
-
-    async def set_proactive(self, room_key: str, on: bool, per_day: int | None = None) -> None:
-        """선톡 받기를 켜거나 끈다. per_day 를 주면 이 방의 하루 선톡 수도 바꾼다."""
-        async with self.pool.connection() as c:
-            if per_day is None:
-                await c.execute("UPDATE marong.rooms SET proactive = %s WHERE room_key = %s", (on, room_key))
-            else:
-                await c.execute("UPDATE marong.rooms SET proactive = %s, proactive_per_day = %s WHERE room_key = %s",
-                                (on, per_day, room_key))
+                return await self._link(c, user_key, name, room_key)
 
     # ── 친구들(서로 아는 사이) ───────────────────────────────────
 
     @staticmethod
-    async def _link(c, user_key: str, name: str) -> int | None:
-        """키를 친구에 묶는다(이미 묶였으면 친구 이름만 바꿈). 같은 이름 친구가 하나뿐이면 그 친구에, 아니면 새 친구로.
-        사람마다 1:1 방은 하나라서 1:1 키는 이미 1:1 키가 있는 친구에게는 묶지 않는다. 터미널 대화 키는 묶지 않는다."""
+    async def _link(c, user_key: str, name: str, room_key: str | None = None) -> int | None:
+        """키를 친구에 묶는다(이미 묶였으면 친구 이름만 바꿈). 같은 이름 친구가 없으면 새 친구로 묶고, 있으면 묶지 않고
+        묶기 요청을 남긴다(이름은 누구나 댈 수 있어서. 관리자가 admin link 로 묶거나 unlink 로 따로 둠). 터미널 대화 키는
+        묶지 않는다."""
         await c.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("marong.friend:" + name,))
         cur = await c.execute("SELECT friend_id FROM marong.people WHERE user_key = %s FOR UPDATE", (user_key,))
         row = await cur.fetchone()
@@ -157,29 +150,33 @@ class Store:
         if row["friend_id"]:
             await c.execute("UPDATE marong.friends SET name = %s WHERE id = %s", (name, row["friend_id"]))
             return row["friend_id"]
-        cur = await c.execute(
-            "SELECT bool_or(r.is_channel) AS channel FROM marong.messages m "
-            "JOIN marong.rooms r ON r.room_key = m.room_key WHERE m.user_key = %s AND m.kakao_id IS NOT NULL",
-            (user_key,))
-        channel = (await cur.fetchone())["channel"]
-        if channel is None:
+        cur = await c.execute("SELECT 1 FROM marong.messages WHERE user_key = %s AND kakao_id IS NOT NULL LIMIT 1",
+                              (user_key,))
+        if await cur.fetchone() is None:
             return None
-        cur = await c.execute(
-            "SELECT f.id FROM marong.friends f WHERE f.name = %s AND NOT (%s AND EXISTS ("
-            "  SELECT 1 FROM marong.people p JOIN marong.messages m ON m.user_key = p.user_key "
-            "  JOIN marong.rooms r ON r.room_key = m.room_key WHERE p.friend_id = f.id AND r.is_channel))",
-            (name, channel))
-        found = await cur.fetchall()
-        if len(found) == 1:
-            friend_id = found[0]["id"]
-        else:
-            cur = await c.execute("INSERT INTO marong.friends (name) VALUES (%s) RETURNING id", (name,))
-            friend_id = (await cur.fetchone())["id"]
+        cur = await c.execute("SELECT 1 FROM marong.friends f WHERE f.name = %s "
+                              "AND EXISTS (SELECT 1 FROM marong.people p WHERE p.friend_id = f.id)", (name,))
+        if await cur.fetchone():
+            await Store._request(c, user_key, None, room_key, "link", {"name": name})
+            return None
+        cur = await c.execute("INSERT INTO marong.friends (name) VALUES (%s) RETURNING id", (name,))
+        friend_id = (await cur.fetchone())["id"]
         await c.execute("UPDATE marong.people SET friend_id = %s WHERE user_key = %s", (friend_id, user_key))
         return friend_id
 
+    @staticmethod
+    async def _request(c, user_key: str, friend_id: int | None, room_key: str | None, kind: str, detail: dict) -> None:
+        """대화로 한 요청을 남긴다(바꾸지는 않음). 이 키의 바로 앞 요청과 같으면(같은 말을 또 하면) 남기지 않는다."""
+        await c.execute(
+            "INSERT INTO marong.requests (user_key, friend_id, room_key, kind, detail) "
+            "SELECT %(k)s, %(f)s, %(r)s, %(kind)s, %(d)s WHERE NOT EXISTS ("
+            "  SELECT 1 FROM (SELECT kind, detail FROM marong.requests WHERE user_key = %(k)s ORDER BY id DESC LIMIT 1) x "
+            "  WHERE x.kind = %(kind)s AND x.detail = %(d)s)",
+            {"k": user_key, "f": friend_id, "r": room_key, "kind": kind, "d": Jsonb(detail)})
+
     async def link_unlinked(self) -> int:
-        """이름은 있는데 친구에 안 묶인 키를 묶는다(표 버전 3 으로 올린 뒤 한 번. 그 뒤엔 set_name 이 묶음)."""
+        """이름은 있는데 친구에 안 묶인 키를 묶는다(표 버전 3 전에 이름만 저장된 키. 그 뒤엔 set_name 이 묶음).
+        같은 이름 친구가 있어 묶기 요청으로 남긴 키는 계속 안 묶인 채로 둔다."""
         rows = await self._all("SELECT user_key, name FROM marong.people WHERE name IS NOT NULL AND friend_id IS NULL "
                                "ORDER BY first_seen")
         linked = 0
@@ -217,37 +214,43 @@ class Store:
             "ORDER BY (t.id IS NOT NULL OR g.id IS NOT NULL) DESC, last_seen DESC NULLS LAST LIMIT %(n)s",
             {"k": user_key, "n": limit})
 
-    async def add_friendship(self, user_key: str, name: str, label: str, close: bool = False) -> tuple[str, str | None]:
-        """지금 말하는 친구와 name 친구를 아는 사이로 저장한다(close 면 가까운 사이). 돌려주는 것: (결과, 말하는 친구 이름).
-        결과: ok | no_speaker(이름을 몰라 친구에 안 묶인 키) | unknown(그 이름 친구 없음) | ambiguous(여럿) | self"""
+    async def add_request(self, user_key: str, room_key: str, kind: str, name: str | None = None,
+                          label: str | None = None, per_day: int | None = None) -> tuple[str, str | None]:
+        """친구가 대화로 한 요청을 남긴다. 바꾸지는 않는다(관리자가 정함). kind: share_off 자기 얘기를 다른 친구에게 하지
+        마라 · share_on 다시 해도 된다 · friendship name 친구와 label 사이다 · proactive_off/on/less/more 이 방 선톡을
+        그만·다시·덜·더(per_day 는 친구가 말한 하루 횟수). 돌려주는 것: (결과, 말하는 친구 이름).
+        결과: ok | already(이미 그렇게 돼 있음) | no_speaker(이름을 몰라 친구에 안 묶인 키) | unknown(그 이름 친구 없음)
+        | ambiguous(여럿) | self. 선톡 요청은 이름을 몰라도 남긴다."""
         async with self.pool.connection() as c:
             async with c.transaction():
-                cur = await c.execute("SELECT f.id, f.name FROM marong.people p JOIN marong.friends f ON f.id = p.friend_id "
-                                      "WHERE p.user_key = %s", (user_key,))
+                cur = await c.execute("SELECT f.id, f.name, f.share FROM marong.people p "
+                                      "JOIN marong.friends f ON f.id = p.friend_id WHERE p.user_key = %s", (user_key,))
                 me = await cur.fetchone()
+                if kind.startswith("proactive_"):
+                    cur = await c.execute("SELECT proactive FROM marong.rooms WHERE room_key = %s", (room_key,))
+                    room = await cur.fetchone()
+                    if kind in ("proactive_off", "proactive_on") and room and room["proactive"] == (kind == "proactive_on"):
+                        return "already", me and me["name"]
+                    await self._request(c, user_key, me and me["id"], room_key, kind,
+                                        {"per_day": per_day} if per_day else {})
+                    return "ok", me and me["name"]
                 if not me:
                     return "no_speaker", None
-                cur = await c.execute(
-                    "SELECT f.id FROM marong.friends f WHERE f.name = %s AND f.id <> %s "
-                    "AND EXISTS (SELECT 1 FROM marong.people p WHERE p.friend_id = f.id)", (name, me["id"]))
-                others = await cur.fetchall()
-                if not others:
-                    return ("self" if name == me["name"] else "unknown"), me["name"]
-                if len(others) > 1:
-                    return "ambiguous", me["name"]
-                a, b = sorted((me["id"], others[0]["id"]))
-                await c.execute(
-                    "INSERT INTO marong.friendships (friend_a, friend_b, label, told_by, close) VALUES (%s, %s, %s, %s, %s) "
-                    "ON CONFLICT (friend_a, friend_b) DO UPDATE SET label = EXCLUDED.label, told_by = EXCLUDED.told_by, "
-                    "  close = EXCLUDED.close",
-                    (a, b, label or None, me["id"], close))
+                detail = {}
+                if kind in ("share_off", "share_on") and me["share"] == (kind == "share_on"):
+                    return "already", me["name"]
+                if kind == "friendship":
+                    cur = await c.execute(
+                        "SELECT f.id FROM marong.friends f WHERE f.name = %s AND f.id <> %s "
+                        "AND EXISTS (SELECT 1 FROM marong.people p WHERE p.friend_id = f.id)", (name, me["id"]))
+                    others = await cur.fetchall()
+                    if not others:
+                        return ("self" if name == me["name"] else "unknown"), me["name"]
+                    if len(others) > 1:
+                        return "ambiguous", me["name"]
+                    detail = {"name": name, "label": label or None, "with": others[0]["id"]}
+                await self._request(c, user_key, me["id"], room_key, kind, detail)
                 return "ok", me["name"]
-
-    async def set_share(self, user_key: str, on: bool) -> bool:
-        """지금 말하는 친구의 공유(가벼운 얘기를 아는 친구에게 해도 되는지)를 바꾼다. 친구에 안 묶인 키면 False."""
-        row = await self._one("UPDATE marong.friends f SET share = %s FROM marong.people p "
-                              "WHERE p.user_key = %s AND p.friend_id = f.id RETURNING f.id", (on, user_key))
-        return row is not None
 
     async def similar(self, model: str, room_key: str, vector, before_id: int, skip_summary_ids: list[int],
                       limit: int) -> list[dict]:

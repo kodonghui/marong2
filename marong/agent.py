@@ -68,59 +68,35 @@ SET_NAME_TOOL = {
         "additionalProperties": False,
     },
 }
-SET_PROACTIVE_TOOL = {
-    "name": "set_proactive",
+# 설정(공유 켬·끔, 아는 사이·가까운 사이, 키를 친구에 묶기, 선톡 켬·끔·횟수)은 관리자만 정한다. 마롱이는 대화로 설정을
+# 바꾸는 도구가 없고, 친구가 말하면 요청으로만 남긴다(2026-10-30 동희님 "왜 내 설계가 아니라 마롱이한테 전달되는대로
+# 되는거야?", "당연히 내가 관리하는거 아냐?")
+ASK_OWNER_TOOL = {
+    "name": "ask_owner",
     "description": (
-        "마롱이가 이 1:1 방에 먼저 말을 거는 것(선톡)을 끄거나 다시 켜고, 하루에 몇 번 먼저 말 걸지 바꾼다. 친구가 먼저 "
-        "연락하지 말라거나 선톡이 싫다고 분명하게 말하면 on=false, 다시 먼저 말 걸어 달라고 하면 on=true 로 부른다. "
-        "너무 자주 온다거나 더 자주 말 걸어 달라고 하면 on=true 와 per_day 를 같이 넣는다. 바쁘다거나 나중에 "
-        "얘기하자는 말만으로는 부르지 않는다."
+        "마롱이가 못 바꾸고 동희(마롱이를 만든 사람)가 정하는 걸 친구가 말하면 동희에게 남긴다. 남기기만 하고 바로 바뀌지는 "
+        "않는다. share_off: 친구가 자기 얘기를 다른 친구에게 하지 말라고 분명히 말할 때(어떤 얘기 하나만 비밀로 해 달라는 "
+        "말은 아님. 그 얘기는 비밀로 기억돼서 다른 친구에게 안 감). share_on: 자기 얘기를 다시 다른 친구에게 해도 된다고 할 때. "
+        "friendship: 마롱이도 아는 다른 친구와 어떤 사이인지 말해 줄 때(예: '현경이는 내 회사 동기야', '현경이 내 여친이야'). "
+        "proactive_off·proactive_on·proactive_less·proactive_more: 1:1 방에서 친구가 마롱이가 먼저 말 거는 것(선톡)을 "
+        "그만해 달라·다시 해 달라·덜 해 달라·더 해 달라고 분명히 말할 때(바쁘다거나 나중에 얘기하자는 말만으로는 아님). "
+        "친구가 직접 말한 것만 남기고 추측하지 않는다. '지금 친구와 아는 사이'에 이미 같은 관계로 있으면 부르지 않는다."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
-            "on": {"type": "boolean", "description": "선톡을 받으면 true, 그만 받으면 false"},
-            "per_day": {"type": "integer", "minimum": 1, "maximum": PER_DAY_MAX,
-                        "description": f"하루에 먼저 말 거는 횟수(1~{PER_DAY_MAX}). 친구가 횟수를 바꿔 달라고 할 때만 넣어"},
-        },
-        "required": ["on"],
-        "additionalProperties": False,
-    },
-}
-ADD_FRIENDSHIP_TOOL = {
-    "name": "add_friendship",
-    "description": (
-        "지금 말하는 친구가 마롱이도 아는 다른 친구와 어떤 사이인지 알려 주면 저장한다(예: '현경이는 내 회사 동기야', "
-        "'현경이 내 여친이야', '동희는 내 남자친구야'). 저장하면 두 친구는 아는 사이가 되어서, 서로에게 상대의 가벼운 얘기를 "
-        "할 수 있다. 연인·배우자·가족·절친처럼 가까운 사이면 close 를 true 로 해서 서로의 요즘 근황까지 얘기할 수 있게 한다. "
-        "친구가 직접 말한 관계만 저장하고 추측하지 않는다. '지금 친구와 아는 사이'에 이미 같은 관계로 있으면 부르지 않는다."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
+            "kind": {"type": "string", "enum": ["share_off", "share_on", "friendship", "proactive_off", "proactive_on",
+                                                "proactive_less", "proactive_more"]},
             "name": {"type": "string",
-                     "description": "상대 친구 이름('마롱이가 아는 다른 친구들'에 있는 이름. 호칭이나 '아'·'야'·'이'는 빼고)"},
+                     "description": "friendship 일 때 상대 친구 이름('마롱이가 아는 다른 친구들'에 있는 이름. 호칭이나 "
+                                    "'아'·'야'·'이'는 빼고)"},
             "label": {"type": "string",
-                      "description": "지금 친구 쪽에서 본 상대와의 관계를 짧게(예: 친구, 회사 동기, 여자친구, 남편, 동생). 1~20자"},
-            "close": {"type": "boolean",
-                      "description": "연인·배우자·가족·절친처럼 서로 근황과 힘든 일까지 나누는 가까운 사이면 true. "
-                                     "회사 동기·같은 반·그냥 아는 친구면 false"},
+                      "description": "friendship 일 때 지금 친구 쪽에서 본 상대와의 관계를 짧게(예: 친구, 회사 동기, "
+                                     "여자친구, 남편, 동생). 1~20자"},
+            "per_day": {"type": "integer", "minimum": 1, "maximum": PER_DAY_MAX,
+                        "description": "proactive_less·proactive_more 일 때 친구가 하루 몇 번이라고 콕 집어 말했으면 그 횟수"},
         },
-        "required": ["name", "label", "close"],
-        "additionalProperties": False,
-    },
-}
-SET_SHARE_TOOL = {
-    "name": "set_share",
-    "description": (
-        "지금 말하는 친구의 얘기를 이 친구를 아는 다른 친구에게 해도 되는지 바꾼다(가벼운 얘기는 아는 친구에게, 요즘 근황은 "
-        "가까운 사이에게). 친구가 자기 얘기를 다른 친구에게 하지 말라고 분명히 말하면 on=false, 다시 해도 된다고 하면 on=true "
-        "로 부른다. 어떤 얘기 하나만 비밀로 해 달라는 말에는 부르지 않는다(그 얘기는 비밀로 기억돼서 다른 친구에게 안 감)."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {"on": {"type": "boolean", "description": "해도 되면 true, 하지 말라면 false"}},
-        "required": ["on"],
+        "required": ["kind"],
         "additionalProperties": False,
     },
 }
@@ -406,15 +382,16 @@ class Agent:
                          "알려 주면 set_name 으로 저장해.")
         if self.s.proactive and msg.is_channel:
             if (person or {}).get("proactive") is False:
-                lines.append("- 이 친구는 선톡을 꺼 뒀어(마롱이가 먼저 말 걸지 않음). 다시 해 달라고 하면 "
-                             "set_proactive 로 켜.")
+                lines.append("- 이 친구에게는 지금 마롱이가 먼저 말 걸지 않아(선톡 끔, 동희가 정함). 다시 해 달라고 하면 "
+                             "ask_owner 의 proactive_on 으로 동희에게 남기고, 켜는 건 동희가 한다고 말해.")
             else:
                 per_day = (person or {}).get("per_day") or self.s.proactive_per_day
-                lines.append(f"- 마롱이는 이 친구에게 하루 {per_day}번쯤 먼저 카톡을 보내(선톡). "
-                             "친구가 선톡이 싫다거나 먼저 연락하지 말라고 하면 set_proactive 로 끄고 알겠다고 가볍게 말해. "
-                             "너무 자주 온다거나 더 자주 보내 달라고 하면 set_proactive 의 per_day 로 횟수를 바꿔.")
+                lines.append(f"- 마롱이는 이 친구에게 하루 {per_day}번쯤 먼저 카톡을 보내(선톡, 동희가 정함). 친구가 선톡이 "
+                             "싫다거나 먼저 연락하지 말라고 하면, 또는 덜·더 자주 보내 달라고 하면 ask_owner 로 동희에게 남기고 "
+                             "바꾸는 건 동희가 한다고 솔직하게 말해(바꾼 척하지 마).")
         if (person or {}).get("share") is False:
-            lines.append("- 이 친구는 자기 얘기를 다른 친구에게 하지 말라고 했어. 다시 해도 된다고 하면 set_share 로 켜.")
+            lines.append("- 이 친구 얘기는 지금 다른 친구에게 하지 않게 돼 있어(동희가 정함). 다시 해도 된다고 하면 ask_owner 의 "
+                         "share_on 으로 동희에게 남기고, 다시 켜는 건 동희가 한다고 말해.")
         return "\n".join(lines + self._memory_lines(notes, summaries, recalled)
                          + self._friend_lines(circle or [], group=not msg.is_channel))
 
@@ -515,11 +492,8 @@ class Agent:
     # ── Claude 호출 ──────────────────────────────────────────
 
     def _tools(self, msg: Incoming) -> list[dict]:
-        """선톡을 켰으면 1:1 방에서만 set_proactive 도 쓸 수 있다."""
-        tools = [SET_NAME_TOOL, ADD_FRIENDSHIP_TOOL, SET_SHARE_TOOL]
-        if self.s.proactive and msg.is_channel:
-            tools.insert(1, SET_PROACTIVE_TOOL)
-        return tools
+        """설정을 바꾸는 도구는 없다(set_name 은 친구 자신의 이름, ask_owner 는 관리자에게 남기기만 함)."""
+        return [SET_NAME_TOOL, ASK_OWNER_TOOL]
 
     def _body(self, system: list[dict], messages: list[dict], tools: list[dict]) -> dict:
         body = {"model": self.s.anthropic_model, "max_tokens": self.s.llm_max_tokens, "system": system,
@@ -577,19 +551,15 @@ class Agent:
 
     async def _run_tool(self, block, msg: Incoming) -> dict:
         result = {"type": "tool_result", "tool_use_id": block.id}
-        if block.name == "set_proactive":
-            return await self._set_proactive(block, msg, result)
-        if block.name == "add_friendship":
-            return await self._add_friendship(block, msg, result)
-        if block.name == "set_share":
-            return await self._set_share(block, msg, result)
+        if block.name == "ask_owner":
+            return await self._ask_owner(block, msg, result)
         if block.name != "set_name":
             return {**result, "content": f"{block.name} 도구는 없어.", "is_error": True}
         name = clean_name((block.input or {}).get("name"))
         if not name:
             return {**result, "content": f"이름이 비었거나 {NAME_MAX}자를 넘어. 친구에게 다시 물어봐.", "is_error": True}
         try:
-            await self.store.set_name(msg.user_key, name)
+            await self.store.set_name(msg.user_key, name, msg.room_key)
         except Exception as e:
             log.error("db_error %s", brief(e))
             return {**result, "content": "저장소 오류로 저장하지 못했어. 이번 대화에서는 그 이름으로 불러.",
@@ -597,73 +567,63 @@ class Agent:
         log.info("set_name user=%s", short_key(msg.user_key))
         return {**result, "content": f"저장했어. 이제부터 '{name}'(이)라고 불러."}
 
-    async def _set_proactive(self, block, msg: Incoming, result: dict) -> dict:
+    async def _ask_owner(self, block, msg: Incoming, result: dict) -> dict:
         inp = block.input or {}
-        on, per_day = inp.get("on"), inp.get("per_day")
-        if not isinstance(on, bool):
-            return {**result, "content": "on 은 true 나 false 여야 해.", "is_error": True}
+        kind, per_day = inp.get("kind"), inp.get("per_day")
+        name, label = clean_name(inp.get("name")), " ".join(str(inp.get("label") or "").split())[:NAME_MAX].strip()
+        if kind not in ASK_OWNER_TOOL["input_schema"]["properties"]["kind"]["enum"]:
+            return {**result, "content": "kind 는 " + "·".join(ASK_OWNER_TOOL["input_schema"]["properties"]["kind"]["enum"])
+                                         + " 중 하나여야 해.", "is_error": True}
         if per_day is not None and (isinstance(per_day, bool) or not isinstance(per_day, int)
                                     or not 1 <= per_day <= PER_DAY_MAX):
             return {**result, "content": f"per_day 는 1~{PER_DAY_MAX} 사이 정수여야 해.", "is_error": True}
-        try:
-            await self.store.set_proactive(msg.room_key, on, per_day)
-        except Exception as e:
-            log.error("db_error %s", brief(e))
-            return {**result, "content": "저장소 오류로 바꾸지 못했어. 친구에게 나중에 다시 말해 달라고 해.",
-                    "is_error": True}
-        log.info("set_proactive room=%s on=%s per_day=%s", short_key(msg.room_key), on, per_day)
-        if not on:
-            return {**result, "content": "선톡을 껐어. 이제 이 방에는 먼저 말 걸지 않아. 친구에게 알겠다고 가볍게 말해."}
-        if per_day:
-            return {**result, "content": f"바꿨어. 이제 하루 {per_day}번쯤 먼저 말 걸게. 친구에게 알겠다고 가볍게 말해."}
-        return {**result, "content": "선톡을 다시 켰어. 이제 가끔 먼저 말 걸게."}
-
-    async def _add_friendship(self, block, msg: Incoming, result: dict) -> dict:
-        inp = block.input or {}
-        name, label = clean_name(inp.get("name")), " ".join(str(inp.get("label") or "").split())[:NAME_MAX].strip()
-        close = inp.get("close", False)
-        if not name:
+        if kind.startswith("proactive_") and not (self.s.proactive and msg.is_channel):
+            return {**result, "content": "이 방에는 원래 마롱이가 먼저 말 걸지 않아(선톡은 1:1 방에서만). 그렇게 말해."}
+        if kind == "friendship" and not name:
             return {**result, "content": f"친구 이름이 비었거나 {NAME_MAX}자를 넘어.", "is_error": True}
-        if not isinstance(close, bool):
-            return {**result, "content": "close 는 true 나 false 여야 해.", "is_error": True}
         names = [name] + ([name[:-1]] if name.endswith("이") and len(name) > 2 else [])  # '현경이' → '현경'
         try:
             for n in names:
-                outcome, me = await self.store.add_friendship(msg.user_key, n, label, close)
+                outcome, me = await self.store.add_request(msg.user_key, msg.room_key, kind, n, label,
+                                                           per_day if kind in ("proactive_less", "proactive_more") else None)
                 if outcome != "unknown":
                     name = n
                     break
         except Exception as e:
             log.error("db_error %s", brief(e))
-            return {**result, "content": "저장소 오류로 저장하지 못했어.", "is_error": True}
-        log.info("add_friendship user=%s outcome=%s close=%s", short_key(msg.user_key), outcome, close)
-        texts = {
-            "ok": f"저장했어. 이제 마롱이는 {me}(이)랑 {name}(이)가 {label or '아는 사이'}인 걸 알아."
-                  + (" 가까운 사이라서 서로 요즘 근황도 얘기할 수 있어." if close else ""),
-            "no_speaker": "지금 친구 이름을 아직 몰라서 저장하지 못했어. 이름을 먼저 물어봐.",
-            "unknown": f"마롱이는 '{name}'(이)라는 친구를 아직 몰라. 모른다고 솔직하게 말해.",
-            "ambiguous": f"'{name}'(이)라는 친구가 여러 명이라 저장하지 않았어. 누군지 헷갈린다고 말해.",
-            "self": "자기 자신이라 저장하지 않았어.",
-        }
+            return {**result, "content": "저장소 오류로 남기지 못했어.", "is_error": True}
+        log.info("ask_owner user=%s kind=%s outcome=%s", short_key(msg.user_key), kind, outcome)
+        if kind.startswith("proactive_"):
+            texts = {
+                "ok": "동희에게 남겼어. 선톡(마롱이가 먼저 말 거는 것)을 바꾸는 건 동희가 정해서 아직은 그대로야. 바꾼 척하지 말고 "
+                      "친구에게 솔직하게 말해(예: '그건 동희가 정하는 거라 동희한테 남겨 둘게. 동희한테 직접 말해도 돼').",
+                "already": "이미 그렇게 돼 있어(선톡이 " + ("꺼져" if kind == "proactive_off" else "켜져") + " 있음). 그렇게 말해.",
+            }
+        elif kind == "share_off":
+            texts = {
+                "ok": "동희에게 남겼어. 공유를 끄는 건 동희가 정해서 아직은 그대로야(가벼운 얘기는 이 친구를 아는 친구에게, 요즘 "
+                      "근황은 가까운 사이에게 갈 수 있음). 끈 척하지 말고 친구에게 그대로 솔직하게 말해(예: '내가 바로 끌 수는 "
+                      "없고 동희가 정하는 거라 동희한테 남겨 둘게. 비밀이라고 한 얘기는 원래 안 옮겨').",
+                "already": "이미 꺼져 있어. 이 친구 얘기는 다른 친구에게 하지 않아. 알겠다고 가볍게 말해.",
+                "no_speaker": "이름을 모르는 친구라서 원래 이 친구 얘기를 다른 친구에게 하지 않아. 알겠다고 말해.",
+            }
+        elif kind == "share_on":
+            texts = {
+                "ok": "동희에게 남겼어. 공유를 다시 켜는 건 동희가 정해서 아직은 그대로 꺼져 있어. 친구에게 그렇게 솔직하게 말해"
+                      "(예: '알겠어! 다시 켜는 건 동희가 해야 해서 동희한테 남겨 둘게').",
+                "already": "이미 켜져 있어. 이 친구의 가벼운 얘기는 이 친구를 아는 친구에게, 요즘 근황은 가까운 사이에게 할 수 있어.",
+                "no_speaker": "이름을 모르는 친구라서 원래 이 친구 얘기를 다른 친구에게 하지 않아. 이름을 먼저 물어봐.",
+            }
+        else:
+            texts = {
+                "ok": f"동희에게 남겼어. {me}(이)랑 {name}(이)가 어떤 사이인지는 동희가 정해서, 정하기 전까지는 서로 얘기를 "
+                      "옮기지 않아. 친구에게 따로 말할 필요는 없고 얘기를 이어 가.",
+                "no_speaker": "지금 친구 이름을 아직 몰라서 남기지 못했어. 이름을 먼저 물어봐.",
+                "unknown": f"마롱이는 '{name}'(이)라는 친구를 아직 몰라. 모른다고 솔직하게 말해.",
+                "ambiguous": f"'{name}'(이)라는 친구가 여러 명이라 남기지 않았어. 누군지 헷갈린다고 말해.",
+                "self": "자기 자신이라 남기지 않았어.",
+            }
         return {**result, "content": texts[outcome]}
-
-    async def _set_share(self, block, msg: Incoming, result: dict) -> dict:
-        on = (block.input or {}).get("on")
-        if not isinstance(on, bool):
-            return {**result, "content": "on 은 true 나 false 여야 해.", "is_error": True}
-        try:
-            changed = await self.store.set_share(msg.user_key, on)
-        except Exception as e:
-            log.error("db_error %s", brief(e))
-            return {**result, "content": "저장소 오류로 바꾸지 못했어. 친구에게 나중에 다시 말해 달라고 해.",
-                    "is_error": True}
-        log.info("set_share user=%s on=%s", short_key(msg.user_key), on)
-        if not changed:
-            return {**result, "content": "이름을 모르는 친구라서 원래 이 친구 얘기를 다른 친구에게 하지 않아. 알겠다고 말해."}
-        if on:
-            return {**result, "content": "켰어. 이제 이 친구의 가벼운 얘기(취향 같은 것)는 이 친구를 아는 친구에게, "
-                                         "요즘 근황은 가까운 사이에게 할 수 있어."}
-        return {**result, "content": "껐어. 이제 이 친구 얘기는 다른 친구에게 하지 않아. 알겠다고 가볍게 말해."}
 
     # ── 선톡(먼저 말 걸기) ──────────────────────────────────────
 

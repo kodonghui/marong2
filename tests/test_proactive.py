@@ -63,13 +63,13 @@ def respond(body):
         return message([text("알겠어 👌")])
     said = last["content"].splitlines()[-1]
     if "선톡 그만" in said:
-        return message([tool_use("set_proactive", {"on": False})], "tool_use")
+        return message([tool_use("ask_owner", {"kind": "proactive_off"})], "tool_use")
     if "선톡 다시" in said:
-        return message([tool_use("set_proactive", {"on": True})], "tool_use")
+        return message([tool_use("ask_owner", {"kind": "proactive_on"})], "tool_use")
     if "선톡 자주" in said:
-        return message([tool_use("set_proactive", {"on": True, "per_day": 5})], "tool_use")
+        return message([tool_use("ask_owner", {"kind": "proactive_more", "per_day": 5})], "tool_use")
     if "선톡 엄청" in said:
-        return message([tool_use("set_proactive", {"on": True, "per_day": 60})], "tool_use")
+        return message([tool_use("ask_owner", {"kind": "proactive_more", "per_day": 60})], "tool_use")
     return message([text(f"응답:{said}")])
 
 
@@ -202,7 +202,7 @@ async def main():
     await say("g1", "u1g", "다들 안녕", channel=False, kid="c1")
     await say("terminal", "terminal", "터미널에서 한 말")
     await say("p3", "u3", "안녕", kid="d1")
-    await store.set_proactive("p3", False)
+    db.admin("UPDATE marong.rooms SET proactive = false WHERE room_key = 'p3'")  # 관리자가 끈 방
     await say("p4", "u4", "심심해", kid="e1")
     ids = [r[0] for r in db.admin("SELECT id FROM marong.messages WHERE room_key = 'p1' ORDER BY id")]
     sid = await store.add_summary("p1", ids[0], ids[-1], "동희가 다음 주 토익 시험을 본다고 함",
@@ -375,43 +375,57 @@ async def main():
            "첫 말부터 실패하면 만든 말 전부를 전달 안 됨으로")
         MODE["proactive"] = "ok"
 
-        # ── 친구가 그만하라면 끄고, 다시 해 달라면 켬, 횟수도 바꿈(1:1 에서만 도구) ──
+        # ── 친구가 선톡을 그만·다시·더 해 달라고 해도 설정은 안 바뀌고 관리자에게 요청으로만 남음 ──
+        def requests_of(room):
+            return db.admin("SELECT kind, detail FROM marong.requests WHERE room_key = %s ORDER BY id", (room,))
+
+        def room5_state():
+            return db.admin("SELECT proactive, proactive_per_day FROM marong.rooms WHERE room_key = 'p5'")
+
+        def last_result():
+            return llm.bodies[-1]["messages"][-1]["content"][0]
+
         await say("p5", "u5", "안녕", kid="f1")
         b = llm.bodies[-1]
-        ok([x["name"] for x in b["tools"]] == ["set_name", "set_proactive", "add_friendship", "set_share"]
-           and "하루 2번쯤 먼저 카톡을 보내(선톡)" in situation(b), "선톡이 켜져 있으면 1:1 에서 끄기 도구와 안내")
-        props = next(x for x in b["tools"] if x["name"] == "set_proactive")["input_schema"]["properties"]
+        ok([x["name"] for x in b["tools"]] == ["set_name", "ask_owner"]
+           and "하루 2번쯤 먼저 카톡을 보내(선톡, 동희가 정함)" in situation(b), "설정을 바꾸는 도구는 없고 1:1 에 선톡 안내")
+        props = next(x for x in b["tools"] if x["name"] == "ask_owner")["input_schema"]["properties"]
         ok(props["per_day"] == {**props["per_day"], "type": "integer", "minimum": 1, "maximum": 48}, props)
-        ok(await say("p5", "u5", "선톡 그만 보내", kid="f2") == "알겠어 👌"
-           and db.admin("SELECT proactive FROM marong.rooms WHERE room_key = 'p5'") == [(False,)], "그만하라면 끔")
+        ok(await say("p5", "u5", "선톡 그만 보내", kid="f2") == "알겠어 👌" and room5_state() == [(True, None)]
+           and requests_of("p5") == [("proactive_off", {})], "그만하라고 해도 끄지 않고 요청으로 남김")
+        ok("동희가 정해서" in last_result()["content"] and "바꾼 척하지 말고" in last_result()["content"], last_result())
+        await say("p5", "u5", "선톡 그만 보내", kid="f2b")
+        ok(len(requests_of("p5")) == 1, "같은 말을 또 하면 다시 남기지 않음")
+        db.admin("UPDATE marong.rooms SET proactive = false WHERE room_key = 'p5'")  # 관리자가 끔(admin schedule … off)
         age("p5", 5)
         ok("p5" not in await due_rooms(t), "끈 방은 대상 아님")
         await say("p5", "u5", "선톡 다시 해줘", kid="f3")
-        ok("선톡을 꺼 뒀어" in situation(llm.bodies[-2])
-           and db.admin("SELECT proactive FROM marong.rooms WHERE room_key = 'p5'") == [(True,)], "다시 켜기")
-        ok(await say("p5", "u5", "선톡 자주 해줘", kid="f5") == "알겠어 👌"
-           and db.admin("SELECT proactive, proactive_per_day FROM marong.rooms WHERE room_key = 'p5'") == [(True, 5)],
-           "더 자주(덜) 해 달라면 하루 횟수를 바꿈")
-        result = llm.bodies[-1]["messages"][-1]["content"][0]
-        ok("하루 5번쯤" in result["content"] and not result.get("is_error"), result)
+        ok("마롱이가 먼저 말 걸지 않아(선톡 끔, 동희가 정함)" in situation(llm.bodies[-2]) and room5_state() == [(False, None)]
+           and requests_of("p5")[-1] == ("proactive_on", {}), "다시 해 달라고 해도 켜지 않고 요청만")
+        await say("p5", "u5", "선톡 그만 보내", kid="f3b")
+        ok("이미 그렇게 돼 있어" in last_result()["content"] and requests_of("p5")[-1] == ("proactive_on", {}),
+           "이미 꺼져 있으면 남기지 않음")
+        db.admin("UPDATE marong.rooms SET proactive = true WHERE room_key = 'p5'")  # 관리자가 다시 켬
+        ok(await say("p5", "u5", "선톡 자주 해줘", kid="f5") == "알겠어 👌" and room5_state() == [(True, None)]
+           and requests_of("p5")[-1] == ("proactive_more", {"per_day": 5}), "더 자주 해 달라고 해도 횟수는 그대로, 말한 횟수만 남김")
         await say("p5", "u5", "선톡 엄청 많이 해줘", kid="f6")
-        result = llm.bodies[-1]["messages"][-1]["content"][0]
-        ok(result.get("is_error") is True and "1~48" in result["content"]
-           and db.admin("SELECT proactive_per_day FROM marong.rooms WHERE room_key = 'p5'") == [(5,)],
-           "1~48 밖이면 안 바꿈")
+        ok(last_result().get("is_error") is True and "1~48" in last_result()["content"] and len(requests_of("p5")) == 3,
+           "1~48 밖이면 남기지 않음")
         await say("p5", "u5", "고마워", kid="f7")
-        ok("하루 5번쯤 먼저 카톡을 보내(선톡)" in situation(llm.bodies[-1]), "바꾼 횟수가 안내에 보임")
+        ok("하루 2번쯤 먼저 카톡을 보내(선톡, 동희가 정함)" in situation(llm.bodies[-1]), "횟수는 관리자가 정한 그대로")
         room5 = (await store.proactive_rooms("p5"))[0]
         r = await pro.deliver(room5, dry=True)
-        ok(room5["per_day"] == 5 and r["parts"] == [0, 1] and PROACTIVE_GUIDE.format(per_day=5) in situation(llm.bodies[-1]),
-           "선톡 만들 때도 바꾼 횟수")
+        ok(room5["per_day"] is None and r["parts"] == [0, 1] and PROACTIVE_GUIDE.format(per_day=2) in situation(llm.bodies[-1]),
+           "선톡 만들 때도 관리자가 정한 횟수")
         await say("g1", "u1g", "마롱아", channel=False, kid="c2")
-        ok([x["name"] for x in llm.bodies[-1]["tools"]] == ["set_name", "add_friendship", "set_share"]
-           and "선톡" not in situation(llm.bodies[-1]), "단체방에서는 선톡 도구·안내 없음")
+        ok([x["name"] for x in llm.bodies[-1]["tools"]] == ["set_name", "ask_owner"]
+           and "선톡" not in situation(llm.bodies[-1]), "단체방에서는 선톡 안내 없음")
+        await say("g1", "u1g", "선톡 그만 보내", channel=False, kid="c3")
+        ok("1:1 방에서만" in last_result()["content"] and requests_of("g1") == [], "단체방에서는 선톡 요청을 남기지 않음")
         off = Agent(replace(s, proactive=False), store, FakeEmbeddings(), llm)
         await say("p5", "u5", "안녕 또", kid="f4", ag=off)
-        ok([x["name"] for x in llm.bodies[-1]["tools"]] == ["set_name", "add_friendship", "set_share"]
-           and "선톡" not in situation(llm.bodies[-1]), "PROACTIVE=off 면 도구·안내 없음")
+        ok([x["name"] for x in llm.bodies[-1]["tools"]] == ["set_name", "ask_owner"]
+           and "선톡" not in situation(llm.bodies[-1]), "PROACTIVE=off 면 선톡 안내 없음")
 
         # ── 단체방 전송 형식(지금은 안 씀) ──
         sent_ok, code = await send_message(http, s, skill_text("단체방 시험"), group_key="g1")
@@ -449,6 +463,7 @@ async def main():
                             "WHERE conrelid = 'marong.rooms'::regclass AND pg_get_constraintdef(oid) LIKE %s",
                             ("%proactive_per_day%",))
 
+        db.admin("UPDATE marong.rooms SET proactive_per_day = 5 WHERE room_key = 'p5'")  # 관리자가 정한 횟수
         checks = per_day_checks()
         ok(len(checks) == 1 and ">= 1" in checks[0][1] and "<= 48" in checks[0][1], checks)
         db.admin("ALTER TABLE marong.rooms DROP CONSTRAINT rooms_proactive_per_day_check")
@@ -505,7 +520,7 @@ async def main():
         ok("- 친구: 현경" in sit and PROACTIVE_GUIDE.format(per_day=12) in sit, "선톡 안내에도 하루 12번")
         tick(20)  # 07:50 친구가 답함
         await say("p6", "u6", "ㅋㅋ 아침부터 웬일", kid="g2")
-        ok("하루 12번쯤 먼저 카톡을 보내(선톡)" in situation(llm.bodies[-1]), "답할 때 안내에도 이 방 횟수")
+        ok("하루 12번쯤 먼저 카톡을 보내(선톡, 동희가 정함)" in situation(llm.bodies[-1]), "답할 때 안내에도 이 방 횟수")
         tick(40)  # 08:30, 다음 칸(08:25~09:50)
         ok(await due_rooms(today.replace(hour=8, minute=30)) == [], "칸 반 길이(42분 30초)만큼은 조용해야")
         tick(10)  # 08:40
@@ -517,7 +532,7 @@ async def main():
     joined = "\n".join(LOGS)
     for secret in ("tok-secret", "선톡 1 🌰", "동희 선톡", "토익", "심심해", "botUserKey", "첫 말", "현경이야", "웬일"):
         ok(secret not in joined, f"로그에 '{secret}'이(가) 남음")
-    ok("선톡 room=" in joined and "parts=3/3" in joined and "set_proactive room=" in joined, "로그 자체는 남음")
+    ok("선톡 room=" in joined and "parts=3/3" in joined and "ask_owner user=" in joined, "로그 자체는 남음")
 
     await store.close()
     claude.close()

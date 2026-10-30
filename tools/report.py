@@ -1,5 +1,5 @@
 """마롱이 기록 리포트: 대화 · 임베딩 · 들어간 기억(답마다 임베딩 검색으로 찾은 것과 실제로 넣은 것) · 요약·메모
-· 친구·공유(지금 기준 공유 켬·끔, 아는 사이, 다른 친구에게 하는 얘기).
+· 친구·공유(지금 기준 공유 켬·끔, 아는 사이, 다른 친구에게 하는 얘기, 대화로 한 요청과 관리자가 정할 일).
   python tools/report.py [--hours 24] [--until 2026-10-27T19:00+09:00] [--out 파일]   엑셀(--out 이 없으면 stdout)
   python tools/report.py --sheet [--until …]   구글 시트로 보냄(.env 의 SHEET_URL. 기간은 최근 SHEET_DAYS 일, 기본 30)
   python tools/report.py --sheet --if-asked    시트에서 '마롱이 > 지금 새로고침'을 눌렀을 때만 보냄(서버가 1분마다 물어봄)
@@ -154,6 +154,11 @@ def fetch(c, start: datetime, until: datetime, vectors: bool = True) -> dict:
         "latest_shared": {r["friend_id"]: r for r in c.execute(
             "SELECT DISTINCT ON (friend_id) friend_id, content, close_content, created_at FROM marong.shared_notes "
             "ORDER BY friend_id, id DESC").fetchall()},
+        "requests": c.execute(
+            "SELECT q.user_key, q.friend_id, q.kind, q.detail, q.created_at, r.is_channel, r.proactive, "
+            "  r.proactive_per_day, p.name AS key_name, p.friend_id AS key_friend, p.last_seen AS key_seen "
+            "FROM marong.requests q LEFT JOIN marong.rooms r ON r.room_key = q.room_key "
+            "LEFT JOIN marong.people p ON p.user_key = q.user_key ORDER BY q.id DESC").fetchall(),
     }
     # 답에 넣은(또는 찾고 안 넣은) 예전 기억과 친구가 한 말은 기간 밖일 수 있어서 따로 읽음
     msg_ids, sum_ids = set(), set()
@@ -176,6 +181,45 @@ def fetch(c, start: datetime, until: datetime, vectors: bool = True) -> dict:
         "LEFT JOIN marong.people p ON p.user_key = m.user_key "
         "WHERE m.role = 'user' AND m.room_key = ANY(%s)", (room_keys,)).fetchall()
     return data
+
+
+REQUESTS_SHOWN = 5
+
+
+def request_text(q: dict, f: dict | None, friend_name: dict[int, str], pairs: set[tuple[int, int]], tz) -> str:
+    """대화로 한 요청 한 줄: 언제·어느 방에서 무엇을 말했는지와, 지금 그렇게 돼 있는지 아니면 관리자가 할 명령.
+    f 는 요청을 붙인 친구 줄(친구에 안 묶인 키의 요청이면 None)."""
+    where = "1:1" if q["is_channel"] else "단체방" if q["is_channel"] is not None else "방 모름"
+    head = f"{q['created_at'].astimezone(tz).strftime('%m/%d %H:%M')} {where}: "
+    who = f["name"] if f else key(q["user_key"])
+    if q["kind"].startswith("proactive_"):
+        if q["kind"] == "proactive_off":
+            return head + "선톡 그만 보내 달라고 함 → " + (
+                "지금 안 보냄" if q["proactive"] is False else f"정할 일: admin schedule {who} off")
+        if q["kind"] == "proactive_on":
+            return head + "선톡 다시 보내 달라고 함 → " + (
+                "지금 보냄" if q["proactive"] else f"정할 일: admin schedule {who} on")
+        said = f"(하루 {q['detail']['per_day']}번)" if q["detail"].get("per_day") else ""
+        now = f"하루 {q['proactive_per_day']}번" if q["proactive_per_day"] else "하루 횟수 기본값"
+        return (head + f"선톡 {'더' if q['kind'] == 'proactive_more' else '덜'} 보내 달라고 함{said} → 지금 {now}, "
+                f"정할 일: admin schedule {who} <하루 횟수>")
+    if q["kind"] == "share_off":
+        return head + "공유 꺼 달라고 함 → " + ("지금 꺼져 있음" if not f["share"] else f"정할 일: admin share {f['name']} off")
+    if q["kind"] == "share_on":
+        return head + "공유 다시 켜 달라고 함 → " + ("지금 켜져 있음" if f["share"] else f"정할 일: admin share {f['name']} on")
+    if q["kind"] == "friendship":
+        other = q["detail"].get("with")
+        name = friend_name.get(other, q["detail"].get("name"))
+        label = q["detail"].get("label") or "아는 사이"
+        done = tuple(sorted((f["id"], other))) in pairs if other else False
+        arg = f'"{label}"' if " " in label else label
+        return (head + f"{name}(이)랑 '{label}' 사이라고 함 → "
+                + ("아는 사이로 정해져 있음" if done else f"정할 일: admin friendship {f['name']} {name} {arg} [close]"))
+    k, name = key(q["user_key"]), q["detail"].get("name")
+    return (head + f"{k} 키가 '{name}'(이)라고 함 → "
+            + ("이 친구에 묶여 있음" if f and q["key_friend"] == f["id"]
+               else "다른 친구에 묶여 있음" if q["key_friend"]
+               else f"정할 일: 같은 사람이면 admin link {k} {name}, 다른 사람이면 admin unlink {k}"))
 
 
 def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, threshold: float = 0.4,
@@ -350,6 +394,16 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
     for m in data["mates"]:
         if m["a"] in friend_name and m["b"] in friend_name:
             known.setdefault(m["a"], {}).setdefault(m["b"], []).append("같은 단체방")
+    pairs = {(fs["friend_a"], fs["friend_b"]) for fs in data["friendships"]}
+    asked: dict[int, list[str]] = {}  # 친구 → 대화로 한 요청(최신 먼저). 묶기 요청은 그 이름 친구에게 붙임
+    loose: dict[str, list[dict]] = {}  # 어느 친구 줄에도 못 붙인 요청(친구에 안 묶인 키) → 키마다 한 줄
+    for q in data["requests"]:
+        owners = [f for f in data["friends"] if q["friend_id"] == f["id"] or (
+            q["kind"] == "link" and q["friend_id"] is None and q["detail"].get("name") == f["name"])]
+        for f in owners:
+            asked.setdefault(f["id"], []).append(request_text(q, f, friend_name, pairs, tz))
+        if not owners:
+            loose.setdefault(q["user_key"], []).append(q)
     rows = []
     for f in data["friends"]:
         s = data["latest_shared"].get(f["id"])
@@ -361,10 +415,16 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         else:
             light = close = "(아직 없음)"
         rows.append([f["name"], "켬" if f["share"] else "끔", "\n".join(f"{n}({how})" for n, how in knows) or "(아직 없음)",
-                     light, close, at(s["created_at"]) if s else None, at(f["last"])])
+                     light, close, "\n".join(asked.get(f["id"], [])[:REQUESTS_SHOWN]) or "(없음)",
+                     at(s["created_at"]) if s else None, at(f["last"])])
+    for k, qs in loose.items():
+        who = f"{qs[0]['key_name'] or '이름 모름'}({key(k)}, 친구에 안 묶인 키)"
+        texts = [request_text(q, None, friend_name, pairs, tz) for q in qs][:REQUESTS_SHOWN]
+        rows.append([who, "-", "-", "-", "-", "\n".join(texts), None, at(qs[0]["key_seen"])])
     tabs.append(tab("친구·공유", ["친구", "공유", "아는 사이", "아는 친구 누구에게나: 가벼운 얘기",
-                               "가까운 사이에게만: 요즘 근황", "공유 메모 만든 시각", "마지막으로 본 때"],
-                    rows, [10, 6, 40, 50, 50, 19, 19], wrap={3, 4, 5}))
+                               "가까운 사이에게만: 요즘 근황", f"대화로 한 요청(최근 {REQUESTS_SHOWN}개)", "공유 메모 만든 시각",
+                               "마지막으로 본 때"],
+                    rows, [10, 6, 40, 50, 50, 60, 19, 19], wrap={3, 4, 5, 6}))
 
     # ── 읽는 법(맨 앞) ──
     replies = [m for m in msgs if m["role"] == "assistant" and not (m["meta"] or {}).get("proactive")]
@@ -386,9 +446,10 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         "실제로 답에 넣었는지(넣음·안 넣음)와 그 원문을 보여 줘요.",
         f"요약·메모: 이 기간에 만든 요약 {len(data['summaries'])}개, 친구 메모 {len(data['notes'])}줄, "
         f"공유 메모 {len(data['shared'])}줄(compact 된 기억).",
-        f"친구·공유: 기간과 상관없이 지금 기준 친구 {len(data['friends'])}명. 친구마다 공유 켬·끔, 아는 사이(친구가 말해 준 관계와 "
-        "같은 단체방), 다른 친구에게 하는 얘기예요. 가까운 사이(연인·가족·절친)끼리는 요즘 근황까지 하고, 공유를 끈 친구"
-        "(자기 얘기를 하지 말라고 한 친구) 얘기는 아무에게도 안 해요.",
+        f"친구·공유: 기간과 상관없이 지금 기준 친구 {len(data['friends'])}명. 친구마다 공유 켬·끔, 아는 사이(관리자가 정한 관계와 "
+        "같은 단체방), 다른 친구에게 하는 얘기예요. 가까운 사이(연인·가족·절친)끼리는 1:1 방에서 요즘 근황까지 하고, 공유를 끈 "
+        "친구 얘기는 아무에게도 안 해요. 공유 켬·끔, 아는 사이·가까운 사이, 새 키 묶기는 관리자만 정하고 친구 말로는 안 바뀌어요. "
+        "대화로 한 요청과 정할 일(노트북에서 bash deploy/ovh.sh admin …)은 '대화로 한 요청' 칸에 있어요.",
         "",
         "■ 마롱이가 답할 때 넣는 기억",
         f"- 최근 대화 원문(같은 방 최근 {recent_turns}턴)",
