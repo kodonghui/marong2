@@ -10,25 +10,51 @@ from psycopg_pool import AsyncConnectionPool
 
 log = logging.getLogger("store")
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 # 'ㅋㅋㅋ'·'ㅇㅇ'·이모티콘만 있는 말은 검색해도 쓸모가 없어 임베딩하지 않음(한글 음절·영문·숫자가 2개 이상 이어진 말만)
 MEANINGFUL = "[가-힣A-Za-z0-9]{2}"
-# 카카오에서 온 방마다 마지막 사람 말과 이 방의 선톡 일정·조건 재료. 1:1 방은 그 친구, 단체방은 마지막으로 마롱이에게
-# 말한 사람(카카오는 단체방에서 마롱이를 태그한 말만 보내 줌). 터미널 대화('terminal' 방)는 카카오 id 가 없어서 빠짐.
-# 시각은 DB 시계 now() 에서 거꾸로 잰 길이: quiet_for(마지막 사람 말 뒤), sent_ago(마지막 선톡 뒤. 없으면 NULL),
-# failures(마지막 사람 말 뒤 전달에 실패한 선톡 수)
+
+
+def scope(room: str) -> str:
+    """room(SQL 자리표시자나 열)과 기억을 같이 쓰는 방들(그 방 포함)의 키를 고르는 SQL(표 버전 9 기억 묶기). 묶인 단체방은
+    rooms.memory_room 에 1:1 방을 가리키고, 묶음의 뿌리(1:1 방)는 비어 있다. 묶지 않은 방은 그 방 하나."""
+    return ("(SELECT sc.room_key FROM marong.rooms sc WHERE coalesce(sc.memory_room, sc.room_key) = "
+            f"(SELECT coalesce(s0.memory_room, s0.room_key) FROM marong.rooms s0 WHERE s0.room_key = {room}))")
+
+
+def root(room: str) -> str:
+    """room 의 묶음 뿌리(묶인 단체방이면 그 1:1 방, 아니면 그 방). 새 요약·메모는 뿌리 쪽에 쌓는다."""
+    return f"(SELECT coalesce(s1.memory_room, s1.room_key) FROM marong.rooms s1 WHERE s1.room_key = {room})"
+
+
+def done(room: str) -> str:
+    """room(열) 메시지를 어디까지 요약했는지(요약 last_id, 없으면 0): 그 방 요약과, 그 방을 함께 요약한 묶음 요약(뿌리 쪽
+    요약 중 meta.rooms 에 그 방이 있는 것) 가운데 가장 뒤. 묶기 전에 방마다 따로 한 요약에서 이어 가서, 묶어도 빠지거나 두 번
+    요약되는 말이 없다."""
+    return (f"coalesce((SELECT max(sd.last_id) FROM marong.summaries sd WHERE sd.room_key = {room} "
+            f"OR sd.meta->'rooms' ? {room}), 0)")
+
+
+# 카카오에서 온 방마다 마지막 사람 말과 이 방의 선톡 일정·조건 재료. 친구(user_key·name)는 1:1 방이면 그 친구, 1:1 방에 묶인
+# 단체방이면 그 1:1 친구, 그냥 단체방이면 마지막으로 마롱이에게 말한 사람(카카오는 단체방에서 마롱이를 태그한 말만 보내 줌).
+# 터미널 대화('terminal' 방)는 카카오 id 가 없어서 빠짐. 시각은 DB 시계 now() 에서 거꾸로 잰 길이: quiet_for(묶인 방들 어디서든
+# 마지막 사람 말 뒤), sent_ago(묶인 방들 어디서든 마지막 선톡 뒤. 없으면 NULL), failures(마지막 사람 말 뒤 이 방에서 전달에
+# 실패한 선톡 수)
 ROOM_STATE = (
-    "SELECT r.room_key, r.is_channel, u.user_key, p.name, u.created_at AS last_said, r.proactive, r.group_proactive, "
+    "SELECT r.room_key, r.is_channel, r.memory_room, coalesce(w.user_key, u.user_key) AS user_key, p.name, "
+    "  u.created_at AS last_said, r.proactive, r.group_proactive, "
     "  r.proactive_per_day AS per_day, r.proactive_start AS start_hour, r.proactive_end AS end_hour, "
     "  now() - u.created_at AS quiet_for, "
-    "  now() - (SELECT max(x.created_at) FROM marong.messages x WHERE x.room_key = r.room_key "
+    "  now() - (SELECT max(x.created_at) FROM marong.messages x WHERE x.room_key IN " + scope("r.room_key") + " "
     "    AND x.meta->>'proactive' = 'true') AS sent_ago, "
     "  (SELECT count(*) FROM marong.messages f WHERE f.room_key = r.room_key AND f.id > u.id "
     "    AND f.meta->>'proactive' = 'true' AND f.meta->>'delivered' = 'false') AS failures "
     "FROM marong.rooms r "
     "CROSS JOIN LATERAL (SELECT m.id, m.user_key, m.kakao_id, m.created_at FROM marong.messages m "
-    "  WHERE m.room_key = r.room_key AND m.role = 'user' ORDER BY m.id DESC LIMIT 1) u "
-    "LEFT JOIN marong.people p ON p.user_key = u.user_key "
+    "  WHERE m.room_key IN " + scope("r.room_key") + " AND m.role = 'user' ORDER BY m.id DESC LIMIT 1) u "
+    "LEFT JOIN LATERAL (SELECT m.user_key FROM marong.messages m "
+    "  WHERE m.room_key = coalesce(r.memory_room, r.room_key) AND m.role = 'user' ORDER BY m.id DESC LIMIT 1) w ON true "
+    "LEFT JOIN marong.people p ON p.user_key = coalesce(w.user_key, u.user_key) "
     "WHERE u.kakao_id IS NOT NULL ")
 # 선톡 대상: 선톡을 켜 둔 1:1 방(기본 켬)과 관리자가 켠 단체방(group_proactive, 기본 꺼짐, 표 버전 8)
 PROACTIVE_ON = "AND CASE WHEN r.is_channel THEN r.proactive ELSE r.group_proactive END "
@@ -77,13 +103,18 @@ class Store:
 
     async def touch(self, room_key: str, is_channel: bool, user_key: str) -> dict:
         """방·친구를 처음 보면 만들고 마지막으로 본 시각을 바꾼다. 친구 줄(user_key, name, friend_id, share)에
-        이 방의 선톡 받기(proactive)와 이 방만의 하루 선톡 수(per_day, 비면 None)를 붙여 돌려준다.
-        share 는 친구에 안 묶인 키(이름을 모름)면 None."""
+        이 방의 선톡 받기(proactive: 1:1 은 proactive, 단체방은 group_proactive)와 이 방만의 하루 선톡 수(per_day, 비면 None),
+        기억 묶기(memory_room: 이 단체방이 묶인 1:1 방, linked_name: 그 1:1 친구 이름, followers: 이 방에 묶인 단체방 수)를
+        붙여 돌려준다. share 는 친구에 안 묶인 키(이름을 모름)면 None."""
         async with self.pool.connection() as c:
             cur = await c.execute(
-                "INSERT INTO marong.rooms (room_key, is_channel) VALUES (%s, %s) "
+                "INSERT INTO marong.rooms AS t (room_key, is_channel) VALUES (%s, %s) "
                 "ON CONFLICT (room_key) DO UPDATE SET last_seen = now(), is_channel = EXCLUDED.is_channel "
-                "RETURNING proactive, proactive_per_day",
+                "RETURNING CASE WHEN t.is_channel THEN t.proactive ELSE t.group_proactive END AS proactive, "
+                "  t.proactive_per_day, t.memory_room, "
+                "  (SELECT count(*) FROM marong.rooms x WHERE x.memory_room = t.room_key) AS followers, "
+                "  (SELECT p.name FROM marong.messages m JOIN marong.people p ON p.user_key = m.user_key "
+                "   WHERE m.room_key = t.memory_room AND m.role = 'user' ORDER BY m.id DESC LIMIT 1) AS linked_name",
                 (room_key, is_channel))
             room = await cur.fetchone()
             cur = await c.execute(
@@ -91,7 +122,9 @@ class Store:
                 "ON CONFLICT (user_key) DO UPDATE SET last_seen = now() RETURNING user_key, name, friend_id, "
                 "(SELECT f.share FROM marong.friends f WHERE f.id = people.friend_id) AS share",
                 (user_key,))
-            return {**await cur.fetchone(), "proactive": room["proactive"], "per_day": room["proactive_per_day"]}
+            return {**await cur.fetchone(), "proactive": room["proactive"], "per_day": room["proactive_per_day"],
+                    "memory_room": room["memory_room"], "linked_name": room["linked_name"],
+                    "followers": room["followers"]}
 
     async def add_message(self, room_key: str, role: str, content: str, user_key: str | None = None,
                           kakao_id: str | None = None, reply_to: int | None = None, meta: dict | None = None) -> int | None:
@@ -103,31 +136,33 @@ class Store:
         return row["id"] if row else None
 
     async def recent(self, room_key: str, limit: int, since_id: int | None = None) -> list[dict]:
-        """방의 최근 메시지(오래된 것부터). since_id 가 있으면 그 메시지부터는 limit 을 넘어도 다 넣는다.
+        """방(묶인 방들 함께)의 최근 메시지(오래된 것부터). since_id 가 있으면 그 메시지부터는 limit 을 넘어도 다 넣는다.
         친구에게 전달되지 못한 마롱이 답은 뺀다."""
         rows = await self._all(
             "SELECT m.id, m.role, m.user_key, p.name, m.content, m.created_at FROM marong.messages m "
             "LEFT JOIN marong.people p ON p.user_key = m.user_key "
-            "WHERE m.room_key = %s AND m.meta->>'delivered' IS DISTINCT FROM 'false' "
-            "ORDER BY m.id DESC LIMIT greatest(%s, "
-            "(SELECT count(*) FROM marong.messages WHERE room_key = %s AND id >= %s))",
-            (room_key, limit, room_key, since_id))
+            "WHERE m.room_key IN " + scope("%(room)s") + " AND m.meta->>'delivered' IS DISTINCT FROM 'false' "
+            "ORDER BY m.id DESC LIMIT greatest(%(limit)s, "
+            "(SELECT count(*) FROM marong.messages WHERE room_key IN " + scope("%(room)s") + " AND id >= %(since)s))",
+            {"room": room_key, "limit": limit, "since": since_id})
         return rows[::-1]
 
     async def summaries(self, room_key: str, limit: int) -> list[dict]:
-        """방의 최근 요약(오래된 것부터). until 은 요약한 구간의 마지막 메시지 시각."""
+        """방(묶인 방들 함께)의 최근 요약(오래된 것부터). until 은 요약한 구간의 마지막 메시지 시각."""
         rows = await self._all(
             "SELECT s.id, s.first_id, s.last_id, s.content, m.created_at AS until FROM marong.summaries s "
             "JOIN marong.messages m ON m.id = s.last_id "
-            "WHERE s.room_key = %s ORDER BY s.last_id DESC LIMIT %s", (room_key, limit))
+            "WHERE s.room_key IN " + scope("%(room)s") + " ORDER BY s.last_id DESC LIMIT %(limit)s",
+            {"room": room_key, "limit": limit})
         return rows[::-1]
 
     async def notes(self, room_key: str) -> list[dict]:
-        """방 안 친구마다 가장 최근 메모."""
+        """방(묶인 방들 함께) 안 친구(카카오 키)마다 가장 최근 메모. 묶음 뿌리(1:1 방)의 메모가 있으면 그것(묶은 뒤 메모는
+        뿌리 쪽에 쌓여서 묶기 전 단체방 메모보다 앞섬)."""
         return await self._all(
             "SELECT DISTINCT ON (n.user_key) n.id, n.user_key, p.name, n.content, n.created_at FROM marong.notes n "
-            "JOIN marong.people p ON p.user_key = n.user_key WHERE n.room_key = %s "
-            "ORDER BY n.user_key, n.id DESC", (room_key,))
+            "JOIN marong.people p ON p.user_key = n.user_key WHERE n.room_key IN " + scope("%(room)s") + " "
+            "ORDER BY n.user_key, n.room_key = " + root("%(room)s") + " DESC, n.id DESC", {"room": room_key})
 
     async def set_name(self, user_key: str, name: str, room_key: str | None = None) -> int | None:
         """이름을 저장하고 이 키를 친구 한 명(friends)에 묶는다. 묶은 친구 id(카카오에서 말한 적 없는 키이거나 같은 이름
@@ -230,7 +265,8 @@ class Store:
                                       "JOIN marong.friends f ON f.id = p.friend_id WHERE p.user_key = %s", (user_key,))
                 me = await cur.fetchone()
                 if kind.startswith("proactive_"):
-                    cur = await c.execute("SELECT proactive FROM marong.rooms WHERE room_key = %s", (room_key,))
+                    cur = await c.execute("SELECT CASE WHEN is_channel THEN proactive ELSE group_proactive END AS proactive "
+                                          "FROM marong.rooms WHERE room_key = %s", (room_key,))
                     room = await cur.fetchone()
                     if kind in ("proactive_off", "proactive_on") and room and room["proactive"] == (kind == "proactive_on"):
                         return "already", me and me["name"]
@@ -257,11 +293,11 @@ class Store:
 
     async def similar(self, model: str, room_key: str, vector, before_id: int, skip_summary_ids: list[int],
                       limit: int) -> list[dict]:
-        """같은 방에서 지금 말과 비슷한 예전 메시지·요약(비슷한 순). 최근 원문 구간과 이미 넣은 요약은 뺀다."""
+        """같은 방(묶인 방들 함께)에서 지금 말과 비슷한 예전 메시지·요약(비슷한 순). 최근 원문 구간과 이미 넣은 요약은 뺀다."""
         return await self._all(
             "WITH q AS (SELECT %s::vector AS v), hits AS ("
             "  SELECT e.source_type, e.source_id, 1 - (e.embedding <=> q.v) AS similarity "
-            "  FROM marong.embeddings e, q WHERE e.model = %s AND e.room_key = %s "
+            "  FROM marong.embeddings e, q WHERE e.model = %s AND e.room_key IN " + scope("%s") + " "
             "  AND NOT (e.source_type = 'message' AND e.source_id >= %s) "
             "  AND NOT (e.source_type = 'summary' AND e.source_id = ANY(%s::bigint[])) "
             "  ORDER BY e.embedding <=> q.v LIMIT %s) "
@@ -296,7 +332,8 @@ class Store:
         keys = [p["user_key"] for p in people
                 if p["name"] == who or "#" + hashlib.sha1(p["user_key"].encode()).hexdigest()[:8] == tag]
         if keys:
-            return await self._all(ROOM_STATE + "AND r.is_channel AND u.user_key = ANY(%s) ORDER BY u.created_at DESC",
+            return await self._all(ROOM_STATE + "AND r.is_channel AND EXISTS (SELECT 1 FROM marong.messages k "
+                                   "WHERE k.room_key = r.room_key AND k.user_key = ANY(%s)) ORDER BY u.created_at DESC",
                                    (keys,))
         rooms = [r["room_key"] for r in await self._all("SELECT room_key FROM marong.rooms")
                  if "#" + hashlib.sha1(r["room_key"].encode()).hexdigest()[:8] == tag]
@@ -326,29 +363,37 @@ class Store:
                     [(model, t, i, r, vec(v)) for t, i, r, v in rows])
 
     async def rooms_due(self, min_messages: int) -> list[str]:
-        """마지막 요약 뒤로 메시지가 min_messages 개 이상 쌓인 방."""
+        """마지막 요약 뒤로 메시지가 min_messages 개 이상 쌓인 방(묶인 방들은 묶음 뿌리 하나로 셈)."""
         rows = await self._all(
-            "SELECT m.room_key FROM marong.messages m "
-            "LEFT JOIN (SELECT room_key, max(last_id) AS last_id FROM marong.summaries GROUP BY room_key) s "
-            "  ON s.room_key = m.room_key "
-            "WHERE m.id > coalesce(s.last_id, 0) GROUP BY m.room_key HAVING count(*) >= %s", (min_messages,))
+            "SELECT coalesce(w.memory_room, w.room_key) AS room_key "
+            "FROM (SELECT r.room_key, r.memory_room, " + done("r.room_key") + " AS done FROM marong.rooms r) w "
+            "JOIN marong.messages m ON m.room_key = w.room_key AND m.id > w.done "
+            "GROUP BY 1 HAVING count(*) >= %s", (min_messages,))
         return [r["room_key"] for r in rows]
 
     async def unsummarized(self, room_key: str, limit: int) -> list[dict]:
-        """마지막 요약 뒤의 메시지(오래된 것부터). delivered 가 False 면 친구에게 전달되지 못한 답."""
+        """아직 요약 안 한 메시지(묶인 방들 함께, 방마다 그 방을 요약한 데 뒤로, 오래된 것부터). delivered 가 False 면
+        친구에게 전달되지 못한 답."""
         return await self._all(
             "SELECT m.id, m.role, m.user_key, p.name, m.content, m.created_at, "
-            "  m.meta->>'delivered' IS DISTINCT FROM 'false' AS delivered FROM marong.messages m "
+            "  m.meta->>'delivered' IS DISTINCT FROM 'false' AS delivered "
+            "FROM (SELECT w.room_key, " + done("w.room_key") + " AS done FROM marong.rooms w "
+            "  WHERE w.room_key IN " + scope("%(room)s") + ") w "
+            "JOIN marong.messages m ON m.room_key = w.room_key AND m.id > w.done "
             "LEFT JOIN marong.people p ON p.user_key = m.user_key "
-            "WHERE m.room_key = %s AND m.id > coalesce("
-            "  (SELECT max(last_id) FROM marong.summaries WHERE room_key = %s), 0) "
-            "ORDER BY m.id LIMIT %s", (room_key, room_key, limit))
+            "ORDER BY m.id LIMIT %(limit)s", {"room": room_key, "limit": limit})
 
     async def add_summary(self, room_key: str, first_id: int, last_id: int, content: str,
                           notes: dict[str, str], meta: dict) -> int | None:
-        """요약 한 개와 바뀐 친구 메모를 한 트랜잭션으로 쓴다. 같은 구간이 이미 있으면 None."""
+        """요약 한 개와 바뀐 친구 메모를 한 트랜잭션으로 쓴다. 같은 구간이 이미 있으면 None. 묶인 방들을 함께 요약했으면
+        meta.rooms 에 그 방들을 적는다(방마다 어디까지 요약했는지 셀 때 씀)."""
         async with self.pool.connection() as c:
             async with c.transaction():
+                cur = await c.execute("SELECT array_agg(room_key ORDER BY room_key) AS rooms FROM marong.rooms "
+                                      "WHERE room_key IN " + scope("%s"), (room_key,))
+                rooms = (await cur.fetchone())["rooms"] or []
+                if len(rooms) > 1:
+                    meta = {**meta, "rooms": rooms}
                 cur = await c.execute(
                     "INSERT INTO marong.summaries (room_key, first_id, last_id, content, meta) "
                     "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (room_key, last_id) DO NOTHING RETURNING id",
@@ -363,23 +408,26 @@ class Store:
                 return row["id"]
 
     async def rooms_to_note(self) -> list[dict]:
-        """마지막 요약과 마지막으로 메모를 먼저 고친 때(noted_id) 뒤로 친구 말이 새로 있는 방(오래 기다린 방부터)."""
+        """마지막 요약과 마지막으로 메모를 먼저 고친 때(noted_id) 뒤로 친구 말이 새로 있는 방(오래 기다린 방부터). 묶인
+        방들은 묶음 뿌리(1:1 방) 하나로: 그 방들의 말을 함께 보고 메모는 뿌리 쪽에 쌓는다."""
         rows = await self._all(
-            "SELECT r.room_key FROM marong.rooms r CROSS JOIN LATERAL (SELECT min(m.id) AS first_new FROM marong.messages m "
-            "  WHERE m.room_key = r.room_key AND m.role = 'user' AND m.id > greatest(r.noted_id, coalesce("
-            "    (SELECT max(s.last_id) FROM marong.summaries s WHERE s.room_key = r.room_key), 0))) x "
-            "WHERE x.first_new IS NOT NULL ORDER BY x.first_new")
+            "SELECT coalesce(w.memory_room, w.room_key) AS room_key, min(m.id) AS first_new "
+            "FROM (SELECT r.room_key, r.memory_room, r.noted_id, " + done("r.room_key") + " AS done "
+            "  FROM marong.rooms r) w "
+            "JOIN marong.messages m ON m.room_key = w.room_key AND m.role = 'user' "
+            "  AND m.id > greatest(w.noted_id, w.done) "
+            "GROUP BY 1 ORDER BY 2")
         return [r["room_key"] for r in rows]
 
     async def add_notes(self, room_key: str, notes: dict[str, str], last_id: int) -> None:
-        """요약 없이 바뀐 친구 메모를 쓰고, 그 방을 last_id 까지 메모를 고친 것으로 적는다(한 트랜잭션)."""
+        """요약 없이 바뀐 친구 메모를 쓰고, 그 방(묶인 방들 함께)을 last_id 까지 메모를 고친 것으로 적는다(한 트랜잭션)."""
         async with self.pool.connection() as c:
             async with c.transaction():
                 for user_key, text in notes.items():
                     await c.execute("INSERT INTO marong.notes (room_key, user_key, content) VALUES (%s, %s, %s)",
                                     (room_key, user_key, text))
-                await c.execute("UPDATE marong.rooms SET noted_id = greatest(noted_id, %s) WHERE room_key = %s",
-                                (last_id, room_key))
+                await c.execute("UPDATE marong.rooms SET noted_id = greatest(noted_id, %s) WHERE room_key IN "
+                                + scope("%s"), (last_id, room_key))
 
     async def friend_notes(self) -> list[dict]:
         """공유를 켠 친구마다 방·키별 지금 메모(공유 메모를 거를 재료). friend_id, name, note_id, content, is_channel."""

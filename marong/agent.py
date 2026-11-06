@@ -3,7 +3,8 @@
   1) 최근 대화 원문(RECENT_TURNS 턴)  2) 예전 대화 요약(최근 3개)과 친구별 기억 메모
   3) 지금 말과 비슷한 예전 대화(임베딩 검색, 같은 방 안에서만)
 그리고 다른 방 친구들: 지금 친구와 아는 사이인 친구의 공유 메모(가벼운 얘기, 가까운 사이면 요즘 근황까지)만 넣는다.
-다른 방 원문·요약·메모는 안 넣는다.
+다른 방 원문·요약·메모는 안 넣는다. 다만 관리자가 단체방을 한 친구의 1:1 방에 묶으면(표 버전 9) 두 방은 한 방처럼 기억을
+같이 쓰고, 그 단체방 선톡은 그 친구에게 1:1 처럼 간다(1:1 이 막힌 뒤 친구와 마롱이만 있는 단체방을 1:1 대신 씀).
 저장소나 임베딩이 고장 나도 답은 보낸다(그 기억만 빠짐). prompt.md·knowledge/ 는 메시지마다 다시 읽는다.
 답마다 어떤 기억을 넣었는지(최근 대화 범위·요약·메모 id, 임베딩 검색 후보와 넣은 것)를 마롱이 답의 meta.memory 에 남긴다.
 사진은 받자마자 Claude 에게 보여 짧은 설명을 받아 '[사진] 설명'으로 저장하고, 그 사진에 답할 때는 사진 자체도 보여 준다.
@@ -111,6 +112,9 @@ PROACTIVE_GUIDE = """# 먼저 말 걸기
 - 19금이나 야한 얘기로 먼저 말 걸지 마.
 - 친구가 힘든 얘기를 하던 중이었으면 장난치지 말고 다정하게 안부를 물어."""
 PROACTIVE_TRIGGER = "(알림: 친구가 보낸 말이 아니야. 지금 친구에게 먼저 보낼 카톡을 써. 짧은 말 2~3개를 빈 줄로 나눠서.)"
+# 1:1 방에 묶인 단체방: 1:1 처럼 그 친구에게 먼저 말 걸되, 방에 다른 사람이 있을 수 있어서 붙이는 것
+LINKED_GUARD = ("- 단체방이라 다른 사람도 이 방에 있을 수 있어. 비밀, 건강·몸·돈, 연애 속사정처럼 다른 사람이 보면 곤란한 얘기는 "
+                "먼저 꺼내지 마.")
 PROACTIVE_GROUP_GUIDE = """# 단체방에 먼저 말 걸기
 - 이번엔 마롱이가 이 단체방에 먼저 카톡을 보내는 거야(동희가 정한 방이라 하루 {per_day}번쯤 이렇게 먼저 말을 걸어). 방 사람 모두가 봐. 방에 보낼 말만 써.
 - 사람이 카톡을 연달아 보내듯 짧은 말 2~3개를 빈 줄로 나눠 써(많아야 4개). 빈 줄로 나눈 말은 몇 초 간격으로 따로 가. 말 하나는 한 문장 안팎으로 짧게.
@@ -310,7 +314,7 @@ class Agent:
         first = held or user_id  # 이번에 답하는 말들의 사진만 다시 보여 줌
         photos = {i: b for (room, i), b in self._photos.items()
                   if room == msg.room_key and first is not None and i >= first}
-        messages = self._messages(rows, group=not msg.is_channel, photos=photos)
+        messages = self._messages(rows, group=not msg.is_channel or self._merged(person), photos=photos)
         if not rows or rows[-1]["id"] != user_id:  # 저장이 안 됐어도 지금 말은 꼭 넣음
             messages.append({"role": "user", "content": self._current(msg, person, text)})
         known = self._known(circle)
@@ -378,11 +382,20 @@ class Agent:
         tz = self.s.timezone
         name = (person or {}).get("name")
         lines = ["# 지금 상황", f"- 지금 시각: {now_line(tz)} (한국 시간)"]
+        linked = (person or {}).get("memory_room")
         if msg.is_channel:
             lines.append("- 1:1 채팅이야.")
+            if (person or {}).get("followers"):
+                lines.append("- 이 1:1 방은 동희가 묶은 단체방과 기억을 같이 써. 최근 대화에는 그 단체방에서 오간 말도 섞여 있어서 "
+                             "친구 말 앞에 '이름: '을 붙여 뒀어.")
         else:
             lines.append("- 단체 채팅방이야. 친구 메시지 앞에 '이름: '을 붙여 뒀어. 카카오는 친구가 마롱이를 태그한 메시지만 "
                          "보내 줘서(태그 글자는 빠짐) 태그 없이 한 말은 마롱이가 못 봐. '@마롱이'만 있으면 태그만 해서 부른 거야.")
+            if linked:
+                friend = (person or {}).get("linked_name") or "이름 모름"
+                lines.append(f"- 이 방은 한 친구와 1:1 로 하던 대화를 이어 가는 방이야(1:1 친구: {friend}, 동희가 묶음). 1:1 "
+                             "대화와 기억을 같이 써서 예전 1:1 얘기도 이어서 해도 돼.")
+                lines.append(LINKED_GUARD)
         if name:
             lines.append(f"- 지금 말 건 친구: {name}")
         else:
@@ -390,13 +403,14 @@ class Agent:
             lines.append(f"- 지금 말 건 친구의 이름을 아직 몰라{shown}. 최근 대화에서 아직 안 물어봤으면 흐름에 맞게 "
                          "한 번 물어봐. 이미 물어봤는데 답이 없으면 다시 묻지 말고 그냥 얘기를 이어 가. "
                          "알려 주면 set_name 으로 저장해.")
-        if self.s.proactive and msg.is_channel:
+        if self.s.proactive and (msg.is_channel or linked):
+            where = "이 방에" if linked else "이 친구에게"
             if (person or {}).get("proactive") is False:
-                lines.append("- 이 친구에게는 지금 마롱이가 먼저 말 걸지 않아(선톡 끔, 동희가 정함). 다시 해 달라고 하면 "
+                lines.append(f"- {where}는 지금 마롱이가 먼저 말 걸지 않아(선톡 끔, 동희가 정함). 다시 해 달라고 하면 "
                              "ask_owner 의 proactive_on 으로 동희에게 남기고, 켜는 건 동희가 한다고 말해.")
             else:
                 per_day = (person or {}).get("per_day") or self.s.proactive_per_day
-                lines.append(f"- 마롱이는 이 친구에게 하루 {per_day}번쯤 먼저 카톡을 보내(선톡, 동희가 정함). 친구가 선톡이 "
+                lines.append(f"- 마롱이는 {where} 하루 {per_day}번쯤 먼저 카톡을 보내(선톡, 동희가 정함). 친구가 선톡이 "
                              "싫다거나 먼저 연락하지 말라고 하면, 또는 덜·더 자주 보내 달라고 하면 ask_owner 로 동희에게 남기고 "
                              "바꾸는 건 동희가 한다고 솔직하게 말해(바꾼 척하지 마).")
         if (person or {}).get("share") is False:
@@ -404,6 +418,11 @@ class Agent:
                          "share_on 으로 동희에게 남기고, 다시 켜는 건 동희가 한다고 말해.")
         return "\n".join(lines + self._memory_lines(notes, summaries, recalled)
                          + self._friend_lines(circle or [], group=not msg.is_channel))
+
+    @staticmethod
+    def _merged(person: dict | None) -> bool:
+        """이 방이 다른 방과 기억을 같이 쓰는지(1:1 방에 묶인 단체방이거나, 단체방이 묶인 1:1 방)."""
+        return bool((person or {}).get("memory_room") or (person or {}).get("followers"))
 
     @staticmethod
     def _known(circle: list[dict]) -> list[dict]:
@@ -587,8 +606,8 @@ class Agent:
         if per_day is not None and (isinstance(per_day, bool) or not isinstance(per_day, int)
                                     or not 1 <= per_day <= PER_DAY_MAX):
             return {**result, "content": f"per_day 는 1~{PER_DAY_MAX} 사이 정수여야 해.", "is_error": True}
-        if kind.startswith("proactive_") and not (self.s.proactive and msg.is_channel):
-            return {**result, "content": "이 방에는 원래 마롱이가 먼저 말 걸지 않아(선톡은 1:1 방에서만). 그렇게 말해."}
+        if kind.startswith("proactive_") and not self.s.proactive:
+            return {**result, "content": "지금은 마롱이가 아무 방에도 먼저 말 걸지 않아(선톡 꺼짐). 그렇게 말해."}
         if kind == "friendship" and not name:
             return {**result, "content": f"친구 이름이 비었거나 {NAME_MAX}자를 넘어.", "is_error": True}
         names = [name] + ([name[:-1]] if name.endswith("이") and len(name) > 2 else [])  # '현경이' → '현경'
@@ -641,7 +660,8 @@ class Agent:
         """방(1:1 이나 관리자가 켠 단체방)에 먼저 보낼 말을 만든다(보내지는 않음). 오류·거절·빈 답이면 None.
         넣은 기억은 meta.memory 로.
         room: store.proactive_rooms 의 한 줄(room_key, is_channel, user_key, name, last_said, per_day …).
-        단체방이면 user_key·name 은 마지막으로 마롱이에게 말한 사람."""
+        단체방이면 user_key·name 은 마지막으로 마롱이에게 말한 사람, 1:1 방에 묶인 단체방이면 그 1:1 친구(1:1 처럼 말 걸고,
+        기억은 묶인 방들 것을 함께 씀)."""
         rows = await self.store.recent(room["room_key"], self.s.recent_turns * 2)
         summaries = [x for x in await self.store.summaries(room["room_key"], RECENT_SUMMARIES) if x["content"]]
         notes = await self.store.notes(room["room_key"])
@@ -666,7 +686,8 @@ class Agent:
     def _proactive_situation(self, room: dict, notes: list[dict], summaries: list[dict], rows: list[dict]) -> str:
         tz = self.s.timezone
         lines = ["# 지금 상황", f"- 지금 시각: {now_line(tz)} (한국 시간)"]
-        group = not room.get("is_channel", True)
+        linked = not room.get("is_channel", True) and room.get("memory_room")
+        group = not room.get("is_channel", True) and not linked
         if group:
             names = list(dict.fromkeys(speaker_label(r["user_key"], r["name"]) for r in rows if r["role"] == "user"))
             lines.append("- 단체 채팅방이야. 카카오는 친구가 마롱이를 태그한 메시지만 보내 줘서(태그 글자는 빠짐) 태그 없이 "
@@ -674,6 +695,11 @@ class Agent:
             if names:
                 lines.append("- 이 방에서 마롱이에게 말한 친구: " + ", ".join(names))
             lines.append(f"- 이 방에서 누가 마지막으로 마롱이에게 말한 때: {short_time(room['last_said'], tz)}")
+        elif linked:
+            lines.append("- 이 친구와 1:1 로 하던 대화를 이어 가는 단체 채팅방이야(동희가 묶음). 1:1 대화와 기억을 같이 써. "
+                         "카카오는 친구가 마롱이를 태그한 메시지만 보내 줘서(태그 글자는 빠짐) 태그 없이 한 말은 마롱이가 못 봐.")
+            lines.append(f"- 친구: {room['name']}" if room.get("name") else "- 친구 이름은 아직 몰라. 이름 없이 말해.")
+            lines.append(f"- 이 방이나 1:1 에서 누가 마지막으로 마롱이에게 말한 때: {short_time(room['last_said'], tz)}")
         else:
             lines.append("- 1:1 채팅이야.")
             lines.append(f"- 친구: {room['name']}" if room.get("name") else "- 친구 이름은 아직 몰라. 이름 없이 말해.")
@@ -688,4 +714,5 @@ class Agent:
                     text = text[:PROACTIVE_LINE_CHARS - 1] + "…"
                 lines.append(f"- ({short_time(r['created_at'], tz)}) {who}: {text}")
         guide = PROACTIVE_GROUP_GUIDE if group else PROACTIVE_GUIDE
-        return "\n".join(lines + ["", guide.format(per_day=room.get("per_day") or self.s.proactive_per_day)])
+        guide = guide.format(per_day=room.get("per_day") or self.s.proactive_per_day)
+        return "\n".join(lines + ["", guide] + ([LINKED_GUARD] if linked else []))
