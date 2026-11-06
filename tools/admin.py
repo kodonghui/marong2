@@ -2,7 +2,7 @@
   friends                      친구 목록(카카오 키들, 아는 사이, 다른 친구에게 하는 얘기=공유 메모: 가벼운 얘기와 가까운 사이에게만
                                하는 요즘 근황)
   people                       카카오 키 목록(이름·친구·메시지 수·처음/마지막으로 본 때)
-  rooms                        방 목록(1:1·단체, 친구들, 메시지 수, 마지막 대화, 선톡 끔)
+  rooms                        방 목록(1:1·단체, 친구들, 메시지 수, 마지막 대화, 1:1 선톡 끔·단체방 선톡 켬)
   show <이름 또는 #키> [개수]   그 친구가 있는 방들의 최근 대화(기본 30개)와 기억 메모
   stats                        전체 개수와 최근 7일 토큰 사용량(대략의 비용)
   link <#키> <친구 이름 또는 #키>  그 키를 그 친구로 묶음(같은 사람. 이름이 같은 친구가 이미 있으면 새 키는 묶이지 않고
@@ -13,7 +13,8 @@
                                close 를 붙이면 가까운 사이(서로 요즘 근황까지 들음), 빼면 가벼운 얘기만
   schedule <친구 이름 또는 #키> <하루 횟수> [시작-끝 시]  그 친구 1:1 방의 선톡 일정(예: schedule 현경 12 7-24.
                                시간을 빼면 횟수만 바꿈). schedule <친구> default 면 .env 기본값으로 되돌림,
-                               schedule <친구> off|on 이면 선톡을 끄거나 다시 켬
+                               schedule <친구> off|on 이면 선톡을 끄거나 다시 켬. 친구 대신 rooms 의 #방키를 주면 그 방
+                               (단체방은 기본 꺼짐이라 schedule <#방키> on 으로 켬. 2026-11-05 부터 카카오가 1:1 선톡을 막음)
 기록을 지우는 명령은 없다(봇 계정에는 그 권한도 없다). link·unlink·share·friendship·schedule 은 키가 어느 친구인지, 공유,
 아는 사이, 선톡만 바꾼다. 이 설정들은 관리자만 바꾸고 친구 말로는 안 바뀐다. 친구가 대화로 한 요청은 시트 '친구·공유' 탭과
 friends 에 보인다.
@@ -138,7 +139,8 @@ def people(c, tz, _args):
 
 def rooms(c, tz, _args):
     rows = c.execute(
-        "SELECT r.room_key, r.is_channel, r.proactive, r.proactive_per_day, r.proactive_start, r.proactive_end, "
+        "SELECT r.room_key, r.is_channel, r.proactive, r.group_proactive, r.proactive_per_day, r.proactive_start, "
+        "  r.proactive_end, "
         "  count(m.id) AS n, max(m.created_at) AS last, "
         "  string_agg(DISTINCT coalesce(p.name, '?'), ', ') FILTER (WHERE m.user_key IS NOT NULL) AS who "
         "FROM marong.rooms r "
@@ -147,8 +149,11 @@ def rooms(c, tz, _args):
         "GROUP BY r.room_key ORDER BY last DESC NULLS LAST").fetchall()
     for r in rows:
         kind = "1:1 " if r["is_channel"] else "단체"
-        off = "  (선톡 끔)" if r["is_channel"] and not r["proactive"] else ""
-        plan = f"  (선톡 일정 {plan_text(r)})" if r["is_channel"] and has_plan(r) else ""
+        if r["is_channel"]:
+            off = "  (선톡 끔)" if not r["proactive"] else ""
+        else:  # 단체방 선톡은 관리자가 켠 방만(기본 꺼짐)
+            off = "  (선톡 켬)" if r["group_proactive"] else ""
+        plan = f"  (선톡 일정 {plan_text(r)})" if (r["is_channel"] or r["group_proactive"]) and has_plan(r) else ""
         print(f"{key(r['room_key'])}  {kind}  메시지 {r['n']:>5}  마지막 {when(r['last'], tz)}  {r['who'] or ''}{off}{plan}")
 
 
@@ -306,8 +311,8 @@ def friendship(c, _tz, args):
 
 
 def schedule(c, _tz, args):
-    usage = (f"사용: schedule <친구 이름 또는 #키> <하루 횟수 1~{PER_DAY_MAX}> [시작-끝 시, 예: 7-24] | schedule <친구> default"
-             " | schedule <친구> off|on")
+    usage = (f"사용: schedule <친구 이름·#키 또는 #방키> <하루 횟수 1~{PER_DAY_MAX}> [시작-끝 시, 예: 7-24]"
+             " | schedule <…> default | schedule <…> off|on")
     if len(args) not in (2, 3):
         sys.exit(usage)
     who = args[0]
@@ -318,10 +323,15 @@ def schedule(c, _tz, args):
     rooms_ = [r["room_key"] for r in c.execute(
         "SELECT DISTINCT m.room_key FROM marong.messages m JOIN marong.rooms r ON r.room_key = m.room_key "
         "WHERE r.is_channel AND m.user_key = ANY(%s)", (users,)).fetchall()] if users else []
+    if not users and is_key(who):  # rooms 의 #방키: 1:1 방이나 관리자가 선톡을 켜는 단체방
+        k = who if who.startswith("#") else "#" + who
+        rooms_ = [r["room_key"] for r in c.execute("SELECT room_key FROM marong.rooms").fetchall()
+                  if key(r["room_key"]) == k]
     if not rooms_:
-        sys.exit(f"'{who}' 친구의 1:1 방을 찾지 못함(rooms·people 로 보기)")
-    if args[1] in ("on", "off") and len(args) == 2:
-        sets, values = "proactive = %s", (args[1] == "on",)
+        sys.exit(f"'{who}' 친구의 1:1 방이나 그 #방키의 방을 찾지 못함(rooms·people 로 보기)")
+    switch = args[1] in ("on", "off") and len(args) == 2
+    if switch:
+        sets, values = None, (args[1] == "on",)  # 1:1 은 proactive, 단체방은 group_proactive(방마다 아래에서)
     elif args[1] == "default" and len(args) == 2:
         sets, values = "proactive_per_day = NULL, proactive_start = NULL, proactive_end = NULL", ()
     else:
@@ -338,10 +348,17 @@ def schedule(c, _tz, args):
                 sys.exit("시작-끝 시는 0~24, 시작이 끝보다 앞이어야 해요(예: 7-24)")
             sets, values = sets + ", proactive_start = %s, proactive_end = %s", (per_day, int(m[1]), int(m[2]))
     for room in rooms_:
-        r = c.execute(f"UPDATE marong.rooms SET {sets} WHERE room_key = %s "
-                      "RETURNING proactive, proactive_per_day, proactive_start, proactive_end", (*values, room)).fetchone()
-        off = " (선톡 꺼짐: 지금은 안 보냄)" if not r["proactive"] else ""
-        print(f"방 {key(room)}: 선톡 일정 " + (plan_text(r) if has_plan(r) else ".env 기본값") + off)
+        channel = c.execute("SELECT is_channel FROM marong.rooms WHERE room_key = %s", (room,)).fetchone()["is_channel"]
+        col = sets or ("proactive = %s" if channel else "group_proactive = %s")
+        r = c.execute(f"UPDATE marong.rooms SET {col} WHERE room_key = %s "
+                      "RETURNING is_channel, proactive, group_proactive, proactive_per_day, proactive_start, proactive_end",
+                      (*values, room)).fetchone()
+        if r["is_channel"]:
+            label, off = "방", " (선톡 꺼짐: 지금은 안 보냄)" if not r["proactive"] else ""
+        else:
+            label = "단체방"
+            off = " (선톡 켜짐: 이 방에 먼저 말 걸어요)" if r["group_proactive"] else " (선톡 꺼짐: on 으로 켜야 보냄)"
+        print(f"{label} {key(room)}: 선톡 일정 " + (plan_text(r) if has_plan(r) else ".env 기본값") + off)
 
 
 COMMANDS = {"friends": friends, "people": people, "rooms": rooms, "show": show, "stats": stats,

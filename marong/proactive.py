@@ -1,17 +1,21 @@
-"""선톡: 1:1 친구에게 마롱이가 하루에 몇 번 먼저 말을 건다(.env 의 PROACTIVE=on 일 때만).
-- 누구에게: 카카오 1:1(채널채팅) 방. 지난 선톡에 친구가 답하지 않았어도 보낸다. 친구가 조금 전(QUIET_HOURS 시간,
-  칸이 짧으면 칸 반 길이)에 말했으면 이야기 중이라 끼어들지 않고 조용해지면 보낸다. 관리자가 끈 방에는 보내지 않는다.
+"""선톡: 마롱이가 하루에 몇 번 먼저 말을 건다(.env 의 PROACTIVE=on 일 때만).
+- 누구에게: 카카오 1:1(채널채팅) 방(기본 켬)과 관리자가 켠 단체방(기본 꺼짐, rooms.group_proactive). 지난 선톡에 답이
+  없어도 보낸다. 방에서 누가 조금 전(QUIET_HOURS 시간, 칸이 짧으면 칸 반 길이)에 마롱이에게 말했으면 이야기 중이라 끼어들지
+  않고 조용해지면 보낸다. 관리자가 끈 방에는 보내지 않는다. 2026-11-05 14:30 KST부터 카카오가 1:1 방에 먼저 보내기를
+  막아서(사람 키 -876, 방 키 -880) 지금은 단체방으로만 간다(봇을 초대한 단체방은 방 키로 감).
 - 언제: 방마다 일정(하루 횟수, 한국 시각 시작~끝 시). 방에 정한 일정이 없으면 .env 의 PROACTIVE_PER_DAY·PROACTIVE_HOURS.
   일정 시간을 하루 횟수만큼 칸으로 똑같이 나눠 칸마다 한 번(12~21시를 2칸이면 12:00~16:30, 16:30~21:00). 매분 확인하고,
   칸에 남은 확인 횟수로 나눈 확률로 보내서 보내는 시각이 칸 안에 고루 퍼진다(칸 마지막 확인에선 꼭 보냄). 칸 경계에서
   연달아 가지 않게 지난 선톡에서 칸 반 길이가 지나야 보낸다. 일정과 켬·끔은 관리자만 tools/admin.py schedule 로 바꾼다
   (친구가 그만·덜·더 보내 달라고 하면 마롱이는 요청으로만 남김).
 - 어떻게: 사람이 카톡을 연달아 보내듯 짧은 말 몇 개(빈 줄로 나눈 덩어리, 많아야 PARTS_MAX 개)를 몇 초 간격으로 따로 보낸다.
+  단체방은 방 키(botGroupKey)로, 1:1 방은 방 키로 보내고 카카오가 키 때문에 안 보냈다고(-876·-880) 하면 사람 키로 한 번 더
+  (kakao.send_first). 카카오가 1:1 을 어느 키로 다시 열어도 코드를 고치지 않고 다시 간다.
 - 얼마나: 모든 친구를 합쳐 하루 PROACTIVE_DAILY_MAX 번까지(연달아 보낸 말 묶음이 한 번).
-- 기록: 보낸 말은 messages 에 마롱이 말로 남기고 meta.proactive=true. 중간에 전달이 끊기면 친구가 받은 말까지만 남긴다.
-  첫 말부터 전달에 실패해도 남긴다(같은 칸에 다시 시도하지 않게). 친구가 마지막으로 말한 뒤로 전달 실패가 두 번이면
-  (차단 등) 친구가 다시 말할 때까지 쉰다.
-- 끄기: .env 를 PROACTIVE=off 로 바꾸고 재시작. 시험으로 한 명에게만 보내기: run.py --proactive <이름|#키>"""
+- 기록: 보낸 말은 messages 에 마롱이 말로 남기고 meta.proactive=true(쓴 키는 meta.send_key). 중간에 전달이 끊기면 받은
+  말까지만 남긴다. 첫 말부터 전달에 실패해도 남긴다(같은 칸에 다시 시도하지 않게). 방에서 마지막으로 누가 말한 뒤로 전달
+  실패가 두 번이면(차단·내보냄 등) 누가 다시 말할 때까지 쉰다.
+- 끄기: .env 를 PROACTIVE=off 로 바꾸고 재시작. 시험으로 한 방에만 보내기: run.py --proactive <이름|#키|#방키>"""
 import asyncio
 import logging
 import math
@@ -26,7 +30,7 @@ import httpx
 from .agent import Agent
 from .config import Settings
 from .fmt import short_key
-from .kakao import send_message, skill_text
+from .kakao import send_first, send_message, skill_text
 from .llm import brief
 from .store import Store
 
@@ -144,21 +148,26 @@ class Proactive:
             return {"text": text, "ok": None, "code": None, "parts": [0, len(chunks)]}
         done: list[str] = []
         code = None
+        key = "room"  # 방 키 먼저. 1:1 에서 앞 말이 사람 키로 갔으면 다음 말도 사람 키로
         for i, chunk in enumerate(chunks):
             if i:  # 사람이 연달아 치듯 몇 초 쉬고 다음 말
                 await self.sleep(PART_GAP_S[0] + self.rng() * (PART_GAP_S[1] - PART_GAP_S[0]))
-            ok, code = await send_message(self.http, self.s, skill_text(chunk), user_key=room["user_key"])
+            if room["is_channel"]:
+                ok, code, key = await send_first(self.http, self.s, skill_text(chunk), room_key=room["room_key"],
+                                                 user_key=room["user_key"], prefer=key)
+            else:  # 관리자가 켠 단체방: 방 키로만
+                ok, code = await send_message(self.http, self.s, skill_text(chunk), group_key=room["room_key"])
             if not ok:
                 break
             done.append(chunk)
         ok = bool(done)
-        log.info("선톡 room=%s ok=%s code=%s parts=%d/%d len=%d", short_key(room["room_key"]), ok, code,
+        log.info("선톡 room=%s ok=%s code=%s key=%s parts=%d/%d len=%d", short_key(room["room_key"]), ok, code, key,
                  len(done), len(chunks), len(text))
         saved = True
         try:  # 친구가 받은 말까지만 남김(첫 말부터 실패하면 만든 말 전부를 '전달 실패'로)
             await self.store.add_message(room["room_key"], "assistant", "\n\n".join(done) if ok else text,
                                          meta={**meta, "proactive": True, "delivered": ok, "send_code": code,
-                                               "parts": [len(done), len(chunks)]})
+                                               "send_key": key, "parts": [len(done), len(chunks)]})
             self.agent.on_saved()
         except Exception as e:  # 저장을 못 하면 다음 확인 때 또 보낼 수 있어서 이번 칸은 이 방을 건너뜀
             saved = False

@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS marong.meta (
   key   text PRIMARY KEY,
   value text NOT NULL
 );
-INSERT INTO marong.meta (key, value) VALUES ('schema_version', '7')
+INSERT INTO marong.meta (key, value) VALUES ('schema_version', '8')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- 채팅방. 채널채팅(1:1)도 방 하나로 친다.
@@ -54,6 +54,10 @@ BEGIN
 END
 $$;
 ALTER TABLE marong.rooms ADD CONSTRAINT rooms_proactive_per_day_check CHECK (proactive_per_day BETWEEN 1 AND 48);
+-- 8: 단체방 선톡. 카카오가 2026-11-05 14:30 KST부터 1:1 방에 먼저 보내기를 막아서(사람 키 -876, 방 키 -880) 관리자가
+-- 켠 단체방에도 보낸다(admin schedule <#방키> on). 기본 꺼짐(proactive 는 1:1 용이라 단체방도 true 로 남아 있음).
+-- 일정은 1:1 과 같은 proactive_per_day·start·end
+ALTER TABLE marong.rooms ADD COLUMN IF NOT EXISTS group_proactive boolean NOT NULL DEFAULT false;
 
 -- 친구의 카카오 키 하나(같은 사람도 1:1 과 단체방에서 키가 다름). 이름은 본인이 알려 준 것만 저장한다(카카오가 이름을 주지 않음).
 CREATE TABLE IF NOT EXISTS marong.people (
