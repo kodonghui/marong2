@@ -2,9 +2,10 @@
   python run.py           봇 실행(카카오 게이트웨이 연결). 서버의 systemd(marong.service)가 이걸 켬
   python run.py --check   설정·Claude 키·Postgres·임베딩·요약을 점검하고 이 서버의 공인 IPv4 를 출력. 하나라도 실패하면 종료 코드 1
   python run.py --chat    카카오 없이 터미널에서 마롱이와 대화(말투 다듬기용). 대화는 'terminal' 방으로 저장됨
-  python run.py --proactive <이름|#키> [--dry]
-                          그 친구의 1:1 방에 선톡 한 번(짧은 말 몇 개)을 지금 보냄(시험용. 선톡 일정·PROACTIVE 설정과 상관없이).
-                          --dry 면 만든 말만 보여 주고 보내지 않음
+  python run.py --proactive <이름|#키|#방키> [--dry]
+                          그 친구의 1:1 방(또는 tools/admin.py rooms 의 #방키인 방)에 선톡 한 번(짧은 말 몇 개)을 지금 보냄
+                          (시험용. 선톡 일정·PROACTIVE 설정과 상관없이. 선톡을 끈 방에는 안 보냄. 단체방은 관리자가 켠 방만).
+                          --dry 면 만든 말만 보여 주고 보내지 않음(끈 방도 미리 보기는 됨)
 같은 봇 토큰으로 두 곳에서 run.py 를 켜지 않는다(서로 끊어 냄. 4004). --proactive 는 게이트웨이에 붙지 않아서 봇이 켜져 있어도 됨."""
 import asyncio
 import logging
@@ -57,9 +58,10 @@ async def check(s, store: Store, emb: Embeddings, llm: LLM, agent: Agent, worker
     print("단체방:", f"{', '.join(s.group_triggers)} 이(가) 들어간 메시지에만 답함" if s.group_triggers
           else "받은 메시지 모두에 답함", "(카카오는 태그한 메시지만 보내 줌)")
     start, end = s.proactive_hours
-    print("선톡:", f"켜짐(1:1 친구에게 기본 하루 {s.proactive_per_day}번쯤, {start}~{end}시를 {s.proactive_per_day}칸으로 나눠 "
-                 f"칸마다 한 번, 짧은 말 2~3개를 연달아. 방마다 일정을 따로 정할 수 있음(admin schedule). 답이 없어도 "
-                 f"보내고, 친구가 조금 전(최대 {QUIET_HOURS}시간)에 말했으면 기다림. 하루 최대 {s.proactive_daily_max}번)"
+    print("선톡:", f"켜짐(1:1 친구와 관리자가 켠 단체방에 기본 하루 {s.proactive_per_day}번쯤, {start}~{end}시를 "
+                 f"{s.proactive_per_day}칸으로 나눠 칸마다 한 번, 짧은 말 2~3개를 연달아. 방마다 일정을 따로 정할 수 있음"
+                 f"(admin schedule). 답이 없어도 보내고, 방에서 조금 전(최대 {QUIET_HOURS}시간)에 말했으면 기다림. "
+                 f"하루 최대 {s.proactive_daily_max}번. 2026-11-05 부터 카카오가 1:1 선톡을 막아 지금은 단체방만 감)"
           if s.proactive else "꺼짐(PROACTIVE=off)")
 
     try:
@@ -149,16 +151,20 @@ async def proactive_once(s, store: Store, agent: Agent, http: httpx.AsyncClient,
     dry = "--dry" in args
     who = next((a for a in args if a != "--dry"), "")
     if not who:
-        print("사용: run.py --proactive <이름|#키> [--dry]")
+        print("사용: run.py --proactive <이름|#키|#방키> [--dry]")
         return 1
     await store.open(wait=True, timeout=10)
     rooms = await store.channel_rooms(who)
     if len(rooms) != 1:
-        print(f"'{who}' 의 1:1 방을 하나로 못 정함(찾은 방 {len(rooms)}개). tools/admin.py people 의 #키로 다시 해 봐요")
+        print(f"'{who}' 의 방을 하나로 못 정함(찾은 방 {len(rooms)}개). tools/admin.py people 의 #키나 rooms 의 #방키로 "
+              "다시 해 봐요")
         return 1
     room = rooms[0]
-    if not room["proactive"]:
-        print("이 친구는 선톡을 꺼 뒀어요(친구가 마롱이에게 다시 켜 달라고 해야 함). 보내지 않음")
+    if not dry and room["is_channel"] and not room["proactive"]:
+        print("이 친구 1:1 방은 선톡이 꺼져 있어요(관리자가 tools/admin.py schedule <친구> on 으로 켬). 보내지 않음")
+        return 1
+    if not dry and not room["is_channel"] and not room["group_proactive"]:
+        print("이 단체방은 선톡이 꺼져 있어요(관리자가 tools/admin.py schedule <#방키> on 으로 켬). 보내지 않음")
         return 1
     result = await Proactive(s, store, agent, http).deliver(room, dry=dry)
     if result["text"] is None:

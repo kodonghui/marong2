@@ -15,8 +15,9 @@
 #                친구 고치기: admin link <#키> <친구> | unlink <#키> | share <친구> on|off
 #                           | friendship <친구> <친구> <관계> [close] (close: 가까운 사이라 근황까지. 기록은 안 지움)
 #                선톡 일정: admin schedule <친구> <하루 횟수> [시작-끝 시] | schedule <친구> default
-#                           | schedule <친구> off|on (선톡 끄기·다시 켜기)
-#   proactive <이름 또는 #키> [--dry]  그 친구의 1:1 방에 선톡 한 개를 지금 보냄(시험용). --dry 면 만든 말만 보여 줌
+#                           | schedule <친구> off|on (선톡 끄기·다시 켜기). 친구 대신 '#방키'(admin rooms)면 그 방,
+#                           단체방은 기본 꺼짐이라 schedule '#방키' on 으로 켬
+#   proactive <이름|#키|#방키> [--dry]  그 친구의 1:1 방(또는 그 방)에 선톡 한 개를 지금 보냄(시험용). --dry 면 만든 말만 보여 줌
 #   report <저장할 파일.xlsx> [시간] [끝 시각]  지난 24시간(기본) 대화·임베딩·답에 들어간 기억·요약/메모를 엑셀로 받음
 #                끝 시각 예: 2026-10-27T19:00+09:00 (비우면 지금). 서버엔 파일을 남기지 않음
 #   sheet url|on|off|now|status  구글 시트에 최근 30일 기록을 30분마다 보냄(서버가 함, 노트북은 꺼져도 됨. tools/sheet.gs)

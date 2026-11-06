@@ -192,7 +192,7 @@ async def main():
     # 방: c1 동희 1:1(d1), c2 현경 1:1(h1), c3 이름만 같은 다른 동희 1:1(x1), g1 단체방(동희 d2·현경 h2),
     #     g2 단체방(동희라고 한 d3 혼자), term 터미널 대화(t1), c4 민수 1:1(m1)·g3 단체방(m2)은 옛 기록
     # ── 키 묶기: 새 이름이면 새 친구로, 같은 이름 친구가 있으면 묶지 않고 묶기 요청(이름은 누구나 댈 수 있어서 관리자가 정함) ──
-    ok(await store.schema_version() == 7, "표 버전 7")
+    ok(await store.schema_version() == 8, "표 버전 8")
     await say("c1", "d1", "안녕 내 이름은 동희")
     f_dh = fid("d1")
     ok(f_dh is not None and asks("d1") == [], "1:1 에서 처음 듣는 이름을 알려 주면 친구 한 명으로 저장")
@@ -533,7 +533,7 @@ async def main():
        == [("여자친구",)], f"옛 사이는 모두 가까운 사이 아님: {got}")
     db.admin("UPDATE marong.friendships SET close = true WHERE friend_a = %s AND friend_b = %s", tuple(sorted((f_dh, f_hk))))
     db.apply_schema()
-    ok(closeness()[tuple(sorted((f_dh, f_hk)))] is True and await store.schema_version() == 7,
+    ok(closeness()[tuple(sorted((f_dh, f_hk)))] is True and await store.schema_version() == 8,
        "다시 설치해도 관리자가 정한 값은 그대로")
 
     # ── 로그에는 내용·이름이 없음 ──

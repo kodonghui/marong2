@@ -58,8 +58,8 @@ class Settings:
     summary_turns: int             # 이만큼 쌓이면 뒤에서 요약 한 개를 만듦
     recall_min_similarity: float   # 이보다 덜 비슷한 예전 대화는 넣지 않음(0~1)
     group_triggers: tuple[str, ...]  # 단체방에서는 이 말이 들어간 메시지에만 답함. 비면 받은 메시지 모두에 답함
-    proactive: bool                # 선톡: 1:1 친구에게 마롱이가 먼저 말 걸기. 기본 꺼짐
-    proactive_per_day: int         # 친구 한 명에게 하루 선톡 수: PROACTIVE_HOURS 를 이만큼 칸으로 나눠 칸마다 한 번
+    proactive: bool                # 선톡: 1:1 친구와 관리자가 켠 단체방에 마롱이가 먼저 말 걸기. 기본 꺼짐
+    proactive_per_day: int         # 방 하나에 하루 선톡 수: PROACTIVE_HOURS 를 이만큼 칸으로 나눠 칸마다 한 번
     proactive_hours: tuple[int, int]  # 이 시간에만 보냄(한국 시각, 시작 시 이상 끝 시 미만)
     # 방마다 따로 정한 일정(rooms.proactive_per_day·start·end)이 있으면 위 두 값 대신 그것을 씀(tools/admin.py schedule)
     proactive_daily_max: int       # 하루에 보내는 선톡 상한(모든 친구 합, 연달아 보낸 말 묶음이 한 번. 카카오 전송 API 는 하루 1,000건)

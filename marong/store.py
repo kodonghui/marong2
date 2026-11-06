@@ -10,14 +10,15 @@ from psycopg_pool import AsyncConnectionPool
 
 log = logging.getLogger("store")
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 # 'ㅋㅋㅋ'·'ㅇㅇ'·이모티콘만 있는 말은 검색해도 쓸모가 없어 임베딩하지 않음(한글 음절·영문·숫자가 2개 이상 이어진 말만)
 MEANINGFUL = "[가-힣A-Za-z0-9]{2}"
-# 카카오에서 온 1:1 방(채널채팅)마다 친구의 마지막 말과 이 방의 선톡 일정·조건 재료. 터미널 대화('terminal' 방)는
-# 카카오 id 가 없어서 빠짐. 시각은 DB 시계 now() 에서 거꾸로 잰 길이: quiet_for(친구가 마지막으로 말한 뒤),
-# sent_ago(마지막 선톡 뒤. 없으면 NULL), failures(친구가 마지막으로 말한 뒤 전달에 실패한 선톡 수)
-CHANNEL_ROOMS = (
-    "SELECT r.room_key, u.user_key, p.name, u.created_at AS last_said, r.proactive, "
+# 카카오에서 온 방마다 마지막 사람 말과 이 방의 선톡 일정·조건 재료. 1:1 방은 그 친구, 단체방은 마지막으로 마롱이에게
+# 말한 사람(카카오는 단체방에서 마롱이를 태그한 말만 보내 줌). 터미널 대화('terminal' 방)는 카카오 id 가 없어서 빠짐.
+# 시각은 DB 시계 now() 에서 거꾸로 잰 길이: quiet_for(마지막 사람 말 뒤), sent_ago(마지막 선톡 뒤. 없으면 NULL),
+# failures(마지막 사람 말 뒤 전달에 실패한 선톡 수)
+ROOM_STATE = (
+    "SELECT r.room_key, r.is_channel, u.user_key, p.name, u.created_at AS last_said, r.proactive, r.group_proactive, "
     "  r.proactive_per_day AS per_day, r.proactive_start AS start_hour, r.proactive_end AS end_hour, "
     "  now() - u.created_at AS quiet_for, "
     "  now() - (SELECT max(x.created_at) FROM marong.messages x WHERE x.room_key = r.room_key "
@@ -28,7 +29,9 @@ CHANNEL_ROOMS = (
     "CROSS JOIN LATERAL (SELECT m.id, m.user_key, m.kakao_id, m.created_at FROM marong.messages m "
     "  WHERE m.room_key = r.room_key AND m.role = 'user' ORDER BY m.id DESC LIMIT 1) u "
     "LEFT JOIN marong.people p ON p.user_key = u.user_key "
-    "WHERE r.is_channel AND u.kakao_id IS NOT NULL ")
+    "WHERE u.kakao_id IS NOT NULL ")
+# 선톡 대상: 선톡을 켜 둔 1:1 방(기본 켬)과 관리자가 켠 단체방(group_proactive, 기본 꺼짐, 표 버전 8)
+PROACTIVE_ON = "AND CASE WHEN r.is_channel THEN r.proactive ELSE r.group_proactive END "
 
 
 def vec(values) -> str:
@@ -274,9 +277,9 @@ class Store:
     # ── 선톡(먼저 말 걸기) ──────────────────────────────────────
 
     async def proactive_rooms(self, room_key: str | None = None) -> list[dict]:
-        """선톡을 켜 둔 카카오 1:1 방(오래 조용한 친구부터)과 일정·조건 재료(CHANNEL_ROOMS). 보낼지는 proactive.py 가
-        방마다 일정으로 정한다. room_key 를 주면 그 방만."""
-        return await self._all(CHANNEL_ROOMS + "AND r.proactive AND (%(room)s::text IS NULL OR r.room_key = %(room)s) "
+        """선톡을 켜 둔 카카오 1:1 방과 관리자가 켠 단체방(오래 조용한 방부터), 일정·조건 재료(ROOM_STATE). 보낼지는
+        proactive.py 가 방마다 일정으로 정한다. room_key 를 주면 그 방만."""
+        return await self._all(ROOM_STATE + PROACTIVE_ON + "AND (%(room)s::text IS NULL OR r.room_key = %(room)s) "
                                "ORDER BY u.created_at", {"room": room_key})
 
     async def proactive_count(self, within: timedelta) -> int:
@@ -286,13 +289,18 @@ class Store:
         return row["n"]
 
     async def channel_rooms(self, who: str) -> list[dict]:
-        """이름이나 #짧은키(tools/admin.py 와 같은 표시)로 찾은 친구의 1:1 방들(선톡 시험용)."""
+        """선톡 시험용 방. 이름이나 #짧은키(tools/admin.py 와 같은 표시. # 은 빼도 됨)가 친구면 그 친구의 1:1 방들,
+        방 키면 그 방(단체방도)."""
+        tag = "#" + who.lstrip("#")
         people = await self._all("SELECT user_key, name FROM marong.people")
         keys = [p["user_key"] for p in people
-                if p["name"] == who or "#" + hashlib.sha1(p["user_key"].encode()).hexdigest()[:8] == who]
-        if not keys:
-            return []
-        return await self._all(CHANNEL_ROOMS + "AND u.user_key = ANY(%s) ORDER BY u.created_at DESC", (keys,))
+                if p["name"] == who or "#" + hashlib.sha1(p["user_key"].encode()).hexdigest()[:8] == tag]
+        if keys:
+            return await self._all(ROOM_STATE + "AND r.is_channel AND u.user_key = ANY(%s) ORDER BY u.created_at DESC",
+                                   (keys,))
+        rooms = [r["room_key"] for r in await self._all("SELECT room_key FROM marong.rooms")
+                 if "#" + hashlib.sha1(r["room_key"].encode()).hexdigest()[:8] == tag]
+        return await self._all(ROOM_STATE + "AND r.room_key = ANY(%s)", (rooms,)) if rooms else []
 
     # ── 뒤에서 하는 일(임베딩·요약) ─────────────────────────────
 
