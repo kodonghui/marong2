@@ -726,6 +726,31 @@ async def main():
         code, out = admin("merge", g2, p6_room)
         ok(code == 0 and f"→ 현경 1:1 방 {p6_room}" in out and (await store.proactive_rooms("g2"))[0]["user_key"] == "u6",
            f"1:1 #방키로도 묶음: {out}")
+
+        # 요약: 방마다 어디까지 요약했는지 세서, 묶기 전에 1:1 만 따로 요약한 말은 다시 요약하지 않고 그 요약보다 먼저 단체방에서
+        # 한 말도 빠뜨리지 않음. 묶음 뿌리(1:1 방) 하나로 요약하고 meta.rooms 에 두 방을 적음
+        g2_ids = [r[0] for r in db.admin("SELECT id FROM marong.messages WHERE room_key = 'g2' ORDER BY id")]
+        p6_new = [r[0] for r in db.admin("SELECT id FROM marong.messages WHERE room_key = 'p6' AND id > %s ORDER BY id",
+                                         (p6_ids[-1],))]
+        rows = await store.unsummarized("g2", 100)
+        ok([r["id"] for r in rows] == sorted(g2_ids + p6_new) and g2_ids[0] < p6_ids[-1]
+           and [r["id"] for r in await store.unsummarized("p6", 100)] == [r["id"] for r in rows],
+           "묶기 전 1:1 요약 뒤의 말과 단체방 말 전부(단체방 첫 말은 그 요약보다 먼저)")
+        due, to_note = await store.rooms_due(1), await store.rooms_to_note()
+        ok("p6" in due and "g2" not in due and "p6" in to_note and "g2" not in to_note, f"묶음 뿌리 하나로: {due} {to_note}")
+        sid_m = await store.add_summary("p6", rows[0]["id"], rows[-1]["id"], "묶은 뒤 첫 요약", {"u6": "- 귤과 감 좋아함"}, {})
+        await store.add_notes("p6", {}, rows[-1]["id"])
+        ok(db.admin("SELECT meta->'rooms' FROM marong.summaries WHERE id = %s", (sid_m,)) == [(["g2", "p6"],)]
+           and await store.unsummarized("g2", 100) == [] and "p6" not in await store.rooms_due(1)
+           and "p6" not in await store.rooms_to_note()
+           and db.admin("SELECT noted_id FROM marong.rooms WHERE room_key IN ('g2', 'p6')") == [(rows[-1]["id"],)] * 2,
+           "묶음 요약은 두 방 말을 함께 덮고, 메모를 고친 위치도 두 방 함께")
+        ok([(n["user_key"], n["content"]) for n in await store.notes("g2")] == [("u6", "- 귤과 감 좋아함")]
+           and [x["id"] for x in await store.summaries("g2", 3)] == [sid6, sid_m],
+           "새 요약·메모는 1:1 방 쪽에 쌓여 두 방이 같이 씀")
+        admin("merge", g2, "off")
+        ok(await store.unsummarized("g2", 100) == [], "풀어도 묶음 요약으로 덮은 단체방 말은 다시 요약하지 않음")
+        admin("merge", g2, p6_room)
         KAKAO["mode"] = "ok"
 
     # ── 로그에 대화 내용·토큰·카카오 키 원문이 없음 ──
