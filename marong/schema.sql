@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS marong.meta (
   key   text PRIMARY KEY,
   value text NOT NULL
 );
-INSERT INTO marong.meta (key, value) VALUES ('schema_version', '8')
+INSERT INTO marong.meta (key, value) VALUES ('schema_version', '9')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- 채팅방. 채널채팅(1:1)도 방 하나로 친다.
@@ -58,6 +58,12 @@ ALTER TABLE marong.rooms ADD CONSTRAINT rooms_proactive_per_day_check CHECK (pro
 -- 켠 단체방에도 보낸다(admin schedule <#방키> on). 기본 꺼짐(proactive 는 1:1 용이라 단체방도 true 로 남아 있음).
 -- 일정은 1:1 과 같은 proactive_per_day·start·end
 ALTER TABLE marong.rooms ADD COLUMN IF NOT EXISTS group_proactive boolean NOT NULL DEFAULT false;
+-- 9: 기억 묶기. 관리자가 단체방을 한 친구의 1:1 방에 묶으면(admin merge <#방키> <친구>) 두 방이 기억(최근 대화·요약·메모·
+-- 비슷한 예전 대화)을 같이 쓰고, 그 단체방 선톡은 그 친구에게 1:1 처럼 간다. 기록은 옮기지 않고 원래 방에 그대로 쌓으며
+-- 읽을 때 묶인 방들을 함께 읽는다. 새 요약·메모는 1:1 방(memory_room) 쪽에 쌓는다. 1:1 이 막혀 친구 한 명과 마롱이만 있는
+-- 단체방을 1:1 대신 쓰게 됨(2026-11-06 동희님 "데이터베이스 각각 합쳐주고, 기존처럼 작동하게 해줘")
+ALTER TABLE marong.rooms ADD COLUMN IF NOT EXISTS memory_room text REFERENCES marong.rooms (room_key)
+  CHECK (memory_room <> room_key);
 
 -- 친구의 카카오 키 하나(같은 사람도 1:1 과 단체방에서 키가 다름). 이름은 본인이 알려 준 것만 저장한다(카카오가 이름을 주지 않음).
 CREATE TABLE IF NOT EXISTS marong.people (

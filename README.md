@@ -109,12 +109,14 @@ bash deploy/ovh.sh logs          # 로그 보기(Ctrl+C 로 나옴)
 - 양: 모든 친구를 합쳐 하루 최대 60번(`PROACTIVE_DAILY_MAX`, 연달아 보낸 말 묶음이 한 번). 카카오 전송 API 한도는 하루 1,000건이에요.
 - 내용: 그 방의 최근 대화·요약·메모를 보고 말을 걸어요. 매번 같은 얘기로 시작하지 않고, 왜 연락 안 했냐고 서운해하거나 답을 조르지 않고, 19금 얘기로 먼저 말 걸지 않아요.
 - 선톡 끄기·다시 켜기도 관리자만 해요(`admin schedule <친구> off|on`, 단체방은 `admin schedule '#방키' on|off`). 친구가 "먼저 연락하지 마"라고 하면 마롱이는 "그건 동희가 정해, 동희한테 남겨 둘게"라고 말하고 요청으로 남겨요(2026-10-30 동희님이 '선톡도 전부 동희님만'을 고름). `admin rooms` 에 끈 1:1 방은 '선톡 끔', 켠 단체방은 '선톡 켬'으로 보여요.
+- 단체방을 1:1 방에 묶기(표 버전 9): 카카오가 1:1 먼저 보내기를 막은 뒤(2026-11-05~) 친구와 마롱이가 있는 단체방을 1:1 대신 쓰려고, 관리자가 단체방을 그 친구 1:1 방에 묶어요(`admin merge '#단체방키' '#1:1방키'`). 두 방이 최근 대화·요약·메모·비슷한 예전 대화를 한 방처럼 같이 읽고(다른 방 말에는 이름을 붙여 읽음), 새 요약·메모는 1:1 방 쪽에 쌓여요. 묶인 단체방 선톡은 1:1 처럼 그 친구에게 말을 걸고 단체방 키로 보내요. 방에 다른 사람도 있을 수 있어서 비밀·건강·돈·연애 속사정은 먼저 꺼내지 않아요. 기록은 옮기거나 고치지 않고, `admin merge '#단체방키' off` 로 언제든 풀어요(2026-11-06 동희님 "데이터베이스 각각 합쳐주고, 기존처럼 작동하게 해줘").
 - 기록: 보낸 선톡은 대화 기록에 마롱이 말 하나로 남아요(`admin show` 에 '(선톡)', 쓴 키는 `meta.send_key`). 중간에 전달이 끊기면 받은 말까지만 남겨요. 첫 말부터 실패해도 남겨서 같은 칸에 다시 시도하지 않고, 방에서 마지막으로 누가 말한 뒤로 전달 실패가 두 번이면(차단·내보냄 등) 누가 다시 말할 때까지 쉬어요.
 
 | 할 일 | 명령 |
 |---|---|
 | 한 명에게 시험으로 보내기 | `bash deploy/ovh.sh proactive 동희` (단체방은 `proactive '#방키'`. `--dry` 를 붙이면 만든 말만 보여 주고 안 보냄. 선톡을 끈 방은 미리 보기만 돼요) |
 | 단체방 선톡 켜기·끄기 | `bash deploy/ovh.sh admin schedule '#방키' on` / `off` (`#방키` 는 `admin rooms` 의 단체방 키. 일정도 `admin schedule '#방키' 3 9-22` 처럼 정해요) |
+| 단체방을 1:1 방에 묶기·풀기 | `bash deploy/ovh.sh admin merge '#단체방키' '#1:1방키'` (1:1 방 대신 친구 이름도 돼요) / `admin merge '#단체방키' off`. `admin rooms` 에 '(기억 묶음: …)'으로 보여요 |
 | 그 친구 일정 정하기 | `bash deploy/ovh.sh admin schedule 현경 36 7-24` (하루 36번, 7~24시. 횟수는 1~48, 시간을 빼면 횟수만 바꿈) |
 | 그 친구 일정 되돌리기 | `bash deploy/ovh.sh admin schedule 현경 default` (`.env` 기본값으로) |
 | 켜기 | `bash deploy/ovh.sh env` 에서 `PROACTIVE=on` → `bash deploy/ovh.sh restart` → `check` 에 '선톡: 켜짐' |
@@ -233,6 +235,6 @@ uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements.txt
 | `marong/llm.py` | Claude 호출(주 키 → 백업 키) |
 | `marong/gateway.py`, `marong/kakao.py`, `marong/app.py` | 카카오 게이트웨이·콜백·전송·이벤트 처리 |
 | `deploy/` | 서버 설치·운영(`ovh.sh`), systemd(`marong`, 시트 타이머 `marong-sheet`·`marong-sheet-ask`), env 옮기기 |
-| `tools/admin.py` | 기록 보기, 설정 바꾸기(키 묶기·따로 두기·공유 켬·끔·아는 사이·선톡 켬·끔·일정). 설정은 이 명령으로만 바뀌어요(기록은 안 지움) |
+| `tools/admin.py` | 기록 보기, 설정 바꾸기(키 묶기·따로 두기·공유 켬·끔·아는 사이·선톡 켬·끔·일정·단체방을 1:1 방에 묶기). 설정은 이 명령으로만 바뀌어요(기록은 안 지움) |
 | `tools/report.py`, `tools/sheet.gs` | 기록 리포트(엑셀)와 구글 시트 30분 갱신·메뉴 '지금 새로고침'(서버가 보내고 시트의 Apps Script 가 씀) |
 | `docs/design.md` | 저장 설계와 이유 |

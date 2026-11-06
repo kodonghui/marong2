@@ -2,7 +2,7 @@
   friends                      친구 목록(카카오 키들, 아는 사이, 다른 친구에게 하는 얘기=공유 메모: 가벼운 얘기와 가까운 사이에게만
                                하는 요즘 근황)
   people                       카카오 키 목록(이름·친구·메시지 수·처음/마지막으로 본 때)
-  rooms                        방 목록(1:1·단체, 친구들, 메시지 수, 마지막 대화, 1:1 선톡 끔·단체방 선톡 켬)
+  rooms                        방 목록(1:1·단체, 친구들, 메시지 수, 마지막 대화, 1:1 선톡 끔·단체방 선톡 켬, 기억 묶음)
   show <이름 또는 #키> [개수]   그 친구가 있는 방들의 최근 대화(기본 30개)와 기억 메모
   stats                        전체 개수와 최근 7일 토큰 사용량(대략의 비용)
   link <#키> <친구 이름 또는 #키>  그 키를 그 친구로 묶음(같은 사람. 이름이 같은 친구가 이미 있으면 새 키는 묶이지 않고
@@ -15,8 +15,11 @@
                                시간을 빼면 횟수만 바꿈). schedule <친구> default 면 .env 기본값으로 되돌림,
                                schedule <친구> off|on 이면 선톡을 끄거나 다시 켬. 친구 대신 rooms 의 #방키를 주면 그 방
                                (단체방은 기본 꺼짐이라 schedule <#방키> on 으로 켬. 2026-11-05 부터 카카오가 1:1 선톡을 막음)
-기록을 지우는 명령은 없다(봇 계정에는 그 권한도 없다). link·unlink·share·friendship·schedule 은 키가 어느 친구인지, 공유,
-아는 사이, 선톡만 바꾼다. 이 설정들은 관리자만 바꾸고 친구 말로는 안 바뀐다. 친구가 대화로 한 요청은 시트 '친구·공유' 탭과
+  merge <단체방 #방키> <친구 이름·#키 또는 1:1 #방키>  그 단체방을 그 친구 1:1 방과 묶음: 두 방이 기억(최근 대화·요약·메모·
+                               비슷한 예전 대화)을 같이 쓰고, 그 단체방 선톡은 그 친구에게 1:1 처럼 감(친구와 마롱이만 있는
+                               단체방을 1:1 대신 쓸 때). 기록은 옮기지 않음. merge <단체방 #방키> off 면 묶음을 풂
+기록을 지우는 명령은 없다(봇 계정에는 그 권한도 없다). link·unlink·share·friendship·schedule·merge 는 키가 어느 친구인지,
+공유, 아는 사이, 선톡, 기억 묶음만 바꾼다. 이 설정들은 관리자만 바꾸고 친구 말로는 안 바뀐다. 친구가 대화로 한 요청은 시트 '친구·공유' 탭과
 friends 에 보인다.
 카카오 키 원문 대신 #짧은키 로 보여 준다(# 은 빼고 써도 된다)."""
 import hashlib
@@ -57,6 +60,16 @@ def find_key(c, who: str) -> dict:
             if key(r["user_key"]) == k]
     if len(rows) != 1:
         sys.exit(f"'{who}' 키를 찾지 못함(friends·people 로 보기)")
+    return rows[0]
+
+
+def find_room(c, who: str) -> dict:
+    """rooms 의 #방키 → 방 줄(room_key, is_channel, memory_room). 없으면 끝냄."""
+    k = who if who.startswith("#") else "#" + who
+    rows = [r for r in c.execute("SELECT room_key, is_channel, memory_room FROM marong.rooms").fetchall()
+            if key(r["room_key"]) == k]
+    if len(rows) != 1:
+        sys.exit(f"'{who}' 방을 찾지 못함(rooms 로 보기)")
     return rows[0]
 
 
@@ -140,7 +153,8 @@ def people(c, tz, _args):
 def rooms(c, tz, _args):
     rows = c.execute(
         "SELECT r.room_key, r.is_channel, r.proactive, r.group_proactive, r.proactive_per_day, r.proactive_start, "
-        "  r.proactive_end, "
+        "  r.proactive_end, r.memory_room, "
+        "  (SELECT count(*) FROM marong.rooms x WHERE x.memory_room = r.room_key) AS followers, "
         "  count(m.id) AS n, max(m.created_at) AS last, "
         "  string_agg(DISTINCT coalesce(p.name, '?'), ', ') FILTER (WHERE m.user_key IS NOT NULL) AS who "
         "FROM marong.rooms r "
@@ -154,7 +168,12 @@ def rooms(c, tz, _args):
         else:  # 단체방 선톡은 관리자가 켠 방만(기본 꺼짐)
             off = "  (선톡 켬)" if r["group_proactive"] else ""
         plan = f"  (선톡 일정 {plan_text(r)})" if (r["is_channel"] or r["group_proactive"]) and has_plan(r) else ""
-        print(f"{key(r['room_key'])}  {kind}  메시지 {r['n']:>5}  마지막 {when(r['last'], tz)}  {r['who'] or ''}{off}{plan}")
+        if r["memory_room"]:
+            merged = f"  (기억 묶음: 1:1 방 {key(r['memory_room'])})"
+        else:
+            merged = f"  (기억 묶음: 단체방 {r['followers']}개)" if r["followers"] else ""
+        print(f"{key(r['room_key'])}  {kind}  메시지 {r['n']:>5}  마지막 {when(r['last'], tz)}  {r['who'] or ''}{off}{plan}"
+              f"{merged}")
 
 
 def has_plan(r) -> bool:
@@ -361,9 +380,48 @@ def schedule(c, _tz, args):
         print(f"{label} {key(room)}: 선톡 일정 " + (plan_text(r) if has_plan(r) else ".env 기본값") + off)
 
 
+def merge(c, _tz, args):
+    """단체방을 한 친구의 1:1 방에 묶거나(기억을 같이 쓰고 선톡은 그 친구에게 1:1 처럼) 묶음을 푼다. 기록은 옮기지 않는다."""
+    usage = "사용: merge <단체방 #방키> <친구 이름·#키 또는 1:1 #방키> | merge <단체방 #방키> off"
+    if len(args) != 2 or not is_key(args[0]):
+        sys.exit(usage)
+    group = find_room(c, args[0])
+    if group["is_channel"]:
+        sys.exit(f"{args[0]} 는 1:1 방이에요. 앞에는 묶을 단체방 #방키를 주세요(rooms 로 보기)")
+    if args[1] == "off":
+        c.execute("UPDATE marong.rooms SET memory_room = NULL WHERE room_key = %s", (group["room_key"],))
+        print(f"단체방 {key(group['room_key'])}: 묶음 풂. 이제 이 방 기억만 쓰고 선톡은 단체방처럼 가요(쌓인 기록은 그대로)")
+        return
+    who = args[1]
+    users = [r["user_key"] for r in c.execute(
+        "SELECT p.user_key, p.name, f.name AS friend FROM marong.people p "
+        "LEFT JOIN marong.friends f ON f.id = p.friend_id").fetchall()
+        if key(r["user_key"]) == (who if who.startswith("#") else "#" + who) or who in (r["name"], r["friend"])]
+    if users:  # 그 친구가 말한 1:1 방
+        targets = [r["room_key"] for r in c.execute(
+            "SELECT DISTINCT m.room_key FROM marong.messages m JOIN marong.rooms r ON r.room_key = m.room_key "
+            "WHERE r.is_channel AND m.user_key = ANY(%s)", (users,)).fetchall()]
+    else:
+        targets = [find_room(c, who)["room_key"]] if is_key(who) else []
+    if len(targets) != 1:
+        sys.exit(f"'{who}' 의 1:1 방을 하나로 못 정함(찾은 방 {len(targets)}개). rooms 의 1:1 #방키로 주세요")
+    target = c.execute("SELECT room_key, is_channel FROM marong.rooms WHERE room_key = %s", (targets[0],)).fetchone()
+    if not target["is_channel"]:
+        sys.exit(f"{key(target['room_key'])} 는 단체방이에요. 1:1 방에만 묶을 수 있어요")
+    if c.execute("SELECT 1 FROM marong.rooms WHERE memory_room = %s", (group["room_key"],)).fetchone():
+        sys.exit(f"{key(group['room_key'])} 에 다른 방이 묶여 있어요(묶음은 한 단계만)")
+    c.execute("UPDATE marong.rooms SET memory_room = %s WHERE room_key = %s", (target["room_key"], group["room_key"]))
+    row = c.execute("SELECT p.name FROM marong.messages m JOIN marong.people p ON p.user_key = m.user_key "
+                    "WHERE m.room_key = %s AND m.role = 'user' ORDER BY m.id DESC LIMIT 1", (target["room_key"],)).fetchone()
+    friend = (row or {}).get("name") or "이름 모르는 친구"
+    print(f"단체방 {key(group['room_key'])} → {friend} 1:1 방 {key(target['room_key'])}: 기억(최근 대화·요약·메모)을 같이 "
+          "써요. 이 단체방 선톡은 그 친구에게 1:1 처럼 가요(켜기·일정은 schedule <#방키>). 기록은 옮기지 않아요")
+
+
 COMMANDS = {"friends": friends, "people": people, "rooms": rooms, "show": show, "stats": stats,
-            "link": link, "unlink": unlink, "share": share, "friendship": friendship, "schedule": schedule}
-WRITES = {"link", "unlink", "share", "friendship", "schedule"}
+            "link": link, "unlink": unlink, "share": share, "friendship": friendship, "schedule": schedule,
+            "merge": merge}
+WRITES = {"link", "unlink", "share", "friendship", "schedule", "merge"}
 
 
 def main() -> None:

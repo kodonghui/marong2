@@ -1,7 +1,7 @@
 """선톡 시험: 진짜 Postgres + 가짜 Claude + 가짜 카카오 전송 API(/v1/bot/send_message).
 칸 나누기·방마다 일정·대상 고르기·시간·하루 상한·확률·여러 말 연달아·전송 형식·저장·끄기·횟수 도구·실패 기록·
 잠금 뒤 다시 확인·시험 명령(run.py --proactive)·일정 명령(tools/admin.py schedule)·카카오가 1:1 을 막은 뒤
-(2026-11-05~) 키 바꿔 보내기·관리자가 켠 단체방 선톡.
+(2026-11-05~) 키 바꿔 보내기·관리자가 켠 단체방 선톡·단체방을 1:1 방에 묶기(admin merge).
 실행(윈도우): .venv\\Scripts\\python tests\\test_proactive.py   (리눅스·맥: .venv/bin/python tests/test_proactive.py)"""
 import asyncio
 import hashlib
@@ -26,7 +26,7 @@ sys.path[:0] = [str(ROOT), str(ROOT / "tests")]
 import httpx  # noqa: E402
 
 from fakes import FakeAnthropic, FakeEmbeddings, ScriptedLLM, message, text, tool_use  # noqa: E402
-from marong.agent import PROACTIVE_GROUP_GUIDE, PROACTIVE_GUIDE, PROACTIVE_TRIGGER  # noqa: E402
+from marong.agent import LINKED_GUARD, PROACTIVE_GROUP_GUIDE, PROACTIVE_GUIDE, PROACTIVE_TRIGGER  # noqa: E402
 from pg import TestDB  # noqa: E402
 
 CHECKS = 0
@@ -435,11 +435,14 @@ async def main():
         ok([x["name"] for x in llm.bodies[-1]["tools"]] == ["set_name", "ask_owner"]
            and "선톡" not in situation(llm.bodies[-1]), "단체방에서는 선톡 안내 없음")
         await say("g1", "u1g", "선톡 그만 보내", channel=False, kid="c3")
-        ok("1:1 방에서만" in last_result()["content"] and requests_of("g1") == [], "단체방에서는 선톡 요청을 남기지 않음")
+        ok("이미 그렇게 돼 있어(선톡이 꺼져 있음)" in last_result()["content"] and requests_of("g1") == [],
+           "단체방 선톡은 기본 꺼짐이라 그만하라고 해도 남기지 않음")
         off = Agent(replace(s, proactive=False), store, FakeEmbeddings(), llm)
         await say("p5", "u5", "안녕 또", kid="f4", ag=off)
         ok([x["name"] for x in llm.bodies[-1]["tools"]] == ["set_name", "ask_owner"]
            and "선톡" not in situation(llm.bodies[-1]), "PROACTIVE=off 면 선톡 안내 없음")
+        await say("p5", "u5", "선톡 그만 보내", kid="f4b", ag=off)
+        ok("선톡 꺼짐" in last_result()["content"] and len(requests_of("p5")) == 3, "PROACTIVE=off 면 요청도 안 남김")
 
         # ── 단체방 전송 형식(관리자가 켠 단체방 선톡) ──
         sent_ok, code = await send_message(http, s, skill_text("단체방 시험"), group_key="g1")
@@ -489,9 +492,9 @@ async def main():
         db.apply_schema()
         checks = per_day_checks()
         ok(len(checks) == 1 and checks[0][0] == "rooms_proactive_per_day_check" and "<= 48" in checks[0][1]
-           and await store.schema_version() == 8
+           and await store.schema_version() == 9
            and db.admin("SELECT proactive_per_day FROM marong.rooms WHERE room_key = 'p5'") == [(5,)],
-           f"옛 CHECK 를 지우고 1~48 하나만, 표 버전 8, 정해 둔 횟수는 그대로: {checks}")
+           f"옛 CHECK 를 지우고 1~48 하나만, 표 버전 9, 정해 둔 횟수는 그대로: {checks}")
 
         # ── 방마다 일정(tools/admin.py schedule): 현경이에게는 7~24시에 하루 12번 ──
         def admin(*args):
@@ -635,11 +638,125 @@ async def main():
            and [r["room_key"] for r in await store.proactive_rooms("p1")] == ["p1"], f"끄면 그 단체방만 빠짐: {out}")
         code, out = await cli(g1[1:], "--dry")
         ok(code == 0 and "미리 보기(보내지 않음" in out, f"# 을 빼도 되고, 끈 단체방도 미리 보기는 됨: {out}")
+
+        # ── 기억 묶기(표 버전 9, admin merge): 1:1 이 막혀 현경이와 마롱이가 있는 단체방 g2 를 현경이 1:1 방 p6 에 묶음.
+        #    기록은 옮기지 않고 두 방이 기억을 같이 쓰며, g2 선톡은 1:1 처럼 현경이에게(2026-11-06 동희님 "데이터베이스 각각 합쳐주고")
+        g2, p6_room = ("#" + hashlib.sha1(k).hexdigest()[:8] for k in (b"g2", b"p6"))
+        await say("g2", "u1g2", "마롱아 여기 현경이 방이야", channel=False, kid="h1")
+        await say("p6", "u6", "나 귤 좋아해", kid="g3")
+        p6_ids = [r[0] for r in db.admin("SELECT id FROM marong.messages WHERE room_key = 'p6' ORDER BY id")]
+        sid6 = await store.add_summary("p6", p6_ids[0], p6_ids[-1], "현경이는 귤을 좋아한다고 함", {"u6": "- 귤 좋아함"}, {})
+        ok("귤" not in json.dumps([r["content"] for r in await store.recent("g2", 50)], ensure_ascii=False)
+           and await store.notes("g2") == [], "묶기 전에는 방마다 기억이 따로")
+        for bad, why in (((g2,), "사용: merge"), ((p6_room, "현경"), "1:1 방이에요"), ((g2, "없는친구"), "하나로 못 정함"),
+                         ((g2, g1), "단체방이에요")):
+            code, out = admin("merge", *bad)
+            ok(code != 0 and why in out and db.admin("SELECT memory_room FROM marong.rooms WHERE room_key = 'g2'")
+               == [(None,)], f"잘못된 묶기는 안 바꿈: {bad} {out}")
+        code, out = admin("merge", g2, "현경")
+        ok(code == 0 and f"단체방 {g2} → 현경 1:1 방 {p6_room}: 기억(최근 대화·요약·메모)을 같이 써요" in out
+           and db.admin("SELECT memory_room FROM marong.rooms WHERE room_key = 'g2'") == [("p6",)], out)
+        code, out = admin("rooms")
+        ok(f"(기억 묶음: 1:1 방 {p6_room})" in room_line(out, g2) and "(기억 묶음: 단체방 1개)" in room_line(out, p6_room)
+           and "기억 묶음" not in room_line(out, g1), out)
+
+        both = await store.recent("g2", 50)
+        ok({"나 귤 좋아해", "마롱아 여기 현경이 방이야"} <= {r["content"] for r in both}
+           and [r["id"] for r in both] == sorted(r["id"] for r in both)
+           and [r["id"] for r in await store.recent("p6", 50)] == [r["id"] for r in both],
+           "묶은 두 방은 서로의 대화를 시간 순으로 함께 읽음")
+        ok([x["id"] for x in await store.summaries("g2", 3)] == [sid6]
+           and [(n["user_key"], n["content"]) for n in await store.notes("g2")] == [("u6", "- 귤 좋아함")],
+           "1:1 에서 정리한 요약·메모를 묶인 단체방에서도 씀")
+        ok(db.admin("SELECT count(*) FROM marong.messages WHERE room_key = 'g2'") == [(2,)],
+           "기록은 옮기지 않음(단체방 말은 단체방에 그대로)")
+
+        ok(await store.proactive_rooms("g2") == [], "묶어도 단체방 선톡은 따로 켬")
+        admin("schedule", g2, "on")
+        code, out = admin("schedule", g2, "36", "7-24")
+        room_g2 = (await store.proactive_rooms("g2"))[0]
+        ok(code == 0 and room_g2["memory_room"] == "p6" and room_g2["is_channel"] is False and room_g2["user_key"] == "u6"
+           and room_g2["name"] == "현경" and room_g2["per_day"] == 36 and room_g2["quiet_for"] < timedelta(minutes=5),
+           f"묶인 단체방 선톡 대상은 1:1 친구, 조용한 시간은 두 방을 함께 봄: {room_g2}")
+        evening = today.replace(hour=20, minute=5)  # 19:45~20:13 칸(36칸이면 28분 20초씩)
+        ok(planner.plan(room_g2, evening) is None, "1:1 에서 방금 말했으면 묶인 단체방에도 끼어들지 않음")
+        shift("p6", 30)
+        shift("g2", 30)
+        room_g2 = (await store.proactive_rooms("g2"))[0]
+        ok(planner.plan(room_g2, evening) is not None, room_g2)
+        n, calls = len(SENT), len(llm.bodies)
+        r = await pro.deliver(room_g2)
+        content, meta = last_message("g2")
+        ok(r["ok"] is True and keys_of(SENT[n:]) == [("botGroupKey", "g2")] and content == f"현경 선톡 {n + 1} 🌰"
+           and meta["proactive"] is True and meta["delivered"] is True and meta["send_key"] == "room",
+           f"묶인 단체방 선톡은 방 키로, 1:1 친구 이름을 불러 말 걺: {r} {meta}")
+        lsit = situation(llm.bodies[-1])
+        ok("- 이 친구와 1:1 로 하던 대화를 이어 가는 단체 채팅방이야(동희가 묶음)" in lsit and "- 친구: 현경" in lsit
+           and PROACTIVE_GUIDE.format(per_day=36) in lsit and lsit.endswith(LINKED_GUARD)
+           and "현경: 나 귤 좋아해" in lsit and "## 현경\n- 귤 좋아함" in lsit and "현경이는 귤을 좋아한다고 함" in lsit
+           and "# 단체방에 먼저 말 걸기" not in lsit and "토익" not in lsit, lsit)
+        ok((await store.proactive_rooms("p6"))[0]["sent_ago"] < timedelta(minutes=1)
+           and planner.plan((await store.proactive_rooms("g2"))[0], evening) is None,
+           "묶인 방들은 지난 선톡도 함께 셈(같은 친구에게 두 방으로 연달아 안 감)")
+
+        await say("g2", "u1g2", "현경이 뭐 좋아해?", channel=False, kid="h2")
+        b = llm.bodies[-1]
+        rsit = situation(b)
+        ok("- 이 방은 한 친구와 1:1 로 하던 대화를 이어 가는 방이야(1:1 친구: 현경, 동희가 묶음)." in rsit
+           and LINKED_GUARD in rsit and "- 마롱이는 이 방에 하루 36번쯤 먼저 카톡을 보내(선톡, 동희가 정함)" in rsit
+           and "## 현경\n- 귤 좋아함" in rsit and "현경: 나 귤 좋아해" in json.dumps(b["messages"], ensure_ascii=False),
+           f"묶인 단체방 답에는 1:1 대화·메모와 선톡 안내: {rsit}")
+        await say("p6", "u6", "응 귤", kid="g4")
+        b = llm.bodies[-1]
+        speaker = "친구-" + hashlib.sha1(b"u1g2").hexdigest()[:4]
+        ok("- 이 1:1 방은 동희가 묶은 단체방과 기억을 같이 써." in situation(b)
+           and "하루 12번쯤 먼저 카톡을 보내" in situation(b)
+           and f"{speaker}: 현경이 뭐 좋아해?" in json.dumps(b["messages"], ensure_ascii=False),
+           "1:1 방에서도 묶인 단체방에서 오간 말을 이름을 붙여 읽음")
+        await say("g2", "u1g2", "선톡 그만 보내", channel=False, kid="h3")
+        ok(requests_of("g2") == [("proactive_off", {})], "선톡을 켠 묶인 단체방에서 한 선톡 요청은 남김")
+        code, out = await cli(g2, "--dry")
+        ok(code == 0 and "미리 보기(보내지 않음, 말 1개):\n현경 선톡" in out, out)
+
+        code, out = admin("merge", g2, "off")
+        room_g2 = (await store.proactive_rooms("g2"))[0]
+        ok(code == 0 and "묶음 풂" in out and room_g2["memory_room"] is None and room_g2["user_key"] == "u1g2"
+           and "나 귤 좋아해" not in {r["content"] for r in await store.recent("g2", 50)} and await store.notes("g2") == [],
+           f"묶음을 풀면 그 방 기억만: {out} {room_g2}")
+        code, out = admin("merge", g2, p6_room)
+        ok(code == 0 and f"→ 현경 1:1 방 {p6_room}" in out and (await store.proactive_rooms("g2"))[0]["user_key"] == "u6",
+           f"1:1 #방키로도 묶음: {out}")
+
+        # 요약: 방마다 어디까지 요약했는지 세서, 묶기 전에 1:1 만 따로 요약한 말은 다시 요약하지 않고 그 요약보다 먼저 단체방에서
+        # 한 말도 빠뜨리지 않음. 묶음 뿌리(1:1 방) 하나로 요약하고 meta.rooms 에 두 방을 적음
+        g2_ids = [r[0] for r in db.admin("SELECT id FROM marong.messages WHERE room_key = 'g2' ORDER BY id")]
+        p6_new = [r[0] for r in db.admin("SELECT id FROM marong.messages WHERE room_key = 'p6' AND id > %s ORDER BY id",
+                                         (p6_ids[-1],))]
+        rows = await store.unsummarized("g2", 100)
+        ok([r["id"] for r in rows] == sorted(g2_ids + p6_new) and g2_ids[0] < p6_ids[-1]
+           and [r["id"] for r in await store.unsummarized("p6", 100)] == [r["id"] for r in rows],
+           "묶기 전 1:1 요약 뒤의 말과 단체방 말 전부(단체방 첫 말은 그 요약보다 먼저)")
+        due, to_note = await store.rooms_due(1), await store.rooms_to_note()
+        ok("p6" in due and "g2" not in due and "p6" in to_note and "g2" not in to_note, f"묶음 뿌리 하나로: {due} {to_note}")
+        sid_m = await store.add_summary("p6", rows[0]["id"], rows[-1]["id"], "묶은 뒤 첫 요약", {"u6": "- 귤과 감 좋아함"}, {})
+        await store.add_notes("p6", {}, rows[-1]["id"])
+        ok(db.admin("SELECT meta->'rooms' FROM marong.summaries WHERE id = %s", (sid_m,)) == [(["g2", "p6"],)]
+           and await store.unsummarized("g2", 100) == [] and "p6" not in await store.rooms_due(1)
+           and "p6" not in await store.rooms_to_note()
+           and db.admin("SELECT noted_id FROM marong.rooms WHERE room_key IN ('g2', 'p6')") == [(rows[-1]["id"],)] * 2,
+           "묶음 요약은 두 방 말을 함께 덮고, 메모를 고친 위치도 두 방 함께")
+        ok([(n["user_key"], n["content"]) for n in await store.notes("g2")] == [("u6", "- 귤과 감 좋아함")]
+           and [x["id"] for x in await store.summaries("g2", 3)] == [sid6, sid_m],
+           "새 요약·메모는 1:1 방 쪽에 쌓여 두 방이 같이 씀")
+        admin("merge", g2, "off")
+        ok(await store.unsummarized("g2", 100) == [], "풀어도 묶음 요약으로 덮은 단체방 말은 다시 요약하지 않음")
+        admin("merge", g2, p6_room)
         KAKAO["mode"] = "ok"
 
     # ── 로그에 대화 내용·토큰·카카오 키 원문이 없음 ──
     joined = "\n".join(LOGS)
-    for secret in ("tok-secret", "선톡 1 🌰", "동희 선톡", "토익", "심심해", "botUserKey", "첫 말", "현경이야", "웬일"):
+    for secret in ("tok-secret", "선톡 1 🌰", "동희 선톡", "토익", "심심해", "botUserKey", "첫 말", "현경이야", "웬일",
+                   "귤", "현경이 방"):
         ok(secret not in joined, f"로그에 '{secret}'이(가) 남음")
     ok("선톡 room=" in joined and "parts=3/3" in joined and "ask_owner user=" in joined, "로그 자체는 남음")
 
