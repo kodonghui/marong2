@@ -495,7 +495,7 @@ paths:
     post:
       operationId: openSegment
       summary: 같은 통화에 새 구간 열기(재연결·깨우기)
-      description: 끊김 뒤 자동 재연결(`reconnect`, SPEC-007)과 쉬다가 깨우기(`wake`, SPEC-008, 결정 대기)가 같은 길을 써요. 예산을 다 써도(100%) 하던 통화라 열어 주고, 120%면 막아요.
+      description: 끊김 뒤 자동 재연결(`reconnect`, SPEC-007)과 쉬다가 깨우기(`wake`, SPEC-008)가 같은 길을 써요. 예산을 다 써도(100%) 하던 통화라 열어 주고, 120%면 막아요.
       x-corthex:
         id: API-003
         spec:
