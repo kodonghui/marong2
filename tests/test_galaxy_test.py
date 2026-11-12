@@ -143,6 +143,19 @@ class GalaxyTestServer(unittest.TestCase):
         self.assertEqual((status, res["error"]), (429, "minute_cap"))
         self.assertEqual(len(FakeOpenAI.seen), 1)
 
+    def test_key_added_after_start(self):
+        key_file = gt.KEY_FILE
+        gt.KEY = ""
+        try:
+            self.assertEqual(self.post("/api/session", {"page": PAGE, "kind": "start", "sdp": OFFER})[0], 503)
+            key_file.write_text("test-key\n", encoding="utf-8")
+            self.assertEqual(self.post("/api/session", {"page": PAGE, "kind": "start", "sdp": OFFER})[0], 201)
+            self.assertEqual(FakeOpenAI.seen[-1]["auth"], "Bearer test-key")
+            self.assertEqual(gt.MODEL_CHECK, "200")
+        finally:
+            gt.KEY = "test-key"
+            key_file.unlink()
+
     def test_model_check_is_free_lookup(self):
         self.assertEqual(gt.check_model("test-key"), "200")
         self.assertEqual(gt.check_model("wrong"), "401")

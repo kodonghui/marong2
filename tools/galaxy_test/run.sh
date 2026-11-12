@@ -5,6 +5,7 @@
 #   bash run.sh stop     끄기
 #   bash run.sh status   상태와 주소
 # 시험 서버는 TEST_RUN_HOURS(기본 8시간) 뒤 스스로 끝나고, 그러면 터널도 꺼져요.
+# cloudflared는 CLOUDFLARED=/절대/경로, PATH, ~/.local/bin/cloudflared 순서로 찾아요.
 set -euo pipefail
 cd "$(dirname "$0")"
 STATE=${TEST_LOG_DIR:-$HOME/marong-galaxy-test}
@@ -45,10 +46,16 @@ case "${1:-start}" in
     if [ -s "$KEY_FILE" ]; then
       chmod 600 "$KEY_FILE"
     else
-      echo "OpenAI 키 파일이 없어서 진짜 통화는 안 되고 가짜 통화(?fake=1)만 돼요: $KEY_FILE"
+      echo "OpenAI 키 파일이 아직 없어요: $KEY_FILE (가짜 통화 ?fake=1은 돼요. 키를 넣으면 다시 켜지 않아도 진짜 통화가 돼요)"
     fi
     PY=$(command -v python3) || { echo "python3가 없어요"; exit 1; }
-    CF=$(command -v cloudflared) || { echo "cloudflared가 없어요"; exit 1; }
+    CF=${CLOUDFLARED:-}
+    if [ -z "$CF" ]; then
+      CF=$(command -v cloudflared || true)
+      [ -n "$CF" ] || CF=$HOME/.local/bin/cloudflared
+    fi
+    case "$CF" in /*) ;; *) echo "cloudflared는 절대 경로로 알려 주세요: $CF"; exit 1 ;; esac
+    [ -x "$CF" ] || { echo "cloudflared가 없어요: $CF (README의 cloudflared 안내를 보거나 CLOUDFLARED=/절대/경로 로 알려 주세요)"; exit 1; }
     stop_all
     # 키는 이 키 파일에서만 읽어요(셸에 OPENAI_API_KEY가 있어도 쓰지 않게)
     env -u OPENAI_API_KEY TEST_BIND="127.0.0.1:$PORT" OPENAI_KEY_FILE="$KEY_FILE" TEST_LOG_DIR="$STATE" \

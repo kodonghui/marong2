@@ -28,7 +28,8 @@
 #   chat         서버에서 터미널로 마롱이와 대화(카카오 없이. 'terminal' 방으로 저장됨)
 #   galaxy-test start|stop|status  통화 갤럭시 시험(기능 명세 7.1). start는 시험 파일만 서버의 ~/marong-galaxy-test 로
 #                올리고 시험 서버(127.0.0.1)와 Cloudflare 임시 주소를 켬. sudo·다른 서비스는 건드리지 않음.
-#                OpenAI 키는 서버의 ~/.config/marong-call/openai.key 에 먼저 넣어 둠(값은 화면에 안 보임)
+#                OpenAI 키는 서버의 ~/.config/marong-call/openai.key 에 넣어 둠(값은 화면에 안 보임, 켠 뒤에 넣어도 됨).
+#                cloudflared는 서버의 PATH나 ~/.local/bin에서 찾음. 다른 곳이면 CLOUDFLARED=/서버의/절대/경로 를 앞에 붙임
 set -euo pipefail
 cd "$(dirname "$0")/.."
 HOST=${MARONG_HOST:-ko-family}
@@ -165,12 +166,16 @@ case "${1:-}" in
     case "$sub" in start|stop|status) ;; *) echo "사용법: bash deploy/ovh.sh galaxy-test start|stop|status"; exit 1 ;; esac
     port=${MARONG_TEST_PORT:-8791}
     case "$port" in ''|*[!0-9]*) echo "MARONG_TEST_PORT는 숫자여야 해요"; exit 1 ;; esac
+    # cloudflared가 서버의 PATH나 ~/.local/bin에 없으면 서버 안의 절대 경로를 CLOUDFLARED=… 로 줘요
+    cf=${CLOUDFLARED:-}
+    case "$cf" in ''|/*) ;; *) echo "CLOUDFLARED는 서버 안의 절대 경로여야 해요"; exit 1 ;; esac
+    case "$cf" in *[!A-Za-z0-9/._-]*) echo "CLOUDFLARED 경로에는 영문·숫자·/._- 만 써 주세요"; exit 1 ;; esac
     if [ "$sub" = start ]; then
       tar -czf - --exclude __pycache__ tools/galaxy_test call_prompt.md marong/call/static/face/v1/01-neutral.webp |
         on_server 'rm -rf ~/marong-galaxy-test/src && mkdir -p ~/marong-galaxy-test/src &&
                    chmod 700 ~/marong-galaxy-test && tar -xzf - -C ~/marong-galaxy-test/src --warning=no-unknown-keyword'
     fi
-    on_server "MARONG_TEST_PORT=$port bash ~/marong-galaxy-test/src/tools/galaxy_test/run.sh $sub"
+    on_server "CLOUDFLARED=$cf MARONG_TEST_PORT=$port bash ~/marong-galaxy-test/src/tools/galaxy_test/run.sh $sub"
     ;;
-  *) sed -n '2,31p' "$0"; exit 1 ;;
+  *) sed -n '2,32p' "$0"; exit 1 ;;
 esac

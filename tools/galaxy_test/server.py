@@ -331,6 +331,23 @@ class Run:
 RUN: Run | None = None
 KEY = ""
 MODEL_CHECK = "-"
+KEY_LOCK = threading.Lock()
+
+
+def current_key() -> str:
+    """키가 아직 없으면 키 파일을 다시 읽어요. 서버를 켠 뒤에 키를 넣어도 다시 켤 필요가 없어요."""
+    global KEY, MODEL_CHECK
+    if KEY:
+        return KEY
+    with KEY_LOCK:
+        if not KEY:
+            key = load_key()
+            if key:
+                KEY = key
+                MODEL_CHECK = check_model(key)
+                if RUN:
+                    RUN.write({"src": "server", "k": "key_loaded", "model_check": MODEL_CHECK})
+    return KEY
 
 
 def check_model(key: str) -> str:
@@ -418,7 +435,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
         if path == "/healthz":
-            return self._json(200, {"ok": True, "key": bool(KEY), "model": MODEL_CHECK,
+            return self._json(200, {"ok": True, "key": bool(current_key()), "model": MODEL_CHECK,
                                     "left_min": int((RUN.deadline - now_ms()) / 60000)})
         if path == "/report":
             return self._send(200, render_report().encode("utf-8"), "text/html; charset=utf-8",
@@ -484,7 +501,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "invalid_request"})
         if not NAME_RE.match(name):
             return self._json(400, {"error": "name"})
-        if not KEY:
+        if not current_key():
             return self._json(503, {"error": "no_key"})
         with RUN.lock:
             if now_ms() > RUN.deadline:
