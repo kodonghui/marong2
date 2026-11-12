@@ -47,15 +47,17 @@ CREATE TABLE IF NOT EXISTS call.caller_logins (
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
--- TBL-003 calls (CTX-002) ← SPEC-002, SPEC-003, SPEC-007~011, SPEC-017~020, SPEC-022~024 | terms: TERM-001, TERM-009, TERM-013, TERM-015
+-- TBL-003 calls (CTX-002) ← SPEC-002~004, SPEC-007~011, SPEC-017~020, SPEC-022~024 | terms: TERM-001, TERM-009, TERM-013, TERM-015
 -- 규칙: 친구 한 명에 끝나지 않은 통화는 하나(calls_one_open_idx). 끝난 통화는 되돌리지 않는다.
 -- 규칙: 끝난 통화만 정리 상태를 가진다(none 은 끝나기 전).
+-- 규칙: 목소리는 걸 때 설정(TBL-009)에서 읽어 두고 그 통화의 모든 구간에 쓴다(세션을 만든 뒤에는 못 바꿈, D16).
 CREATE TABLE IF NOT EXISTS call.calls (
   id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   caller_id             bigint NOT NULL REFERENCES call.callers (id) ON DELETE RESTRICT,
   status                text NOT NULL DEFAULT 'live' CHECK (status IN ('live', 'resting', 'ended')),
   client_id             uuid NOT NULL,                       -- 지금 통화를 가진 화면(넘겨받기, SPEC-009)
   prompt_version        text NOT NULL,                       -- 지시문 틀 sha256 앞 12자(SPEC-004)
+  voice                 text NOT NULL CHECK (char_length(voice) BETWEEN 1 AND 100),  -- 이 통화의 목소리(SPEC-004, D16)
   started_at            timestamptz NOT NULL DEFAULT now(),
   last_beat_at          timestamptz NOT NULL DEFAULT now(),  -- 신호(SPEC-010)
   last_turn_at          timestamptz,                         -- 마지막 자막 조각 시각(쉬기 판단, SPEC-008)

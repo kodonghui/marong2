@@ -10,9 +10,9 @@ SET ROLE marong_call;
 \echo == as marong_call: insert caller, login, call, segment
 INSERT INTO call.callers (friend_id) VALUES (:f_id) RETURNING id \gset c_
 INSERT INTO call.caller_logins (email_sha256, caller_id, email_hint) VALUES (repeat('a',64), :c_id, 'a***@example.com');
-INSERT INTO call.calls (caller_id, client_id, prompt_version) VALUES (:c_id, gen_random_uuid(), 'abc123def456') RETURNING id \gset k_
+INSERT INTO call.calls (caller_id, client_id, prompt_version, voice) VALUES (:c_id, gen_random_uuid(), 'abc123def456', 'noeul') RETURNING id \gset k_
 \echo -- expect error: second open call for same caller
-INSERT INTO call.calls (caller_id, client_id, prompt_version) VALUES (:c_id, gen_random_uuid(), 'x');
+INSERT INTO call.calls (caller_id, client_id, prompt_version, voice) VALUES (:c_id, gen_random_uuid(), 'x', 'noeul');
 INSERT INTO call.segments (call_id, mode, client_id) VALUES (:'k_id', 'start', gen_random_uuid()) RETURNING id \gset s_
 \echo -- expect error: second open segment
 INSERT INTO call.segments (call_id, mode, client_id) VALUES (:'k_id', 'reconnect', gen_random_uuid());
@@ -34,6 +34,8 @@ INSERT INTO call.ai_runs (kind, call_id, segment_id, trace_id, model, prompt_ver
 \echo -- expect error: unknown ai_runs kind
 INSERT INTO call.ai_runs (kind, trace_id, model, prompt_version, sent_at, outcome) VALUES ('face_pick', 't4', 'x', 'x', now(), 'ok');
 UPDATE call.calls SET status='ended', ended_at=now(), end_reason='hangup', organize_status='pending' WHERE id=:'k_id';
+\echo -- expect error: empty voice
+INSERT INTO call.calls (caller_id, client_id, prompt_version, voice) VALUES (:c_id, gen_random_uuid(), 'x', '');
 INSERT INTO call.cards (call_id, summary, model, prompt_version) VALUES (:'k_id', '생일 얘기', 'claude-haiku-5-5', 'org1');
 \echo -- expect error: budget 0
 UPDATE call.settings SET value='0'::jsonb WHERE key='monthly_budget_usd';

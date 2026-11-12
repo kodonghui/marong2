@@ -48,6 +48,7 @@ erDiagram
     bigint caller_id FK
     text status "live resting ended"
     uuid client_id
+    text voice
     timestamptz last_beat_at
     text end_reason
     text organize_status
@@ -107,7 +108,7 @@ erDiagram
 | --- | --- | --- | --- | --- | --- |
 | TBL-001 | `call.callers` | CTX-005 | TERM-003 | 001, 002, 024, 025 | 카톡 친구 한 명에 하나 |
 | TBL-002 | `call.caller_logins` | CTX-005 | TERM-004 | 001, 025 | 이메일 원문 없음(sha256 64자, 가린 표시) |
-| TBL-003 | `call.calls` | CTX-002 | TERM-001, 009, 013, 015 | 002, 003, 007~011, 017~020, 022~024 | 친구 한 명에 안 끝난 통화 하나, 끝남과 끝난 시각·이유·정리 상태가 함께 감 |
+| TBL-003 | `call.calls` | CTX-002 | TERM-001, 009, 013, 015 | 002~004, 007~011, 017~020, 022~024 | 친구 한 명에 안 끝난 통화 하나, 끝남과 끝난 시각·이유·정리 상태가 함께 감, 목소리는 1~100자(통화마다 하나, D16) |
 | TBL-004 | `call.segments` | CTX-002 | TERM-002, 010, 011, 012 | 003, 006~011, 023 | 통화 하나에 안 닫힌 구간 하나, 열린 구간은 OpenAI 세션 id가 있음 |
 | TBL-005 | `call.turns` | CTX-004 | TERM-005 | 006, 012~014, 017, 019, 022 | 한 줄 4,000자, 통화 안 순서 겹침 없음 |
 | TBL-006 | `call.cards` | CTX-004 | TERM-006 | 017, 019, 024 | 통화 하나에 카드 하나 |
