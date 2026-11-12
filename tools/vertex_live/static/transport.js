@@ -26,7 +26,7 @@ self.onmessage=({data})=>{
       let msg;try{msg=JSON.parse(payload);}catch{return;}
       if(msg.type==='ready')ready=true;
       else if(msg.type==='reconnecting')ready=false;
-      else if(msg.type==='audio_reset'||msg.type==='interrupted'){
+      else if(msg.type==='audio_reset'||msg.type==='interrupted'||(msg.type==='audio_transport'&&msg.switched)){
         epoch=msg.epoch;openTurn=false;media({type:'clear',epoch});
       }else if(msg.type==='audio_end'){
         openTurn=false;media({type:'turn',turn:msg.turn,epoch:msg.epoch});

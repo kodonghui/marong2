@@ -401,6 +401,19 @@ def check_sheet(report, i):
         code, out = run(report, ["--sheet", "--until", UNTIL], transport)
         ok(code == 1 and f"시트 갱신 실패: {why}" in out and SECRET not in out and "비밀" not in out, f"{what}: {out}")
 
+    attempts = []
+    def transient(request):
+        attempts.append(request.content)
+        return httpx.Response(500) if len(attempts) == 1 else httpx.Response(200, json={"ok": True})
+    ok(report.send(SHEET_URL, payload, httpx.MockTransport(transient)) is None and len(attempts) == 2
+       and attempts[0] == attempts[1], "HTTP 500 뒤 같은 스냅샷을 재전송해 중복 없이 회복")
+    rejected = []
+    def forbidden(request):
+        rejected.append(request)
+        return httpx.Response(403)
+    ok(report.send(SHEET_URL, payload, httpx.MockTransport(forbidden)) == 'HTTP 403' and len(rejected) == 1,
+       "권한 오류는 반복 전송하지 않음")
+
     for url in (None, "https://evil.example.com/macros/s/X/exec"):
         if url:
             os.environ["SHEET_URL"] = url
@@ -463,7 +476,7 @@ def check_ask(report):
     del os.environ["SHEET_URL"]
     transport, posts = sheet_app(lambda: httpx.Response(200, json={"ok": True, "asked": 1}))
     code, out = run(report, argv, transport)
-    ok(code == 0 and out == "" and not posts, f"주소가 없으면 묻지 않고 조용히 끝(30분 갱신이 알림): {out!r}")
+    ok(code == 0 and out == "" and not posts, f"주소가 없으면 묻지 않고 조용히 끝(5분 갱신이 알림): {out!r}")
     with contextlib.redirect_stderr(io.StringIO()):
         try:
             report.main(["--if-asked"])

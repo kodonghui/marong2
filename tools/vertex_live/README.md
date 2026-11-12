@@ -8,7 +8,7 @@ Input: `capture AudioWorklet -> dedicated network Worker -> Singapore relay -> V
 
 Output: `Vertex PCM -> 600 ms server playout reserve -> LiveKit/Opus/WebRTC -> native browser audio`. LiveKit 1.13.11 runs on the same Singapore server. Only signaling passes through the existing Cloudflare hostname (`/rtc`); media uses encrypted WebRTC on UDP 7882, with TCP 7881 available. The LiveKit API binds only to loopback 7880. The browser receives a short-lived room-scoped, subscribe-only token; the signing secret remains on the server. The frontend SDK is pinned to 2.24.0 and vendored with its license. A media disconnect reconnects the same logical call.
 
-WebSocket PCM is the fallback if the initial WebRTC connection fails. A later media disconnect currently retries WebRTC; it does not explicitly switch the active call to WebSocket PCM. See [the deployment audit](OPERATIONS.md) for the blocked-network limitation. Both microphone PCM and fallback received PCM cross transferable MessagePorts directly. Caption rendering and main-thread pauses do not carry those audio packets. Input is 16 kHz mono PCM16; output is 24 kHz PCM16, continuously resampled to the actual device rate. Fallback playback waits for **actual queued samples**, with a 900 ms initial reserve that grows to 2 s after starvation and slowly decreases after stable turns. Finished short replies do not wait for the full reserve. Interruptions invalidate the previous audio epoch. A network delay longer than available audio or an OS audio suspension can still interrupt playback.
+WebSocket PCM is the fallback for initial failure **and mid-call WebRTC loss**. Disconnection/reconnecting events or a stalled RTP packet counter request PCM over the existing control socket. The server serializes the ACK and pending audio before new PCM. The microphone, Google session and logical call remain intact. Duplicate requests are idempotent; PCM stays selected until the next call, including control-socket reconnects. Both microphone PCM and fallback received PCM cross transferable MessagePorts directly. Caption rendering and main-thread pauses do not carry those audio packets. Input is 16 kHz mono PCM16; output is 24 kHz PCM16, continuously resampled to the actual device rate. Fallback playback waits for **actual queued samples**, with a 900 ms initial reserve that grows to 2 s after starvation and slowly decreases after stable turns. Finished short replies do not wait for the full reserve. Interruptions invalidate the previous audio epoch. Fault detection, unavailable network/audio hardware and buffer refill can still cause a temporary audible gap.
 
 The change to WebRTC followed a measured public-browser failure: the provider delivered a 13.1 s clip in 12.9 s with a 240 ms maximum packet gap, while the public WebSocket playback had roughly 2 s arrival gaps. Dedicated Worker transport alone still produced two underruns. A subsequent two-turn WebRTC browser trial played 28.97 s with zero source underruns; the second 14.86 s turn added no packet concealment or loss. This is a bounded desktop result, not a guarantee for all networks.
 
@@ -33,7 +33,7 @@ Transcripts and source quotes expire after 180 days. Cards and verified memories
 
 ## Operations
 
-For the verified Google API-key route, key rotation procedure, open ports, initial-connection fallback and mid-call network limitation, see [OPERATIONS.md](OPERATIONS.md). Non-secret systemd and LiveKit configuration templates are in [deploy/](deploy/).
+For the verified Google API-key route, key rotation procedure, open ports, mid-call failover results and five-minute session reporting, see [OPERATIONS.md](OPERATIONS.md). Apply `003_transport_reporting.sql` after migration 002 before deploying this version. Non-secret systemd and LiveKit configuration templates are in [deploy/](deploy/).
 
 - App: `/home/opc/marong-vertex-test/app`, user unit `marong-vertex-live.service`.
 - Pinned Python runtime: `/home/opc/marong-vertex-test/venv-memory2`.
@@ -59,6 +59,9 @@ node tools/vertex_live/test_capture.cjs
 node tools/vertex_live/test_playback.cjs
 node tools/vertex_live/test_transport.cjs
 node tools/vertex_live/test_fallback.cjs
+node tools/vertex_live/test_rtc_watchdog.cjs
+python tools/vertex_live/test_midcall.py
+python tools/vertex_live/test_call_report.py  # isolated restored test database only
 ```
 
 On the server, `test_rtc.py` uses the private SFU with synthetic audio to check actual encrypted media delivery under 400 ms burst jitter. It sends no Kakao messages and does not use private conversation content.

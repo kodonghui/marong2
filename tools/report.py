@@ -14,6 +14,7 @@ import logging
 import math
 import os
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -85,6 +86,28 @@ def tab(name: str, headers: list[str], rows: list[list], widths: list[float], wr
     if colors is not None:
         t["colors"] = colors
     return t
+
+
+def call_sessions(c, start, until, tz):
+    """The report role sees a metadata-only view, never voice content."""
+    if not c.execute("SELECT to_regclass('call.session_report') AS report").fetchone()['report']:
+        return None  # Older Kakao-only installations still produce their six tabs.
+    records = c.execute("""SELECT * FROM call.session_report
+        WHERE started_at < %s AND (ended_at IS NULL OR ended_at >= %s)
+        ORDER BY started_at DESC,id""", (until, start)).fetchall()
+    state = {'live': '통화 중', 'resting': '연결 대기', 'ended': '종료'}
+    paths = {'webrtc': 'WebRTC', 'pcm': 'WebSocket PCM', None: '이전 기록 없음'}
+    organized = {'none': '대기 전', 'pending': '대기', 'running': '정리 중', 'done': '완료', 'skipped': '생략', 'failed': '실패'}
+    reasons = {'start': '시작/재연결', 'rtc_disconnected': 'WebRTC 끊김', 'rtc_reconnecting': 'WebRTC 재연결',
+        'rtc_media_stalled': '음성 수신 정지', 'rtc_track_lost': '음성 트랙 끊김', 'rtc_no_media': '음성 수신 안 됨',
+        'control_reconnect': '인터넷 재연결', 'network_change': '네트워크 변경', 'server_pcm': '서버 PCM 선택',
+        'rtc_server_lost': '음성 중계 연결 끊김', None: '이전 기록 없음'}
+    rows = [[str(r['id']), stamp(r['started_at'], tz), stamp(r['ended_at'], tz), state[r['status']],
+        round(r['session_seconds'], 1), r['segment_count'], paths[r['initial_transport']], paths[r['last_transport']],
+        r['fallback_count'], reasons[r['last_reason']], organized[r['organize_status']]] for r in records]
+    return tab('통화 세션', ['통화 ID', '시작(한국 시각)', '종료(한국 시각)', '상태', '세션 시간(초)', '연결 구간 수',
+        '첫 전송 방식', '마지막 전송 방식', '자동 전환 수', '마지막 연결 사유', '기억 정리'],
+        rows, [42, 21, 21, 12, 16, 15, 20, 20, 15, 24, 12])
 
 
 def hits(memory: dict, field: str) -> list[tuple[str, int, float | None]]:
@@ -236,7 +259,7 @@ def request_text(q: dict, f: dict | None, friend_name: dict[int, str], pairs: di
 def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, threshold: float = 0.4,
           recent_turns: int = 10, vectors: bool = True) -> tuple[list[dict], dict]:
     """기간 [start, until) 의 탭들(엑셀·시트 공용)과 개수. 탭마다 최신이 위. threshold·recent_turns 는 봇 설정(읽는 법 설명용).
-    vectors 가 False 면 임베딩 벡터 전체 칸을 뺌(시트는 30일치를 30분마다 통째로 보내서 무거움)."""
+    vectors 가 False 면 임베딩 벡터 전체 칸을 뺌(시트는 30일치를 5분마다 통째로 보내서 무거움)."""
     now = now or datetime.now(tz)
     data = fetch(c, start, until, vectors)
     msgs, embs = data["messages"], data["embeddings"]
@@ -443,6 +466,10 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
                                "마지막으로 본 때"],
                     rows, [10, 6, 40, 50, 50, 60, 19, 19], wrap={3, 4, 5, 6}))
 
+    calls_tab = call_sessions(c, start, until, tz)
+    if calls_tab is not None:
+        tabs.append(calls_tab)
+
     # ── 읽는 법(맨 앞) ──
     replies = [m for m in msgs if m["role"] == "assistant" and not (m["meta"] or {}).get("proactive")]
     proactive = [m for m in msgs if m["role"] == "assistant" and (m["meta"] or {}).get("proactive")]
@@ -484,8 +511,13 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         "- 시각은 모두 한국 시각이에요. 카카오 키 원문 대신 관리 명령(admin)과 같은 #짧은키를 적었어요.",
     ]
     if not vectors:
-        lines.append("- 시트 메뉴 '마롱이 > 지금 새로고침'을 누르면 1분쯤 뒤에 새로 채워요. 안 눌러도 30분마다 새로 채워요.")
+        lines.append("- 시트 메뉴 '마롱이 > 지금 새로고침'을 누르면 1분쯤 뒤에 새로 채워요. 안 눌러도 5분마다 새로 채워요.")
         lines.append("- 걸어 둔 필터는 새로 채운 뒤에도 그대로예요. 손으로 칠한 색·서식은 새로 채울 때 지워져요.")
+    if calls_tab is not None:
+        counts['calls'] = len(calls_tab['rows'])
+        lines.append(f"- 통화 세션: 기간과 겹치는 통화 {len(calls_tab['rows'])}개. 통화 ID당 한 줄이며 자동 전환·재연결로 중복되지 않아요.")
+        lines.append("- 세션 시간은 해당 통화의 서버 연결 구간을 합한 초예요(연결 대기 시간 제외, Google 청구 시간·요금 아님). 진행 중인 통화는 갱신 시각까지예요.")
+        lines.append("- 통화 원문·요약·기억 내용·로그인 이메일은 이 탭에 보내지 않아요. 전송 방식 기록은 2026-11-13 배포 이후부터예요.")
     tabs.insert(0, tab("읽는 법", ["마롱이 기록 리포트"], [[line] for line in lines], [130], wrap={1}))
     return tabs, counts
 
@@ -534,7 +566,7 @@ def post(url: str, payload: dict, timeout: float, transport=None) -> httpx.Respo
 
 def asked(url: str, transport=None) -> bool:
     """시트에서 '마롱이 > 지금 새로고침'을 눌렀는지 웹 앱에 물어봄(웹 앱은 부탁을 넘기면서 지움).
-    못 물었거나 물어보기를 모르는 예전 sheet.gs 면 False. 1분마다 도는 거라 까닭은 남기지 않음(30분 갱신이 남김)."""
+    못 물었거나 물어보기를 모르는 예전 sheet.gs 면 False. 1분마다 도는 거라 까닭은 남기지 않음(5분 갱신이 남김)."""
     try:
         r = post(url, {"poll": True}, ASK_TIMEOUT_S, transport)
         answer = r.json() if r.status_code == 200 else None
@@ -546,10 +578,18 @@ def asked(url: str, transport=None) -> bool:
 
 def send(url: str, payload: dict, transport=None) -> str | None:
     """시트 웹 앱(tools/sheet.gs)에 탭을 보냄. 잘 되면 None, 아니면 짧은 까닭(주소와 구글의 답 내용은 적지 않음)."""
-    try:
-        r = post(url, payload, SHEET_TIMEOUT_S, transport)
-    except Exception as e:  # 오류 글에 주소가 들어 있을 수 있어서 종류만
-        return type(e).__name__
+    # Replacing the same snapshot is idempotent, including a partially written
+    # Apps Script response. Retry transient HTTP/transport errors, not bad data.
+    for attempt in range(2):
+        try:
+            r = post(url, payload, SHEET_TIMEOUT_S, transport)
+        except (httpx.TransportError, OSError) as e:
+            if attempt == 1: return type(e).__name__
+        except Exception as e:  # 오류 글에 주소가 들어 있을 수 있어서 종류만
+            return type(e).__name__
+        else:
+            if r.status_code not in (429, 500, 502, 503, 504) or attempt == 1: break
+        time.sleep(2 ** (attempt + 1))
     if r.status_code != 200:
         return f"HTTP {r.status_code}"
     try:
@@ -582,7 +622,7 @@ def main(argv: list[str] | None = None, transport=None) -> int:
     start = until - (timedelta(days=float(os.getenv("SHEET_DAYS") or 30)) if args.sheet else timedelta(hours=args.hours))
     url = (os.getenv("SHEET_URL") or "").strip()
     if args.sheet and not url.startswith(SHEET_PREFIX):
-        if args.if_asked:  # 1분마다 같은 말을 남기지 않음(30분 갱신이 남김)
+        if args.if_asked:  # 1분마다 같은 말을 남기지 않음(5분 갱신이 남김)
             return 0
         print("SHEET_URL 이 비었거나 Apps Script 웹 앱 주소가 아님(노트북에서 bash deploy/ovh.sh sheet url)", file=sys.stderr)
         return 1

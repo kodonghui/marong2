@@ -20,8 +20,8 @@
 #   proactive <이름|#키|#방키> [--dry]  그 친구의 1:1 방(또는 그 방)에 선톡 한 개를 지금 보냄(시험용). --dry 면 만든 말만 보여 줌
 #   report <저장할 파일.xlsx> [시간] [끝 시각]  지난 24시간(기본) 대화·임베딩·답에 들어간 기억·요약/메모를 엑셀로 받음
 #                끝 시각 예: 2026-10-27T19:00+09:00 (비우면 지금). 서버엔 파일을 남기지 않음
-#   sheet url|on|off|now|status  구글 시트에 최근 30일 기록을 30분마다 보냄(서버가 함, 노트북은 꺼져도 됨. tools/sheet.gs)
-#                url: 시트 웹 앱 주소 넣기(화면엔 안 보임)와 한 번 보내 보기 / on·off: 30분마다 보내기와 시트 메뉴
+#   sheet url|on|off|now|status  구글 시트에 최근 30일 기록을 5분마다 보냄(서버가 함, 노트북은 꺼져도 됨. tools/sheet.gs)
+#                url: 시트 웹 앱 주소 넣기(화면엔 안 보임)와 한 번 보내 보기 / on·off: 5분마다 보내기와 시트 메뉴
 #                '마롱이 > 지금 새로고침'(서버가 1분마다 물어봄) 켜기·끄기
 #                now: 지금 한 번 보내기 / status: 타이머와 최근 결과
 #   backup       DB 백업 파일을 서버의 /var/backups/marong 에 만듦(자동 백업은 하지 않음)
@@ -123,7 +123,7 @@ case "${1:-}" in
         echo "넣음. 시트로 한 번 보내 봄:"
         on_server "cd / && sudo -u marong $DEST/.venv/bin/python $DEST/tools/report.py --sheet" ||
           { echo "못 보냄: 웹 앱 배포 설정(실행: 나, 액세스: 모든 사용자)과 주소를 확인"; exit 1; }
-        echo "30분마다 보내려면: bash deploy/ovh.sh sheet on"
+        echo "5분마다 보내려면: bash deploy/ovh.sh sheet on"
         ;;
       on)
         on_server "sudo test -f $DEST/deploy/marong-sheet-ask.timer || { echo '먼저 bash deploy/ovh.sh install'; exit 1; }
@@ -144,7 +144,7 @@ case "${1:-}" in
                    sudo journalctl -u marong-sheet --since "@$t" --no-pager -o cat; exit $rc'
         ;;
       status)
-        on_server 'echo "30분 갱신: $(systemctl is-active marong-sheet.timer 2>/dev/null) · 지금 새로고침(1분마다 물어봄): $(systemctl is-active marong-sheet-ask.timer 2>/dev/null)"
+        on_server 'echo "5분 갱신: $(systemctl is-active marong-sheet.timer 2>/dev/null) · 지금 새로고침(1분마다 물어봄): $(systemctl is-active marong-sheet-ask.timer 2>/dev/null)"
                    systemctl list-timers "marong-sheet*" --all --no-pager
                    sudo journalctl -u marong-sheet -u marong-sheet-ask -n 8 --no-pager -o short-iso'
         ;;

@@ -11,7 +11,7 @@ from collections import deque
 from aiohttp import ClientSession,ClientTimeout,WSMsgType
 from memory_tools import TranscriptRecorder,execute_tool
 
-BUILD='20261112-memory6'
+BUILD='20261113-failover1'
 FRAME=struct.Struct('!4sIIIII')
 
 
@@ -27,6 +27,42 @@ class LiveSession:
         self.revision=principal.revision if principal else 0;self.recorder=None;self.ready=False;self.turn_segments={}
         self.legacy_pcm=False
         self.rtc=None
+        self.pcm_forced=False;self.connection_id=str(uuid.uuid4());self.transport_log=[]
+
+    def log_transport(self,mode,reason):
+        self.d['audioPath']=mode
+        self.transport_log.append((mode,reason))
+
+    async def flush_transport(self):
+        if not self.store or not self.p:return
+        while self.transport_log:
+            mode,reason=self.transport_log[0]
+            await self.store.record_transport(self.p,self.call_id,self.connection_id,mode,reason)
+            self.transport_log.pop(0)
+
+    async def request_pcm(self,reason):
+        await self.output.put(('transport',reason))
+
+    async def switch_pcm(self,reason):
+        # This runs only in browser_writer: ACK, pending samples and new audio
+        # share one ordered writer. Neither the microphone nor Google reconnects.
+        self.pcm_forced=True;bridge=self.rtc;self.rtc=None
+        pending=[];path_epoch=bridge.epoch if bridge else self.epoch
+        if bridge:
+            bridge.session=None;pending=bridge.take_pending()
+            self.background(bridge.close())
+            self.log_transport('pcm',reason)
+            self.d['transportFallbacks']=self.d.get('transportFallbacks',0)+1
+            self.d['transportFallbackReason']=reason
+        await self.ws.send_json({'type':'audio_transport','mode':'pcm','switched':bool(bridge),
+            'epoch':path_epoch,'callId':self.call_id})
+        for epoch,turn,offset,pcm,ended in pending:
+            for start in range(0,len(pcm),8192):
+                chunk=pcm[start:start+8192]
+                packet=FRAME.pack(b'MRG2',epoch,turn,0,offset+start//2,len(chunk)//2)+chunk
+                await asyncio.wait_for(self.ws.send_bytes(chunk if self.legacy_pcm else packet),5)
+            if ended:await self.ws.send_json({'type':'audio_end','epoch':epoch,'turn':turn})
+        self.d['audioPath']='pcm'
 
     async def save(self,key,role,content,finalized,interrupted):
         if self.store and self.p and self.segment:
@@ -51,9 +87,11 @@ class LiveSession:
             while not self.stop.is_set():
                 kind,data=await self.output.get();before=time.monotonic()
                 try:
-                    if kind=='bytes':
+                    if kind=='transport':await self.switch_pcm(data)
+                    elif kind=='bytes':
+                        if self.rtc and self.rtc.closed:await self.switch_pcm('rtc_server_lost')
                         if self.rtc:
-                            _,epoch,turn,_,_,_=FRAME.unpack(data[:24]);self.rtc.feed(data[24:],epoch,turn)
+                            _,epoch,turn,_,offset,_=FRAME.unpack(data[:24]);self.rtc.feed(data[24:],epoch,turn,offset)
                         else:await asyncio.wait_for(self.ws.send_bytes(data[24:] if self.legacy_pcm else data),5)
                     else:
                         if self.rtc and data.get('type') in ('audio_reset','interrupted'):self.rtc.reset(data['epoch'])
@@ -81,6 +119,10 @@ class LiveSession:
                     if not isinstance(item,dict):continue
                     if item.get('type')=='stop':self.explicit=True;return
                     if item.get('type')=='playback_stats':self.stats(item);continue
+                    if item.get('type')=='audio_transport' and item.get('mode')=='pcm':
+                        reason=item.get('reason')
+                        if reason not in {'rtc_disconnected','rtc_reconnecting','rtc_media_stalled','rtc_track_lost','rtc_no_media','control_reconnect','network_change','server_pcm'}:reason='rtc_disconnected'
+                        await self.request_pcm(reason);continue
                     if item.get('type')=='text':
                         text=str(item.get('text',''))[:2000]
                         if not text:continue
@@ -116,6 +158,7 @@ class LiveSession:
         elif self.resume.get('owner')==self.owner and time.time()-self.resume.get('updated',0)<600:
             self.call_id=self.resume.get('call_id',self.call_id)
         self.d.update(build=BUILD,callId=self.call_id,startedAt=time.time(),providerInterruptions=0,providerReconnects=0)
+        self.log_transport('webrtc' if self.rtc else 'pcm','start')
         if self.resume.get('owner')==self.owner and self.resume.get('call_id')==self.call_id and time.time()-self.resume.get('updated',0)<600 and self.resume.get('revision')==self.revision:
             self.handle=self.resume.get('handle')
         self.recorder=TranscriptRecorder(self.save,self.caption)
@@ -130,6 +173,8 @@ class LiveSession:
             await asyncio.gather(*running,*list(self.tasks),return_exceptions=True)
             await self.recorder.close()
             if self.store and self.p:
+                try:await asyncio.wait_for(self.flush_transport(),4)
+                except Exception:self.d['transportLogFailed']=True
                 try:await asyncio.wait_for(self.store.finish(self.p,self.call_id,self.explicit),4)
                 except Exception:self.d['memoryCloseFailed']=True
             if self.explicit:self.resume.clear()
@@ -142,6 +187,8 @@ class LiveSession:
         while not self.stop.is_set():
             await asyncio.sleep(2)
             if not self.store or not self.p:continue
+            try:await self.flush_transport()
+            except Exception:self.d['transportLogFailed']=True
             try:
                 revision=await self.store.revision(self.p)
                 if revision!=self.revision:self.revision=revision;self.reset.set()
@@ -173,7 +220,7 @@ class LiveSession:
                             raise ConnectionError('setup_rejected')
                         self.ready=True;delay=1
                         await self.emit({'type':'ready','resumed':bool(self.handle) or self.logical_resumed,'callId':self.call_id,
-                            'build':BUILD,'audioFormat':2,'epoch':self.epoch,'memoryConnected':bool(self.p and self.segment)})
+                            'build':BUILD,'audioFormat':2,'epoch':self.epoch,'audioTransport':'webrtc' if self.rtc else 'pcm','memoryConnected':bool(self.p and self.segment)})
                         self.logical_resumed=True
                         await self.provider(upstream)
             except asyncio.CancelledError:raise

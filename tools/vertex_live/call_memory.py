@@ -214,6 +214,13 @@ class MemoryStore:
                 await c.execute("UPDATE call.calls SET status='ended',ended_at=now(),end_reason='hangup',organize_status='pending',organize_next_at=now() WHERE id=%s",(call_id,))
             else:await c.execute("UPDATE call.calls SET status='resting',last_beat_at=now() WHERE id=%s",(call_id,))
 
+    async def record_transport(self,p,call_id,connection_id,mode,reason):
+        async with self.pool.connection() as c,c.transaction():
+            await self._owned(c,p,call_id)
+            await c.execute("""INSERT INTO call.transport_events(call_id,connection_id,mode,reason)
+                VALUES(%s,%s,%s,%s) ON CONFLICT(connection_id,mode) DO NOTHING""",
+                (call_id,connection_id,mode,reason))
+
     async def remember(self,p,call_id,segment,key,quote,replaces=()):
         quote=normalized(quote)
         if not 2<=len(quote)<=200:return {'result':'not_saved','reason':'quote_length'}

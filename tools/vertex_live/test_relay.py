@@ -101,4 +101,4 @@ async def main():
                 state=await (await c.get('/status',headers=headers)).json()
                 assert state['durationLimit'] is None and state['callCountLimit'] is None
     print('PASS: HTTP identity boundaries, framed PCM, 100 turns, GoAway/browser resume, ACK replay, 8+ calls, explicit stop, Sulafat and no thinking configuration')
-asyncio.run(main())
+if __name__=='__main__':asyncio.run(main())

@@ -35,17 +35,25 @@ class Bridge:
     def reset(self,epoch):
         self.epoch=epoch;self.turns.clear();self.source.clear_queue()
 
-    def feed(self,pcm,epoch,turn):
+    def feed(self,pcm,epoch,turn,offset=0):
         if epoch<self.epoch:return
         if epoch>self.epoch:self.reset(epoch)
         if not self.turns or self.turns[-1]['id']!=turn:
             if self.turns:self.turns[-1]['end']=True
-            self.turns.append({'id':turn,'pcm':bytearray(),'end':False,'started':False,'stalled':False})
+            self.turns.append({'id':turn,'offset':offset,'pcm':bytearray(),'end':False,'started':False,'stalled':False})
         if sum(len(t['pcm']) for t in self.turns)>24000*2*120:self.reset(epoch);return
         self.turns[-1]['pcm'].extend(pcm)
 
     def finish(self,epoch,turn):
         if epoch==self.epoch and self.turns and self.turns[-1]['id']==turn:self.turns[-1]['end']=True
+
+    def take_pending(self):
+        """Freeze the producer and hand unplayed samples to the ordered WS writer."""
+        if self.task:self.task.cancel()
+        if not self.closed:self.source.clear_queue()
+        pending=[(self.epoch,t['id'],t['offset'],bytes(t['pcm']),t['end']) for t in self.turns]
+        self.turns.clear()
+        return pending
 
     async def playout(self):
         deadline=time.monotonic();silence=bytes(960)
@@ -60,6 +68,7 @@ class Bridge:
                     if t['started']:
                         if len(buf)>=960 or t['end']:
                             count=min(960,len(buf));data=bytes(buf[:count]).ljust(960,b'\0');del buf[:count]
+                            t['offset']+=count//2
                             self.stats['rtcSourcePlayedMs']+=count/48
                         else:
                             t['started']=False;t['stalled']=True;self.stats['rtcSourceUnderruns']+=1
@@ -74,11 +83,14 @@ class Bridge:
     async def close(self):
         if self.closed:return
         self.closed=True
-        if self.session and self.session.rtc is self:self.session.rtc=None
+        if self.session and self.session.rtc is self and not self.session.stop.is_set():
+            await self.session.request_pcm('rtc_server_lost')
         if self.task and self.task is not asyncio.current_task():
             self.task.cancel();await asyncio.gather(self.task,return_exceptions=True)
-        await self.room.disconnect();await self.source.aclose()
-        if bridges.get(self.client) is self:bridges.pop(self.client,None)
+        try:
+            await self.room.disconnect();await self.source.aclose()
+        finally:
+            if bridges.get(self.client) is self:bridges.pop(self.client,None)
 
 async def acquire(owner,client):
     old=bridges.get(client)

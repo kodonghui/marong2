@@ -200,10 +200,13 @@ async def rtc_config(req):
     try:client=str(uuid.UUID(body['client']))
     except (ValueError,KeyError,TypeError):raise web.HTTPBadRequest()
     if active and (not active_session or active_session.client_id!=client or active_session.owner!=authn['owner']):raise web.HTTPConflict()
+    if active_session and active_session.pcm_forced:raise web.HTTPConflict()
     try:bridge=await rtc_transport.acquire(authn['owner'],client)
     except PermissionError:raise web.HTTPForbidden()
     except ValueError:raise web.HTTPConflict()
     if active_session and active_session.client_id==client and active_session.owner==authn['owner']:
+        if active_session.pcm_forced:
+            await bridge.close();raise web.HTTPConflict()
         active_session.rtc=bridge;bridge.session=active_session
     return json_response({'url':'wss://'+req.host,'token':bridge.token(),'room':bridge.name})
 

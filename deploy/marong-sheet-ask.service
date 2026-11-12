@@ -6,7 +6,7 @@ Wants=network-online.target postgresql.service
 [Service]
 # 시트에서 '마롱이 > 지금 새로고침'을 눌렀는지 웹 앱(tools/sheet.gs)에 묻고, 눌렀으면 그때 한 번 보내고 끝남.
 # 1분마다 돌아서, 할 일이 없을 때의 시작·끝 기록은 남기지 않고(LogLevelMax) 보낸 결과만 남김(SyslogLevel).
-# 켜기·끄기는 30분 갱신과 같이: 노트북에서 bash deploy/ovh.sh sheet on|off
+# 켜기·끄기는 5분 갱신과 같이: 노트북에서 bash deploy/ovh.sh sheet on|off
 Type=oneshot
 User=marong
 Group=marong
