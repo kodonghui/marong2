@@ -45,11 +45,11 @@ async def main():
         assert report()==tab,'refresh duplicated or changed a closed session'
         assert name not in json.dumps(tab) and 'PRIVATE_VOICE_CONTENT' not in json.dumps(tab)
         with psycopg.connect(f'dbname={DB} user=marong',autocommit=True) as c:
-            try:c.execute('SELECT content FROM call.turns LIMIT 1');raise AssertionError('report role can read transcript')
+            try:c.execute('SELECT content FROM call.turns LIMIT 1');raise AssertionError('report role can read raw transcript table')
             except psycopg.errors.InsufficientPrivilege:pass
         admin(f"UPDATE call.calls SET deleted_at=now() WHERE id='{call}'")
         assert not any(r[0]==call for r in report()['rows']),'deleted call stayed in Sheet'
-        print('PASS one row per logical call, two provider segments, gap excluded, one idempotent fallback, KST times, repeat refresh, deleted exclusion and no voice-content access')
+        print('PASS one row per logical call, two provider segments, gap excluded, one idempotent fallback, KST times, repeat refresh, deleted exclusion and no raw transcript-table access')
     finally:
         await store.close()
         admin(f"DELETE FROM call.calls WHERE caller_id={caller}; DELETE FROM call.callers WHERE id={caller}; DELETE FROM marong.friends WHERE id={friend};")

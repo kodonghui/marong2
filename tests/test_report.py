@@ -210,12 +210,13 @@ def check_tabs(report, db, i):
     ok("- 탭마다 최신이 맨 위예요." in readme
        and any(x.startswith("- '모름(기록 시작 전)'은") and "2026-10-26" in x for x in readme), "읽는 법: 최신이 위, '모름' 뜻")
 
-    # 대화: 기간 안 메시지만(시작 시각은 넣고 끝 시각은 뺌), 최신이 위. 줄 색은 친구 말(분홍)·마롱이 말(파랑)
+    # 대화: 기간 안 메시지만(시작 시각은 넣고 끝 시각은 뺌), 최신이 위. 화자별 배경색.
     talk = by["대화"]["rows"]
     ids = [r[0] for r in talk]
     ok(ids == [i[k] for k in ("gl", "g2", "gr1", "g1", "p1", "r2", "m2", "r1", "m1", "b0")], f"기간 안 메시지만, 최신이 위: {ids}")
     colors = by["대화"]["colors"]
-    ok(colors == ["#e8f0fe" if r[3] == "마롱이" else "#fce8e6" for r in talk] and len(set(colors)) == 2, f"줄 색: {colors}")
+    palette = {"마롱이": "#e8f0fe", "현경": "#fff2cc", "동희": "#d9ead3"}
+    ok(colors == [palette.get(r[3], "#fce8e6") for r in talk] and len(set(colors)) == 4, f"화자별 줄 색: {colors}")
     ok(all("colors" not in x for x in tabs if x["name"] != "대화"), "다른 탭은 줄 색 없음")
     t = {r[0]: r for r in talk}
     ok(t[i["m1"]][1] == "2026-10-27 09:00:00" and t[i["b0"]][1] == "2026-10-26 19:00:00", "시각은 한국 시각 글")
@@ -318,7 +319,8 @@ def check_xlsx(report, tabs, i, tmp):
     ok(xml and not any(b"<f>" in x or b"<f " in x for x in xml), "수식으로 저장된 칸이 없음")
     ok(all(wb[n].freeze_panes == "A2" for n in SHEETS) and ws.auto_filter.ref, "머리줄 고정·거르기")
     paint = [({c.fill.fgColor.rgb[-6:] for c in r}, r[3].value) for r in ws.iter_rows(min_row=2)]
-    ok(len(paint) == 10 and all(got == ({"E8F0FE"} if who == "마롱이" else {"FCE8E6"}) for got, who in paint)
+    palette = {"마롱이": "E8F0FE", "현경": "FFF2CC", "동희": "D9EAD3"}
+    ok(len(paint) == 10 and all(got == {palette.get(who, "FCE8E6")} for got, who in paint)
        and ws["A1"].fill.fgColor.rgb.endswith("E8E3F3"), f"대화 줄 색(칸마다): {paint}")
     ok(all(c.fill.fill_type is None for n in SHEETS[2:] for r in wb[n].iter_rows(min_row=2) for c in r),
        "다른 탭은 줄 색 없음")
@@ -370,7 +372,7 @@ def check_sheet(report, i):
     first, last = tabs["대화"]["rows"][0], tabs["대화"]["rows"][-1]
     ok(first[0] == i["gl"] and last[0] == i["o1"], f"최신이 위: {first[0]} … {last[0]}")
     colors = tabs["대화"]["colors"]
-    ok(len(colors) == len(tabs["대화"]["rows"]) and colors[0] == "#e8f0fe" and colors[-1] == "#fce8e6"
+    ok(len(colors) == len(tabs["대화"]["rows"]) and colors[0] == "#e8f0fe" and colors[-1] == "#d9ead3"
        and all(re.fullmatch(r"#[0-9a-f]{6}", c) for c in colors)
        and all("colors" not in t for n, t in tabs.items() if n != "대화"), "대화 탭만 줄마다 색을 보냄")
     ok("벡터 전체" not in tabs["임베딩"]["headers"] and all(len(r) == 8 for r in tabs["임베딩"]["rows"])
