@@ -1,0 +1,13 @@
+[Unit]
+Description=Marong encrypted realtime audio transport
+After=network-online.target
+
+[Service]
+ExecStart=%h/marong-vertex-test/bin/livekit-server --config %h/.config/marong-call/livekit.yaml
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

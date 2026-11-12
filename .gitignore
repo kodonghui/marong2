@@ -7,3 +7,6 @@ logs/
 .ovh
 
 tools/vertex_live/probe-packets.json
+tools/vertex_live/deploy/livekit.yaml
+tools/vertex_live/deploy/livekit.json
+tools/vertex_live/deploy/*.key

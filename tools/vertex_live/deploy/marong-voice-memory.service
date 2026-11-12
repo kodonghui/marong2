@@ -1,0 +1,18 @@
+[Unit]
+Description=Marong private voice memory organizer
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/marong-vertex-test/app
+Environment=VERTEX_AUTH_MODE=api_key
+Environment="MARONG_CALL_DSN=dbname=marong user=marong_call"
+Environment=LANGCHAIN_TRACING_V2=false
+Environment=LANGSMITH_TRACING=false
+ExecStart=%h/marong-vertex-test/venv-memory2/bin/python %h/marong-vertex-test/app/organizer.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
