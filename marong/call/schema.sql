@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS call.calls (
   voice                 text NOT NULL CHECK (char_length(voice) BETWEEN 1 AND 100),  -- 이 통화의 목소리(SPEC-004, D16)
   started_at            timestamptz NOT NULL DEFAULT now(),
   last_beat_at          timestamptz NOT NULL DEFAULT now(),  -- 신호(SPEC-010)
-  last_turn_at          timestamptz,                         -- 마지막 자막 조각 시각(쉬기 판단, SPEC-008)
+  last_marong_sound_at  timestamptz,                         -- 마롱이가 마지막으로 소리를 낸 시각(마롱이 자막 조각·출력 원음 이벤트 도착, 쉬기 판단, SPEC-008)
   ended_at              timestamptz,
   end_reason            text CHECK (end_reason IN ('hangup', 'beat_lost', 'reconnect_limit', 'budget_hard_stop', 'admin')),
   organize_status       text NOT NULL DEFAULT 'none'
@@ -79,21 +79,23 @@ CREATE INDEX IF NOT EXISTS calls_list_idx ON call.calls (caller_id, started_at D
 CREATE INDEX IF NOT EXISTS calls_beat_idx ON call.calls (last_beat_at) WHERE status <> 'ended';
 CREATE INDEX IF NOT EXISTS calls_organize_idx ON call.calls (organize_next_at) WHERE organize_status IN ('pending', 'running');
 
--- TBL-004 segments (CTX-002) ← SPEC-003, SPEC-006~011, SPEC-023 | terms: TERM-002, TERM-010, TERM-011, TERM-012
+-- TBL-004 segments (CTX-002) ← SPEC-003, SPEC-006~011, SPEC-023, SPEC-031 | terms: TERM-002, TERM-010, TERM-011, TERM-012, TERM-020
 -- 규칙: 통화 하나에 닫히지 않은 구간은 하나(segments_one_open_idx). 서버 전체 열린 구간 3개는 코드가 친구별 잠금 안에서 센다.
+-- 규칙: 미리 넘기기(renew)는 OpenAI 세션을 먼저 만든 뒤 한 트랜잭션으로 직전 구간을 닫고(renewed) 새 구간을 open 으로 넣는다(SPEC-031).
 CREATE TABLE IF NOT EXISTS call.segments (
   id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   call_id           uuid NOT NULL REFERENCES call.calls (id) ON DELETE CASCADE,
-  mode              text NOT NULL CHECK (mode IN ('start', 'reconnect', 'wake', 'takeover')),
+  mode              text NOT NULL CHECK (mode IN ('start', 'reconnect', 'wake', 'takeover', 'renew')),
   client_id         uuid NOT NULL,
   state             text NOT NULL DEFAULT 'opening' CHECK (state IN ('opening', 'open', 'closed')),
   openai_session_id text UNIQUE,                            -- OpenAI 가 준 세션 id(open 부터)
+  expires_at        timestamptz,                            -- OpenAI 세션 만료 시각(session.started 의 expires_at, SPEC-031)
   opened_at         timestamptz NOT NULL DEFAULT now(),
   closed_at         timestamptz,
   close_reason      text CHECK (close_reason IN ('user_hangup', 'close_requested', 'expired', 'content', 'remote_hangup',
                                                  'connection_lost', 'server_rest', 'takeover', 'beat_lost',
                                                  'budget_hard_stop', 'reconnect_limit', 'server_restart',
-                                                 'sideband_failed', 'start_failed', 'unknown')),
+                                                 'sideband_failed', 'start_failed', 'renewed', 'unknown')),
   CHECK ((state = 'closed') = (closed_at IS NOT NULL)),
   CHECK ((state = 'closed') = (close_reason IS NOT NULL)),
   CHECK (state = 'opening' OR state = 'closed' OR openai_session_id IS NOT NULL)
@@ -101,8 +103,9 @@ CREATE TABLE IF NOT EXISTS call.segments (
 CREATE UNIQUE INDEX IF NOT EXISTS segments_one_open_idx ON call.segments (call_id) WHERE state <> 'closed';
 CREATE INDEX IF NOT EXISTS segments_call_idx ON call.segments (call_id, opened_at);
 
--- TBL-005 turns (CTX-004) ← SPEC-006, SPEC-012~014, SPEC-017, SPEC-019, SPEC-022 | terms: TERM-005
+-- TBL-005 turns (CTX-004) ← SPEC-006, SPEC-012~015, SPEC-017, SPEC-019, SPEC-021, SPEC-022 | terms: TERM-005
 -- 원음은 두지 않는다(REQ-034). 줄이 열려 있는 동안 5초마다 content 를 이어 붙여 고친다(SPEC-006 3.2).
+-- 잊기 표시(forgotten_at)가 있는 줄은 기억 찾기·통화 정리에 쓰지 않고, 통화 상세에는 보인다(SPEC-015·021, 기능 명세 3.7).
 CREATE TABLE IF NOT EXISTS call.turns (
   id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   call_id    uuid NOT NULL REFERENCES call.calls (id) ON DELETE CASCADE,
@@ -112,12 +115,14 @@ CREATE TABLE IF NOT EXISTS call.turns (
   content    text NOT NULL CHECK (char_length(content) BETWEEN 1 AND 4000),
   started_at timestamptz NOT NULL,
   ended_at   timestamptz NOT NULL,
+  forgotten_at timestamptz,                                -- 잊기 표시(기능 명세 3.7)
   UNIQUE (call_id, seq),
   CHECK (ended_at >= started_at)
 );
 
--- TBL-006 cards (CTX-004) ← SPEC-017, SPEC-019, SPEC-024 | terms: TERM-006
+-- TBL-006 cards (CTX-004) ← SPEC-004, SPEC-013, SPEC-015, SPEC-017, SPEC-019, SPEC-021, SPEC-024 | terms: TERM-006
 -- 규칙: 통화 하나에 카드 하나(call_id 가 기본 키, 정리를 다시 해도 upsert).
+-- 잊기: 잊은 얘기와 맞는 항목은 배열에서 지우고, 요약에 맞으면 forgotten_at 을 남겨 지시문·카톡 블록·기억 찾기에서 뺀다(기능 명세 3.7).
 CREATE TABLE IF NOT EXISTS call.cards (
   call_id        uuid PRIMARY KEY REFERENCES call.calls (id) ON DELETE CASCADE,
   summary        text NOT NULL CHECK (char_length(summary) BETWEEN 1 AND 400),
@@ -126,22 +131,25 @@ CREATE TABLE IF NOT EXISTS call.cards (
   todos          jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(todos) = 'array'),
   ask_next       jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(ask_next) = 'array'),
   truncated      boolean NOT NULL DEFAULT false,            -- 자막이 150,000자를 넘어 앞부분을 못 봄
+  forgotten_at   timestamptz,                               -- 잊기 표시(요약에 잊은 얘기가 있음)
   model          text NOT NULL,
   prompt_version text NOT NULL,
   created_at     timestamptz NOT NULL DEFAULT now(),
   updated_at     timestamptz NOT NULL DEFAULT now()
 );
 
--- TBL-007 memories (CTX-004) ← SPEC-004, SPEC-013~015, SPEC-017, SPEC-019~021, SPEC-024 | terms: TERM-007
+-- TBL-007 memories (CTX-004) ← SPEC-004, SPEC-013~015, SPEC-017, SPEC-019~022, SPEC-024 | terms: TERM-007
 -- 규칙: 같은 통화에서 같은 내용은 한 줄(UNIQUE call_id, idem_key; 멱등 키 = sha256(통화 id + 정리한 content)).
--- 규칙: 대체된 기억(superseded)은 지시문·검색·목록에 쓰지 않는다. 대체한 기억이 지워지면 코드가 이전 기억을 다시 active 로 둔다.
+-- 규칙: 대체된 기억(superseded)은 지시문·검색·목록에 쓰지 않는다.
+-- 규칙: 기억 하나를 지우거나 잊으면(SPEC-015·021) 코드가 그 기억이 대체했던 이전 기억들(대체 사슬)도 함께 지운다.
+--       이전 기억을 다시 active 로 두는 건 통화를 통째로 지울 때(SPEC-020)뿐이다.
 CREATE TABLE IF NOT EXISTS call.memories (
   id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   caller_id     bigint NOT NULL REFERENCES call.callers (id) ON DELETE CASCADE,
   call_id       uuid NOT NULL REFERENCES call.calls (id) ON DELETE CASCADE,
   source        text NOT NULL CHECK (source IN ('delegation', 'organize')),
   content       text NOT NULL CHECK (char_length(content) BETWEEN 2 AND 200),
-  quote         text NOT NULL CHECK (char_length(quote) BETWEEN 1 AND 200),
+  quote         text CHECK (quote IS NULL OR char_length(quote) BETWEEN 1 AND 200),  -- 현경님 말 그대로. 자막을 180일 뒤 지울 때 함께 비움(SPEC-022)
   turn_id       bigint REFERENCES call.turns (id) ON DELETE SET NULL,   -- 자막을 180일 뒤 지우면 비움
   status        text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'superseded')),
   superseded_by bigint REFERENCES call.memories (id) ON DELETE SET NULL,
@@ -155,12 +163,15 @@ CREATE INDEX IF NOT EXISTS memories_superseded_idx ON call.memories (superseded_
 
 -- TBL-008 delegations (CTX-003) ← SPEC-012~016 | terms: TERM-008
 -- 위임(모델의 도구 호출) 기록. 말 내용은 두지 않고 길이만 둔다. 쓰거나 지운 기억 id 는 target_memory_ids.
--- 규칙: OpenAI 위임 id 하나는 한 번만 처리(UNIQUE).
+-- 규칙: OpenAI 위임 id 하나는 한 번만 처리(UNIQUE). 서버 보조 판단(origin server, 기능 명세 3.6)은 위임 id 가 없다.
+-- 규칙: 보조 판단과 같은 부탁인 모델 위임은 다시 쓰지 않고 same_as 로 그 줄을 가리킨다.
 CREATE TABLE IF NOT EXISTS call.delegations (
   id                   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   call_id              uuid NOT NULL REFERENCES call.calls (id) ON DELETE CASCADE,
   segment_id           uuid NOT NULL REFERENCES call.segments (id) ON DELETE CASCADE,
-  openai_delegation_id text NOT NULL UNIQUE,
+  origin               text NOT NULL DEFAULT 'model' CHECK (origin IN ('model', 'server')),
+  openai_delegation_id text UNIQUE,
+  same_as              bigint REFERENCES call.delegations (id) ON DELETE SET NULL,
   state                text NOT NULL DEFAULT 'queued' CHECK (state IN ('queued', 'running', 'done', 'failed', 'dropped')),
   intent               text CHECK (intent IN ('recall', 'remember', 'forget', 'time', 'other')),
   result               text CHECK (result IN ('found', 'not_found', 'saved', 'not_saved', 'forgotten', 'none_matched',
@@ -169,7 +180,8 @@ CREATE TABLE IF NOT EXISTS call.delegations (
   request_chars        smallint CHECK (request_chars >= 0),  -- 다시 만든 요청의 길이(내용은 두지 않음)
   created_at           timestamptz NOT NULL DEFAULT now(),
   finished_at          timestamptz,
-  latency_ms           integer CHECK (latency_ms >= 0)
+  latency_ms           integer CHECK (latency_ms >= 0),
+  CHECK ((origin = 'model') = (openai_delegation_id IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS delegations_call_idx ON call.delegations (call_id, created_at);
 
@@ -192,9 +204,10 @@ INSERT INTO call.settings (key, value) VALUES
 
 -- TBL-010 budget_events (CTX-006) ← SPEC-023, SPEC-025, SPEC-026 | terms: TERM-014
 -- 규칙: 달마다 종류마다 한 줄(처음 넘었을 때만). 예산을 올렸다 내려도 다시 쌓이지 않는다.
+-- provider_limit: 서버보다 OpenAI 지출 한도(429)가 먼저 막은 달(SPEC-023).
 CREATE TABLE IF NOT EXISTS call.budget_events (
   month      date NOT NULL CHECK (extract(day FROM month) = 1),   -- UTC 달의 1일
-  kind       text NOT NULL CHECK (kind IN ('warn', 'exhausted', 'hard_stop')),
+  kind       text NOT NULL CHECK (kind IN ('warn', 'exhausted', 'hard_stop', 'provider_limit')),
   spent_usd  numeric(10, 2) NOT NULL CHECK (spent_usd >= 0),
   budget_usd numeric(10, 2) NOT NULL CHECK (budget_usd > 0),
   created_at timestamptz NOT NULL DEFAULT now(),

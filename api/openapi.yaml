@@ -2,20 +2,20 @@
 openapi: 3.1.0
 info:
   title: 마롱이 통화 API
-  version: 0.1.0-draft
+  version: 0.2.0-draft
   description: |-
     마롱이 통화 웹앱(PWA)과 통화 서버 사이의 계약이에요. 원본은 이 파일이고 코드는 이 파일을 따라가요(06단계).
 
-    - 음성은 이 API를 지나지 않아요. 휴대폰과 OpenAI가 WebRTC로 직접 주고받고, 서버는 sideband로 같은 세션을 지켜봐요(REQ-026).
+    - 음성은 이 API를 지나지 않아요. 휴대폰과 OpenAI가 WebRTC로 직접 주고받고, 서버는 sideband로 같은 세션을 지켜봐요(REQ-026). sideband에도 원음 사본이 오지만 서버는 풀지 않고 바로 버려요(SPEC-006, REQ-034).
     - 모든 요청은 Cloudflare Access를 지나요. 서버는 `Cf-Access-Jwt-Assertion`을 다시 확인해요(SPEC-001). 쓰기 요청은 `Origin`이 앱 주소여야 해요(REQ-006).
     - 오류는 RFC 9457 Problem Details에 `code`와 `traceId`를 더한 한 모양이에요. 코드 목록은 `components.x-corthex.errors`예요.
     - 마롱이 얼굴 그림은 API가 아니라 정적 파일 `/static/face/v1/*.webp`예요(1년 캐시, 바뀌면 v2, SPEC-029). 얼굴에 쓰는 느낌만 API-012로 물어요(SPEC-030).
 
-    계약에서 정한 것(Claude 제안, 2026-11-12, 검토 대상):
+    계약에서 정한 것(Claude 제안, 2026-11-12, 검토 대상). 0.2.0-draft는 독립 검토 반영: `quietMs` 뺌, `renew` 더함, 카드·자막 줄 `forgotten` 더함, OpenAI 지출 한도 처리 바꿈.
     1. 검증 오류는 400을 써요(422는 쓰지 않음).
     2. id 형식이 틀리면 400, 없거나 남의 것이면 404예요. 남의 것인지는 드러내지 않아요.
     3. 끊기를 다시 보내면 같은 200이에요. 지우기를 다시 보내면 404이고 화면은 '이미 지워졌어요'로 처리해요.
-    4. 예산 한도는 성공이 아니라 429 오류예요. OpenAI 쪽 한도(429)는 우리 예산 오류로 바꾸지 않고 503 `voice_unavailable`로 내요.
+    4. 예산 한도는 성공이 아니라 429 오류예요. OpenAI 지출 한도 429(`project_spend_limit_exceeded`·`organization_spend_limit_exceeded`·`organization_usage_limit_exceeded`)는 우리 예산 오류(`budget_exhausted`·`budget_hard_stop`)로 바꾸고, 그 밖의 OpenAI 오류(크레딧 소진 포함)는 503 `voice_unavailable`로 내요(SPEC-003, SPEC-023).
     5. 신호(beat)는 상태가 맞지 않아도 409 대신 200의 `action`으로 알려 줘요.
     6. 새 통화는 201, 다른 화면의 통화를 넘겨받으면 200이에요.
     7. 느낌 고르기(API-012)의 오류는 화면에 보이지 않아요. 얼굴만 그대로 두고 통화는 이어 가요.
@@ -149,7 +149,7 @@ paths:
     post:
       operationId: startCall
       summary: 통화 걸기(진행 중 통화가 있으면 넘겨받기)
-      description: 새 통화면 201, 다른 화면의 진행 중 통화를 넘겨받으면 200이에요(SPEC-003, SPEC-009). 음성은 이 API를 지나지 않고 휴대폰과 OpenAI 사이 WebRTC로 오가요. 쓰기 요청이라 Origin이 앱 주소여야 해요.
+      description: 새 통화면 201, 다른 화면의 진행 중 통화를 넘겨받으면 200이에요(SPEC-003, SPEC-009). 음성은 이 API를 지나지 않고 휴대폰과 OpenAI 사이 WebRTC로 오가요. 서버가 붙는 sideband로 원음 사본이 오지만 풀지 않고 바로 버려요(SPEC-006). OpenAI 지출 한도 429는 429 `budget_exhausted`로 바꿔요(SPEC-023). 쓰기 요청이라 Origin이 앱 주소여야 해요.
       x-corthex:
         id: API-002
         spec:
@@ -284,7 +284,7 @@ paths:
                 budget-exhausted:
                   value:
                     type: https://marong.corthex-hq.com/problems/budget-exhausted
-                    title: 이번 달(UTC) 통화 예산을 다 써서 새 통화를 막음
+                    title: 이번 달(UTC) 통화 예산을 다 썼거나 OpenAI 지출 한도(429)에 걸려 새 통화를 막음
                     status: 429
                     code: budget_exhausted
                     traceId: 00f067aa0ba902b7
@@ -292,7 +292,7 @@ paths:
                 budget-hard-stop:
                   value:
                     type: https://marong.corthex-hq.com/problems/budget-hard-stop
-                    title: 이번 달 예산의 120%에 이르러 하던 통화도 끝냄
+                    title: 이번 달 예산의 120%에 이르렀거나 통화 중 OpenAI 지출 한도(429)에 걸려 하던 통화도 끝냄
                     status: 429
                     code: budget_hard_stop
                     traceId: 53995c3f42cd8ad8
@@ -317,7 +317,7 @@ paths:
                 voice-unavailable:
                   value:
                     type: https://marong.corthex-hq.com/problems/voice-unavailable
-                    title: OpenAI 세션을 못 만듦(키 없음, OpenAI 오류·한도·10초 넘김)
+                    title: OpenAI 세션을 못 만듦(키 없음, OpenAI 오류·크레딧 소진·10초 넘김). 지출 한도 429는 예산 오류로 냄
                     status: 503
                     code: voice_unavailable
                     traceId: e457b5a2e4d86bd1
@@ -496,8 +496,8 @@ paths:
   /api/calls/{callId}/segments:
     post:
       operationId: openSegment
-      summary: 같은 통화에 새 구간 열기(재연결·깨우기)
-      description: 끊김 뒤 자동 재연결(`reconnect`, SPEC-007)과 쉬다가 깨우기(`wake`, SPEC-008)가 같은 길을 써요. 예산을 다 써도(100%) 하던 통화라 열어 주고, 120%면 막아요.
+      summary: 같은 통화에 새 구간 열기(재연결·깨우기·미리 넘기기)
+      description: 끊김 뒤 자동 재연결(`reconnect`, SPEC-007), 쉬다가 깨우기(`wake`, SPEC-008), 만료 전 미리 넘기기(`renew`, SPEC-031)가 같은 길을 써요. `renew`는 직전 구간이 아직 열려 있을 때 OpenAI 세션을 먼저 만들고, 한 트랜잭션으로 직전 구간을 닫고(`renewed`) 새 구간을 열어요. 재연결 수에 세지 않아요. 예산을 다 써도(100%) 하던 통화라 열어 주고, 120%나 OpenAI 지출 한도면 통화를 끝내요(429 `budget_hard_stop`).
       x-corthex:
         id: API-003
         spec:
@@ -505,6 +505,7 @@ paths:
         - SPEC-007
         - SPEC-008
         - SPEC-023
+        - SPEC-031
       security:
       - cfAccess: []
       parameters:
@@ -528,6 +529,12 @@ paths:
                   clientId: 2b7e1516-28ae-4d2a-9b1f-3c4d5e6f7a8b
                   mode: wake
                   previousSegmentId: 5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f
+              renew:
+                value:
+                  sdp: "v=0\r\no=- 4611731400430051336 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n(이하 생략)"
+                  clientId: 2b7e1516-28ae-4d2a-9b1f-3c4d5e6f7a8b
+                  mode: renew
+                  previousSegmentId: 5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f
       responses:
         '201':
           description: 새 구간을 열었음
@@ -548,6 +555,12 @@ paths:
                       id: 6e7f8091-ab2c-4d3e-9f40-5b6c7d8e9fa0
                       mode: wake
                     sdp: "v=0\r\no=- 1234567890 2 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\n(이하 생략)"
+                renew:
+                  value:
+                    segment:
+                      id: 6e7f8091-ab2c-4d3e-9f40-5b6c7d8e9fa0
+                      mode: renew
+                    sdp: "v=0\r\no=- 1234567890 2 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\n(이하 생략)"
         '400':
           description: 요청이 틀림
           content:
@@ -562,7 +575,7 @@ paths:
                     status: 400
                     code: invalid_request
                     traceId: 53995c3f42cd8ad8
-                    detail: mode는 reconnect 또는 wake
+                    detail: mode는 reconnect·wake·renew 중 하나
                     errors:
                     - field: mode
                       reason: bad_format
@@ -653,14 +666,14 @@ paths:
                 reconnect-limit:
                   value:
                     type: https://marong.corthex-hq.com/problems/reconnect-limit
-                    title: 10분 안에 자동 재연결이 3번을 넘음
+                    title: 10분 안에 자동 재연결이 3번(안전 필터로 닫힌 뒤의 재연결은 따로 5번)을 넘음. 미리 넘기기는 세지 않음
                     status: 429
                     code: reconnect_limit
                     traceId: 1d2c3b4a59687f0e
                 budget-hard-stop:
                   value:
                     type: https://marong.corthex-hq.com/problems/budget-hard-stop
-                    title: 이번 달 예산의 120%에 이르러 하던 통화도 끝냄
+                    title: 이번 달 예산의 120%에 이르렀거나 통화 중 OpenAI 지출 한도(429)에 걸려 하던 통화도 끝냄
                     status: 429
                     code: budget_hard_stop
                     traceId: 0af7651916cd43dd
@@ -678,7 +691,7 @@ paths:
                 voice-unavailable:
                   value:
                     type: https://marong.corthex-hq.com/problems/voice-unavailable
-                    title: OpenAI 세션을 못 만듦(키 없음, OpenAI 오류·한도·10초 넘김)
+                    title: OpenAI 세션을 못 만듦(키 없음, OpenAI 오류·크레딧 소진·10초 넘김). 지출 한도 429는 예산 오류로 냄
                     status: 503
                     code: voice_unavailable
                     traceId: 4bf92f3577b34da6
@@ -724,7 +737,7 @@ paths:
     post:
       operationId: beat
       summary: 신호 보내기(15초마다)
-      description: 통화 화면이 쉬는 중에도 15초마다 보내요. 서버는 할 일을 action으로 알려 주고, 상태가 맞지 않아도 409 대신 200의 action으로 답해요(SPEC-010).
+      description: 통화 화면이 쉬는 중에도 15초마다 보내요. 서버는 할 일을 action으로 알려 주고, 상태가 맞지 않아도 409 대신 200의 action으로 답해요(SPEC-010). 쉬기는 서버가 아는 마롱이 소리 시각으로(SPEC-008), 미리 넘기기는 구간 만료 시각으로(SPEC-031) 판단해서 화면이 조용한 시간을 보내지 않아요.
       x-corthex:
         id: API-004
         spec:
@@ -732,6 +745,7 @@ paths:
         - SPEC-009
         - SPEC-010
         - SPEC-023
+        - SPEC-031
         omit:
           '409': 상태는 200의 action(taken_over, ended)으로 알려 줌
       security:
@@ -749,13 +763,11 @@ paths:
                 value:
                   clientId: 2b7e1516-28ae-4d2a-9b1f-3c4d5e6f7a8b
                   segmentId: 5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f
-                  quietMs: 4000
                   micActive: true
               resting:
                 value:
                   clientId: 2b7e1516-28ae-4d2a-9b1f-3c4d5e6f7a8b
                   segmentId: null
-                  quietMs: 720000
                   micActive: true
       responses:
         '200':
@@ -771,6 +783,9 @@ paths:
                 rest:
                   value:
                     action: rest
+                renew:
+                  value:
+                    action: renew
                 taken-over:
                   value:
                     action: taken_over
@@ -785,17 +800,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
               examples:
-                bad-quiet:
+                bad-mic:
                   value:
                     type: https://marong.corthex-hq.com/problems/invalid-request
                     title: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)
                     status: 400
                     code: invalid_request
                     traceId: e457b5a2e4d86bd1
-                    detail: quietMs는 0~86,400,000
+                    detail: micActive는 true 또는 false
                     errors:
-                    - field: quietMs
-                      reason: out_of_range
+                    - field: micActive
+                      reason: bad_format
         '401':
           description: 로그인 증명이 없거나 맞지 않음
           content:
@@ -1253,7 +1268,7 @@ paths:
     get:
       operationId: getCall
       summary: 통화 상세
-      description: 카드·이 통화에서 생긴 통화 기억·자막을 돌려줘요. 180일이 지나 자막을 지운 통화는 turns가 null이에요(SPEC-019).
+      description: '카드·이 통화에서 생긴 통화 기억·자막을 돌려줘요. 180일이 지나 자막을 지운 통화는 turns가 null이에요(SPEC-019). 잊기 표시된 카드와 자막 줄도 `forgotten: true`로 그대로 보여요(기능 명세 3.7).'
       x-corthex:
         id: API-007
         spec:
@@ -1294,6 +1309,7 @@ paths:
                       askNext:
                       - 면접 잘 봤는지
                       truncated: false
+                      forgotten: false
                     memories:
                     - id: 41
                       content: 목요일 오전 10시에 면접
@@ -1305,11 +1321,13 @@ paths:
                       role: assistant
                       content: 여보세요~ 현경아!
                       startedAt: '2026-11-12T12:00:02Z'
+                      forgotten: false
                     - id: 1002
                       seq: 2
                       role: user
                       content: 마롱아 나 목요일에 면접 있어
                       startedAt: '2026-11-12T12:00:05Z'
+                      forgotten: false
                     transcriptDeletedAt: null
                 organizing:
                   value:
@@ -1330,6 +1348,7 @@ paths:
                       role: assistant
                       content: 여보세요~ 현경아!
                       startedAt: '2026-11-12T12:00:02Z'
+                      forgotten: false
                     transcriptDeletedAt: null
                 transcript-deleted:
                   value:
@@ -1351,6 +1370,7 @@ paths:
                       askNext:
                       - 집 구했는지
                       truncated: false
+                      forgotten: false
                     memories: []
                     turns: null
                     transcriptDeletedAt: '2026-11-09T19:00:00Z'
@@ -1711,7 +1731,7 @@ paths:
     delete:
       operationId: deleteMemory
       summary: 통화 기억 하나 지우기
-      description: 지우면 다음 통화 지시문·위임 검색·카톡 '# 최근 통화'에서 바로 빠져요. 그 기억이 대체했던 이전 기억은 다시 활성이에요(SPEC-021).
+      description: 그 기억과 그 기억이 대체했던 이전 기억들을 함께 지우고, 잊기 범위(기능 명세 3.7)대로 카드 항목과 자막 줄도 정리해요. 다음 통화 지시문·위임 검색·카톡 '# 최근 통화'에서 바로 빠져요(SPEC-021).
       x-corthex:
         id: API-010
         spec:
@@ -1950,17 +1970,17 @@ components:
         client: 상세 화면에 안내 한 줄
       budget_exhausted:
         status: 429
-        meaning: 이번 달(UTC) 통화 예산을 다 써서 새 통화를 막음
+        meaning: 이번 달(UTC) 통화 예산을 다 썼거나 OpenAI 지출 한도(429)에 걸려 새 통화를 막음
         message: 이번 달 통화는 여기까지야. 다음 달에 또 걸어 줘. 카톡으로는 계속 얘기할 수 있어!
         client: 통화 홈의 budget 상태. retryAt까지 통화 버튼을 막음
       budget_hard_stop:
         status: 429
-        meaning: 이번 달 예산의 120%에 이르러 하던 통화도 끝냄
+        meaning: 이번 달 예산의 120%에 이르렀거나 통화 중 OpenAI 지출 한도(429)에 걸려 하던 통화도 끝냄
         message: 이번 달 통화는 여기까지야. 다음 달에 또 걸어 줘. 카톡으로는 계속 얘기할 수 있어!
         client: 통화를 끝내고 ended 상태에 이유 한 줄
       reconnect_limit:
         status: 429
-        meaning: 10분 안에 자동 재연결이 3번을 넘음
+        meaning: 10분 안에 자동 재연결이 3번(안전 필터로 닫힌 뒤의 재연결은 따로 5번)을 넘음. 미리 넘기기는 세지 않음
         message: 연결이 자꾸 끊겨서 잠깐 끊을게. 다시 걸어 줘
         client: 통화를 끝내고 다시 걸기
       takeover_limit:
@@ -1980,7 +2000,7 @@ components:
         client: 재연결이면 2초·5초 뒤 다시, 새 통화면 다시 걸기
       voice_unavailable:
         status: 503
-        meaning: OpenAI 세션을 못 만듦(키 없음, OpenAI 오류·한도·10초 넘김)
+        meaning: OpenAI 세션을 못 만듦(키 없음, OpenAI 오류·크레딧 소진·10초 넘김). 지출 한도 429는 예산 오류로 냄
         message: 마롱이가 지금 전화를 못 받아. 조금 있다 다시 걸어 줘
         client: 재연결이면 2초·5초 뒤 다시, 새 통화면 다시 걸기
       mood_unavailable:
@@ -2127,7 +2147,6 @@ components:
                 - mode
                 - previousSegmentId
                 - segmentId
-                - quietMs
                 - micActive
                 - limit
                 - cursor
@@ -2243,6 +2262,7 @@ components:
           enum:
           - reconnect
           - wake
+          - renew
         previousSegmentId:
           type: string
           format: uuid
@@ -2266,6 +2286,7 @@ components:
           - reconnect
           - wake
           - takeover
+          - renew
     CallStarted:
       type: object
       required:
@@ -2317,7 +2338,6 @@ components:
       required:
       - clientId
       - segmentId
-      - quietMs
       - micActive
       additionalProperties: false
       properties:
@@ -2332,13 +2352,9 @@ components:
             format: uuid
             pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
           description: 쉬는 중이면 null
-        quietMs:
-          type: integer
-          minimum: 0
-          maximum: 86400000
-          description: 화면이 잰 마지막 말소리 뒤 시간
         micActive:
           type: boolean
+          description: 쉬는 중 말소리를 잡을 마이크가 켜져 있는지(SPEC-008). 쉬기 판단에는 쓰지 않음
     BeatResponse:
       type: object
       required:
@@ -2350,6 +2366,7 @@ components:
           enum:
           - none
           - rest
+          - renew
           - taken_over
           - ended
         endReason:
@@ -2516,6 +2533,7 @@ components:
       - todos
       - askNext
       - truncated
+      - forgotten
       additionalProperties: false
       properties:
         summary:
@@ -2552,6 +2570,9 @@ components:
             maxLength: 100
         truncated:
           type: boolean
+        forgotten:
+          type: boolean
+          description: 요약에 잊기 표시가 있음(기능 명세 3.7). 다음 통화·카톡·기억 찾기에서 빠짐
     Turn:
       type: object
       required:
@@ -2560,6 +2581,7 @@ components:
       - role
       - content
       - startedAt
+      - forgotten
       additionalProperties: false
       properties:
         id:
@@ -2581,6 +2603,9 @@ components:
         startedAt:
           type: string
           format: date-time
+        forgotten:
+          type: boolean
+          description: 잊기 표시된 줄(기능 명세 3.7). 기억 찾기·통화 정리에서 빠짐
     MemoryItem:
       type: object
       required:

@@ -18,9 +18,9 @@ flowchart TD
 | ID | 이름 | 경로 | 누가 보나 | 흐름 | 용어 |
 | --- | --- | --- | --- | --- | --- |
 | SCR-001 | 통화 홈 | `/` | 통화하는 친구 | FL-001, FL-002, FL-006, FL-007, FL-008, FL-009 | CTX-002, CTX-006, TERM-001, TERM-003, TERM-014, TERM-018 |
-| SCR-002 | 통화 중 | `/call` | 통화하는 친구 | FL-002, FL-003, FL-004, FL-005, FL-006, FL-007, FL-009 | CTX-002, CTX-003, TERM-001, TERM-002, TERM-009~012, TERM-017~019 |
+| SCR-002 | 통화 중 | `/call` | 통화하는 친구 | FL-002, FL-003, FL-004, FL-005, FL-006, FL-007, FL-009 | CTX-002, CTX-003, TERM-001, TERM-002, TERM-009\~012, TERM-017\~019 |
 | SCR-003 | 지난 통화 | `/calls` | 통화하는 친구 | FL-008 | CTX-004, TERM-001, TERM-006 |
-| SCR-004 | 통화 상세 | `/calls/:id` | 통화하는 친구(자기 통화만) | FL-007, FL-008 | CTX-004, TERM-001, TERM-005~007, TERM-015 |
+| SCR-004 | 통화 상세 | `/calls/:id` | 통화하는 친구(자기 통화만) | FL-007, FL-008 | CTX-004, TERM-001, TERM-005\~007, TERM-015 |
 | SCR-005 | 마롱이 기억 | `/memories` | 통화하는 친구(자기 기억만) | FL-008 | CTX-004, TERM-007 |
 
 화면이 없는 용어: TERM-004 로그인 이메일(Access 로그인 화면은 Cloudflare가 그림), TERM-008 위임(목소리로만 답함), TERM-013 신호, TERM-016 sideband.
