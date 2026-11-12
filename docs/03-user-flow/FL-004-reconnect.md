@@ -1,6 +1,6 @@
 # FL-004 끊김과 자동 재연결
 
-Serves: REQ-012, REQ-013, REQ-014, REQ-015, REQ-018
+Serves: REQ-012, REQ-013, REQ-014, REQ-015, REQ-018, REQ-061
 Screens: SCR-002
 
 ```mermaid
@@ -21,3 +21,5 @@ flowchart TD
   H -->|예| H1["그 얘기는 다시 꺼내지 않고 다른 얘기로<br/>REQ-014"] --> A
   H -->|아니오| A
 ```
+
+다시 잇는 동안 마롱이 얼굴은 걱정하는 얼굴(13)이에요(REQ-061, SPEC-029).

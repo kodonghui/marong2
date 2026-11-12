@@ -199,13 +199,14 @@ CREATE TABLE IF NOT EXISTS call.budget_events (
   PRIMARY KEY (month, kind)
 );
 
--- TBL-011 ai_runs (CTX-003, CTX-004) ← SPEC-003, SPEC-006, SPEC-012, SPEC-013, SPEC-017, SPEC-022, SPEC-023, SPEC-026 | terms: none
+-- TBL-011 ai_runs (CTX-002, CTX-003, CTX-004) ← SPEC-003, SPEC-006, SPEC-012, SPEC-013, SPEC-017, SPEC-022, SPEC-023, SPEC-026, SPEC-030 | terms: none
 -- 모델 호출마다 한 줄(05단계 규칙). 프롬프트·답·자막·이메일은 두지 않는다. 음성 구간은 구간마다 한 줄이고 usage_seconds 가
 -- 이번 달 예산 계산의 원본이다(SPEC-023). 통화를 지워도 통화 id 만 비우고 남겨서 예산이 줄지 않는다(SPEC-020).
 -- 위임(도구 호출)의 이름·결과·대상 id 는 TBL-008 이 기록한다.
+-- 느낌 고르기(mood_classify)는 마롱이 문장 하나마다 한 줄이고, 문장과 고른 느낌은 두지 않는다(SPEC-030).
 CREATE TABLE IF NOT EXISTS call.ai_runs (
   id                 bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  kind               text NOT NULL CHECK (kind IN ('live_session', 'delegate_classify', 'recall_compose', 'organize')),
+  kind               text NOT NULL CHECK (kind IN ('live_session', 'delegate_classify', 'recall_compose', 'organize', 'mood_classify')),
   call_id            uuid REFERENCES call.calls (id) ON DELETE SET NULL,
   segment_id         uuid REFERENCES call.segments (id) ON DELETE SET NULL,
   delegation_id      bigint REFERENCES call.delegations (id) ON DELETE SET NULL,

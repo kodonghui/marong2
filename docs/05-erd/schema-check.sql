@@ -2,7 +2,7 @@
 --   1) 빈 DB에 marong/schema.sql 과 marong/call/schema.sql 을 차례로 적용
 --   2) psql -d <시험 DB> -f docs/05-erd/schema-check.sql
 -- 'expect error' 줄 다음에는 오류가, 나머지는 성공이 나와야 한다. 마지막 줄은 통화를 지운 뒤
--- 자막·기억·카드·구간·위임 0줄, AI 호출 기록 1줄(통화 id 비움, 600초)이어야 한다.
+-- 자막·기억·카드·구간·위임 0줄, AI 호출 기록 2줄(음성 구간 1줄·느낌 고르기 1줄, 통화 id 비움, 600초)이어야 한다.
 \set ON_ERROR_STOP 0
 \echo == setup as postgres
 INSERT INTO marong.friends (name) VALUES ('현경') RETURNING id \gset f_
@@ -30,6 +30,9 @@ UPDATE call.segments SET state='closed', closed_at=now(), close_reason='user_han
 INSERT INTO call.ai_runs (kind, call_id, segment_id, segment_ref, trace_id, model, prompt_version, sent_at, usage_seconds, outcome, stop_reason) VALUES ('live_session', :'k_id', :'s_id', :'s_id', 't1', 'gpt-live-1', 'abc123def456', now(), 600, 'ok', 'close_requested');
 \echo -- expect error: same live segment counted twice
 INSERT INTO call.ai_runs (kind, segment_ref, trace_id, model, prompt_version, sent_at, usage_seconds, outcome) VALUES ('live_session', :'s_id', 't2', 'gpt-live-1', 'x', now(), 1, 'ok');
+INSERT INTO call.ai_runs (kind, call_id, segment_id, trace_id, model, prompt_version, sent_at, total_ms, input_tokens, output_tokens, outcome) VALUES ('mood_classify', :'k_id', :'s_id', 't3', 'gpt-6-luna', 'mood1', now(), 420, 60, 5, 'ok');
+\echo -- expect error: unknown ai_runs kind
+INSERT INTO call.ai_runs (kind, trace_id, model, prompt_version, sent_at, outcome) VALUES ('face_pick', 't4', 'x', 'x', now(), 'ok');
 UPDATE call.calls SET status='ended', ended_at=now(), end_reason='hangup', organize_status='pending' WHERE id=:'k_id';
 INSERT INTO call.cards (call_id, summary, model, prompt_version) VALUES (:'k_id', '생일 얘기', 'claude-haiku-5-5', 'org1');
 \echo -- expect error: budget 0

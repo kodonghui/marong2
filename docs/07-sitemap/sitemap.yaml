@@ -8,7 +8,7 @@
   access: 허용된 Google 계정(통화하는 친구)
   status: active
   flows: [FL-001, FL-002, FL-006, FL-007, FL-008, FL-009]
-  terms: [CTX-002, CTX-006, TERM-001, TERM-003, TERM-014]
+  terms: [CTX-002, CTX-006, TERM-001, TERM-003, TERM-014, TERM-018]
   children:
     - id: SCR-002
       name: 통화 중
@@ -16,7 +16,7 @@
       access: 허용된 Google 계정(통화하는 친구)
       status: active
       flows: [FL-002, FL-003, FL-004, FL-005, FL-006, FL-007, FL-009]
-      terms: [CTX-002, CTX-003, TERM-001, TERM-002, TERM-009, TERM-010, TERM-011, TERM-012, TERM-017]
+      terms: [CTX-002, CTX-003, TERM-001, TERM-002, TERM-009, TERM-010, TERM-011, TERM-012, TERM-017, TERM-018, TERM-019]
     - id: SCR-003
       name: 지난 통화
       path: /calls

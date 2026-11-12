@@ -3,8 +3,9 @@
 현경님이 카톡에서 마롱이를 부르는 대신, 휴대폰에서 버튼 하나로 마롱이에게 전화해 친구처럼 목소리로 얘기하게 하는 기능이에요. 코드·인증·안내 같은 기계적인 절차는 두지 않고, 마롱이는 먼저 끊지 않아요. 이 문서는 구현 전 설계(CORTHEX 01~09단계)의 입구예요.
 
 - 상태: 설계 초안(2026-11-12). 다음은 독립 검토, 설계 보완, 구현이에요.
-- 정한 것(동희님, 2026-11-12, Notion '결정할 것' D1~D8·P1): 전용 하위 주소의 통화 웹앱, `gpt-live-1`, LangGraph는 통화 중 위임과 통화 뒤 정리에만, 현경님 혼자(허용 Gmail 두 개, 로그인 약 30일), 첫 연결 안내·동의 없음과 원음 저장 안 함, 하루·한 통화 한도 없음(월 150달러), 동희님에게 알림 없음, 기계적인 절차 없음, 오래 조용하면 쉬었다가 말하면 이어받기(D8, 12:36 결정 카드).
+- 정한 것(동희님, 2026-11-12, Notion '결정할 것' D1~D8·D14·P1): 전용 하위 주소의 통화 웹앱, `gpt-live-1`, LangGraph는 통화 중 위임과 통화 뒤 정리에만, 현경님 혼자(허용 Gmail 두 개, 로그인 약 30일), 첫 연결 안내·동의 없음과 원음 저장 안 함, 하루·한 통화 한도 없음(월 150달러), 동희님에게 알림 없음, 기계적인 절차 없음, 오래 조용하면 쉬었다가 말하면 이어받기(D8, 12:36 결정 카드), 표정 그림은 화면용 512px만 저장소에(D14, 14:48 결정 카드).
 - 다른 의견을 기다리는 제안(Notion '결정할 것' D9~D13, 설계는 Claude 추천대로): D9 예산 120%에서 진행 중 통화도 끝내기(REQ-051 `proposed`), D10 자막 180일(REQ-043), D11 통화 내용을 다른 친구에게 넘기지 않기(REQ-044), D12 하위 주소 `marong.corthex-hq.com`(REQ-058), D13 통화의 19금 수위 낮추기(`call_prompt.md`).
+- 마롱이 얼굴(2026-11-12 14:21 동희님이 올린 표정 그림 19장): 통화 상태·마롱이 말소리·문장의 느낌에 따라 얼굴이 바뀌어요(REQ-061~064, SPEC-029·030, 2.6절). 그림은 화면용 512px 17장만 저장소에 넣고 원본은 Git 밖에 둬요(D14, 14:48 결정 카드).
 
 ## 1. 한눈에 보기
 
@@ -13,8 +14,9 @@ flowchart LR
   phone["현경님 갤럭시 Chrome<br>통화 웹앱 SCR-001~005"]
   access["Cloudflare Access<br>Google 로그인, 허용 계정 2개"]
   tunnel["전용 Cloudflare Tunnel"]
-  callsrv["marong-call 서버<br>127.0.0.1:8790<br>API-001~011"]
+  callsrv["marong-call 서버<br>127.0.0.1:8790<br>API-001~012"]
   openai["OpenAI gpt-live-1<br>실시간 음성"]
+  luna["OpenAI gpt-6-luna<br>느낌 고르기 AI-5"]
   anth["Anthropic Haiku 5.5<br>위임 나누기·기억 찾기·통화 정리"]
   db[("Postgres 16<br>marong 스키마 + call 스키마")]
   kakao["카톡 마롱이<br>marong.service"]
@@ -23,6 +25,7 @@ flowchart LR
   callsrv -->|"세션 만들기·끊기"| openai
   callsrv <-->|"sideband: 자막·위임·사용 초"| openai
   callsrv -->|"LangGraph 위임·정리"| anth
+  callsrv -->|"마롱이 문장 하나"| luna
   callsrv --> db
   kakao -->|"'# 최근 통화' 읽기만"| db
 ```
@@ -30,6 +33,7 @@ flowchart LR
 - 목소리는 휴대폰과 OpenAI 사이를 WebRTC로만 오가요. 우리 서버는 원음을 받지도 저장하지도 않아요(REQ-034).
 - 우리 서버는 세션을 만들고(지시문과 기억을 넣어), 옆길(sideband)로 자막·위임·사용 초를 받아요. 쓰기(기억해 두기·잊어 주기)는 위임을 거쳐 코드가 확인한 뒤에만 해요.
 - 통화 서버는 카톡 서버와 따로 돌아요(서비스·DB 계정·환경 파일·venv가 따로, SPEC-028). 통화 서버가 멈춰도 카톡 마롱이는 그대로예요.
+- 마롱이 얼굴은 휴대폰이 골라요. 소리 크기는 휴대폰 안에서만 재고, 느낌을 고를 때만 마롱이가 말한 문장 하나를 API-012로 보내요(SPEC-029, SPEC-030).
 
 ## 2. 주요 흐름
 
@@ -88,19 +92,33 @@ sequenceDiagram
 
 현경님만 끊을 수 있어요(마롱이에게 끊는 길이 없음, REQ-011). 끊으면 정리 작업자가 LangGraph 정리 그래프로 카드(요약·정한 것·안 정한 것·할 일·다음에 물어볼 것)와 통화 기억을 만들어요. 인용이 현경님 자막에 없는 기억은 버려요.
 
+### 2.6 마롱이 얼굴(SPEC-029, SPEC-030)
+
+연구 문서에 따르면 `gpt-live-1`은 감정이나 입 모양 값을 주지 않아요. 그래서 얼굴은 세 가지를 보고 휴대폰이 골라요. 그림은 동희님이 올린 표정 그림 17장(14·17번은 01번과 같은 파일)이고, 번호와 파일은 [design/marong-face/README.md](../design/marong-face/README.md)에 있어요.
+
+| 보는 것 | 어디서 | 얼굴 |
+| --- | --- | --- |
+| 화면 상태 | SCR-001·SCR-002의 상태 | 기본 01, 예산·오류 06, 다시 잇는 중·권한 13, 쉬는 중 11 → 12 |
+| 말소리 크기 | 휴대폰 안 `AnalyserNode`(마롱이 목소리·현경님 마이크). 보내지 않음 | 마롱이가 말하면 입 01·15·16, 현경님이 말하면 03, 다 듣고 나면 04, 기본 얼굴일 때 깜빡임 18·19 |
+| 문장의 느낌 | 마롱이 자막 문장 → API-012 → AI-5 `gpt-6-luna` | 02 웃음, 05 신남, 06 슬픔, 07 엉엉, 08 놀람, 09 삐짐, 10 수줍음, 13 걱정 |
+
+- 그림을 못 받거나 느낌을 못 골라도 통화는 그대로이고 얼굴만 덜 바뀌어요(REQ-064).
+- 그림은 `marong/call/static/face/v1/`의 512px WebP 17장(약 953KB)이고 1년 캐시로 내줘요. 1024 원본과 지시문은 Git 밖 프로젝트 파일에 둬요(D14).
+- 문턱값과 원격 소리 재기는 갤럭시 실기기에서 확인해요(7절).
+
 ## 3. 단계별 산출물
 
 | 단계 | 원본 | ID |
 | --- | --- | --- |
-| 01 도메인 | [docs/01-domain/domain.md](01-domain/domain.md) | CTX-001~006, TERM-001~017 |
-| 02 요구사항 | [docs/02-prd/requirements.md](02-prd/requirements.md) | REQ-001~060 |
+| 01 도메인 | [docs/01-domain/domain.md](01-domain/domain.md) | CTX-001~006, TERM-001~019 |
+| 02 요구사항 | [docs/02-prd/requirements.md](02-prd/requirements.md) | REQ-001~064 |
 | 03 흐름 | [docs/03-user-flow/](03-user-flow/) | FL-001~010 |
-| 04 기능 명세 | [docs/04-functional-spec/spec.md](04-functional-spec/spec.md) | SPEC-001~028, AI 호출 4개 |
+| 04 기능 명세 | [docs/04-functional-spec/spec.md](04-functional-spec/spec.md) | SPEC-001~030, AI 호출 5개 |
 | 05 DB | [marong/call/schema.sql](../marong/call/schema.sql), [docs/05-erd/erd.md](05-erd/erd.md) | TBL-001~012 |
-| 06 API | [api/openapi.yaml](../api/openapi.yaml) | API-001~011 |
+| 06 API | [api/openapi.yaml](../api/openapi.yaml) | API-001~012 |
 | 07 화면 목록 | [docs/07-sitemap/sitemap.md](07-sitemap/sitemap.md) | SCR-001~005 |
 | 08 화면 상태 | [docs/08-screens/](08-screens/), 와이어프레임은 디자인 캔버스 | 상태 38개 |
-| 09 목업 | [design/base.tokens.json](../design/base.tokens.json), 후보 두 안은 디자인 캔버스 | 후보 A 밤하늘, B 군밤 크림 |
+| 09 목업 | [design/base.tokens.json](../design/base.tokens.json), 후보 두 안은 디자인 캔버스, 얼굴 그림은 [design/marong-face/](../design/marong-face/README.md) | 후보 A 밤하늘, B 군밤 크림 |
 | 통화 지시문 | [call_prompt.md](../call_prompt.md) | SPEC-004 |
 
 디자인 캔버스: [마롱이 통화 화면 설계](https://claude.ai/artifact/FDFCuk2xc8JE8SCUuh7hL2)(비공개, 공유받은 사람만 열림). 캔버스와 `docs/08-screens/`가 다르면 `docs/08-screens/`가 맞아요.
@@ -109,7 +127,7 @@ sequenceDiagram
 
 | 파일 | 하는 일 | SPEC |
 | --- | --- | --- |
-| `marong/call/app.py` | HTTP 서버, API-001~011 경로, 정적 파일 | 001~003, 007~011, 018~021, 027 |
+| `marong/call/app.py` | HTTP 서버, API-001~012 경로, 정적 파일(얼굴 그림은 1년 캐시) | 001~003, 007~011, 018~021, 027, 029 |
 | `marong/call/auth.py` | Access JWT 확인, 같은 사이트 쓰기 확인 | 001 |
 | `marong/call/live.py` | OpenAI 세션 만들기·끊기, sideband, 자막 줄 만들기 | 003, 005, 006, 011 |
 | `marong/call/session.py` | 통화·구간 상태, 친구별 잠금, 신호, 재연결·쉬기·넘겨받기, 오래된 통화 정리 | 007~010 |
@@ -117,9 +135,12 @@ sequenceDiagram
 | `marong/call/delegate.py` | LangGraph 위임 그래프 | 012~016 |
 | `marong/call/organize.py` | LangGraph 정리 그래프와 작업자, 매일 보관 정리 | 017, 022 |
 | `marong/call/budget.py` | 사용 초 기록, 이번 달 상태 | 023 |
+| `marong/call/mood.py` | 느낌 고르기(통화별 한도, AI-5 호출, 목록 확인) | 030 |
 | `marong/call/llm.py` | Anthropic 호출 한 곳(effort, 구조화 출력, 시간 제한) | AI-2~4 |
 | `marong/call/store.py` | SQL 한 곳 | TBL-001~012 |
 | `marong/call/static/` | 통화 웹앱(manifest, 서비스 워커, 화면 다섯 개) | 027 |
+| `marong/call/static/face.js` | 얼굴 고르기(상태·소리 크기·느낌, 깜빡임, 미리 받기) | 029, 030 |
+| `marong/call/static/face/v1/` | 얼굴 그림 17장(이미 있음, D14) | 029 |
 | `marong/call/schema.sql` | call 스키마(이미 있음) | 05단계 |
 | `run_call.py` | 통화 서버 시작(켤 때 확인 포함) | 028 |
 | `requirements-call.txt` | 통화 서버만 쓰는 패키지와 고정 판 | 028 |
@@ -144,6 +165,7 @@ sequenceDiagram
 | `CALL_BIND` | 기본 `127.0.0.1:8790` |
 | `CALL_REST_AFTER_MIN` | 쉬기 시작 분(기본 10, SPEC-008) |
 | `CALL_LIVE_MODEL`, `CALL_ANTHROPIC_MODEL` | 기본 `gpt-live-1`, `claude-haiku-5-5` |
+| `CALL_MOOD_MODEL` | 느낌 고르기 모델(기본 `gpt-6-luna`). 비우면 느낌 고르기를 끄고 얼굴은 상태·입만 써요(SPEC-030) |
 | `DELEGATE_EFFORT`, `ORGANIZE_EFFORT` | 기본 `low`, `xhigh` |
 | `PROMPT_PATH`, `CALL_PROMPT_PATH`, `TIMEZONE` | 기본 `prompt.md`, `call_prompt.md`, `Asia/Seoul` |
 
@@ -155,6 +177,7 @@ sequenceDiagram
 - 조용할 때 쉬기(D8) 덕분에 말없이 켜 둔 시간은 10분까지만 과금돼요. 쉬기가 없으면 30분 동안 켜 둔 조용한 통화도 1.5달러예요.
 - 80%는 동희님만 보는 기록(관리 명령·시트), 100%는 새 통화를 막고 하던 통화는 이어 가요. 120%는 진행 중 통화를 끝내는 안전장치예요(제안). OpenAI 프로젝트에는 지출 알림 120달러, 한도 180달러를 걸어요.
 - Anthropic 비용(위임 나누기·찾기·정리)은 AI 호출 기록의 토큰 수로 `call-stats`에 보여요. 크기는 12단계 시험에서 재요.
+- 느낌 고르기(AI-5 `gpt-6-luna`)는 [사실] 100만 토큰당 입력 0.10달러, 출력 0.50달러예요(OpenAI 가격표 Standard, 2026-11-12 확인). [추정] 한 시간에 문장 200개, 문장마다 300토큰이면 약 0.0065달러예요. 통화 프로젝트 키를 같이 써서 지출 알림·한도에 함께 들어가요.
 
 ## 7. 위험과 실기기 확인
 
@@ -167,6 +190,9 @@ sequenceDiagram
 | 위임 답이 늦거나 틀림(effort `low`) | 6초에 '못 찾음', 정확도가 모자라면 `medium` | 12단계 |
 | 한국어 자막이 틀려 인용 확인에 걸림 | 걸리면 저장하지 않고 다시 말해 달라고 함 | 12단계 |
 | 통화 서버 메모리 | `MemoryMax=1G`, 임베딩 모델을 쓰지 않음 | 부하 시험 |
+| 원격 WebRTC 소리를 잴 수 없어 입이 안 움직임 | 자막 조각이 오는 동안 입을 돌림(SPEC-029) | 갤럭시 실기기 |
+| 느낌이 틀리거나 늦음 | 얼굴만 바뀌고 말·기록은 그대로, 1.5초 넘으면 버림. 설정을 비워 끌 수 있음 | 12단계 문장 50개 |
+| 얼굴 그림이 흐리거나 늦게 뜸 | 홈에서 미리 받기, 못 받으면 빈 원 | 갤럭시 실기기, LTE |
 
 자세한 확인 목록은 [기능 명세 7절](04-functional-spec/spec.md)에 있어요.
 
@@ -182,7 +208,7 @@ sequenceDiagram
 
 ## 9. 범위 밖
 
-APK(2단계에서 다시 봄), 카톡 본체의 LangGraph 전환, 다른 친구의 통화, 영상 통화, 원음 저장, 동희님 알림(D7), 마롱이가 먼저 전화 걸기, 통화 중 웹 검색(날씨·뉴스는 못 찾아본다고 말함).
+APK(2단계에서 다시 봄), 인형이나 전용 기기로 마롱이 얼굴·목소리 내기(표정·인형 연구 문서에서 따로 봄), 카톡 본체의 LangGraph 전환, 다른 친구의 통화, 영상 통화, 원음 저장, 동희님 알림(D7), 마롱이가 먼저 전화 걸기, 통화 중 웹 검색(날씨·뉴스는 못 찾아본다고 말함).
 
 ## 10. 시험 메모
 

@@ -1,6 +1,6 @@
 # FL-009 월 예산
 
-Serves: REQ-047, REQ-048, REQ-049, REQ-050, REQ-051, REQ-052
+Serves: REQ-047, REQ-048, REQ-049, REQ-050, REQ-051, REQ-052, REQ-061
 Screens: SCR-001, SCR-002
 
 ```mermaid
@@ -18,3 +18,5 @@ flowchart TD
   I -->|예| J["관리 명령 call-budget<br/>REQ-052"] --> B
   I -->|아니오| K(["다음 달 1일 UTC(한국 9시)에 0부터"])
 ```
+
+예산 때문에 막힌 통화 홈과, 120%로 끝난 통화 화면의 마롱이 얼굴은 슬픈 얼굴(06)이에요(REQ-061, SPEC-029).

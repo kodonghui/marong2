@@ -406,6 +406,27 @@
         "value": 168,
         "unit": "px"
       }
+    },
+    "face-call": {
+      "$value": {
+        "value": 248,
+        "unit": "px"
+      },
+      "$description": "통화 중 화면의 마롱이 얼굴 그림(SPEC-029, 후보 A 기준). 원보다 커서 물음표·Zzz·하트가 원 밖으로 나올 수 있음"
+    },
+    "face-home": {
+      "$value": {
+        "value": 200,
+        "unit": "px"
+      },
+      "$description": "통화 홈의 마롱이 얼굴 그림(SPEC-029, 후보 A 기준. 후보 B는 84)"
+    },
+    "face-small": {
+      "$value": {
+        "value": 152,
+        "unit": "px"
+      },
+      "$description": "끝난 화면의 마롱이 얼굴 그림(SPEC-029)"
     }
   },
   "duration": {
@@ -421,6 +442,27 @@
         "value": 240,
         "unit": "ms"
       }
+    },
+    "blink-half": {
+      "$value": {
+        "value": 60,
+        "unit": "ms"
+      },
+      "$description": "깜빡임의 반쯤 감은 칸(18번)"
+    },
+    "blink-closed": {
+      "$value": {
+        "value": 90,
+        "unit": "ms"
+      },
+      "$description": "깜빡임의 감은 칸(19번)"
+    },
+    "breathe": {
+      "$value": {
+        "value": 4000,
+        "unit": "ms"
+      },
+      "$description": "잠든 얼굴(12번)이 1.00~1.02배로 한 번 숨쉬는 시간"
     }
   }
 }
