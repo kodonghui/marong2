@@ -26,6 +26,9 @@
 #                now: 지금 한 번 보내기 / status: 타이머와 최근 결과
 #   backup       DB 백업 파일을 서버의 /var/backups/marong 에 만듦(자동 백업은 하지 않음)
 #   chat         서버에서 터미널로 마롱이와 대화(카카오 없이. 'terminal' 방으로 저장됨)
+#   galaxy-test start|stop|status  통화 갤럭시 시험(기능 명세 7.1). start는 시험 파일만 서버의 ~/marong-galaxy-test 로
+#                올리고 시험 서버(127.0.0.1)와 Cloudflare 임시 주소를 켬. sudo·다른 서비스는 건드리지 않음.
+#                OpenAI 키는 서버의 ~/.config/marong-call/openai.key 에 먼저 넣어 둠(값은 화면에 안 보임)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 HOST=${MARONG_HOST:-ko-family}
@@ -157,5 +160,17 @@ case "${1:-}" in
     on_server "$AS_MARONG 'cd $DEST && exec .venv/bin/python run.py --proactive \"\$@\"' _ $(printf '%q ' "$@")"
     ;;
   chat) "${SSH[@]}" -t "$HOST" "$AS_MARONG 'cd $DEST && .venv/bin/python run.py --chat'" ;;
-  *) sed -n '2,26p' "$0"; exit 1 ;;
+  galaxy-test)
+    sub=${2:-status}
+    case "$sub" in start|stop|status) ;; *) echo "사용법: bash deploy/ovh.sh galaxy-test start|stop|status"; exit 1 ;; esac
+    port=${MARONG_TEST_PORT:-8791}
+    case "$port" in ''|*[!0-9]*) echo "MARONG_TEST_PORT는 숫자여야 해요"; exit 1 ;; esac
+    if [ "$sub" = start ]; then
+      tar -czf - --exclude __pycache__ tools/galaxy_test call_prompt.md marong/call/static/face/v1/01-neutral.webp |
+        on_server 'rm -rf ~/marong-galaxy-test/src && mkdir -p ~/marong-galaxy-test/src &&
+                   chmod 700 ~/marong-galaxy-test && tar -xzf - -C ~/marong-galaxy-test/src --warning=no-unknown-keyword'
+    fi
+    on_server "MARONG_TEST_PORT=$port bash ~/marong-galaxy-test/src/tools/galaxy_test/run.sh $sub"
+    ;;
+  *) sed -n '2,31p' "$0"; exit 1 ;;
 esac

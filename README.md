@@ -237,4 +237,5 @@ uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements.txt
 | `deploy/` | 서버 설치·운영(`ovh.sh`), systemd(`marong`, 시트 타이머 `marong-sheet`·`marong-sheet-ask`), env 옮기기 |
 | `tools/admin.py` | 기록 보기, 설정 바꾸기(키 묶기·따로 두기·공유 켬·끔·아는 사이·선톡 켬·끔·일정·단체방을 1:1 방에 묶기). 설정은 이 명령으로만 바뀌어요(기록은 안 지움) |
 | `tools/report.py`, `tools/sheet.gs` | 기록 리포트(엑셀)와 구글 시트 30분 갱신·메뉴 '지금 새로고침'(서버가 보내고 시트의 Apps Script 가 씀) |
+| `tools/galaxy_test/` | 통화 갤럭시 시험(기능 명세 7.1): 시험 페이지와 작은 서버, `bash deploy/ovh.sh galaxy-test start` 로 켬. [설명](tools/galaxy_test/README.md) |
 | `docs/design.md` | 저장 설계와 이유 |
