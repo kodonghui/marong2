@@ -443,19 +443,26 @@
         "unit": "ms"
       }
     },
-    "blink-half": {
+    "blink-half-close": {
+      "$value": {
+        "value": 50,
+        "unit": "ms"
+      },
+      "$description": "깜빡임에서 감기 시작하는 반쯤 감은 칸(18번, 말하는 중이면 20·22번). 동희님이 올린 GPT 깜빡임 GIF와 같음"
+    },
+    "blink-closed": {
+      "$value": {
+        "value": 70,
+        "unit": "ms"
+      },
+      "$description": "깜빡임의 감은 칸(19번, 말하는 중이면 21·23번). GPT 깜빡임 GIF와 같음"
+    },
+    "blink-half-open": {
       "$value": {
         "value": 60,
         "unit": "ms"
       },
-      "$description": "깜빡임의 반쯤 감은 칸(18번)"
-    },
-    "blink-closed": {
-      "$value": {
-        "value": 90,
-        "unit": "ms"
-      },
-      "$description": "깜빡임의 감은 칸(19번)"
+      "$description": "깜빡임에서 눈을 뜨는 반쯤 감은 칸. GPT 깜빡임 GIF와 같음"
     },
     "breathe": {
       "$value": {
