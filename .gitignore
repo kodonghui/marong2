@@ -5,3 +5,5 @@ __pycache__/
 *.db*
 logs/
 .ovh
+
+tools/vertex_live/probe-packets.json

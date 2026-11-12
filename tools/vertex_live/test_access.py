@@ -22,7 +22,8 @@ async def main():
         def request(values,algorithm='RS256',signing_key=key):
             token=jwt.encode(values,signing_key,algorithm=algorithm,headers={'kid':'test-key'})
             return SimpleNamespace(cookies={},headers={'Cf-Access-Jwt-Assertion':token})
-        assert await server.identity(request(claims))=='user-1'
+        identity=await server.identity(request(claims))
+        assert identity['owner']=='user-1' and len(identity['email_hash'])==64
         for overrides in [{'aud':['other-app']},{'iss':'https://wrong.cloudflareaccess.com'},{'email':'outsider@example.com'},{'exp':int(time.time()-1)},{'nbf':int(time.time()+90)}]:
             assert await server.identity(request(claims|overrides)) is None
         assert await server.identity(request(claims,'HS256','forged-secret-at-least-32-characters')) is None

@@ -1,97 +1,67 @@
-# 마롱이 Vertex Live
+# 마롱이 Vertex Live: 통화와 카톡 기억
 
-Singapore `ko-family` hosts this standalone web app at
-<https://marong.corthex-hq.com/>. It uses the existing Gemini key on the server
-only, through **Vertex AI**, with `gemini-3.8-live`. It does not fall back to the
-AI Studio or OpenAI billing paths.
+Singapore `ko-family` serves https://marong.corthex-hq.com/ through the existing named Cloudflare Tunnel. `gemini-3.8-live`, **Sulafat**, and Korean (`ko-KR`) are unchanged. All Google calls use the existing server-side Vertex credentials and billing project. Credentials are never sent to the browser or copied between devices.
 
-The UI follows the user's Claude artifact, candidate A (밤하늘), and reuses
-`marong/call/static/face/v1` assets. Mouth animation follows the approved 13-frame,
-1.98-second talk sequence, synchronized to actual queued audio playback. It
-supports reduced motion, microphone mute, optional text input and captions.
+## Audio path
 
-The voice is **Sulafat**, Korean (`ko-KR`), with a natural adult female speaking
-instruction. Gacrux was replaced after the user reported an overly deep voice.
-Audio input is resampled from the device's native rate to 16 kHz; output is
-24 kHz PCM. A 900 ms playout reserve absorbs packet jitter and grows up to 2 s
-after an underrun. The learned reserve is reused on the same browser. Numeric playback/connection diagnostics are kept in RAM only;
-they contain no audio or conversation text. No client or relay call-duration/count timer ends calls. Provider
-GoAway and transport failures reconnect automatically with session resumption
-and context compression. Only one concurrent call is allowed. Mobile OS
-suspension, loss of connectivity and provider quota/billing errors can still
-interrupt audio; this is not a guarantee of uninterrupted background calls.
+Input: `capture AudioWorklet -> dedicated network Worker -> Singapore relay -> Vertex Live`.
 
-## Authentication and operations
+Output: `Vertex PCM -> 600 ms server playout reserve -> LiveKit/Opus/WebRTC -> native browser audio`. LiveKit 1.13.11 runs on the same Singapore server. Only signaling passes through the existing Cloudflare hostname (`/rtc`); media uses encrypted WebRTC on UDP 7882, with TCP 7881 available. The LiveKit API binds only to loopback 7880. The browser receives a short-lived room-scoped, subscribe-only token; the signing secret remains on the server. The frontend SDK is pinned to 2.24.0 and vendored with its license. A media disconnect reconnects the same logical call.
 
-- The dedicated named Cloudflare Tunnel forwards to `127.0.0.1:8792`.
-- Cloudflare Access uses an exact email allowlist and a one-month session.
-  Current login is email one-time PIN; Google OAuth is not configured.
-- The origin independently verifies Access RS256 signature, issuer, audience,
-  expiry and email. Set `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD` and
-  `CF_ACCESS_EMAILS` on the server. No private values belong in Git.
-- A previous temporary link remains compatible through an HttpOnly, Secure,
-  SameSite invite cookie. Its token is generated and retained on the server.
-- Credentials stay under the existing server account's `.config/marong-call`.
-  Do not transfer credentials between devices. Only source and approved image
-  assets are deployed from this repository.
-- Runtime: `/home/opc/marong-vertex-test/app`; Python environment:
-  `/home/opc/marong-vertex-test/venv`. App user unit:
-  `marong-vertex-live.service`. Named tunnel user unit:
-  `marong-cloudflare-named-tunnel.service`.
-- User-specific Access settings live in the app unit's server-side drop-in.
-  The relay binds only to loopback. `/healthz` is a liveness check; `/status` and
-  `/live` require authentication. Mutating requests also verify Origin.
-- No raw audio or transcripts are written to server storage. Resume handles and
-  queues are kept in RAM. New calls clear the page's previous captions.
-- Assets are served from `static/face/v1` in a deployment bundle, or from the
-  existing repository asset directory in a checkout. Do not commit duplicates.
-- Check `/status.active` before a planned restart. Keep a source backup for
-  rollback; do not package the state/credential directories.
+WebSocket PCM is the fallback if WebRTC cannot connect. Both microphone PCM and fallback received PCM cross transferable MessagePorts directly. Caption rendering and main-thread pauses do not carry those audio packets. Input is 16 kHz mono PCM16; output is 24 kHz PCM16, continuously resampled to the actual device rate. Fallback playback waits for **actual queued samples**, with a 900 ms initial reserve that grows to 2 s after starvation and slowly decreases after stable turns. Finished short replies do not wait for the full reserve. Interruptions invalidate the previous audio epoch. A network delay longer than available audio or an OS audio suspension can still interrupt playback.
 
-Credit balance is controlled by the Google billing account, not this app.
-The relay does not enforce a financial spending cap. Exhausted or expired
-credits on an upgraded paid account can lead to paid usage.
+The change to WebRTC followed a measured public-browser failure: the provider delivered a 13.1 s clip in 12.9 s with a 240 ms maximum packet gap, while the public WebSocket playback had roughly 2 s arrival gaps. Dedicated Worker transport alone still produced two underruns. A subsequent two-turn WebRTC browser trial played 28.97 s with zero source underruns; the second 14.86 s turn added no packet concealment or loss. This is a bounded desktop result, not a guarantee for all networks.
 
-## Relationship to the existing design
+New clients supply a `client` UUID to `/live`. Binary frames have a 24-byte big-endian `MRG2` header: magic, epoch, turn, sequence, source sample offset, sample count, then little-endian PCM16. Previously loaded clients without the query keep headerless PCM until refreshed.
 
-This relay is not the full implementation of PR #11. The canonical ERD is
-`marong/call/schema.sql`, explained in `docs/05-erd/erd.md`; the functional
-contract is `docs/04-functional-spec/spec.md` (especially SPEC-004 and SPEC-024).
-The Notion summary is
-<https://app.notion.com/p/416bf16cc3ec818d94eeeba9a3524c0a>.
+`/status.diagnostics` distinguishes received/played samples, queued audio, actual underruns, source starvation, rebuffer waiting, browser arrival gaps, server send waiting, provider interruptions/reconnects, and AudioContext suspension. It contains no conversation text. There is no application duration/count cutoff or model hang-up tool. Provider GoAway and transport loss resume automatically; explicit user stop ends the logical call.
 
-A read-only production inspection on 2026-11-12 found the existing `marong`
-schema and the intended person's records, but no `call` or `call_graph` schema
-and no `marong_call` DB role. This relay does not connect to PostgreSQL. Existing
-Kakao memories are therefore not read into voice conversations, and voice
-transcripts/cards/memories are not persisted. No existing data or schema was
-changed during the inspection. Connecting this requires implementing the
-approved identity mapping, scoped memory retrieval, call persistence and
-privacy/deletion rules; it must not map every allowed login to one person's
-private memory or simply export the whole database into a prompt.
+## Identity and bidirectional memory
 
-## Validation
+The origin verifies Cloudflare Access signature, issuer, audience, expiry and exact email allowlist. Private access additionally requires an explicitly approved `caller_logins.email_sha256 -> callers.friend_id` mapping. An invite cookie alone cannot read or write personal memory. The two approved aliases map to the existing intended friend; future allowlisted accounts are not mapped automatically.
 
-Install `requirements.txt` in an isolated environment, then run:
+The schema is `marong/call/schema.sql` plus `marong/call/migrations/002_vertex_memory.sql`. `call_graph` holds LangGraph checkpoints containing IDs/revisions only. The call role reads scoped Kakao data but cannot mutate Kakao raw messages; the Kakao role cannot read voice transcripts.
+
+- Start context: the caller's 1:1 rooms and explicitly linked rooms, bounded notes/summaries/recent messages, existing permitted shared-friend notes, active voice memories, and recent call cards.
+- `recall`: escaped ILIKE keyword search within that same scope; no new vector service is required.
+- Call content is organized automatically after the call. There are no spoken save/delete commands, memory-management screens or public memory mutation/history APIs. The Live model can only retrieve relevant context and read the clock.
+- Server-side maintenance retains caller-scoped deletion/invalidation primitives for test cleanup and data lifecycle enforcement. These invalidate provider resume context, checkpoints and derived Kakao material; they are not exposed as conversation features.
+- The independent organizer runs after **explicit** call completion. Gemini 3.8 Flash uses the Vertex `global` endpoint and LOW reasoning. Proposed quotes must occur in actual user text; call cards are extractive, so invented model summaries cannot become facts. The Live model itself receives no thinking configuration.
+- The next Kakao **1:1** response gets the person's call context. A persistent room provenance guard prevents new private derivatives from entering linked-group prompts or shared notes. Sharing retains the pre-bridge safe notes; this is intentionally conservative. Revision checks also stop in-flight summaries and late replies from reviving forgotten material.
+
+Transcripts and source quotes expire after 180 days. Cards and verified memories remain until deleted. No raw call audio is persisted. Provider resumption may use its own temporary cache. Test probes generate synthetic audio only in the isolated test workflow.
+
+## Operations
+
+- App: `/home/opc/marong-vertex-test/app`, user unit `marong-vertex-live.service`.
+- Pinned Python runtime: `/home/opc/marong-vertex-test/venv-memory2`.
+- Organizer: user unit `marong-voice-memory.service`.
+- Media: user unit `marong-rtc.service`; server-only `.config/marong-call/livekit.json` and `livekit.yaml` are never included in the repository or copied. `/api/rtc` checks identity, Origin and active-call ownership. `/rtc` remains behind the same authentication boundary. Native WebRTC packet loss/concealment and source-buffer underruns are reported separately.
+- Kakao: `/opt/marong`, system unit `marong.service`.
+- Database: `MARONG_CALL_DSN=dbname=marong user=marong_call`, exact local peer mapping from `opc`; no password files move.
+- Kakao: `MARONG_CALL_MEMORY=1` enables privacy enforcement. `MARONG_CALL_CONTEXT=0` can stop injection **without disabling privacy guards**. Once private derivatives exist, do not roll back to unguarded Kakao code or set `MARONG_CALL_MEMORY=0`.
+- Check authenticated `/status.active` before a planned restart. Back up the database and sources on the server. Additive schema remains during application rollback. A database restore must preserve/replay the latest deletion ledger before enabling retrieval; an old dump alone is not a valid privacy-preserving restore.
+- `/healthz` is liveness only. `/status`, `/live`, and the remaining `/api/*` endpoints require authentication; mutations verify Origin. Automatic memory access requires a mapped caller and remains caller-scoped.
+- Call lifecycle: POST `/api/calls/{uuid}/end` marks explicit user hangup and schedules automatic organization. It verifies both identity and ownership.
+
+Credit balance and expiry remain controlled by Google Billing. This change does not add a paid subscription or move usage to another provider; it also does not impose a spending cap.
+
+## Tests
 
 ```sh
-python tools/vertex_live/test_relay.py
 python tools/vertex_live/test_access.py
+python tools/vertex_live/test_relay.py
+python tools/vertex_live/test_transcripts.py
+python tools/vertex_live/test_rtc_api.py
 node tools/vertex_live/test_capture.cjs
 node tools/vertex_live/test_playback.cjs
+node tools/vertex_live/test_transport.cjs
 ```
 
-These use fake upstream connections and generated test signing keys, without
-real Google calls or credentials. They cover auth/origin rejection, asset MIME
-types, 25 turns, provider GoAway/resume, replay acknowledgement, repeated calls,
-explicit-stop cleanup, JWT verification and 16/44.1/48 kHz capture.
+On the server, `test_rtc.py` uses the private SFU with synthetic audio to check actual encrypted media delivery under 400 ms burst jitter. It sends no Kakao messages and does not use private conversation content.
 
-`probe_live.py` makes one short real Vertex request using the server's existing
-credentials. Run it on that server only. It reports voice, audio MIME/rate,
-synthetic-response transcript and audio length; it never outputs the key.
+Database integration uses `test_memory_bridge.py` only against a restored `marong_voice_verify_*` database with synthetic identities. It exercises the real Kakao Agent with a fake delivery callback: no Kakao message is sent to another person. `REAL_VERTEX_TEST=1` also checks the actual structured organizer API.
 
-Deployment validation on 2026-11-12: real Korean audio with Sulafat and
-`audio/pcm;rate=24000`; authenticated fixed-domain UI and `/status` 200;
-unauthenticated Access challenge; both intended email addresses saved in the
-Cloudflare policy. The second user's mailbox login and physical Safari mic / iOS
-background operation were not independently tested.
+`probe_memory_live.py` runs on the authorized server only: ordinary synthetic Korean preference -> real Vertex ASR -> automatic organizer -> PostgreSQL -> actual Kakao Agent prompt; Kakao seed -> spoken answer. No save/delete phrase is used and delivery is a fake callback. It never prints credentials. Physical iPhone Safari, Bluetooth, phone lock/background and cellular handoff require separate device acceptance; desktop Chrome and simulated transport tests do not establish those results.
+
+The existing broader PR #11 screen/admin/budget design remains reference material. This deployment implements the approved voice-stability and bidirectional-memory scope using the existing night-sky UI and assets; it does not silently enable old draft OpenAI billing or call cutoffs.

@@ -4,6 +4,7 @@ class CaptureProcessor extends AudioWorkletProcessor {
   constructor(){
     super();this.block=new Int16Array(1600);this.used=0;
     this.ratio=sampleRate/16000;this.remaining=this.ratio;this.sum=0;this.energy=0;
+    this.media=null;this.port.onmessage=({data})=>{if(data.type==='bind'){this.media?.close();this.media=data.port;}};
   }
   process(inputs,outputs){
     const input=inputs[0]?.[0];
@@ -18,7 +19,9 @@ class CaptureProcessor extends AudioWorkletProcessor {
           this.block[this.used++]=Math.max(-32768,Math.min(32767,Math.round(sample*32768)));
           this.sum=0;this.remaining=this.ratio;
           if(this.used===this.block.length){
-            this.port.postMessage({pcm:this.block.buffer,rms:Math.sqrt(this.energy/this.used)},[this.block.buffer]);
+            const rms=Math.sqrt(this.energy/this.used);
+            if(this.media){this.media.postMessage({pcm:this.block.buffer},[this.block.buffer]);this.port.postMessage({rms});}
+            else this.port.postMessage({pcm:this.block.buffer,rms},[this.block.buffer]);
             this.block=new Int16Array(1600);this.used=0;this.energy=0;
           }
         }

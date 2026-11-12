@@ -144,3 +144,9 @@ erDiagram
 - 2026-11-12, 이 작업 환경의 임시 Postgres 16 클러스터에서 빈 DB에 `marong/schema.sql` → `marong/call/schema.sql`을 두 번씩 적용했어요. 두 번 모두 오류 없이 끝났어요. 임시 환경에 pgvector가 없어서 카톡 스키마 사본에서만 `vector`를 `bytea`로 바꿨어요(원본 파일은 그대로).
 - [`schema-check.sql`](schema-check.sql)로 규칙을 시험했어요(독립 검토 반영 뒤 2026-11-12 다시 돌림). 기대한 오류 16개(안 끝난 통화 두 개, 안 닫힌 구간 두 개, 세션 id 없는 열린 구간, 같은 멱등 키, 위임 id 없는 모델 위임, 위임 id 있는 서버 보조 판단, 끝난 시각 없는 끝남, 같은 구간 사용 초 두 번, 모르는 AI 호출 종류, 빈 목소리, 예산 0, 같은 달 경고 두 번, 통화 서버의 카톡 표 쓰기, 카톡 봇의 자막 읽기, 카톡 봇의 화면 id 칸 읽기, 카톡 봇의 카드 지우기)가 모두 났고 그 밖의 오류는 없었어요. 미리 넘기기(직전 구간을 `renewed`로 닫고 새 구간을 연 한 트랜잭션)는 안 닫힌 구간 하나 규칙을 어기지 않고 지나갔어요. 카톡 봇은 잊기 표시된 카드를 거를 수 있어요(카드 1장 중 잊기 표시 없는 것 0장). 통화를 지운 뒤 자막·기억·카드·구간·위임은 0줄, AI 호출 기록은 2줄(음성 구간 1줄·느낌 고르기 1줄, 통화 id 비움, 600초)로 남았어요.
 - 확인하지 못한 것: 실제 서버 DB(pgvector 있음)에 적용, LangGraph `setup()`이 `call_graph`에 표를 만드는지, 데이터가 많을 때의 검색 속도.
+
+## 2026-11-12 Vertex 운영 적용
+
+현재 통화·기억 경로는 위 정본에 [`002_vertex_memory.sql`](../../marong/call/migrations/002_vertex_memory.sql)을 순서대로 적용한 스키마 버전 2를 사용합니다. OpenAI 전용 식별자는 호환성을 위해 남기고 `segments.provider`, `provider_model`, `provider_ready_at` 및 위임의 `request_key`/`result_data`를 추가했습니다. `turn_key`·`finalized`·`revision`으로 자막을 확정하고 `callers.context_revision`·`deletions`·`kakao_guards`로 삭제와 비공개 파생 자료를 관리합니다. `call_graph`에는 후보 본문 없이 작업 ID와 revision만 둡니다.
+
+배포된 API·권한·보관·되돌리기 규칙은 [Vertex 통화 운영 문서](../../tools/vertex_live/README.md)에 있습니다. 이번 배포는 Vertex Live WebSocket으로 모델과 통신하고, 싱가포르 서버의 LiveKit에서 브라우저로 WebRTC 음성을 전달합니다. 마이크 입력과 대체 PCM 재생은 독립 음성 작업자를 사용합니다. 기존 OpenAI 세션 발급 경로는 사용하지 않습니다.
