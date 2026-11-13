@@ -2,6 +2,8 @@
 
 Singapore `ko-family` serves https://marong.corthex-hq.com/ through the existing named Cloudflare Tunnel. `gemini-3.8-live`, **Sulafat**, and Korean (`ko-KR`) are unchanged. All Google calls use the existing server-side Vertex credentials and billing project. Credentials are never sent to the browser or copied between devices.
 
+The call page uses the Claude mockup's **군밤 크림** theme from 08:00 to just before 20:00 Korea Standard Time (UTC+9), and **밤하늘** for the rest of the day. It changes the theme in place at the boundary and rechecks when the page returns to the foreground. The three frontend files can be updated without restarting the call service.
+
 ## Audio path
 
 Input: `capture AudioWorklet -> dedicated network Worker -> Singapore relay -> Vertex Live`.
@@ -70,4 +72,4 @@ Database integration uses `test_memory_bridge.py` only against a restored `maron
 
 `probe_memory_live.py` runs on the authorized server only: ordinary synthetic Korean preference -> real Vertex ASR -> automatic organizer -> PostgreSQL -> actual Kakao Agent prompt; Kakao seed -> spoken answer. No save/delete phrase is used and delivery is a fake callback. It never prints credentials. Physical iPhone Safari, Bluetooth, phone lock/background and cellular handoff require separate device acceptance; desktop Chrome and simulated transport tests do not establish those results.
 
-The existing broader PR #11 screen/admin/budget design remains reference material. This deployment implements the approved voice-stability and bidirectional-memory scope using the existing night-sky UI and assets; it does not silently enable old draft OpenAI billing or call cutoffs.
+The existing broader PR #11 screen/admin/budget design remains reference material. The deployed call page combines the approved voice and memory features with the two scheduled themes.

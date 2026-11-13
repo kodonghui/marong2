@@ -1,4 +1,36 @@
 'use strict';
+(() => {
+  const hour = 3_600_000, day = 24 * hour;
+  const morning = 8 * hour, evening = 20 * hour;
+  const root = document.documentElement;
+  const themeColor = document.querySelector('meta[name="theme-color"]');
+  const colorScheme = document.querySelector('meta[name="color-scheme"]');
+  let timer;
+
+  function syncTheme() {
+    clearTimeout(timer);
+    // Korean standard time stays UTC+9, independently of the device's time zone.
+    const seoulTime = (Date.now() + 9 * hour) % day;
+    const cream = seoulTime >= morning && seoulTime < evening;
+    const theme = cream ? 'chestnut' : 'night';
+    if (root.dataset.theme !== theme) {
+      root.dataset.theme = theme;
+      if (themeColor) themeColor.content = cream ? '#fbf6ee' : '#121729';
+      if (colorScheme) colorScheme.content = cream ? 'light' : 'dark';
+    }
+    const next = seoulTime < morning ? morning : seoulTime < evening ? evening : day + morning;
+    // Reach the boundary exactly and recheck if the device clock moves.
+    timer = setTimeout(syncTheme, Math.min(next - seoulTime, 60_000));
+  }
+
+  syncTheme();
+  window.addEventListener('pageshow', syncTheme);
+  window.addEventListener('focus', syncTheme);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') syncTheme();
+  });
+})();
+
 const $=id=>document.getElementById(id);
 const CLIENT_VERSION='20261113-failover1';
 const clientId=crypto.randomUUID();
