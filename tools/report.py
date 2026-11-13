@@ -109,7 +109,7 @@ def call_sessions(c, start, until, tz):
         WHERE started_at < %s AND (ended_at IS NULL OR ended_at >= %s)
         ORDER BY started_at DESC,id""", (until, start)).fetchall()
     state = {'live': '통화 중', 'resting': '연결 대기', 'ended': '종료'}
-    paths = {'webrtc': 'WebRTC', 'pcm': 'WebSocket PCM', None: '이전 기록 없음'}
+    paths = {'webrtc': 'WebRTC', 'pcm': 'WebSocket PCM', 'discord': 'Discord 음성', None: '이전 기록 없음'}
     organized = {'none': '대기 전', 'pending': '대기', 'running': '정리 중', 'done': '완료', 'skipped': '생략', 'failed': '실패'}
     reasons = {'start': '시작/재연결', 'rtc_disconnected': 'WebRTC 끊김', 'rtc_reconnecting': 'WebRTC 재연결',
         'rtc_media_stalled': '음성 수신 정지', 'rtc_track_lost': '음성 트랙 끊김', 'rtc_no_media': '음성 수신 안 됨',
@@ -355,7 +355,8 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
             mine = t['role'] == 'assistant'
             label = ('통화(중단)' if t['interrupted'] else '통화(전사 중)' if not t['finalized']
                      else '통화(응답)' if mine else '통화(글)' if t['input_kind'] == 'text' else '통화(전사)')
-            row = [f"V{t['id']}", at(t['started_at']), '통화 #' + str(t['call_id'])[:8],
+            room_label = 'Discord 통화' if t.get('entrypoint') == 'discord' else '통화'
+            row = [f"V{t['id']}", at(t['started_at']), room_label + ' #' + str(t['call_id'])[:8],
                    '마롱이' if mine else (t['caller_name'] or '통화 사용자'), label, t['content'],
                    None, '미확인' if mine else '-', t['provider_model'], None, None, None, None, None,
                    '미집계' if mine else None]

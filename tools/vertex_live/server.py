@@ -185,8 +185,12 @@ async def startup(app):
         memory_store=MemoryStore(dsn)
         await memory_store.open()
         async with memory_store.pool.connection() as c,c.transaction():
-            await c.execute("UPDATE call.calls SET status='resting' WHERE status='live'")
-            await c.execute("UPDATE call.segments SET state='closed',closed_at=now(),close_reason='server_restart' WHERE state<>'closed'")
+            await c.execute("""UPDATE call.calls c SET status='resting' WHERE status='live'
+                AND to_jsonb(c)->>'entrypoint' IS DISTINCT FROM 'discord'""")
+            await c.execute("""UPDATE call.segments s
+                SET state='closed',closed_at=now(),close_reason='server_restart'
+                FROM call.calls c WHERE c.id=s.call_id AND s.state<>'closed'
+                AND to_jsonb(c)->>'entrypoint' IS DISTINCT FROM 'discord'""")
 
 async def cleanup(app):
     await asyncio.gather(*(b.close() for b in list(rtc_transport.bridges.values())),return_exceptions=True)

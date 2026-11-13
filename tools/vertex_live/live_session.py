@@ -16,7 +16,7 @@ FRAME=struct.Struct('!4sIIIII')
 
 
 class LiveSession:
-    def __init__(self,ws,owner,store,principal,setup,headers,resume,diagnostics,location,model,voice,client_id):
+    def __init__(self,ws,owner,store,principal,setup,headers,resume,diagnostics,location,model,voice,client_id,*,entry_transport=None):
         self.ws=ws;self.owner=owner;self.store=store;self.p=principal;self.setup=setup;self.headers=headers
         self.resume=resume;self.d=diagnostics;self.location=location;self.model=model;self.voice=voice;self.client_id=client_id
         self.call_id=str(uuid.uuid4());self.segment=None;self.logical_resumed=False
@@ -27,6 +27,7 @@ class LiveSession:
         self.revision=principal.revision if principal else 0;self.recorder=None;self.ready=False;self.turn_segments={}
         self.legacy_pcm=False
         self.rtc=None
+        self.entry_transport=entry_transport
         self.pcm_forced=False;self.connection_id=str(uuid.uuid4());self.transport_log=[]
 
     def log_transport(self,mode,reason):
@@ -71,6 +72,7 @@ class LiveSession:
 
     def caption(self,role,text,key):
         self.turn_segments.setdefault(key,self.segment)
+        if self.entry_transport=='discord':return
         if not self.output.full():self.output.put_nowait(('json',{'type':'transcript','who':'user' if role=='user' else 'marong','text':text,'key':key,'replace':True}))
 
     async def emit(self,data):await self.output.put(('json',data))
@@ -118,6 +120,7 @@ class LiveSession:
                     except (ValueError,TypeError):continue
                     if not isinstance(item,dict):continue
                     if item.get('type')=='stop':self.explicit=True;return
+                    if self.entry_transport=='discord':continue
                     if item.get('type')=='playback_stats':self.stats(item);continue
                     if item.get('type')=='audio_transport' and item.get('mode')=='pcm':
                         reason=item.get('reason')
@@ -158,7 +161,7 @@ class LiveSession:
         elif self.resume.get('owner')==self.owner and time.time()-self.resume.get('updated',0)<600:
             self.call_id=self.resume.get('call_id',self.call_id)
         self.d.update(build=BUILD,callId=self.call_id,startedAt=time.time(),providerInterruptions=0,providerReconnects=0)
-        self.log_transport('webrtc' if self.rtc else 'pcm','start')
+        self.log_transport(self.entry_transport or ('webrtc' if self.rtc else 'pcm'),'start')
         if self.resume.get('owner')==self.owner and self.resume.get('call_id')==self.call_id and time.time()-self.resume.get('updated',0)<600 and self.resume.get('revision')==self.revision:
             self.handle=self.resume.get('handle')
         self.recorder=TranscriptRecorder(self.save,self.caption)
@@ -220,7 +223,7 @@ class LiveSession:
                             raise ConnectionError('setup_rejected')
                         self.ready=True;delay=1
                         await self.emit({'type':'ready','resumed':bool(self.handle) or self.logical_resumed,'callId':self.call_id,
-                            'build':BUILD,'audioFormat':2,'epoch':self.epoch,'audioTransport':'webrtc' if self.rtc else 'pcm','memoryConnected':bool(self.p and self.segment)})
+                            'build':BUILD,'audioFormat':2,'epoch':self.epoch,'audioTransport':self.entry_transport or ('webrtc' if self.rtc else 'pcm'),'memoryConnected':bool(self.p and self.segment)})
                         self.logical_resumed=True
                         await self.provider(upstream)
             except asyncio.CancelledError:raise

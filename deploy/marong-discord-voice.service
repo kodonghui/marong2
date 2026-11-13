@@ -1,0 +1,24 @@
+[Unit]
+Description=Marong private Discord voice
+After=network-online.target marong-discord-voice-relay.service
+Requires=marong-discord-voice-relay.service
+Wants=network-online.target
+
+[Service]
+User=marong-discord-voice
+Group=marong-discord-voice
+WorkingDirectory=/opt/marong-discord-voice
+EnvironmentFile=/etc/marong-discord/voice
+LoadCredential=discord-token:/etc/marong-discord/token
+ExecStart=/usr/bin/node /opt/marong-discord-voice/index.mjs
+Restart=on-failure
+RestartSec=10s
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
