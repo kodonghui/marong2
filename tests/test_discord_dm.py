@@ -140,6 +140,19 @@ async def check(db):
         assert client.channels[DM_DH].sent == ["테스트 답장이야."]
         print("PASS single opening, ordinary untagged replies, deduplication and isolated context")
 
+        # An existing DM can receive the opening once, with its past messages intact.
+        replay = "여기서 다시 보니까 반갑다 🌰"
+        first_replies = {"1": {"once": replay}, "2": greeting}
+        agent.first_replies = first_replies
+        await client.on_message(event(client, DH, DM_DH, 61, "다시 안녕"))
+        assert client.channels[DM_DH].sent == ["테스트 답장이야.", replay]
+        assert await store.has_delivered_reply(f"discord-dm:{DH}", replay_text=replay)
+        restarted_client = Client(DiscordAgent(settings, store, emb, llm, first_replies=first_replies), store)
+        await restarted_client.on_message(event(restarted_client, DH, DM_DH, 62, "그다음은?"))
+        assert restarted_client.channels[DM_DH].sent == ["테스트 답장이야."]
+        assert "DH_DISCORD_MESSAGE" in json.dumps(await store.recent(f"discord-dm:{DH}", 10), default=str)
+        print("PASS an existing DM gets the configured replay once, across restarts")
+
         rooms = await store.proactive_rooms()
         assert len(rooms) == 1 and rooms[0]["per_day"] == 36 and rooms[0]["start_hour"] == 7
         room = rooms[0]["room_key"]

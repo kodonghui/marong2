@@ -127,11 +127,13 @@ class DiscordStore(Store):
         )
         return bool(row)
 
-    async def has_delivered_reply(self, room_key: str) -> bool:
+    async def has_delivered_reply(self, room_key: str, *, replay_text: str | None = None) -> bool:
         row = await self._one(
             """SELECT EXISTS (SELECT 1 FROM marong.messages WHERE room_key=%s
-                              AND role='assistant' AND meta->>'delivered'='true') AS delivered""",
-            (room_key,),
+                              AND role='assistant' AND meta->>'delivered'='true'
+                              AND (%s::text IS NULL OR
+                                   (meta->>'discord_opening_replay'='true' AND content=%s))) AS delivered""",
+            (room_key, replay_text, replay_text),
         )
         return row["delivered"]
 

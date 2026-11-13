@@ -80,8 +80,11 @@ class DiscordAgent(Agent):
         if msg.proactive_preference is False:
             return "응, 먼저 연락하는 건 멈출게.", {}
         opening = self.first_replies.get(str((person or {}).get("friend_id")))
-        if opening and use_memory and user_id is not None and not await self.store.has_delivered_reply(msg.room_key):
-            return opening, {}
+        if opening and use_memory and user_id is not None:
+            replay = isinstance(opening, dict)
+            greeting = opening["once"] if replay else opening
+            if not await self.store.has_delivered_reply(msg.room_key, replay_text=greeting if replay else None):
+                return greeting, {"discord_opening_replay": True} if replay else {}
         if msg.proactive_preference is True:
             return "응, 나도 먼저 톡할게 🌰", {}
         if text in GUIDE:

@@ -22,11 +22,12 @@ async def main():
         raise SystemExit("Invalid Marong model or database settings")
     token = (Path(os.environ["CREDENTIALS_DIRECTORY"]) / "discord-token").read_text(encoding="ascii").strip()
     first_replies = json.loads(os.environ.get("MARONG_DISCORD_FIRST_REPLIES", "{}"))
-    if not isinstance(first_replies, dict) or not all(
-        key.isdecimal() and isinstance(reply, str) and reply.strip()
-        for key, reply in first_replies.items()
-    ):
+    if not isinstance(first_replies, dict):
         raise SystemExit("Invalid Discord first-reply configuration")
+    for friend_id, reply in first_replies.items():
+        greeting = reply.get("once") if isinstance(reply, dict) else reply
+        if not friend_id.isdecimal() or not isinstance(greeting, str) or not greeting.strip():
+            raise SystemExit("Invalid Discord first-reply configuration")
     store = DiscordStore(settings.database_url, call_bridge=True)
     store.discord_context_enabled = False
     llm = LLM(settings)
