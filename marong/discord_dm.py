@@ -1,7 +1,7 @@
 """Discord Gateway transport for private, explicitly linked Marong accounts."""
 import asyncio
 from collections import OrderedDict
-from contextlib import suppress
+from dataclasses import dataclass
 from datetime import datetime
 import logging
 from zoneinfo import ZoneInfo
@@ -12,15 +12,30 @@ from .agent import Agent, Incoming
 from .proactive import PART_GAP_S, Proactive, parts, schedule, slot
 
 log = logging.getLogger("marong.discord")
-ON = {"선톡 켜기", "선톡 켜 줘", "선톡 켜줘"}
-OFF = {"선톡 끄기", "선톡 꺼 줘", "선톡 꺼줘", "선톡 그만", "먼저 연락하지 마"}
+ON = {
+    "선톡 켜기", "선톡 켜 줘", "선톡 켜줘", "먼저 톡해 줘", "먼저 톡해줘",
+    "앞으로 먼저 톡해 줘", "앞으로 먼저 톡해줘",
+}
+OFF = {
+    "선톡 끄기", "선톡 꺼 줘", "선톡 꺼줘", "선톡 그만",
+    "먼저 연락하지 마", "먼저 톡하지 마",
+}
 GUIDE = {"도움말", "사용법"}
-INTRO = (
-    "안녕, 마롱이야 🌰 이 DM에서 그냥 편하게 말 걸면 돼. "
-    "네 계정에 연결된 카톡과 통화의 기억을 이어 쓰고, 여기서 나눈 대화도 마롱이 연구용 시트에 기록돼. "
-    "먼저 말 걸어 줬으면 ‘선톡 켜기’, 멈추려면 ‘선톡 끄기’라고 보내 줘."
-)
 NO_MENTIONS = discord.AllowedMentions.none()
+
+
+@dataclass
+class DiscordIncoming(Incoming):
+    proactive_preference: bool | None = None
+
+
+def proactive_preference(text: str) -> bool | None:
+    phrase = " ".join(text.split()).rstrip(".!?~").removeprefix("마롱아").lstrip(", ")
+    if phrase in ON:
+        return True
+    if phrase in OFF:
+        return False
+    return None
 
 
 def chunks(text: str):
@@ -47,15 +62,35 @@ async def send_text(channel, text: str) -> bool:
 
 
 class DiscordAgent(Agent):
+    def __init__(self, settings, store, embeddings, llm, on_saved=None, *, first_replies=None):
+        super().__init__(settings, store, embeddings, llm, on_saved=on_saved)
+        self.first_replies = first_replies or {}
+
     def _tools(self, msg):
         return []  # Identity and opt-in never change on model output.
 
     def _system(self, situation):
         return super()._system(
             situation + "\n\n지금은 디스코드에서 마롱이와 하는 개인 DM이야. 이름을 바꾸거나 다른 친구의 기록을 "
-            "찾아 주겠다고 말하지 마. 선톡 설정은 '선톡 켜기' 또는 '선톡 끄기'라고 정확히 보내면 바뀌어. "
+            "찾아 주겠다고 말하지 마. 친구처럼 바로 대화하고, 사용법이나 선톡 설정을 먼저 설명하지 마. "
             "먼저 말 걸 때에는 잠금 화면에 보여도 괜찮은 가벼운 이야기만 하고, 개인적인 내용은 인용하지 마."
         )
+
+    async def _reply(self, msg: DiscordIncoming, person, user_id, text, timeout, use_memory=True, held=None):
+        if msg.proactive_preference is False:
+            return "응, 먼저 연락하는 건 멈출게.", {}
+        opening = self.first_replies.get(str((person or {}).get("friend_id")))
+        if opening and use_memory and user_id is not None and not await self.store.has_delivered_reply(msg.room_key):
+            return opening, {}
+        if msg.proactive_preference is True:
+            return "응, 나도 먼저 톡할게 🌰", {}
+        if text in GUIDE:
+            link = await self.store.link(msg.user_key.removeprefix("discord-user:"))
+            schedule_text = (f"먼저 톡은 한국 시간 {link['start_hour']:02d}:00~{link['end_hour']:02d}:00에 "
+                             f"하루 최대 {link['per_day']}번이야. " if link else "")
+            return ("여기서 평소처럼 말 걸어 줘. 이 대화는 연구용 시트에 기록돼. " + schedule_text
+                    + "원하면 ‘먼저 톡해 줘’, 그만 받으려면 ‘선톡 끄기’라고 말해 줘."), {}
+        return await super()._reply(msg, person, user_id, text, timeout, use_memory, held)
 
 
 class DiscordDM(discord.Client):
@@ -123,22 +158,12 @@ class DiscordDM(discord.Client):
             self.seen.popitem(last=False)
 
         text = msg.content.strip()
-        command = " ".join(text.split())
-        preference = True if command in ON else False if command in OFF else None
-        if not await self.store.incoming(user_id, channel_id, preference):
+        message_key = f"discord:{msg.id}"
+        preference = proactive_preference(text)
+        if not await self.store.incoming(user_id, channel_id, message_key, preference):
             return
-        if command in GUIDE:
-            await send_text(msg.channel, INTRO)
-            return
-        if first_dm:
-            await send_text(msg.channel, INTRO)
         if preference is not None:
-            message = (f"선톡 켰어. 한국 시간 {link['start_hour']:02d}:00~{link['end_hour']:02d}:00에 "
-                       f"하루 최대 {link['per_day']}번 가볍게 말 걸게. 그만 받고 싶으면 ‘선톡 끄기’라고 해 줘."
-                       if preference else "선톡 껐어. 네가 먼저 말 걸면 언제든 대답할게.")
-            await send_text(msg.channel, message)
             log.info("discord_proactive_preference changed=%s", preference)
-            return
 
         async def reply(body):
             return await send_text(msg.channel, body)
@@ -146,7 +171,8 @@ class DiscordDM(discord.Client):
         room = link["room_key"]
         async with self.room_lock(room):
             result = await self.agent.handle(
-                Incoming(room, link["user_key"], text, True, f"discord:{msg.id}"), reply,
+                DiscordIncoming(room, link["user_key"], text, kakao_id=message_key,
+                                proactive_preference=preference), reply,
             )
         if result is not None:
             log.info("discord_dm_replied")

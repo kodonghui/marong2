@@ -1,6 +1,7 @@
 """Run the private Discord bot using the existing server-side Marong settings."""
 import asyncio
 from dataclasses import replace
+import json
 import logging
 import os
 from pathlib import Path
@@ -20,6 +21,12 @@ async def main():
     if any("BOT_TOKEN" not in item for item in settings.problems()):
         raise SystemExit("Invalid Marong model or database settings")
     token = (Path(os.environ["CREDENTIALS_DIRECTORY"]) / "discord-token").read_text(encoding="ascii").strip()
+    first_replies = json.loads(os.environ.get("MARONG_DISCORD_FIRST_REPLIES", "{}"))
+    if not isinstance(first_replies, dict) or not all(
+        key.isdecimal() and isinstance(reply, str) and reply.strip()
+        for key, reply in first_replies.items()
+    ):
+        raise SystemExit("Invalid Discord first-reply configuration")
     store = DiscordStore(settings.database_url, call_bridge=True)
     store.discord_context_enabled = False
     llm = LLM(settings)
@@ -37,7 +44,8 @@ async def main():
         emb.start()
         if worker:
             tasks.append(asyncio.create_task(worker.run()))
-        agent = DiscordAgent(settings, store, emb, llm, on_saved=worker.kick if worker else None)
+        agent = DiscordAgent(settings, store, emb, llm, on_saved=worker.kick if worker else None,
+                             first_replies=first_replies)
         client = DiscordDM(agent, store, int(os.environ["MARONG_DISCORD_APP_ID"]), int(os.environ["MARONG_DISCORD_GUILD_ID"]))
         async with client:
             tasks.append(asyncio.create_task(DiscordProactive(settings, store, agent, client).run()))

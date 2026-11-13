@@ -69,7 +69,7 @@ def event(client, user, channel, mid, content, *, group=False, bot=False):
 def prepare(db):
     with psycopg.connect(db.admin_url, autocommit=True) as conn:
         for name in ("marong/call/schema.sql", "marong/call/migrations/002_vertex_memory.sql",
-                     "marong/migrations/010_discord_dm.sql"):
+                     "marong/migrations/010_discord_dm.sql", "marong/migrations/011_discord_proactive_consent.sql"):
             conn.execute((ROOT / name).read_text(encoding="utf-8"))
         conn.execute("INSERT INTO marong.friends(name) VALUES ('동희'),('현경')")
         conn.execute("""INSERT INTO marong.rooms(room_key,is_channel,proactive)
@@ -87,6 +87,7 @@ def prepare(db):
         bind_dm(conn, DH, 1, 2, 12, 21)
         bind_dm(conn, HK, 2, 36, 7, 24)
         bind_dm(conn, HK, 2, 36, 7, 24)
+        conn.execute("UPDATE marong.discord_dm_links SET opted_in_at=now() WHERE discord_user_id=%s", (HK,))
         conn.execute("INSERT INTO call.callers(friend_id) VALUES (2)")
 
 
@@ -100,7 +101,8 @@ async def check(db):
     try:
         emb = FakeEmbeddings()
         llm = ScriptedLLM(lambda _: message([text("테스트 답장이야.")]))
-        agent = DiscordAgent(settings, store, emb, llm)
+        greeting = "여기서 보니까 반갑다 🌰 오늘 뭐 했어?"
+        agent = DiscordAgent(settings, store, emb, llm, first_replies={"2": greeting})
         client = Client(agent, store)
         for incoming in (
             event(client, OTHER, DM_HK, 1, "third party"),
@@ -110,26 +112,36 @@ async def check(db):
         ):
             await client.on_message(incoming)
         assert not llm.bodies and not any(ch.sent for ch in client.channels.values())
+        assert not await store.proactive_rooms()
+        assert any(r["room_key"] == "mixed" for r in await kakao.proactive_rooms())
         print("PASS third-party, server, bot and wrong-recipient events are ignored")
 
         h = event(client, HK, DM_HK, 5, "HK_DISCORD_MESSAGE")
         await client.on_message(h)
+        # A fresh gateway process still won't repeat the opening or a handled message.
+        client.seen.clear()
         await client.on_message(h)
+        assert client.channels[DM_HK].sent == [greeting]
+        assert not llm.bodies
+        assert await store.has_delivered_reply(f"discord-dm:{HK}")
+        rooms = await store.proactive_rooms()
+        assert [r["friend_id"] for r in rooms] == [2]
+        assert not any(r["room_key"] == "mixed" for r in await kakao.proactive_rooms())
+        print("PASS prior consent activates proactive DMs on an ordinary first message")
+
+        await client.on_message(event(client, HK, DM_HK, 51, "HK_DISCORD_NEXT"))
         await client.on_message(event(client, DH, DM_DH, 6, "DH_DISCORD_MESSAGE"))
         assert len(llm.bodies) == 2
         a, b = (json.dumps(req, ensure_ascii=False) for req in llm.bodies)
         assert "HK_OWN_KAKAO" in a and "DH_OWN_KAKAO" in b
         assert all(x not in a for x in ("DH_OWN_KAKAO", "PRIVATE_GROUP_MARKER", "PRIVATE_MIXED_SUMMARY"))
         assert all(x not in b for x in ("HK_OWN_KAKAO", "HK_DISCORD_MESSAGE"))
-        assert len(client.channels[DM_HK].sent) == len(client.channels[DM_DH].sent) == 2
-        print("PASS untagged replies, duplicate protection and isolated per-person context")
+        assert client.channels[DM_HK].sent == [greeting, "테스트 답장이야."]
+        assert client.channels[DM_DH].sent == ["테스트 답장이야."]
+        print("PASS single opening, ordinary untagged replies, deduplication and isolated context")
 
-        assert not await store.proactive_rooms()
-        assert any(r["room_key"] == "mixed" for r in await kakao.proactive_rooms())
-        await client.on_message(event(client, HK, DM_HK, 7, "선톡 켜기"))
         rooms = await store.proactive_rooms()
         assert len(rooms) == 1 and rooms[0]["per_day"] == 36 and rooms[0]["start_hour"] == 7
-        assert "하루 최대 36번" in client.channels[DM_HK].sent[-1]
         room = rooms[0]["room_key"]
         db.admin("UPDATE marong.discord_dm_links SET last_incoming_at=now()-interval '2 hours', opted_in_at=now()-interval '2 hours' WHERE room_key=%s", (room,))
         now = datetime(2026, 11, 13, 12, 0, tzinfo=TZ)
@@ -139,14 +151,21 @@ async def check(db):
         assert await restarted.step(now) == 0
         assert not any(r["room_key"] == "mixed" for r in await kakao.proactive_rooms())
         assert client.channels[DM_HK].sent[-1] == "테스트 답장이야."
+        enable = event(client, HK, DM_HK, 7, "마롱아, 먼저 톡해 줘.")
+        await client.on_message(enable)
+        assert client.channels[DM_HK].sent[-1] == "응, 나도 먼저 톡할게 🌰"
         await client.on_message(event(client, HK, DM_HK, 8, "선톡 끄기"))
+        client.seen.clear()
+        await client.on_message(enable)
+        assert client.channels[DM_HK].sent[-1] == "응, 먼저 연락하는 건 멈출게."
+        await client.on_message(event(client, HK, DM_HK, 9, "HK_DISCORD_RECENT"))
         assert not await store.proactive_rooms()
         assert await restarted.step(now) == 0
         print("PASS consent gate, scheduled DM, persistent deduplication and immediate opt-out")
 
         assert not any(r["room_key"].startswith("discord-dm:") for r in await kakao.proactive_rooms())
         hk_user_id = await kakao.add_message("k-hk", "user", "kakao continuity", "p-hk")
-        assert "HK_DISCORD_MESSAGE" in json.dumps(await kakao.discord_context("k-hk", "p-hk", hk_user_id))
+        assert "HK_DISCORD_RECENT" in json.dumps(await kakao.discord_context("k-hk", "p-hk", hk_user_id))
         assert not await kakao.discord_context("k-hk", "p-dh", hk_user_id)
         assert not await kakao.discord_context("mixed", "p-hk", hk_user_id)
         assert "HK_DISCORD_MESSAGE" not in json.dumps(await kakao.recent("k-dh", 100), default=str)
@@ -155,14 +174,14 @@ async def check(db):
         async def deliver_kakao(_):
             return True
         await kakao_agent.handle(Incoming("k-hk", "p-hk", "kakao memory continuity"), deliver_kakao)
-        assert "HK_DISCORD_MESSAGE" in json.dumps(kakao_llm.bodies[-1], ensure_ascii=False)
+        assert "HK_DISCORD_RECENT" in json.dumps(kakao_llm.bodies[-1], ensure_ascii=False)
         assert "DH_DISCORD_MESSAGE" not in json.dumps(kakao_llm.bodies[-1], ensure_ascii=False)
         assert "HK_KAKAO_PRIVATE_REPLY" not in json.dumps(await kakao.recent("mixed", 100), default=str)
         call = MemoryStore(db.admin_url)
         await call.pool.open(wait=True)
         try:
             voice = await call.seed(Principal(1, 2, "현경"))
-            assert "HK_DISCORD_MESSAGE" in voice and "DH_DISCORD_MESSAGE" not in voice
+            assert "HK_DISCORD_RECENT" in voice and "DH_DISCORD_MESSAGE" not in voice
         finally:
             await call.close()
         print("PASS same-account Kakao/voice context and no group or other-account access")
@@ -173,6 +192,7 @@ async def check(db):
             data = next(tab for tab in tabs if tab["name"] == "대화")
             index = next(i for i,row in enumerate(data["rows"]) if row[5] == "HK_DISCORD_MESSAGE")
             assert data["rows"][index][2].startswith("Discord DM") and data["colors"][index] == "#fff2cc"
+            assert sum(row[5] == greeting for row in data["rows"]) == 1
         print("PASS research report contains Discord DM text with existing speaker color")
     finally:
         await store.close()

@@ -110,19 +110,30 @@ class DiscordStore(Store):
     async def link(self, discord_user_id: str) -> dict | None:
         return await self._one(DM_STATE + " AND d.discord_user_id=%s", (discord_user_id,))
 
-    async def incoming(self, user_id: str, channel_id: str, preference: bool | None) -> bool:
+    async def incoming(self, user_id: str, channel_id: str, message_key: str, preference: bool | None) -> bool:
         row = await self._one(
-            """UPDATE marong.discord_dm_links
-                  SET channel_id=%s,last_incoming_at=clock_timestamp(),failures=0,
-                      opted_in_at=CASE WHEN %s::boolean THEN coalesce(opted_in_at,clock_timestamp())
-                                       WHEN %s::boolean IS FALSE THEN NULL ELSE opted_in_at END,
-                      proactive_moved_at=CASE WHEN %s::boolean THEN coalesce(proactive_moved_at,clock_timestamp())
-                                             ELSE proactive_moved_at END
-                WHERE discord_user_id=%s AND (channel_id IS NULL OR channel_id=%s)
+            """UPDATE marong.discord_dm_links d
+                  SET channel_id=%(channel)s,last_incoming_at=clock_timestamp(),failures=0,
+                      opted_in_at=CASE WHEN %(preference)s::boolean IS TRUE THEN coalesce(opted_in_at,clock_timestamp())
+                                       WHEN %(preference)s::boolean IS FALSE THEN NULL ELSE opted_in_at END,
+                      proactive_moved_at=CASE WHEN coalesce(%(preference)s::boolean, opted_in_at IS NOT NULL)
+                                             THEN coalesce(proactive_moved_at,clock_timestamp()) ELSE proactive_moved_at END
+                WHERE discord_user_id=%(user)s AND (channel_id IS NULL OR channel_id=%(channel)s)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM marong.messages m WHERE m.room_key=d.room_key AND m.kakao_id=%(message)s
+                  )
                 RETURNING discord_user_id""",
-            (channel_id, preference, preference, preference, user_id, channel_id),
+            {"user": user_id, "channel": channel_id, "message": message_key, "preference": preference},
         )
         return bool(row)
+
+    async def has_delivered_reply(self, room_key: str) -> bool:
+        row = await self._one(
+            """SELECT EXISTS (SELECT 1 FROM marong.messages WHERE room_key=%s
+                              AND role='assistant' AND meta->>'delivered'='true') AS delivered""",
+            (room_key,),
+        )
+        return row["delivered"]
 
     async def proactive_rooms(self, room_key: str | None = None) -> list[dict]:
         return await self._all(
