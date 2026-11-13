@@ -72,7 +72,7 @@ def parts(text: str) -> list[str]:
 
 
 class Proactive:
-    def __init__(self, settings: Settings, store: Store, agent: Agent, http: httpx.AsyncClient, room_lock=None,
+    def __init__(self, settings: Settings, store: Store, agent: Agent, http: httpx.AsyncClient | None, room_lock=None,
                  rng=random.random, sleep=asyncio.sleep):
         self.s = settings
         self.store = store
@@ -140,6 +140,8 @@ class Proactive:
         """그 방에 보낼 선톡을 만들어 보내고 저장한다. dry 면 만들기만 한다.
         돌려주는 것: {"text": 만든 말(못 만들면 None), "ok": 한 말이라도 전달됨, "code": 카카오 오류 코드,
         "parts": [전달된 말 수, 만든 말 수], "saved": 저장 성공}."""
+        if self.http is None and not dry:
+            raise RuntimeError("Kakao delivery requires an HTTP client")
         made = await self.agent.proactive_message(room)
         if made is None:
             return {"text": None, "ok": False, "code": None}
@@ -153,6 +155,11 @@ class Proactive:
         for i, chunk in enumerate(chunks):
             if i:  # 사람이 연달아 치듯 몇 초 쉬고 다음 말
                 await self.sleep(PART_GAP_S[0] + self.rng() * (PART_GAP_S[1] - PART_GAP_S[0]))
+            if getattr(self.store, "discord_context_enabled", False) and not await self.store.proactive_rooms(room["room_key"]):
+                # The recipient may have moved their scheduled greetings while Claude was replying.
+                if not done:
+                    return {"text": None, "ok": False, "code": None}
+                break
             if room["is_channel"]:
                 ok, code, key = await send_first(self.http, self.s, skill_text(chunk), room_key=room["room_key"],
                                                  user_key=room["user_key"], prefer=key)

@@ -56,7 +56,7 @@ ROOM_STATE = (
     "LEFT JOIN LATERAL (SELECT m.user_key FROM marong.messages m "
     "  WHERE m.room_key = coalesce(r.memory_room, r.room_key) AND m.role = 'user' ORDER BY m.id DESC LIMIT 1) w ON true "
     "LEFT JOIN marong.people p ON p.user_key = coalesce(w.user_key, u.user_key) "
-    "WHERE u.kakao_id IS NOT NULL ")
+    "WHERE u.kakao_id IS NOT NULL AND r.room_key NOT LIKE 'discord-dm:%%' ")
 # 선톡 대상: 선톡을 켜 둔 1:1 방(기본 켬)과 관리자가 켠 단체방(group_proactive, 기본 꺼짐, 표 버전 8)
 PROACTIVE_ON = "AND CASE WHEN r.is_channel THEN r.proactive ELSE r.group_proactive END "
 
@@ -81,6 +81,7 @@ class Store:
         self.call_bridge = os.getenv('MARONG_CALL_MEMORY') == '1' if call_bridge is None else call_bridge
         # Keep privacy filters on when injection is disabled during a rollback.
         self.call_context_enabled = os.getenv('MARONG_CALL_CONTEXT', '1') == '1'
+        self.discord_context_enabled = os.getenv("MARONG_DISCORD_CONTEXT") == "1"
 
     def _call_guard(self, kind: str, source_id: str, room: str, requested: str = '%(room)s', expression=False) -> str:
         if not self.call_bridge:
@@ -158,16 +159,22 @@ class Store:
             (room_key, user_key, role, content, kakao_id, reply_to, Jsonb(meta or {})))
         return row["id"] if row else None
 
+    def _reply_rooms(self, room: str) -> str:
+        return scope(room)
+
+    def _reply_embedding_filter(self) -> str:
+        return ""
+
     async def recent(self, room_key: str, limit: int, since_id: int | None = None) -> list[dict]:
         """방(묶인 방들 함께)의 최근 메시지(오래된 것부터). since_id 가 있으면 그 메시지부터는 limit 을 넘어도 다 넣는다.
         친구에게 전달되지 못한 마롱이 답은 뺀다."""
         rows = await self._all(
             "SELECT m.id, m.role, m.user_key, p.name, m.content, m.created_at FROM marong.messages m "
             "LEFT JOIN marong.people p ON p.user_key = m.user_key "
-            "WHERE m.room_key IN " + scope("%(room)s") + " AND m.meta->>'delivered' IS DISTINCT FROM 'false' "
+            "WHERE m.room_key IN " + self._reply_rooms("%(room)s") + " AND m.meta->>'delivered' IS DISTINCT FROM 'false' "
             + self._call_guard('message','m.id','m.room_key') +
             "ORDER BY m.id DESC LIMIT greatest(%(limit)s, "
-            "(SELECT count(*) FROM marong.messages WHERE room_key IN " + scope("%(room)s") + " AND id >= %(since)s))",
+            "(SELECT count(*) FROM marong.messages WHERE room_key IN " + self._reply_rooms("%(room)s") + " AND id >= %(since)s))",
             {"room": room_key, "limit": limit, "since": since_id})
         return rows[::-1]
 
@@ -322,7 +329,8 @@ class Store:
         return await self._all(
             "WITH q AS (SELECT %s::vector AS v), hits AS ("
             "  SELECT e.source_type, e.source_id, 1 - (e.embedding <=> q.v) AS similarity "
-            "  FROM marong.embeddings e, q WHERE e.model = %s AND e.room_key IN " + scope("%s") + " "
+            "  FROM marong.embeddings e, q WHERE e.model = %s AND e.room_key IN " + self._reply_rooms("%s") + " "
+            + self._reply_embedding_filter() +
             "  AND NOT (e.source_type = 'message' AND e.source_id >= %s) "
             "  AND NOT (e.source_type = 'summary' AND e.source_id = ANY(%s::bigint[])) "
             "  ORDER BY e.embedding <=> q.v LIMIT %s) "
@@ -341,7 +349,9 @@ class Store:
     async def proactive_rooms(self, room_key: str | None = None) -> list[dict]:
         """선톡을 켜 둔 카카오 1:1 방과 관리자가 켠 단체방(오래 조용한 방부터), 일정·조건 재료(ROOM_STATE). 보낼지는
         proactive.py 가 방마다 일정으로 정한다. room_key 를 주면 그 방만."""
-        return await self._all(ROOM_STATE + PROACTIVE_ON + "AND (%(room)s::text IS NULL OR r.room_key = %(room)s) "
+        moved = ("AND NOT EXISTS (SELECT 1 FROM marong.discord_dm_links d WHERE d.proactive_moved_at IS NOT NULL "
+                 "AND d.kakao_room_key = coalesce(r.memory_room,r.room_key)) " if self.discord_context_enabled else "")
+        return await self._all(ROOM_STATE + PROACTIVE_ON + moved + "AND (%(room)s::text IS NULL OR r.room_key = %(room)s) "
                                "ORDER BY u.created_at", {"room": room_key})
 
     async def proactive_count(self, within: timedelta) -> int:
@@ -510,6 +520,51 @@ class Store:
                     text=row['content'][:min(400,remaining-30)];remaining-=len(text)+30
                     selected.append({'source':row['source'],'id':row['id'],'text':text})
                 return {'friend_id':caller['friend_id'],'items':selected}
+
+    async def discord_context(self, room_key: str, user_key: str, user_id: int | None) -> list[dict]:
+        """Only the same friend's Discord DM enters this exact Kakao 1:1 room."""
+        if not self.call_bridge or not self.discord_context_enabled or user_id is None:
+            return []
+        async with self.pool.connection() as c, c.transaction():
+            await c.execute("SELECT pg_advisory_xact_lock(hashtextextended('call.kakao:'||" + root("%s") + ",0))",
+                            (room_key,))
+            cur = await c.execute(
+                """SELECT d.friend_id, d.room_key
+                     FROM marong.discord_dm_links d
+                     JOIN marong.rooms r ON r.room_key=d.kakao_room_key AND r.is_channel AND r.memory_room IS NULL
+                     JOIN marong.people p ON p.user_key=%s AND p.friend_id=d.friend_id
+                     JOIN marong.people dp ON dp.user_key=d.user_key AND dp.friend_id=d.friend_id
+                     JOIN call.kakao_guards g ON g.room_key=d.room_key AND g.friend_id=d.friend_id
+                    WHERE d.kakao_room_key=%s AND d.channel_id IS NOT NULL
+                      AND NOT EXISTS (
+                        SELECT 1 FROM marong.messages m LEFT JOIN marong.people mp USING(user_key)
+                         WHERE m.room_key=r.room_key AND m.role='user' AND mp.friend_id IS DISTINCT FROM d.friend_id
+                      )""", (user_key, room_key),
+            )
+            link = await cur.fetchone()
+            if not link:
+                return []
+            cur = await c.execute(
+                """SELECT id,role,left(content,260) AS text FROM marong.messages
+                    WHERE room_key=%s AND meta->>'delivered' IS DISTINCT FROM 'false'
+                      AND NOT call.kakao_hidden('message',id,room_key)
+                    ORDER BY id DESC LIMIT 8""", (link["room_key"],),
+            )
+            rows = await cur.fetchall()
+            if not rows:
+                return []
+            await c.execute(
+                """INSERT INTO call.kakao_guards(room_key,friend_id,message_floor,note_floor,summary_floor)
+                   VALUES(%(room)s,%(friend)s,greatest(0,%(current)s-1),
+                          coalesce((SELECT max(id) FROM marong.notes WHERE room_key=%(room)s),0),
+                          coalesce((SELECT max(id) FROM marong.summaries WHERE room_key=%(room)s),0))
+                   ON CONFLICT(room_key) DO NOTHING""",
+                {"room": room_key, "friend": link["friend_id"], "current": user_id},
+            )
+            guard = await c.execute("SELECT friend_id FROM call.kakao_guards WHERE room_key=%s", (room_key,))
+            if (await guard.fetchone())["friend_id"] != link["friend_id"]:
+                return []
+            return rows[::-1]
 
     async def shared_sources(self) -> dict[int, tuple[list[int], str | None]]:
         """공유를 켠 친구마다 가장 최근 공유 메모를 만들 때 거른 메모 id 들과 거른 규칙(memory.SHARE_RULES)."""

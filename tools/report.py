@@ -298,7 +298,8 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         if k == "terminal":
             return "터미널"
         who = ", ".join(sorted(names.get(k, ())))
-        kind = "1:1" if (data["rooms"].get(k) or {}).get("is_channel") else "단체"
+        kind = ("Discord DM" if k.startswith("discord-dm:") else
+                "1:1" if (data["rooms"].get(k) or {}).get("is_channel") else "단체")
         return f"{kind} {key(k)}" + (f" {who}" if who else "")
 
     def speaker(m):
@@ -521,7 +522,7 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         f"마지막 갱신: {at(now)}",
         "",
         "■ 탭",
-        f"대화: 이 기간에 오간 카톡 메시지 {len(msgs)}개(친구 말 {len(msgs) - len(replies) - len(proactive)}, "
+        f"대화: 이 기간에 오간 채팅 메시지 {len(msgs)}개(친구 말 {len(msgs) - len(replies) - len(proactive)}, "
         f"마롱이 답 {len(replies)}, 선톡 {len(proactive)}). 현경이는 노랑, 마롱이는 파랑, 동희는 초록 줄이에요. "
         "그 외 친구는 분홍이고, 기록된 화자 이름을 기준으로 칠해요. "
         "마지막 칸은 그 답에 임베딩 검색으로 실제로 넣은 예전 기억 수예요.",
@@ -561,7 +562,7 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         lines.append("- 통화 원문·요약·기억 내용·로그인 이메일은 이 탭에 보내지 않아요. 전송 방식 기록은 2026-11-13 배포 이후부터예요.")
     if voice:
         counts['call_transcripts'] = len(voice)
-        lines.append(f"- 대화 탭에 저장된 통화 전사 {len(voice)}줄도 함께 표시해요. V로 시작하는 번호가 통화 발화이며 카톡과 시각순으로 섞여 있어요.")
+        lines.append(f"- 대화 탭에 저장된 통화 전사 {len(voice)}줄도 함께 표시해요. V로 시작하는 번호가 통화 발화이며 카톡·디스코드와 시각순으로 섞여 있어요.")
         lines.append("- '통화(전사 중)'은 아직 완성되지 않은 글로 다음 갱신에 같은 번호의 내용이 바뀌어요. '통화(중단)'은 중간에 끊긴 발화예요. 사용자 글 입력은 '통화(글)'로 구분해요.")
         lines.append("- 통화의 '전달됨: 미확인'은 실제 음성 청취 완료를 측정하지 않았다는 뜻이에요. 발화별 토큰·참고한 기억 수는 추정하지 않아요. 삭제·제외된 통화 발화는 내보내지 않아요.")
     tabs.insert(0, tab("읽는 법", ["마롱이 기록 리포트"], [[line] for line in lines], [130], wrap={1}))

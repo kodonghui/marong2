@@ -1,0 +1,34 @@
+[Unit]
+Description=Marong private Discord DM chatbot
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=marong
+Group=marong
+WorkingDirectory=/opt/marong
+EnvironmentFile=/etc/marong-discord/config
+LoadCredential=discord-token:/etc/marong-discord/token
+Environment=MARONG_CALL_MEMORY=1
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPATH=/opt/marong-discord/vendor
+ExecStart=/opt/marong/.venv/bin/python /opt/marong-discord/run_discord.py
+Restart=on-failure
+RestartSec=15s
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/marong/.cache/fastembed
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
