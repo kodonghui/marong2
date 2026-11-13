@@ -163,7 +163,8 @@ function connect(){
       hasConnected=true;const resolve=firstReady;firstReady=null;if(resolve)resolve(true);
       if(rtcClient&&message.audioTransport==='pcm')fallbackToPCM('server_pcm');
       if(fallbackPending)requestPCM();
-    }else if(message.type==='transcript'){transcript(message.who,message.text,message.key,message.replace);}
+    }else if(message.type==='call_busy'){void end('디스코드 통화가 진행 중이야. 거기서 통화를 마치면 여기서 다시 걸 수 있어.');}
+    else if(message.type==='transcript'){transcript(message.who,message.text,message.key,message.replace);}
     else if(message.type==='audio_transport'&&message.mode==='pcm'){
       pcmFallback=true;fallbackPending=false;clearTimeout(fallbackTimer);fallbackTimer=null;
       const old=rtcClient;rtcClient=null;old?.close().catch(()=>{});

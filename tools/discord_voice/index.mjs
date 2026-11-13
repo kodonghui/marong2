@@ -11,43 +11,45 @@ import OpusScript from 'opusscript';
 import WebSocket from 'ws';
 import { CallPlayback, DISCORD_FRAME_BYTES, FRAME_MS, microphonePcm } from './audio.mjs';
 
-const guildId = process.env.MARONG_DISCORD_GUILD_ID;
-const channelId = process.env.MARONG_DISCORD_VOICE_CHANNEL_ID;
-const ownerId = process.env.MARONG_DISCORD_VOICE_USER_ID;
 const appId = process.env.MARONG_DISCORD_APP_ID;
-if (![guildId, channelId, ownerId, appId].every(id => /^[1-9][0-9]{16,19}$/.test(id ?? ''))) {
+const configured = JSON.parse(process.env.MARONG_DISCORD_VOICE_ROOMS ?? 'null');
+const idFields = ['guild_id', 'channel_id', 'user_id'];
+const validId = id => typeof id === 'string' && /^[1-9][0-9]{16,19}$/.test(id);
+if (!validId(appId) || !Array.isArray(configured) || !configured.length ||
+    configured.some(room => !room || Object.keys(room).length !== idFields.length ||
+      idFields.some(field => !validId(room[field]))) ||
+    idFields.some(field => new Set(configured.map(room => room[field])).size !== configured.length)) {
   throw new Error('invalid Discord voice configuration');
 }
+const rooms = new Map(configured.map(({ guild_id, channel_id, user_id }) =>
+  [guild_id, { guildId: guild_id, channelId: channel_id, ownerId: user_id,
+    current: null, clientId: randomUUID(), retry: null, joining: false, callStarted: false }]));
 
 const RELAY = 'ws+unix:///run/marong-discord-voice/live.sock:/live';
 const SOCKET = '/run/marong-discord-voice/live.sock';
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] });
-let current = null;
-let clientId = randomUUID();
-let retry = null;
 let stopping = false;
-let guildAvailable = false;
-let callStarted = false;
+let gatewayReady = false;
 
 function log(event, fields = {}) {
   console.info(JSON.stringify({ event, ...fields }));
 }
 
-function eligible(guild) {
-  if (stopping || !guildAvailable || !guild?.available) return false;
+function eligible(guild, { ownerId, channelId }) {
+  if (stopping || !gatewayReady || !guild?.available) return false;
   if (guild.voiceStates.cache.get(ownerId)?.channelId !== channelId) return false;
   return !guild.voiceStates.cache.some(state =>
     state.channelId === channelId && state.id !== ownerId && state.id !== appId);
 }
 
-function headersFor(id) {
+function headersFor({ ownerId, guildId, channelId }, id) {
   return { 'X-Marong-Client-Id': id, 'X-Marong-Discord-User': ownerId,
     'X-Marong-Discord-Guild': guildId, 'X-Marong-Discord-Channel': channelId };
 }
 
-function finishCall(id) {
+function finishCall(room, id) {
   const end = request({ socketPath: SOCKET, path: '/end', method: 'POST',
-    headers: headersFor(id), timeout: 12_000 }, response => {
+    headers: headersFor(room, id), timeout: 12_000 }, response => {
     response.resume();
     if (response.statusCode !== 204) log('relay_finish_failed', { status: response.statusCode });
   });
@@ -56,10 +58,23 @@ function finishCall(id) {
   end.end();
 }
 
-function schedule(guild, ms = 2_000) {
-  if (retry !== null || current || !eligible(guild)) return;
-  retry = setTimeout(() => {
-    retry = null;
+function available(room) {
+  return new Promise(resolve => {
+    const check = request({ socketPath: SOCKET, path: '/available', method: 'GET',
+      headers: headersFor(room, room.clientId), timeout: 5_000 }, response => {
+      response.resume();
+      resolve(response.statusCode === 204);
+    });
+    check.on('timeout', () => check.destroy());
+    check.on('error', () => resolve(false));
+    check.end();
+  });
+}
+
+function schedule(guild, room, ms = 2_000) {
+  if (room.retry !== null || room.current || !eligible(guild, room)) return;
+  room.retry = setTimeout(() => {
+    room.retry = null;
     reconcile(guild);
   }, ms);
 }
@@ -81,13 +96,13 @@ function close(session, reason, explicit = false) {
     session.ws.close();
   } else session.ws?.terminate();
   log('voice_ended', { reason, ...session.counts });
-  if (current === session) current = null;
-  schedule(session.guild);
+  if (session.room.current === session) session.room.current = null;
+  schedule(session.guild, session.room);
 }
 
 function sendMic(session, frame) {
   const ws = session.ws;
-  if (!session.providerReady || !eligible(session.guild) || ws?.readyState !== WebSocket.OPEN) return;
+  if (!session.providerReady || !eligible(session.guild, session.room) || ws?.readyState !== WebSocket.OPEN) return;
   if (ws.bufferedAmount > 12_800) {
     session.counts.input_drops++;
     return;
@@ -96,10 +111,10 @@ function sendMic(session, frame) {
 }
 
 function attachInput(session) {
-  const input = session.connection.receiver.subscribe(ownerId);
+  const input = session.connection.receiver.subscribe(session.room.ownerId);
   session.input = input;
   input.on('data', (opus) => {
-    if (session.closed || !eligible(session.guild)) return;
+    if (session.closed || !eligible(session.guild, session.room)) return;
     let pcm;
     try {
       pcm = microphonePcm(Buffer.from(session.decoder.decode(opus)));
@@ -127,14 +142,14 @@ function attachInput(session) {
 
 function attachRelay(session) {
   const ws = new WebSocket(RELAY, {
-    headers: headersFor(session.clientId), handshakeTimeout: 5_000, maxPayload: 256_000,
+    headers: headersFor(session.room, session.clientId), handshakeTimeout: 5_000, maxPayload: 256_000,
   });
   session.ws = ws;
   session.providerSetup = setTimeout(() => {
     if (!session.providerReady) close(session, 'vertex_not_ready');
   }, 40_000);
   ws.on('message', (data, binary) => {
-    if (session.closed || !eligible(session.guild)) return;
+    if (session.closed || !eligible(session.guild, session.room)) return;
     if (binary) {
       if (++session.counts.vertex_chunks === 1) log('vertex_audio_received');
       session.playback.add(data);
@@ -142,6 +157,7 @@ function attachRelay(session) {
     }
     let item;
     try { item = JSON.parse(data); } catch { return; }
+    if (item.type === 'call_busy') return close(session, 'caller_busy');
     if (item.type === 'audio_reset' || item.type === 'interrupted') {
       session.playback.clear(item.epoch);
       return;
@@ -163,7 +179,15 @@ function attachRelay(session) {
   ws.on('close', () => close(session, 'relay_closed'));
 }
 
-async function begin(guild) {
+function canJoin(guild, room) {
+  const channel = guild?.channels.cache.get(room.channelId);
+  return channel?.isVoiceBased() && channel.permissionsFor(appId)?.has([
+    PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak,
+  ]);
+}
+
+async function begin(guild, room) {
+  const { guildId, channelId, clientId } = room;
   const connection = joinVoiceChannel({ guildId, channelId, adapterCreator: guild.voiceAdapterCreator,
     selfDeaf: false, selfMute: false, daveEncryption: true });
   const encoder = new OpusScript(48_000, 2, OpusScript.Application.AUDIO);
@@ -178,9 +202,9 @@ async function begin(guild) {
     counts[metric]++;
     if (metric === 'turn_played' && counts[metric] === 1) log('discord_first_turn_played');
   });
-  const session = { guild, connection, encoder, decoder, playback, player, counts, clientId,
+  const session = { guild, room, connection, encoder, decoder, playback, player, counts, clientId,
     lastMic: -Infinity, providerReady: false, closed: false };
-  current = session;
+  room.current = session;
   player.on('error', () => close(session, 'discord_playback_failed'));
   playback.on('error', () => close(session, 'audio_encoding_failed'));
   connection.on('error', error => {
@@ -200,14 +224,14 @@ async function begin(guild) {
   });
   try {
     await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
-    if (session.closed || !eligible(guild)) return close(session, 'no_participant');
+    if (session.closed || !eligible(guild, room)) return close(session, 'no_participant');
     if (!connection.voicePrivacyCode) {
       // DAVE may complete immediately after the transport becomes ready.
       for (let attempt = 0; attempt < 15 && !connection.voicePrivacyCode && !session.closed; attempt++) {
         await delay(200);
       }
     }
-    if (session.closed || !eligible(guild)) return close(session, 'no_participant');
+    if (session.closed || !eligible(guild, room)) return close(session, 'no_participant');
     if (!connection.voicePrivacyCode) return close(session, 'dave_not_ready');
     const subscription = connection.subscribe(player);
     if (!subscription) return close(session, 'discord_subscribe_failed');
@@ -221,42 +245,48 @@ async function begin(guild) {
   }
 }
 
-function reconcile(guild) {
-  if (guild?.id !== guildId) return;
-  if (!eligible(guild)) {
-    clearTimeout(retry);
-    retry = null;
-    const left = guildAvailable && guild.available &&
-      guild.voiceStates.cache.get(ownerId)?.channelId !== channelId;
-    if (current) close(current, left ? 'participant_left' : 'voice_paused', left);
-    if (left && callStarted) {
-      finishCall(clientId);
-      clientId = randomUUID();
-      callStarted = false;
-    }
-    return;
-  }
-  if (!current && retry === null) {
-    callStarted = true;
-    begin(guild).catch(() => {
-      if (current) close(current, 'voice_failed');
-      else schedule(guild);
-    });
+async function startWhenAvailable(guild, room) {
+  room.joining = true;
+  const clientId = room.clientId;
+  try {
+    if (!canJoin(guild, room) || !await available(room)) return;
+    if (!eligible(guild, room) || room.clientId !== clientId) return;
+    room.callStarted = true;
+    await begin(guild, room);
+  } catch {
+    if (room.current) close(room.current, 'voice_failed');
+  } finally {
+    room.joining = false;
+    schedule(guild, room, 5_000);
   }
 }
 
-client.once(Events.ClientReady, async ready => {
+function reconcile(guild) {
+  const room = rooms.get(guild?.id);
+  if (!room) return;
+  if (!eligible(guild, room)) {
+    clearTimeout(room.retry);
+    room.retry = null;
+    const left = gatewayReady && guild.available &&
+      guild.voiceStates.cache.get(room.ownerId)?.channelId !== room.channelId;
+    if (room.current) close(room.current, left ? 'participant_left' : 'voice_paused', left);
+    if (left && (room.callStarted || room.joining)) {
+      if (room.callStarted) finishCall(room, room.clientId);
+      room.clientId = randomUUID();
+      room.callStarted = false;
+    }
+    return;
+  }
+  if (!room.current && !room.joining && room.retry === null) void startWhenAvailable(guild, room);
+}
+
+client.once(Events.ClientReady, ready => {
   try {
     if (ready.user.id !== appId) throw new Error('unexpected bot');
-    const guild = ready.guilds.cache.get(guildId);
-    const channel = guild?.channels.cache.get(channelId);
-    const permissions = channel?.permissionsFor(ready.user.id);
-    if (!channel?.isVoiceBased() || !permissions?.has([
-      PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak,
-    ])) throw new Error('missing voice permissions');
-    guildAvailable = true;
-    log('discord_voice_gateway_ready');
-    reconcile(guild);
+    const readyRooms = [...rooms.values()].filter(room => canJoin(ready.guilds.cache.get(room.guildId), room)).length;
+    if (!readyRooms) throw new Error('missing voice permissions');
+    log('discord_voice_gateway_ready', { rooms: readyRooms, configured: rooms.size });
+    gatewayAvailable();
   } catch {
     log('discord_voice_configuration_error');
     ready.destroy();
@@ -264,32 +294,40 @@ client.once(Events.ClientReady, async ready => {
   }
 });
 client.on(Events.VoiceStateUpdate, (before, after) => {
-  if (after.guild.id !== guildId) return;
-  if (after.id !== appId && (before.channelId === channelId || after.channelId === channelId)) reconcile(after.guild);
+  const room = rooms.get(after.guild.id);
+  if (!room) return;
+  if (after.id !== appId && (before.channelId === room.channelId || after.channelId === room.channelId)) reconcile(after.guild);
 });
 client.on(Events.ShardDisconnect, () => {
-  guildAvailable = false;
-  reconcile(client.guilds.cache.get(guildId));
+  gatewayReady = false;
+  for (const guildId of rooms.keys()) reconcile(client.guilds.cache.get(guildId));
 });
 function gatewayAvailable() {
-  guildAvailable = true;
-  reconcile(client.guilds.cache.get(guildId));
+  gatewayReady = true;
+  for (const guildId of rooms.keys()) reconcile(client.guilds.cache.get(guildId));
 }
 client.on(Events.ShardResume, gatewayAvailable);
 client.on(Events.ShardReady, () => {
   if (client.isReady()) gatewayAvailable();
 });
-client.on(Events.GuildUnavailable, guild => {
-  if (guild.id === guildId) reconcile(guild);
-});
+client.on(Events.GuildUnavailable, reconcile);
 client.on(Events.GuildAvailable, reconcile);
+client.on(Events.GuildDelete, guild => {
+  const room = rooms.get(guild.id);
+  if (!room) return;
+  clearTimeout(room.retry);
+  room.retry = null;
+  if (room.current) close(room.current, 'guild_removed');
+});
 client.on(Events.Error, () => log('discord_gateway_error'));
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.once(signal, () => {
     stopping = true;
-    clearTimeout(retry);
-    if (current) close(current, 'service_stop');
+    for (const room of rooms.values()) {
+      clearTimeout(room.retry);
+      if (room.current) close(room.current, 'service_stop');
+    }
     client.destroy();
   });
 }

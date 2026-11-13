@@ -23,6 +23,7 @@ from test_relay import HTTP, Upstream, event
 from tools.report import build
 
 GUILD, CHANNEL = '100000000000000021', '100000000000000022'
+OTHER_GUILD, OTHER_CHANNEL = '100000000000000023', '100000000000000024'
 
 
 class AudioUpstream(Upstream):
@@ -43,7 +44,8 @@ async def check(db, temp, module):
     dsn = db.admin_url.replace('postgres:@', 'marong_call@', 1)
     store = module.DiscordMemoryStore(dsn)
     await store.open()
-    app = module.create_app(store, os.getuid(), OWNER, GUILD, CHANNEL)
+    rooms = [(OWNER, GUILD, CHANNEL), (OTHER, OTHER_GUILD, OTHER_CHANNEL)]
+    app = module.create_app(store, os.getuid(), rooms)
     runner = web.AppRunner(app)
     await runner.setup()
     socket = str(temp / 'test.sock')
@@ -52,6 +54,8 @@ async def check(db, temp, module):
     first = str(uuid.uuid4())
     headers = {'X-Marong-Discord-User': OWNER, 'X-Marong-Discord-Guild': GUILD,
                'X-Marong-Discord-Channel': CHANNEL, 'X-Marong-Client-Id': first}
+    other_headers = {'X-Marong-Discord-User': OTHER, 'X-Marong-Discord-Guild': OTHER_GUILD,
+                     'X-Marong-Discord-Channel': OTHER_CHANNEL, 'X-Marong-Client-Id': str(uuid.uuid4())}
     try:
         async with aiohttp.ClientSession(connector=aiohttp.UnixConnector(path=socket)) as http:
             async with http.post('http://localhost/end', headers={**headers, 'X-Marong-Discord-User': OTHER}) as r:
@@ -59,18 +63,63 @@ async def check(db, temp, module):
             async with http.post('http://localhost/end', headers={**headers, 'X-Marong-Client-Id': 'bad'}) as r:
                 assert r.status == 400
             person = await store.discord_principal(OWNER)
-            assert not await store.discord_principal(OTHER)
+            other = await store.discord_principal(OTHER)
+            assert other.caller_id != person.caller_id
             seed = await store.seed(person)
             assert 'OWNER_KAKAO' in seed and 'OWNER_DISCORD' in seed
             for forbidden in ('PRIVATE_GROUP', 'OTHER_KAKAO', 'MIXED_SUMMARY', 'MIXED_NOTE'):
                 assert forbidden not in seed
                 assert (await store.recall(person, forbidden))['result'] == 'not_found'
+            other_seed = await store.seed(other)
+            assert 'OTHER_KAKAO' in other_seed and 'OWNER_KAKAO' not in other_seed and 'OWNER_DISCORD' not in other_seed
+            web_person = await store.principal('a' * 64)
+            assert web_person.caller_id == other.caller_id
+            web_client = str(uuid.uuid4())
+            web_id, _ = await store.start_call(web_person, web_client, 'Sulafat', 'web-test')
+            async with http.get('http://localhost/available', headers=other_headers) as r:
+                assert r.status == 409
+            try:
+                await http.ws_connect('http://localhost/live', headers=other_headers)
+                raise AssertionError('Discord interrupted an active web call')
+            except aiohttp.WSServerHandshakeError as error:
+                assert error.status == 409
+            assert (await store.detail(web_person, web_id))['status'] == 'live'
+            await store.finish(web_person, web_id, False, entrypoint='web', client_id=web_client)
+            async with http.get('http://localhost/available', headers=other_headers) as r:
+                assert r.status == 204
+            with patch.object(module, 'google_headers', AsyncMock(return_value={})), \
+                 patch('live_session.ClientSession', lambda **_: HTTP(Upstream())):
+                async with http.ws_connect('http://localhost/live', headers=other_headers) as ws:
+                    ready = await event(ws, 'ready')
+                    other_id = ready['callId']
+                    assert other_id != web_id and not ready['resumed']
+                    assert (await store.detail(web_person, web_id))['status'] == 'ended'
+                    try:
+                        await store.start_call(web_person, web_client, 'Sulafat', 'web-test')
+                        raise AssertionError('Web interrupted an active Discord call')
+                    except module.CallBusy:
+                        pass
+                    try:
+                        await store.finish(web_person, other_id, True, entrypoint='web')
+                        raise AssertionError('Web ended a Discord call')
+                    except PermissionError:
+                        pass
+                    assert (await store.detail(other, other_id))['status'] == 'live'
+                    await ws.close()
+                async with http.post('http://localhost/end', headers=other_headers) as r:
+                    assert r.status == 204
+                assert (await store.detail(other, other_id))['status'] == 'ended'
+            resumed_web_id, resumed = await store.start_call(web_person, web_client, 'Sulafat', 'web-test')
+            assert resumed_web_id not in (web_id, other_id) and not resumed
+            await store.finish(web_person, resumed_web_id, True, entrypoint='web', client_id=web_client)
             with patch.object(module, 'google_headers', AsyncMock(return_value={})), \
                  patch('live_session.ClientSession', lambda **_: HTTP(upstream)):
                 async with http.ws_connect('http://localhost/live', headers=headers) as ws:
                     ready = await event(ws, 'ready')
                     assert ready['audioTransport'] == 'discord' and ready['memoryConnected']
                     call_id = ready['callId']
+                    async with http.get('http://localhost/available', headers=other_headers) as r:
+                        assert r.status == 204
                     for bad, status in (({**headers, 'X-Marong-Discord-Channel': GUILD}, 403),
                                         (headers, 409)):
                         try:
@@ -101,7 +150,7 @@ async def check(db, temp, module):
                          if row[2].startswith('Discord 통화')]
                 assert {row[3]: color for row, color in voice} == {'동희': '#d9ead3', '마롱이': '#e8f0fe'}
                 assert len({row[0] for row, _ in voice}) == len(voice) == 2
-            print('PASS Discord identity, lease, private memory, PCM round trip, finish and report')
+            print('PASS two Discord identities, separate room gates and memory, web/Discord ownership, PCM round trip and report')
     finally:
         await runner.cleanup()
         await store.close()
@@ -111,7 +160,8 @@ if __name__ == '__main__':
     db = TestDB()
     try:
         prepare(db)
-        for name in ('003_transport_reporting.sql', '004_transcript_reporting.sql', '005_discord_voice.sql'):
+        for name in ('003_transport_reporting.sql', '004_transcript_reporting.sql', '005_discord_voice.sql',
+                     '006_discord_shared_callers.sql'):
             db.admin((ROOT / 'marong/call/migrations' / name).read_text(encoding='utf-8'), None)
         db.admin("""UPDATE marong.discord_dm_links SET channel_id=%s,last_incoming_at=now() WHERE friend_id IN (1,2)""",
                  (CHANNEL,))

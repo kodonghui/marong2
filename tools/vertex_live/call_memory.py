@@ -22,6 +22,10 @@ class Principal:
     private_rooms: tuple[str, str] | None = None
 
 
+class CallBusy(Exception):
+    pass
+
+
 SCOPE = """WITH roots AS (
  SELECT r.room_key FROM marong.rooms r WHERE r.is_channel AND EXISTS (
   SELECT 1 FROM marong.messages m JOIN marong.people p USING(user_key)
@@ -187,16 +191,38 @@ class MemoryStore:
           AND x.source_type=hits.source AND x.source_id=hits.id) ORDER BY created_at DESC LIMIT 12""", params)
         return {'result':'found' if rows else 'not_found','items':pack(rows,3000)}
 
-    async def start_call(self,p,client_id,voice,prompt_version):
+    async def start_call(self, p, client_id, voice, prompt_version, *, entrypoint='web'):
         async with self.pool.connection() as c, c.transaction():
-            await c.execute('SELECT id FROM call.callers WHERE id=%s FOR UPDATE',(p.caller_id,))
-            cur=await c.execute("SELECT id FROM call.calls WHERE caller_id=%s AND status<>'ended' AND deleted_at IS NULL",(p.caller_id,))
-            row=await cur.fetchone()
+            caller = await c.execute('SELECT id FROM call.callers WHERE id=%s AND enabled FOR UPDATE', (p.caller_id,))
+            if not await caller.fetchone():
+                raise PermissionError('caller_disabled')
+            cur = await c.execute("""SELECT id,entrypoint,status,client_id FROM call.calls
+                WHERE caller_id=%s AND status<>'ended' AND deleted_at IS NULL FOR UPDATE""", (p.caller_id,))
+            row = await cur.fetchone()
             if row:
-                await c.execute("UPDATE call.calls SET status='live',client_id=%s,last_beat_at=now() WHERE id=%s",(client_id,row['id']))
-                return str(row['id']),True
-            cur=await c.execute("INSERT INTO call.calls(caller_id,client_id,prompt_version,voice) VALUES(%s,%s,%s,%s) RETURNING id",(p.caller_id,client_id,prompt_version,voice))
-            return str((await cur.fetchone())['id']),False
+                same_call = row['entrypoint'] == entrypoint and (
+                    entrypoint == 'web' or str(row['client_id']) == client_id)
+                if same_call:
+                    await c.execute("""UPDATE call.calls SET status='live',client_id=%s,last_beat_at=now()
+                        WHERE id=%s""", (client_id, row['id']))
+                    return str(row['id']), True
+                if row['status'] == 'live':
+                    raise CallBusy()
+                # A disconnected call from another entry point keeps its own history and memory scope.
+                await c.execute("""UPDATE call.calls SET status='ended',ended_at=now(),
+                    end_reason='beat_lost',organize_status='pending',organize_next_at=now() WHERE id=%s""",
+                    (row['id'],))
+            cur = await c.execute("""INSERT INTO call.calls(caller_id,client_id,prompt_version,voice,entrypoint)
+                VALUES(%s,%s,%s,%s,%s) RETURNING id""", (p.caller_id, client_id, prompt_version, voice, entrypoint))
+            return str((await cur.fetchone())['id']), False
+
+    async def recover_entrypoint(self, entrypoint):
+        async with self.pool.connection() as c, c.transaction():
+            await c.execute("""UPDATE call.calls SET status='resting' WHERE status='live' AND entrypoint=%s""",
+                            (entrypoint,))
+            await c.execute("""UPDATE call.segments s SET state='closed',closed_at=now(),close_reason='server_restart'
+                FROM call.calls c WHERE c.id=s.call_id AND s.state<>'closed' AND c.entrypoint=%s""",
+                (entrypoint,))
 
     async def start_segment(self,p,call_id,client_id,model):
         segment=str(uuid.uuid4())
@@ -229,9 +255,13 @@ class MemoryStore:
                 VALUES(%s,%s,%s,%s,%s,now(),now(),%s,%s,%s) RETURNING id""",(call_id,segment,seq,role,content,key,finalized,interrupted))
             return (await cur.fetchone())['id']
 
-    async def finish(self,p,call_id,explicit):
+    async def finish(self,p,call_id,explicit,*,entrypoint=None,client_id=None):
         async with self.pool.connection() as c,c.transaction():
             row=await self._owned(c,p,call_id)
+            if entrypoint is not None and row['entrypoint'] != entrypoint:
+                raise PermissionError('call_not_found')
+            if client_id is not None and str(row['client_id']) != client_id:
+                return
             if row['status']=='ended':return
             await c.execute("UPDATE call.segments SET state='closed',closed_at=now(),close_reason=%s WHERE call_id=%s AND state<>'closed'",('user_hangup' if explicit else 'connection_lost',call_id))
             if explicit:

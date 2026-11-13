@@ -11,7 +11,7 @@ from collections import deque
 from aiohttp import ClientSession,ClientTimeout,WSMsgType
 from memory_tools import TranscriptRecorder,execute_tool
 
-BUILD='20261113-failover1'
+BUILD='20261113-discord-rooms'
 FRAME=struct.Struct('!4sIIIII')
 
 
@@ -157,7 +157,9 @@ class LiveSession:
 
     async def run(self):
         if self.store and self.p:
-            self.call_id,self.logical_resumed=await self.store.start_call(self.p,self.client_id,self.voice,BUILD)
+            self.call_id,self.logical_resumed=await self.store.start_call(
+                self.p,self.client_id,self.voice,BUILD,
+                entrypoint='discord' if self.entry_transport=='discord' else 'web')
         elif self.resume.get('owner')==self.owner and time.time()-self.resume.get('updated',0)<600:
             self.call_id=self.resume.get('call_id',self.call_id)
         self.d.update(build=BUILD,callId=self.call_id,startedAt=time.time(),providerInterruptions=0,providerReconnects=0)
@@ -178,7 +180,7 @@ class LiveSession:
             if self.store and self.p:
                 try:await asyncio.wait_for(self.flush_transport(),4)
                 except Exception:self.d['transportLogFailed']=True
-                try:await asyncio.wait_for(self.store.finish(self.p,self.call_id,self.explicit),4)
+                try:await asyncio.wait_for(self.store.finish(self.p,self.call_id,self.explicit,client_id=self.client_id),4)
                 except Exception:self.d['memoryCloseFailed']=True
             if self.explicit:self.resume.clear()
             if self.rtc:

@@ -8,7 +8,7 @@ from google.auth.transport.requests import Request
 import jwt
 from live_session import LiveSession, BUILD
 from memory_tools import DECLARATIONS
-from call_memory import MemoryStore
+from call_memory import CallBusy, MemoryStore
 import rtc_transport
 
 HERE=Path(__file__).resolve().parent
@@ -146,7 +146,7 @@ async def end_call(req):
     if active_session and active_session.call_id==call_id and active_session.p and active_session.p.caller_id==person.caller_id:
         active_session.explicit=True;active_session.stop.set()
     else:
-        try:await memory_store.finish(person,call_id,True)
+        try:await memory_store.finish(person,call_id,True,entrypoint='web')
         except PermissionError:raise web.HTTPNotFound()
     return json_response({'ok':True})
 
@@ -173,6 +173,9 @@ async def live(req):
         elif bridge and bridge.owner==authn['owner']:await bridge.close()
         active_session=session
         await session.run()
+    except CallBusy:
+        await ws.send_json({'type':'call_busy'})
+        if session.rtc:await session.rtc.close()
     except Exception as error:print('session_error',type(error).__name__,flush=True)
     finally:
         active=False;active_session=None;await ws.close()
@@ -184,13 +187,7 @@ async def startup(app):
     if dsn:
         memory_store=MemoryStore(dsn)
         await memory_store.open()
-        async with memory_store.pool.connection() as c,c.transaction():
-            await c.execute("""UPDATE call.calls c SET status='resting' WHERE status='live'
-                AND to_jsonb(c)->>'entrypoint' IS DISTINCT FROM 'discord'""")
-            await c.execute("""UPDATE call.segments s
-                SET state='closed',closed_at=now(),close_reason='server_restart'
-                FROM call.calls c WHERE c.id=s.call_id AND s.state<>'closed'
-                AND to_jsonb(c)->>'entrypoint' IS DISTINCT FROM 'discord'""")
+        await memory_store.recover_entrypoint('web')
 
 async def cleanup(app):
     await asyncio.gather(*(b.close() for b in list(rtc_transport.bridges.values())),return_exceptions=True)
