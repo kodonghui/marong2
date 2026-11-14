@@ -1,10 +1,10 @@
-"""고민·위기 규칙 시험: 카톡 지시문(prompt.md)과 통화 지시문(call_instruction.md)이 같은 원칙을 지키는지 본다.
+"""고민·위기 규칙 시험: 글 대화 지시문(prompt.md, 디스코드 DM)과 통화 지시문(call_instruction.md)이 같은 원칙을 지키는지 본다.
 DB·네트워크 없이 글자만 본다. 실행: .venv/bin/python tests/test_counsel_prompts.py"""
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-KAKAO = (ROOT / "prompt.md").read_text(encoding="utf-8")
+TEXT = (ROOT / "prompt.md").read_text(encoding="utf-8")
 CALL = (ROOT / "tools/vertex_live/call_instruction.md").read_text(encoding="utf-8")
 
 # 고민 들어 주기: 평소 고민을 친구로서 직접 들어 주는 규칙
@@ -46,7 +46,7 @@ def section(text: str, title: str) -> str:
 
 
 def main():
-    for name, text in (("카톡", KAKAO), ("통화", CALL)):
+    for name, text in (("글 대화", TEXT), ("통화", CALL)):
         counsel = section(text, "고민 들어 주기")
         crisis = section(text, "위험한 순간")
         for rule, phrase in COUNSEL.items():
@@ -55,9 +55,9 @@ def main():
             assert phrase in crisis, f"{name} '위험한 순간'에 없음: {rule}"
         assert "109" not in counsel, f"{name}: 109 안내는 '위험한 순간'에만"
         assert re.search(r"아직 109 ?는 꺼내지 말고", crisis), f"{name}: 헷갈릴 때는 109 보다 직접 묻기가 먼저"
-    assert "마들랜" in section(KAKAO, "위험한 순간"), "카톡: 글로 하는 상담(마들랜) 안내"
+    assert "마들랜" in section(TEXT, "위험한 순간"), "글 대화: 글로 하는 상담(카카오톡 마들랜) 안내"
     assert "'일, 공, 구'" in section(CALL, "위험한 순간"), "통화: 109 를 숫자 하나씩 읽기"
-    print(f"PASS: 카톡·통화 지시문이 고민 원칙 {len(COUNSEL)}개와 위기 원칙 {len(CRISIS)}개를 같이 지킴")
+    print(f"PASS: 글 대화·통화 지시문이 고민 원칙 {len(COUNSEL)}개와 위기 원칙 {len(CRISIS)}개를 같이 지킴")
 
 
 if __name__ == "__main__":

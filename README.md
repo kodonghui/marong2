@@ -220,7 +220,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements.txt
 .venv/Scripts/python tests/test_friends.py    # 친구들: 키 묶기·아는 사이·공유 메모 거르기·다른 방 안 샘·친구 말은 요청만·관리 명령
 .venv/Scripts/python tests/test_photo.py      # 사진: CDN 주소·종류·내려받기(옮김·크기)·설명 저장·답에 사진·묶어 답하기·주소가 안 남음
 .venv/Scripts/python tests/test_report.py     # 리포트: 엑셀·시트 탭 내용(최신이 위·대화 줄 색)·들어간 기억·'지금 새로고침' 묻기·시트 주소가 안 새어 나감
-.venv/Scripts/python tests/test_counsel_prompts.py  # 고민·위기 규칙: 카톡 지시문과 통화 지시문이 같은 원칙(DB 없이 글자만)
+.venv/Scripts/python tests/test_counsel_prompts.py  # 고민·위기 규칙: 글 대화 지시문(디스코드 DM)과 통화 지시문이 같은 원칙(DB 없이 글자만)
 ```
 
 (맥·리눅스는 `.venv/bin/python`.) 노트북에서 `python run.py`(봇 모드)는 켜지 마세요. 서버의 봇과 같은 토큰이라 서로 끊어 내요.
