@@ -11,7 +11,7 @@ from collections import deque
 from aiohttp import ClientSession,ClientTimeout,WSMsgType
 from memory_tools import TranscriptRecorder,execute_tool
 
-BUILD='20261113-discord-rooms'
+BUILD='20261115-listening'
 FRAME=struct.Struct('!4sIIIII')
 
 
