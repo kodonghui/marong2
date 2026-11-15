@@ -76,9 +76,9 @@ class Client(DiscordDM):
 
 
 def chat(client, user, mid, content, *, channel=None, bot=False, name=None, mentions=(), roles=(), reply_to=None,
-         attachments=(), clean=None, guild=GUILD, webhook=None, everyone=False):
+         attachments=(), clean=None, guild=GUILD, owner=None, webhook=None, everyone=False):
     resolved = None if reply_to is None else SimpleNamespace(author=SimpleNamespace(id=int(reply_to)))
-    return Msg(guild=SimpleNamespace(id=guild, self_role=SimpleNamespace(id=ROLE)),
+    return Msg(guild=SimpleNamespace(id=guild, owner_id=owner, self_role=SimpleNamespace(id=ROLE)),
                author=SimpleNamespace(id=int(user), bot=bot, display_name=name or "손님", name="guest"),
                channel=channel or client.text, webhook_id=webhook, id=mid, type=discord.MessageType.default,
                content=content, clean_content=content if clean is None else clean,
@@ -141,7 +141,9 @@ async def check(db):
 
         # Ignored: another server, a webhook, a voice channel's chat, Marong's own message, words the Gateway left
         # empty (no Message Content intent), and a repeated message.
-        for msg in (chat(client, HK, 10, "다른 서버", guild=999), chat(client, HK, 11, "웹훅", webhook=5),
+        for msg in (chat(client, HK, 10, "다른 서버", guild=999),
+                    chat(client, HK, 15, "남이 만든 서버", guild=998, owner=int(OTHER)),
+                    chat(client, HK, 11, "웹훅", webhook=5),
                     chat(client, HK, 12, "음성 채널 채팅", channel=client.voice),
                     chat(client, MARONG, 13, "마롱이 자기 말", bot=True), chat(client, HK, 14, "")):
             await client.on_message(msg)
@@ -317,6 +319,18 @@ async def check(db):
         assert {r["content"] for r in await store.recent(ROOM, 100)} >= {"CHANNEL_ONLY_TALK 오늘 저녁 뭐 먹을까"}
         assert not any("DM_ONLY_SECRET" in r["content"] for r in await store.recent(ROOM, 100))
         print("PASS channel words stay out of DMs, Kakao and calls, and recall stays inside each room")
+
+        # A server a linked friend made (동희's server for the three of them, 2026-11-13): Marong talks there too.
+        theirs = TextChannel(OTHER_GUILD_TEXT)
+        replies.append("여기서도 들려!")
+        await client.on_message(chat(client, HK, 95, "마롱아 여기서도 들려?", channel=theirs, guild=888, owner=int(DH)))
+        assert theirs.sent and theirs.sent[-1][0] == "여기서도 들려!"
+        assert [r[2] for r in rows(db, f"discord-ch:{OTHER_GUILD_TEXT}")] == ["마롱아 여기서도 들려?", "여기서도 들려!"]
+        # ... while a server someone else owns stays silent, even for a friend who calls Marong there.
+        calls = len(llm.bodies)
+        await client.on_message(chat(client, HK, 96, "마롱아 여기는?", channel=theirs, guild=998, owner=int(OTHER)))
+        assert len(llm.bodies) == calls and len(theirs.sent) == 1 and client.ignored == {999, 998}
+        print("PASS a server a linked friend made is a channel Marong talks in, someone else's server is not")
 
         with psycopg.connect(db.app_url, row_factory=dict_row) as conn:
             ts = datetime.now(TZ)

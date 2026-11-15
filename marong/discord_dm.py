@@ -61,6 +61,7 @@ CHANNEL_TYPES = (discord.ChannelType.text, discord.ChannelType.public_thread, di
 FOLLOW_S = 120          # 마롱이가 채널에서 한 친구에게 답한 뒤, 그 친구가 이만큼(초) 안에 이어서 한 말에도 답함(다른 친구가 끼면 멈춤)
 HEARD_LINES = 12        # 다른 봇·디스코드로 연결 안 된 사람의 채널 말: 저장하지 않고 방마다 이만큼만 잠깐 들고 있다가 답할 때 보여 줌
 HEARD_S = 1800          # 그 말을 들고 있는 시간(초). 봇이 다시 켜지면 없어짐
+OWNER_S = 600           # 서버 주인이 마롱이와 연결된 친구인지 다시 묻기까지(초): 설정한 비공개 서버와 친구가 만든 서버에서만 대화
 HEARD_CHARS = 500
 NAME_CHARS = 32
 FRIENDS_S = 600         # 이 서버에서 연결된 친구 이름을 다시 읽는 간격(초)
@@ -575,6 +576,8 @@ class DiscordDM(discord.Client):
         self.heard = {}         # channel room -> deque of (clock, created_at, name, text), never stored
         self.waiting = {}       # (channel room, Discord id) -> number of that friend's newest message for Marong
         self.friend_names = (None, [], None)  # (read at (clock), linked friends' names, their vocative pattern)
+        self.servers = {}       # server id -> (owner's Discord id, owner is a linked friend, until (clock))
+        self.ignored = set()    # servers whose channel words were ignored, logged once each (no ids in the log)
 
     def room_lock(self, room_key):
         return self.locks.setdefault(room_key, asyncio.Lock())
@@ -596,20 +599,38 @@ class DiscordDM(discord.Client):
         self.available = self.user.id == self.app_id and self.get_guild(self.guild_id) is not None
         log.info("discord_ready app=%s private_server=%s", self.user.id, self.available)
         if self.channel_chat and self.available:
-            self._log_channels()
+            await self._log_channels()
 
-    def _log_channels(self):
-        """How many text channels of the private server Marong can read and answer in (counts only, no names)."""
+    async def _log_channels(self):
+        """How many servers Marong is in, in how many it talks (the private server and the ones a linked friend made),
+        and how many of their text channels it can read and answer in (counts only, no names or ids)."""
         try:
-            guild = self.get_guild(self.guild_id)
-            me = guild.me
-            perms = [c.permissions_for(me) for c in guild.text_channels]
-            log.info("discord_channels_ready text=%d view=%d send=%d history=%d react=%d", len(perms),
-                     sum(p.view_channel for p in perms), sum(p.view_channel and p.send_messages for p in perms),
+            servers = list(self.guilds)
+            talks = [g for g in servers if await self._talks_in(g)]
+            perms = [c.permissions_for(g.me) for g in talks for c in g.text_channels]
+            log.info("discord_channels_ready servers=%d talk=%d text=%d view=%d send=%d history=%d react=%d",
+                     len(servers), len(talks), len(perms), sum(p.view_channel for p in perms),
+                     sum(p.view_channel and p.send_messages for p in perms),
                      sum(p.view_channel and p.read_message_history for p in perms),
                      sum(p.view_channel and p.add_reactions for p in perms))
         except Exception as e:  # never stop on_ready over a log line
             log.warning("discord_channels_ready unknown %s", type(e).__name__)
+
+    async def _talks_in(self, guild) -> bool:
+        """Marong talks in the channels of the private server it was set up with, and of any server whose owner is a
+        friend linked to Marong (동희 made a second server for the three of them on 2026-11-13). Servers someone else
+        owns stay silent, even when a friend is there."""
+        if guild is None:
+            return False
+        if guild.id == self.guild_id:
+            return True
+        owner = getattr(guild, "owner_id", None)
+        if not owner:
+            return False
+        now, known = self.clock(), self.servers.get(guild.id)
+        if known is None or known[0] != owner or now >= known[2]:
+            known = self.servers[guild.id] = (owner, bool(await self.store.link(str(owner))), now + OWNER_S)
+        return known[1]
 
     async def on_guild_join(self, guild):
         if self.user and self.user.id == self.app_id and guild.id == self.guild_id:
@@ -789,14 +810,19 @@ class DiscordDM(discord.Client):
         return [(at, name, said) for t, at, name, said in self.heard.get(room, ()) if now - t <= HEARD_S]
 
     async def on_channel_message(self, msg):
-        """A message in a channel of the private server. Everything a friend linked to Marong says there is stored in
+        """A message in a channel of the private server or of a server a linked friend made (_talks_in). Everything a
+        friend linked to Marong says there is stored in
         the channel's room, so Marong follows the conversation; it answers when one calls it, or when that friend goes
         on right after its answer (follow_s, until someone else joins in or they turn to someone else). Other bots and
         people not linked are kept for HEARD_S in memory only. Nothing here touches a friend's DM link or DM memory."""
-        if (not self.available or getattr(msg.guild, "id", None) != self.guild_id or msg.webhook_id
-                or msg.author.id == self._me()
+        if (not self.available or msg.webhook_id or msg.author.id == self._me()
                 or msg.type not in (discord.MessageType.default, discord.MessageType.reply)
                 or getattr(msg.channel, "type", None) not in CHANNEL_TYPES):
+            return
+        if not await self._talks_in(msg.guild):
+            if msg.guild.id not in self.ignored:
+                self.ignored.add(msg.guild.id)
+                log.info("discord_channel_server_ignored servers=%d", len(self.ignored))
             return
         text = self._channel_text(msg)
         attachments = list(getattr(msg, "attachments", None) or [])
