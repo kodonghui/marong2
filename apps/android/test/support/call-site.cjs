@@ -1,7 +1,11 @@
 'use strict';
-// A stand-in for the call server, for browser tests only: it serves the real call page files
-// (tools/vertex_live/static and the face images) with a fixed /status and a /live WebSocket that
-// says "ready" and then ignores what it receives. No model, no memory, no network beyond 127.0.0.1.
+// A stand-in for the call server, for browser and emulator tests only: it serves the real call page
+// files (tools/vertex_live/static and the face images) with a fixed /status and a /live WebSocket that
+// says "ready" and then only counts what it receives. No model, no memory, no network beyond 127.0.0.1.
+//
+// Emulator tests (TC-110 to TC-112, TC-116) run it on a fixed port and log what reaches it:
+//   node test/support/call-site.cjs 8787
+//   adb reverse tcp:8787 tcp:8787   (the test build opens http://localhost:8787, a secure context)
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -58,8 +62,9 @@ function readFrames(socket, onFrame) {
   });
 }
 
-async function startCallSite({ status = {} } = {}) {
+async function startCallSite({ status = {}, port = 0, log = () => {} } = {}) {
   const received = [];
+  const audio = { frames: 0, bytes: 0 };
   const requests = [];
   const sockets = new Set();
   const server = http.createServer((req, res) => {
@@ -81,23 +86,35 @@ async function startCallSite({ status = {} } = {}) {
     const key = req.headers['sec-websocket-key'];
     if (pathname !== '/live' || !key) { socket.destroy(); return; }
     sockets.add(socket);
-    socket.on('close', () => sockets.delete(socket));
+    log(`/live opened (${sockets.size} open)`);
+    socket.on('close', () => {
+      sockets.delete(socket);
+      log(`/live closed (${sockets.size} open)`);
+    });
     socket.on('error', () => {});
     const accept = crypto.createHash('sha1').update(key + WS_GUID).digest('base64');
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
     socket.write(frame(JSON.stringify({ type: 'ready', callId: 'test-call', memoryConnected: false })));
     readFrames(socket, (opcode, payload) => {
-      if (opcode === 1) received.push(JSON.parse(payload.toString('utf8')));
+      if (opcode === 1) {
+        const message = JSON.parse(payload.toString('utf8'));
+        received.push(message);
+        if (message.type !== 'playback_stats') log(`/live received ${message.type}`);
+      } else if (opcode === 2) {
+        audio.frames++;
+        audio.bytes += payload.length;
+      }
       else if (opcode === 8) { socket.end(Buffer.from([0x88, 0])); }
       else if (opcode === 9) socket.write(Buffer.concat([Buffer.from([0x8a, payload.length]), payload]));
     });
   });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address();
+  await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
   return {
-    url: `http://127.0.0.1:${port}`,
+    url: `http://127.0.0.1:${server.address().port}`,
     received,
     requests,
+    audio,
+    openSockets: () => sockets.size,
     async close() {
       for (const socket of sockets) socket.destroy();
       await new Promise((resolve) => server.close(resolve));
@@ -106,3 +123,16 @@ async function startCallSite({ status = {} } = {}) {
 }
 
 module.exports = { startCallSite, REPO };
+
+if (require.main === module) {
+  const log = (line) => console.log(`${new Date().toTimeString().slice(0, 8)} ${line}`);
+  startCallSite({ port: Number(process.argv[2] || 8787), log }).then((site) => {
+    log(`stand-in call site on ${site.url}`);
+    let last = 0;
+    setInterval(() => {
+      const bytes = site.audio.bytes;
+      if (site.openSockets() > 0 || bytes !== last) log(`/live open: ${site.openSockets()}, microphone audio in the last 10 s: ${bytes - last} bytes`);
+      last = bytes;
+    }, 10000);
+  });
+}

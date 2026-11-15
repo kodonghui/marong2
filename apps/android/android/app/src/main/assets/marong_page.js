@@ -31,7 +31,55 @@
     if (next === active) return;
     active = next;
     send('MarongCall', next ? 'callStarted' : 'callEnded');
+    syncKeepAudible();
   };
+
+  // A hidden page (screen off, app in the background) that plays nothing audible for 5 minutes is
+  // frozen by the WebView, and the microphone audio stops reaching the server (BUG-103). During a
+  // call in a hidden page, a 20 Hz tone at -57 dBFS RMS, far below hearing and below what phone
+  // speakers play, keeps the page audible for the WebView (REQ-103, SPEC-103).
+  const audioContexts = new Set();
+  const NativeAudioContext = window.AudioContext;
+  if (typeof NativeAudioContext === 'function') {
+    window.AudioContext = class extends NativeAudioContext {
+      constructor(...args) {
+        super(...args);
+        audioContexts.add(this);
+      }
+    };
+  }
+  let keepAudible = null;
+  const syncKeepAudible = () => {
+    const hidden = document.visibilityState === 'hidden';
+    if (active && hidden && !keepAudible) {
+      for (const context of audioContexts) if (context.state === 'closed') audioContexts.delete(context);
+      const context = [...audioContexts].reverse().find((c) => c.state === 'running');
+      if (!context) return;
+      try {
+        const tone = context.createOscillator();
+        const level = context.createGain();
+        tone.frequency.value = 20;
+        level.gain.value = 0.002;
+        tone.connect(level);
+        level.connect(context.destination);
+        tone.start();
+        keepAudible = { tone, level };
+      } catch {
+        keepAudible = null;
+      }
+    } else if ((!active || !hidden) && keepAudible) {
+      const { tone, level } = keepAudible;
+      keepAudible = null;
+      try {
+        tone.stop();
+        tone.disconnect();
+        level.disconnect();
+      } catch {
+        // The page may already have closed its audio context.
+      }
+    }
+  };
+  document.addEventListener('visibilitychange', syncKeepAudible);
 
   const media = navigator.mediaDevices;
   if (media && typeof media.getUserMedia === 'function') {
@@ -61,12 +109,15 @@
     };
   }
 
-  // Status bar icons follow the page's cream day theme and night theme (SPEC-107).
+  // Status bar icons follow the page's cream day theme and night theme (SPEC-107). With a WebView
+  // older than 140, Capacitor keeps the page below the bars and sets --safe-area-inset-top to 0px;
+  // the window's night colour then shows behind the bars, so the icons stay light (BUG-102).
   let barStyle = null;
   const syncBars = () => {
     const root = document.documentElement;
     if (!root) return;
-    const next = root.dataset.theme === 'chestnut' ? 'LIGHT' : 'DARK';
+    const belowBars = root.style.getPropertyValue('--safe-area-inset-top').trim() === '0px';
+    const next = !belowBars && root.dataset.theme === 'chestnut' ? 'LIGHT' : 'DARK';
     if (next !== barStyle && send('SystemBars', 'setStyle', { style: next })) barStyle = next;
   };
   // At document start the <html> element may not exist yet; then start watching once the page has loaded.
@@ -75,7 +126,7 @@
     const root = document.documentElement;
     if (!root) return;
     if (!watching) {
-      new MutationObserver(syncBars).observe(root, { attributes: true, attributeFilter: ['data-theme'] });
+      new MutationObserver(syncBars).observe(root, { attributes: true, attributeFilter: ['data-theme', 'style'] });
       watching = true;
     }
     syncBars();

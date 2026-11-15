@@ -9,7 +9,7 @@
   },
   "android": {
     "allowMixedContent": false,
-    "appendUserAgent": "MarongApp/0.1.0"
+    "appendUserAgent": "MarongApp/0.1.1"
   },
   "plugins": {
     "SystemBars": {

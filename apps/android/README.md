@@ -8,7 +8,7 @@
 | `www/error.html` | 통화 주소를 못 열 때의 화면(SCR-102) |
 | `android/app/src/main/assets/marong_page.js` | 통화 주소에만 넣는 페이지 스크립트: 통화 시작·끝, 마이크 거절, 테마를 앱에 알려요 |
 | `android/app/src/main/java/com/corthexhq/marong/` | 통화 유지 서비스·알림, 주소 규칙, 웹뷰 처리 |
-| `test/` | 페이지 스크립트 단위 시험과 실제 통화 화면 브라우저 시험 |
+| `test/` | 페이지 스크립트·앱 설정 단위 시험, 실제 통화 화면 브라우저 시험, 대역 통화 서버(`node test/support/call-site.cjs 8787`로 에뮬레이터 시험에도 써요) |
 
 ```sh
 npm ci

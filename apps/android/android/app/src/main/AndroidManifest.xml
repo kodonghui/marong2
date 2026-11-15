@@ -4,6 +4,9 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The WebView updates navigator.onLine and fires "online" and "offline" only with this
+         permission; the "can't connect" page needs both (SPEC-108, BUG-101). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Voice calls: the page's getUserMedia, granted at the first call (SPEC-106). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />

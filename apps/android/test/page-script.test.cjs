@@ -15,11 +15,28 @@ class FakeTrack {
   end() { this.readyState = 'ended'; for (const fn of this.listeners.ended || []) fn(); }
 }
 
+// Records the audio graph a script builds; the page makes its contexts through window.AudioContext.
+class FakeAudioContext {
+  constructor() { this.state = 'running'; this.nodes = []; this.destination = { kind: 'destination' }; }
+  node(kind, extra) {
+    const node = { kind, connected: [], started: false, stopped: false, ...extra,
+      connect(target) { this.connected.push(target); return target; },
+      disconnect() { this.connected = []; },
+      start() { this.started = true; },
+      stop() { this.stopped = true; } };
+    this.nodes.push(node);
+    return node;
+  }
+  createOscillator() { return this.node('oscillator', { frequency: { value: 440 } }); }
+  createGain() { return this.node('gain', { gain: { value: 1 } }); }
+}
+
 function setup({ capacitorAtStart = true, deny = false, theme = 'night', rootAtStart = true } = {}) {
   const calls = [];
   const docListeners = {};
   const observers = [];
-  const root = { dataset: { theme } };
+  const inline = {};
+  const root = { dataset: { theme }, style: { getPropertyValue: (name) => inline[name] || '', setProperty: (name, value) => { inline[name] = value; } } };
   let currentRoot = rootAtStart ? root : null;
   const stopButton = { clicks: 0, click() { this.clicks++; } };
   const window = {};
@@ -27,7 +44,9 @@ function setup({ capacitorAtStart = true, deny = false, theme = 'night', rootAtS
   const capacitor = { nativePromise: (plugin, method, options) => { calls.push([plugin, method, { ...options }]); return Promise.resolve(); } };
   if (capacitorAtStart) window.Capacitor = capacitor;
   window.addEventListener = () => {};
+  window.AudioContext = FakeAudioContext;
   const document = {
+    visibilityState: 'visible',
     get documentElement() { return currentRoot; },
     getElementById: (id) => (id === 'stop' ? stopButton : null),
     addEventListener: (type, fn) => { (docListeners[type] ||= []).push(fn); },
@@ -41,7 +60,7 @@ function setup({ capacitorAtStart = true, deny = false, theme = 'night', rootAtS
       },
     },
   };
-  class MutationObserver { constructor(fn) { this.fn = fn; observers.push(this); } observe() {} }
+  class MutationObserver { constructor(fn) { this.fn = fn; observers.push(this); } observe(target, options) { this.options = options; } }
   const context = { window, document, navigator, MediaStreamTrack: FakeTrack, MutationObserver, Object, Set, Error };
   window.window = window;
   vm.createContext(context);
@@ -52,8 +71,11 @@ function setup({ capacitorAtStart = true, deny = false, theme = 'night', rootAtS
     capacitor: () => { window.Capacitor = capacitor; },
     attachRoot: () => { currentRoot = root; },
     observerCount: () => observers.length,
+    observedAttributes: () => observers.map((o) => [...o.options.attributeFilter]),
     fire: (type) => (docListeners[type] || []).forEach((fn) => fn()),
     themeChanged: () => observers.forEach((o) => o.fn()),
+    hide: () => { document.visibilityState = 'hidden'; (docListeners.visibilitychange || []).forEach((fn) => fn()); },
+    show: () => { document.visibilityState = 'visible'; (docListeners.visibilitychange || []).forEach((fn) => fn()); },
     getUserMedia: () => navigator.mediaDevices.getUserMedia({ audio: true }),
     names: () => calls.map(([p, m]) => `${p}.${m}`),
   };
@@ -107,6 +129,47 @@ test('TC-107: status bar style follows the page theme and waits for the Capacito
   assert.deepEqual(t.calls.at(-1), ['SystemBars', 'setStyle', { style: 'DARK' }]);
   t.themeChanged(); // unchanged theme sends nothing new
   assert.equal(t.calls.filter(([p]) => p === 'SystemBars').length, 2);
+});
+
+test('TC-107: when an older WebView keeps the page below the bars, the icons stay light (BUG-102)', () => {
+  const t = setup({ theme: 'chestnut' });
+  assert.deepEqual(t.calls.at(-1), ['SystemBars', 'setStyle', { style: 'LIGHT' }]); // insets not known yet
+  assert.deepEqual(t.observedAttributes(), [['data-theme', 'style']]);
+  t.root.style.setProperty('--safe-area-inset-top', '0px'); // Capacitor: WebView < 140, bars padded
+  t.themeChanged();
+  assert.deepEqual(t.calls.at(-1), ['SystemBars', 'setStyle', { style: 'DARK' }]);
+  t.root.style.setProperty('--safe-area-inset-top', '24px'); // the page draws behind the bars again
+  t.themeChanged();
+  assert.deepEqual(t.calls.at(-1), ['SystemBars', 'setStyle', { style: 'LIGHT' }]);
+});
+
+test('TC-110: a call in a hidden page plays a 20 Hz tone below hearing so the WebView does not freeze it (BUG-103)', async () => {
+  const t = setup();
+  const context = new t.window.AudioContext(); // the page's own context, made through the wrapper
+  assert.ok(context instanceof FakeAudioContext);
+  t.hide();
+  assert.equal(context.nodes.length, 0, 'no call, no tone');
+  t.show();
+  const { track } = await t.getUserMedia();
+  t.hide();
+  const [tone, level] = context.nodes;
+  assert.equal(tone.frequency.value, 20);
+  assert.equal(level.gain.value, 0.002);
+  assert.ok(tone.started && tone.connected[0] === level && level.connected[0] === context.destination);
+  t.hide();
+  assert.equal(context.nodes.length, 2, 'one tone at a time');
+  t.show();
+  assert.ok(tone.stopped, 'visible again: the tone stops');
+  t.hide();
+  assert.equal(context.nodes.length, 4);
+  track.end(); // the call ends while the page is hidden
+  assert.ok(context.nodes[2].stopped);
+  context.state = 'closed';
+  const second = new t.window.AudioContext();
+  const next = await t.getUserMedia();
+  t.hide();
+  assert.equal(second.nodes.length, 2, 'the newest running context carries the tone');
+  next.track.end();
 });
 
 test('TC-103: running the script twice keeps one wrapper and one app object', async () => {
