@@ -65,6 +65,16 @@ DM에 사진을 붙여 보내면 카톡과 같은 방식으로 본다. 받자마
 - 기록: 답 meta에 `web_searches`(검색 횟수)와 `sources`(주소·제목)를 남긴다. 대화 기록 글에는 출처 줄을 넣지 않아 마롱이가 주소를 따라 쓰지 않는다. 로그에는 횟수만 남기고 검색어·결과는 남기지 않는다. 검색어는 Anthropic을 거쳐 검색 업체로 간다. 친구 이름·사는 곳 같은 개인 정보는 검색어에 넣지 않게 안내하고, 검색 결과의 글은 지시로 따르지 않게 한다.
 - 같이 쓰기: 같은 이름의 도구가 두 번 들어가면 API가 400을 낸다. 쇼핑 같은 다른 기능도 `marong/web_search.py`의 이 도구 하나를 같이 쓰고, 도메인 제한(`allowed_domains`)은 붙이지 않는다(붙이면 일반 검색까지 막힘). 상품 페이지 읽기(`web_fetch`)는 이름이 달라 따로 붙일 수 있고, 그 성공한 주소도 출처에 들어간다.
 
+## 프롬프트 캐시
+
+답장과 선톡은 앞부분(도구 목록 → 마롱이 성격 `prompt.md`+참고 자료, 약 8천 토큰)이 매번 같아서 Claude가 캐시해 둔다. 뒤의 '지금 상황'·기억·대화는 매번 달라 캐시하지 않는다.
+
+- 수명: `ANTHROPIC_CACHE_TTL`(기본 `1h`, `5m`도 됨). Haiku 5.5 값(100만 토큰당)은 입력 0.10달러, 캐시 읽기 0.01달러, 쓰기 5분 0.125달러·1시간 0.20달러(2026-11 공식 문서). 2026-11-13~15 기록에서 친구 말·선톡 사이는 대부분 5분~1시간이었고, 5분 캐시라 선톡은 거의 매번, 답장은 셋 중 하나꼴로 새로 썼다(11/15 저녁까지 디스코드 Claude 값 약 0.09달러 중 캐시 쓰기가 약 0.033달러).
+- 캐시 유지: Claude 캐시는 5분·1시간뿐이고 하루짜리는 없다. 대신 캐시를 읽으면 수명이 처음부터 다시 시작된다. 봇은 실제 답장·선톡에 쓰인 앞부분을 기억해 두고, 45분 동안 그 앞부분을 쓴 요청이 없으면 같은 앞부분을 `max_tokens: 0`으로 보낸다(공식 문서 'Pre-warming the cache': 앞부분만 읽고 글은 만들지 않아 출력값이 없다). 한 번에 약 8천 토큰 읽기라 0.0001달러쯤이고, 앞부분 두 개(도구 있는 답장, 도구 없는 선톡)를 하루 내내 이어도 하루 약 0.006달러다. 실제 요청이 24시간 없으면 그 앞부분은 놓는다.
+- 돈이 새지 않게: 유지 요청이 캐시를 새로 썼으면(이미 식음) 그 앞부분은 놓고 다음 실제 요청이 다시 등록한다. 하루(한국 날짜) 100번까지만 보내고, API가 유지 요청을 거절(400)하면 그 앞부분은 다시 보내지 않는다. 앞부분은 3개까지 기억한다(웹 검색 `max_uses`가 바뀌거나 도구가 빠지면 새 앞부분이 된다).
+- 끄기: `/etc/marong-discord/config`에 `MARONG_CACHE_WARM=off`(유지만 끔) 또는 `ANTHROPIC_CACHE_TTL=5m`(5분이면 유지도 꺼짐)을 넣고 서비스를 다시 시작한다. 시작 로그에 `prompt_cache ttl=1h warm=on`이 나온다.
+- 기록: 답 meta에 `cache_read_tokens`·`cache_write_tokens`(전부)와 `cache_write_1h_tokens`(그중 1시간 쓰기)를 남기고, `tools/admin.py stats`는 1시간 쓰기를 0.20달러로 센다. 유지 요청은 대화 기록에 남기지 않고 로그 `marong.cache`에 `cache_warm_hit`·`cache_warm_miss`(앞부분 해시 앞 12자와 토큰 수)와 날마다 `cache_warm_day`(횟수·읽기·쓰기 합)만 남긴다. 글 내용은 남기지 않는다.
+
 ## 운영
 
 - 기존 통화 메모리 마이그레이션을 적용한 `marong` DB에 `010_discord_dm.sql`, `011_discord_proactive_consent.sql`, `012_schedules.sql`을 순서대로 DB 관리자 역할로 적용한다. `012`가 없으면 봇은 디스코드에 로그인하기 전에 멈춘다. 일정 표는 봇 계정(`marong`)에 읽기·추가·고치기만 주고 지우기 권한은 주지 않는다. 계정 확인 후에만 DB 관리자 역할로 `tools/link_discord.py <Discord 숫자 ID> <friend_id> <하루 횟수> <시작 시> <끝 시>`를 실행한다.
@@ -75,7 +85,7 @@ DM에 사진을 붙여 보내면 카톡과 같은 방식으로 본다. 받자마
 - Gateway 연결은 서버에서 Discord로 나가는 연결이다. 기존 통화 주소는 `https://marong.corthex-hq.com/`이며 `marong-vertex-tunnel.service`는 꺼진 상태를 유지한다.
 - 구글 캘린더는 선택이다. 클라이언트 파일이 없으면 구글 기능만 꺼진 채로 돌고, **구글 캘린더 연결**에는 준비 중이라고 답한다. 켜는 순서는 아래에 있다.
 - 쇼핑몰 페이지 읽기: 따로 키나 drop-in이 없고 기본으로 켜진다. 하루 상한은 `/etc/marong-discord/config`의 `MARONG_SHOP_FETCH_PER_DAY`(기본 100, 0이면 끔)로 바꾸고 서비스를 재시작한다. 로그에 `web_fetch on, 100 a day`가 나온다.
-- 점검: `python tests/test_discord_dm.py`, `python tests/test_schedules.py`, `python tests/test_google_calendar.py`, `python tests/test_dm_help.py`, `python tests/test_web_search.py`(별도 테스트 Postgres, 가짜 Discord·모델·구글), `systemctl status marong-discord.service` 및 본인 계정의 실제 DM. 운영에서 타인의 DM을 열어 점검하지 않는다.
+- 점검: `python tests/test_discord_dm.py`, `python tests/test_schedules.py`, `python tests/test_google_calendar.py`, `python tests/test_dm_help.py`, `python tests/test_web_search.py`(별도 테스트 Postgres, 가짜 Discord·모델·구글), `python tests/test_cache.py`(캐시 수명·유지, 가짜 모델), `systemctl status marong-discord.service` 및 본인 계정의 실제 DM. 운영에서 타인의 DM을 열어 점검하지 않는다.
 
 ### 구글 캘린더 켜기
 

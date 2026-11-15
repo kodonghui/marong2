@@ -17,6 +17,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
+from .cache_warm import hour_writes
 from .config import PER_DAY_MAX, Settings
 from .embed import Embeddings
 from .fmt import now_line, short_key, short_time
@@ -154,6 +155,7 @@ def clean_name(raw) -> str:
 
 class Agent:
     caption_prompt = CAPTION_PROMPT
+    warmer = None  # cache_warm.CacheWarmer: 캐시를 쓴 요청의 앞부분을 받아 조용할 때도 캐시를 유지(디스코드 봇이 켬)
 
     def __init__(self, settings: Settings, store: Store, embeddings: Embeddings, llm: LLM, on_saved=None):
         self.s = settings
@@ -559,11 +561,13 @@ class Agent:
         return lines
 
     def _system(self, situation: str) -> list[dict]:
-        """앞쪽(성격·말투)은 메시지마다 같아서 캐시하고, 뒤쪽(지금 상황·기억)만 매번 바뀐다."""
+        """앞쪽(성격·말투)은 메시지마다 같아서 캐시하고, 뒤쪽(지금 상황·기억)만 매번 바뀐다.
+        캐시 수명은 ANTHROPIC_CACHE_TTL(기본 1시간). 친구 말·선톡 사이가 5분~1시간인 때가 많아 5분이면 거의 매번 새로 쓴다."""
         blocks = []
         persona = self.persona()
         if persona:
-            blocks.append({"type": "text", "text": persona, "cache_control": {"type": "ephemeral"}})
+            mark = {"type": "ephemeral", "ttl": "1h"} if self.s.cache_ttl == "1h" else {"type": "ephemeral"}
+            blocks.append({"type": "text", "text": persona, "cache_control": mark})
         blocks.append({"type": "text", "text": situation})
         return blocks
 
@@ -572,6 +576,14 @@ class Agent:
     def _tools(self, msg: Incoming) -> list[dict]:
         """설정을 바꾸는 도구는 없다(set_name 은 친구 자신의 이름, ask_owner 는 관리자에게 남기기만 함)."""
         return [SET_NAME_TOOL, ASK_OWNER_TOOL]
+
+    def _cache_used(self, body: dict, usage, meta: dict) -> None:
+        """1시간 수명으로 쓴 캐시 토큰을 meta 에 따로 세고(5분 쓰기와 값이 다름), 캐시 유지에 이 요청의 앞부분을 알린다."""
+        hour = hour_writes(usage)
+        if hour:
+            meta["cache_write_1h_tokens"] = meta.get("cache_write_1h_tokens", 0) + hour
+        if self.warmer is not None:
+            self.warmer.seen(body, usage)
 
     def _body(self, system: list[dict], messages: list[dict], tools: list[dict]) -> dict:
         body = {"model": self.s.anthropic_model, "max_tokens": self.s.llm_max_tokens, "system": system,
@@ -601,7 +613,9 @@ class Agent:
         said: list[tuple[str, bool]] = []
         nudged = False
         for _ in range(MAX_STEPS):
-            resp = await self.llm.create(self._body(system, convo, tools), end - loop.time())
+            body = self._body(system, convo, tools)
+            resp = await self.llm.create(body, end - loop.time())
+            self._cache_used(body, resp.usage, meta)
             meta["calls"] += 1
             meta["stop_reason"] = resp.stop_reason
             usage = resp.usage

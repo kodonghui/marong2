@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from marong.cache_warm import CacheWarmer
 from marong.config import load_dotenv, load_settings
 from marong.discord_dm import DiscordAgent, DiscordDM, DiscordProactive, DiscordReminders
 from marong.discord_store import DiscordStore
@@ -57,6 +58,12 @@ async def main():
         raise SystemExit("Invalid MARONG_SHOP_FETCH_PER_DAY")
     shop = ShopFetch(int(shop_daily), timezone=settings.timezone) if int(shop_daily) else None
     logging.getLogger("marong.shop").info("web_fetch %s", f"on, {shop_daily} a day" if shop else "off")
+    # Keep the cached tools+persona front warm between messages (1-hour cache only). MARONG_CACHE_WARM=off turns it off.
+    warm = os.environ.get("MARONG_CACHE_WARM", "on").strip().lower()
+    if warm not in ("on", "off"):
+        raise SystemExit("Invalid MARONG_CACHE_WARM")
+    warm = warm == "on" and settings.cache_ttl == "1h"
+    logging.getLogger("marong.cache").info("prompt_cache ttl=%s warm=%s", settings.cache_ttl, "on" if warm else "off")
     store = DiscordStore(settings.database_url, call_bridge=True)
     store.discord_context_enabled = False
     llm = LLM(settings)
@@ -81,6 +88,9 @@ async def main():
             tasks.append(asyncio.create_task(worker.run()))
         agent = DiscordAgent(settings, store, emb, llm, on_saved=worker.kick if worker else None,
                              first_replies=first_replies, google=google, shop=shop, web=web)
+        if warm:
+            agent.warmer = CacheWarmer(llm, settings.timezone)
+            tasks.append(asyncio.create_task(agent.warmer.run()))
         client = DiscordDM(agent, store, int(os.environ["MARONG_DISCORD_APP_ID"]), int(os.environ["MARONG_DISCORD_GUILD_ID"]))
         async with client:
             tasks.append(asyncio.create_task(DiscordProactive(settings, store, agent, client).run()))

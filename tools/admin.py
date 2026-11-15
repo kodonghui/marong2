@@ -37,8 +37,9 @@ sys.path.insert(0, str(ROOT))
 
 from marong.config import PER_DAY_MAX, load_dotenv  # noqa: E402
 
-# Haiku 5.5 가격(1M 토큰당 달러, 프롬프트 10만 토큰 이하). 캐시 읽기는 입력의 0.1배, 캐시 쓰기(5분)는 1.25배
+# Haiku 5.5 가격(1M 토큰당 달러, 프롬프트 10만 토큰 이하). 캐시 읽기는 입력의 0.1배, 캐시 쓰기는 5분 1.25배·1시간 2배
 PRICE_IN, PRICE_OUT, PRICE_CACHE_READ, PRICE_CACHE_WRITE = 0.10, 0.50, 0.01, 0.125
+PRICE_CACHE_WRITE_1H = 0.20  # 답 meta 의 cache_write_1h_tokens(cache_write_tokens 에 들어 있는 1시간 쓰기)
 
 
 def key(k: str | None) -> str:
@@ -230,7 +231,8 @@ def stats(c, tz, _args):
         "SELECT count(*) AS replies, coalesce(sum((meta->>'input_tokens')::bigint), 0)::bigint AS i, "
         "coalesce(sum((meta->>'output_tokens')::bigint), 0)::bigint AS o, "
         "coalesce(sum((meta->>'cache_read_tokens')::bigint), 0)::bigint AS cr, "
-        "coalesce(sum((meta->>'cache_write_tokens')::bigint), 0)::bigint AS cw "
+        "coalesce(sum((meta->>'cache_write_tokens')::bigint), 0)::bigint AS cw, "
+        "coalesce(sum((meta->>'cache_write_1h_tokens')::bigint), 0)::bigint AS cw1h "
         "FROM marong.messages WHERE role = 'assistant' AND created_at > now() - interval '7 days'").fetchone()
     s = c.execute(
         "SELECT count(*) AS n, coalesce(sum((meta->>'input_tokens')::bigint), 0)::bigint AS i, "
@@ -238,7 +240,8 @@ def stats(c, tz, _args):
         "  SELECT meta FROM marong.summaries WHERE created_at > now() - interval '7 days' UNION ALL "
         "  SELECT meta FROM marong.shared_notes WHERE created_at > now() - interval '7 days') x").fetchone()
     usd = ((t["i"] + s["i"]) * PRICE_IN + (t["o"] + s["o"]) * PRICE_OUT
-           + t["cr"] * PRICE_CACHE_READ + t["cw"] * PRICE_CACHE_WRITE) / 1e6
+           + t["cr"] * PRICE_CACHE_READ + (t["cw"] - t["cw1h"]) * PRICE_CACHE_WRITE
+           + t["cw1h"] * PRICE_CACHE_WRITE_1H) / 1e6
     print(f"최근 7일: 답장 {t['replies']}개(입력 {t['i']:,} · 캐시 읽기 {t['cr']:,} · 캐시 쓰기 {t['cw']:,} · "
           f"출력 {t['o']:,} 토큰), "
           f"요약·공유 메모 {s['n']}개(입력 {s['i']:,} · 출력 {s['o']:,} 토큰) → 대략 ${usd:.2f}")

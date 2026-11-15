@@ -61,6 +61,7 @@ bash deploy/ovh.sh logs          # 로그 보기(Ctrl+C 로 나옴)
 - `ANTHROPIC_API_KEY`(필수), `ANTHROPIC_API_KEY_BACKUP`(선택, 주 키가 실패하면 씀)
 - `ANTHROPIC_EFFORT`: 답장 effort. 기본 `xhigh`. 답이 느리면 `high`
 - `SUMMARY_EFFORT`: 뒤에서 하는 요약·메모·공유 메모 effort. 줄이 없으면 `low`, 서버는 `xhigh`
+- `ANTHROPIC_CACHE_TTL`: 마롱이 성격(`prompt.md`+참고 자료) 앞부분을 Claude가 캐시해 두는 시간. 기본 `1h`, 예전처럼 하려면 `5m`. 캐시를 읽으면 입력값의 0.1배, 새로 쓰면 5분은 1.25배·1시간은 2배예요. 친구 말 사이가 5분~1시간인 때가 많아 1시간이 싸요. Claude에는 이 둘뿐이라 하루짜리 캐시는 없어요(디스코드 봇은 조용할 때 캐시를 다시 읽어 이어 가요: [디스코드 DM](docs/discord-dm.md#프롬프트-캐시))
 - `GROUP_TRIGGER`: 단체방에서 이 말(예: `마롱`)이 들어간 메시지에만 답해요. 비우면 받은 메시지 모두에 답해요
 - 단체방은 카카오가 마롱이를 태그(@마롱이)한 메시지만 보내 줘요(태그 글자는 빼고). 그래서 단체방에서는 태그해야 답하고, 태그 없이 한 말은 마롱이가 못 봐요. 태그만 하면 부른 것으로 알아들어요
 
@@ -229,6 +230,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements.txt
 .venv/Scripts/python tests/test_google_calendar.py  # 구글 캘린더(가짜 구글): 연결 링크·허용·한 번만·일정 보기·친구끼리 안 보임·마롱이 캘린더 넣기·빼기·끊김·끊기·비밀값이 로그에 없음
 .venv/Scripts/python tests/test_dm_help.py    # 말 다듬기('야'·한숨 이모티콘)·디스코드 DM 사진·쇼핑몰 페이지 읽기(설정·하루 상한·안내·검색과 같이 붙기·꺼졌을 때 다시 답하기)·공부·쇼핑 지시문
 .venv/Scripts/python tests/test_web_search.py # 디스코드 DM 인터넷 검색(가짜 Claude): 도구 하나·답마다·하루 상한·이어 받기(pause_turn)·출처는 보내는 글에만·꺼졌을 때 다시 답하기
+.venv/Scripts/python tests/test_cache.py     # 프롬프트 캐시: 성격 앞부분 1시간 캐시·1시간 쓰기 기록·조용할 때 max_tokens 0 으로 캐시 유지(가짜 Claude, DB 없음)
 ```
 
 (맥·리눅스는 `.venv/bin/python`.) 노트북에서 `python run.py`(봇 모드)는 켜지 마세요. 서버의 봇과 같은 토큰이라 서로 끊어 내요.
