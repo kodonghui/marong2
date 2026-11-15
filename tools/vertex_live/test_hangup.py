@@ -54,7 +54,7 @@ def check_consent():
 async def check_setup():
     with tempfile.TemporaryDirectory() as tmp:
         with patch.object(Path,'home',return_value=Path(tmp)):import server
-    names=lambda config:[x['name'] for tool in config['setup'].get('tools',[]) for x in tool['functionDeclarations']]
+    names=lambda config:[x['name'] for tool in config['setup'].get('tools',[]) for x in tool.get('functionDeclarations',[])]
     assert names(server.setup())==[]
     assert names(server.setup(hangup=True))==['end_call']
     assert names(server.setup(memory=True))==['recall','current_time']
@@ -243,7 +243,7 @@ async def check_http(server):
                     m=await ws.receive(timeout=4)
                     if m.type==WSMsgType.TEXT and json.loads(m.data).get('type')=='ready':break
                 setup=upstreams[-1].sent[0][1]['setup']
-                assert [x['name'] for t in setup.get('tools',[]) for x in t['functionDeclarations']]==tools,query
+                assert [x['name'] for t in setup.get('tools',[]) for x in t.get('functionDeclarations',[])]==tools,query
                 await ws.send_json({'type':'stop'});await ws.receive();await ws.close()
                 for _ in range(100):
                     if not server.active:break

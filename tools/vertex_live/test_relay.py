@@ -73,7 +73,8 @@ async def main():
                 setup=upstreams[-1].sent[0]['setup']
                 assert setup['generationConfig']['speechConfig']['voiceConfig']['prebuiltVoiceConfig']['voiceName']=='Sulafat'
                 assert 'thinkingConfig' not in setup['generationConfig']
-                assert not setup.get('tools')
+                # No function tools for a page without memory or hang-up; Google Search is on by default (call_search.py).
+                assert setup.get('tools')==[{'googleSearch':{}}],setup.get('tools')
                 try:await c.ws_connect('/live?client=00000000-0000-4000-8000-000000000001',headers=headers);raise AssertionError('concurrent call')
                 except aiohttp.WSServerHandshakeError as e:assert e.status==409
                 for i in range(100):

@@ -11,8 +11,9 @@ from collections import deque
 from aiohttp import ClientSession,ClientTimeout,WSMsgType
 from memory_tools import TranscriptRecorder,execute_tool
 from hangup import Consent
+from call_search import queries as search_queries
 
-BUILD='20261115-hangup'
+BUILD='20261115-search'
 FRAME=struct.Struct('!4sIIIII')
 # Marong ends a call only when the friend asked (hangup.Consent). Gemini can
 # send toolCall before the last goodbye audio, or say goodbye only after the
@@ -24,10 +25,15 @@ HANGUP_REPLY_S=3
 HANGUP_MAX_S=15
 HANGUP_CLIENT_S=25
 HANGUP_LATE_CAPTION_S=2
+# Once a call's or today's searches are spent, the open Google connection still has the search tool:
+# the session resumes on a new connection without it (call_search.py), only when the answer has had
+# time to play out (its audio length plus this slack) and nobody has spoken since.
+SEARCH_CUT_SLACK_S=2.0
+OUTPUT_RATE=24000
 
 
 class LiveSession:
-    def __init__(self,ws,owner,store,principal,setup,headers,resume,diagnostics,location,model,voice,client_id,*,entry_transport=None,hangup=False):
+    def __init__(self,ws,owner,store,principal,setup,headers,resume,diagnostics,location,model,voice,client_id,*,entry_transport=None,hangup=False,search=None):
         self.ws=ws;self.owner=owner;self.store=store;self.p=principal;self.setup=setup;self.headers=headers
         self.resume=resume;self.d=diagnostics;self.location=location;self.model=model;self.voice=voice;self.client_id=client_id
         self.call_id=str(uuid.uuid4());self.segment=None;self.logical_resumed=False
@@ -44,6 +50,9 @@ class LiveSession:
         # ?hangup=1, the Discord bot with X-Marong-Hangup. Older clients get no tool.
         self.hangup=hangup;self.consent=Consent();self.hanging_up=None;self.hangup_answered=None
         self.goodbye_done=asyncio.Event();self.last_model_audio=0.;self.close_reason=None
+        # Google Search: call_search.SearchBudget shared by this process, or None (no search, no guide).
+        self.search=search;self.searches=0;self.search_live=False;self.planned_reconnect=False
+        self.activity_at=0.;self.turn_done_at=None;self.turn_started_at=0.;self.playback_end=0.
 
     def log_transport(self,mode,reason):
         self.d['audioPath']=mode
@@ -151,7 +160,7 @@ class LiveSession:
                         text=str(item.get('text',''))[:2000]
                         if not text:continue
                         key=str(item.get('id') or uuid.uuid4())[:100]
-                        self.consent.note('user','text:'+key,text)
+                        self.consent.note('user','text:'+key,text);self.activity_at=time.monotonic()
                         try:await asyncio.wait_for(self.recorder.text(text,'text:'+key),3)
                         except Exception:self.d['memoryWriteFailures']=self.d.get('memoryWriteFailures',0)+1
                         if not self.controls.full():
@@ -221,6 +230,21 @@ class LiveSession:
                 if revision!=self.revision:self.revision=revision;self.reset.set()
             except Exception:pass
 
+    def search_mode(self):
+        return self.search.mode(self.searches) if self.search else None
+
+    def searched(self,count):
+        self.searches+=count;self.d['webSearches']=self.searches
+        if self.search:self.search.spend(count)
+        print('web_search',f'n={count}',f'call={self.searches}',f'today_left={self.search.left() if self.search else "-"}',flush=True)
+
+    def quiet_for_reconnect(self,tool_tasks):
+        """Nothing would be cut by moving to a new connection: the last answer has played, nobody spoke since."""
+        return bool(self.handle and self.hanging_up is None and self.turn_done_at is not None
+            and self.turn_done_at>=self.activity_at and time.monotonic()>=self.playback_end
+            and not self.in_turn and self.controls.empty() and not (self.rtc and self.rtc.queued_ms()>0)
+            and all(task.done() for task in tool_tasks.values()))
+
     async def google_loop(self):
         delay=1
         while not self.stop.is_set():
@@ -240,7 +264,10 @@ class LiveSession:
                 url=f'wss://{self.location}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent'
                 async with ClientSession(timeout=ClientTimeout(total=None,connect=15)) as http:
                     async with http.ws_connect(url,headers=await self.headers(),max_msg_size=2_000_000,heartbeat=20) as upstream:
-                        await upstream.send_json(self.setup(self.handle,seed,bool(self.p and self.segment),hangup=self.hangup))
+                        mode=self.search_mode();self.search_live=mode=='on'
+                        options={'hangup':self.hangup}
+                        if mode:options['search']=mode
+                        await upstream.send_json(self.setup(self.handle,seed,bool(self.p and self.segment),**options))
                         first=await upstream.receive(timeout=20)
                         if first.type not in (WSMsgType.TEXT,WSMsgType.BINARY) or 'setupComplete' not in json.loads(first.data):
                             if self.handle:self.handle=None;self.pending.clear()
@@ -255,6 +282,9 @@ class LiveSession:
                 print('connection_retry',type(error).__name__,flush=True)
             self.ready=False
             if self.reset.is_set():continue
+            if self.planned_reconnect:
+                # Searches spent: resume at once with a setup without search, no 'reconnecting' notice.
+                self.planned_reconnect=False;continue
             if not self.stop.is_set() and not self.ws.closed:
                 self.d['providerReconnects']=self.d.get('providerReconnects',0)+1
                 await self.emit({'type':'reconnecting'})
@@ -300,7 +330,7 @@ class LiveSession:
             self.d['hangupServerEnded']=True;self.explicit=True;self.stop.set()
 
     async def provider(self,upstream):
-        sequence=0;last_audio=None;tool_tasks={};speaking=False;go_away=False;audio_finished=False
+        sequence=0;last_audio=None;tool_tasks={};speaking=False;go_away=False;audio_finished=False;turn_queries=set()
         async def send(payload,remember=True):
             nonlocal sequence
             sequence+=1
@@ -350,13 +380,15 @@ class LiveSession:
                     ack=update.get('lastConsumedClientMessageIndex')
                     if ack is not None:
                         while self.pending and self.pending[0][0]<=int(ack):self.pending.popleft()
-                content=data.get('serverContent',{})
+                content=data.get('serverContent',{});now=time.monotonic()
+                if content.get('speechState')=='SPEECH' or content.get('inputTranscription') or content.get('modelTurn') or data.get('toolCall'):
+                    self.activity_at=now
                 if content.get('speechState')=='SPEECH':self.recorder.speech_start()
                 elif content.get('speechState')=='NON_SPEECH':self.recorder.boundary('user')
                 if content.get('interrupted'):
                     self.d['providerInterruptions']=self.d.get('providerInterruptions',0)+1
                     self.recorder.feed('assistant',finished=True,interrupted=True)
-                    self.epoch+=1;self.in_turn=False;speaking=False;audio_finished=False;last_audio=None
+                    self.epoch+=1;self.in_turn=False;speaking=False;audio_finished=False;last_audio=None;turn_queries.clear()
                     await self.emit({'type':'interrupted','epoch':self.epoch})
                 for part in content.get('modelTurn',{}).get('parts',[]):
                     inline=part.get('inlineData',{})
@@ -364,7 +396,7 @@ class LiveSession:
                         now=time.monotonic()
                         if audio_finished:self.in_turn=False
                         if not self.in_turn:
-                            self.turn+=1;self.offset=0;self.in_turn=True;last_audio=None;audio_finished=False
+                            self.turn+=1;self.offset=0;self.in_turn=True;last_audio=None;audio_finished=False;self.turn_started_at=now
                         if last_audio:self.d['maxProviderArrivalGapMs']=max(self.d.get('maxProviderArrivalGapMs',0),round((now-last_audio)*1000))
                         last_audio=now;speaking=True;self.last_model_audio=now
                         if self.hangup_answered is not None:self.goodbye_done.clear()
@@ -377,10 +409,14 @@ class LiveSession:
                     if item:self.recorder.feed(role,item.get('text',''),bool(item.get('finished')))
                 if content.get('modelTurn') or data.get('toolCall') or content.get('turnComplete'):
                     self.recorder.boundary('user')
+                fresh=[q for q in search_queries(content) if q not in turn_queries]
+                if fresh:turn_queries.update(fresh);self.searched(len(fresh))
                 if content.get('generationComplete') and self.in_turn and not audio_finished:
                     audio_finished=True;await self.emit({'type':'audio_end','epoch':self.epoch,'turn':self.turn})
                 if content.get('turnComplete'):
                     self.recorder.feed('assistant',finished=True)
+                    turn_queries.clear();self.turn_done_at=now
+                    self.playback_end=max(now,self.turn_started_at+self.offset/OUTPUT_RATE)+SEARCH_CUT_SLACK_S
                     if self.in_turn and not audio_finished:await self.emit({'type':'audio_end','epoch':self.epoch,'turn':self.turn})
                     speaking=False;self.in_turn=False;await self.emit({'type':'turn'})
                     if self.hangup_answered is not None:self.goodbye_done.set()
@@ -394,7 +430,16 @@ class LiveSession:
                     go_away=True
                     if not speaking and self.handle:return
                 if data.get('error'):raise ConnectionError('provider_error')
+        async def search_cut():
+            # Searches spent while this connection still has the tool: resume without it once all is quiet.
+            while True:
+                await asyncio.sleep(.25)
+                if self.search_live and self.search_mode()!='on' and self.quiet_for_reconnect(tool_tasks):
+                    self.planned_reconnect=True;self.d['searchReconnects']=self.d.get('searchReconnects',0)+1
+                    print('search_reconnect',flush=True);return
+
         tasks=[asyncio.create_task(sender()),asyncio.create_task(receiver()),asyncio.create_task(self.stop.wait()),asyncio.create_task(self.reset.wait())]
+        if self.search:tasks.append(asyncio.create_task(search_cut()))
         try:
             done,_=await asyncio.wait(tasks,return_when=asyncio.FIRST_COMPLETED)
             for task in done:task.result()

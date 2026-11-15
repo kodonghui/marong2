@@ -169,6 +169,8 @@ async def check(db, temp, module):
                 assert len({row[0] for row, _ in voice}) == len(voice) == 2
             # The bot that can leave the room asks for the hang-up tool; the owner's request ends the call.
             assert [d['name'] for d in settings['tools'][0]['functionDeclarations']] == ['recall', 'current_time']
+            # The relay passes its process search budget: Google Search is on next to the functions (call_search.py).
+            assert settings['tools'][1:] == [{'googleSearch': {}}], settings['tools']
             hang = HangupUpstream()
             with patch.object(module, 'google_headers', AsyncMock(return_value={})), \
                  patch('live_session.ClientSession', lambda **_: HTTP(hang)):
