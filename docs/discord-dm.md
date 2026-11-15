@@ -50,6 +50,16 @@ DM에 사진을 붙여 보내면 카톡과 같은 방식으로 본다. 받자마
 
 공부를 물어보면 다른 앱이나 검색으로 넘기지 않고 친구로서 같이 푼다. 답만 말하지 않고 왜 그런지 짚고, 먼저 풀어 보고 싶어 하면 힌트부터 준다. 법 조문·판례·숫자처럼 정확해야 하는 건 확실한 것만 말하고, 자신 없으면 교재에서 확인해 보라고 한다. "퀴즈 내 줘"라고 하면 한 문제씩 낸다. 문제집 사진은 위 '사진'대로 본다. 지시는 `prompt.md`의 '공부 같이 하기'에 있어 카톡에도 같다.
 
+## 반응 달기
+
+친구 메시지에 마롱이가 친구처럼 가끔 이모지 반응을 단다(2026-11-15 동희님 "야 대화에서 하트 이런거도 눌러주고 그래라"). 답은 평소처럼 보내고, 반응은 그 답보다 먼저 친구 메시지에 붙는다.
+
+- 고르기: 마롱이(Claude)가 답 맨 앞에 `[반응 ❤️]`를 쓰면 봇이 그 표시를 글에서 빼고 그 이모지를 친구 메시지에 단다. 다정한 말·고맙다는 말 ❤️ 🥰, 웃긴 말 😂, 좋은 소식 🎉, 해낸 일 👏 🔥, 뭉클한 말 🥹, 속상한 얘기 🫂, 맛있어 보이는 음식 😋, 약속 👍, 궁금해지는 얘기 👀, 밤·군밤 얘기 🌰. 이 12개만 단다. 한숨 이모티콘(😮‍💨)처럼 목록에 없는 건 써도 안 달린다. 평범한 말·질문·짧은 대답, 죽고 싶다는 말처럼 아주 무거운 얘기에는 달지 않게 안내한다. 사진에도 단다.
+- 얼마나 자주: 안내에 '가끔만'이라고 쓰고 코드로도 막는다. 한 DM에서 반응을 단 뒤에는 세 번 더 답할 때까지(또는 30분이 지날 때까지) 반응 안내를 빼서 많아야 네 번에 한 번이다. 이 셈은 봇 프로세스 안에만 있어 재시작하면 처음부터다.
+- 기록: 표시는 친구에게 가는 글과 대화 기록에 남지 않는다. 단 반응은 마롱이 답의 meta `reaction`(`emoji`, 성공 여부 `ok`)에 남는다. 연구용 시트에는 아직 따로 보이지 않는다. 로그에는 이모지와 성공·실패(Discord 오류 코드)만 남는다.
+- 실패: Discord가 반응을 거절하거나 4초 안에 안 되면 반응 없이 답만 간다. 답이 표시뿐이면 그 이모지를 글로 보낸다.
+- 카카오(반응 기능 없음), 선톡, 부탁한 알림에는 반응이 없다. 안내는 `marong/reactions.py`의 `GUIDE`에 있어 `prompt.md`를 바꾸지 않는다.
+
 ## 운영
 
 - 기존 통화 메모리 마이그레이션을 적용한 `marong` DB에 `010_discord_dm.sql`, `011_discord_proactive_consent.sql`, `012_schedules.sql`을 순서대로 DB 관리자 역할로 적용한다. `012`가 없으면 봇은 디스코드에 로그인하기 전에 멈춘다. 일정 표는 봇 계정(`marong`)에 읽기·추가·고치기만 주고 지우기 권한은 주지 않는다. 계정 확인 후에만 DB 관리자 역할로 `tools/link_discord.py <Discord 숫자 ID> <friend_id> <하루 횟수> <시작 시> <끝 시>`를 실행한다.
@@ -60,7 +70,7 @@ DM에 사진을 붙여 보내면 카톡과 같은 방식으로 본다. 받자마
 - Gateway 연결은 서버에서 Discord로 나가는 연결이다. 기존 통화 주소는 `https://marong.corthex-hq.com/`이며 `marong-vertex-tunnel.service`는 꺼진 상태를 유지한다.
 - 구글 캘린더는 선택이다. 클라이언트 파일이 없으면 구글 기능만 꺼진 채로 돌고, **구글 캘린더 연결**에는 준비 중이라고 답한다. 켜는 순서는 아래에 있다.
 - 네이버 쇼핑 검색 키: [네이버 개발자 센터](https://developers.naver.com/apps/#/register)에서 애플리케이션을 등록하고 사용 API로 '검색'을 고른 뒤 Client ID와 Client Secret을 받는다. 서버의 root 전용 파일 `/etc/marong-discord/naver-shop`(600)에 두 줄로 넣고, `deploy/marong-discord-shopping.conf`를 `/etc/systemd/system/marong-discord.service.d/shopping.conf`로 깐 뒤 `systemctl daemon-reload`와 서비스 재시작을 한다. 로그에 `shop_search on`이 나오면 켜진 것이다. 키 파일 없이 drop-in만 깔면 서비스가 시작하지 못하니 순서를 지킨다. 끌 때는 drop-in을 지우고 다시 읽혀 재시작한다.
-- 점검: `python tests/test_discord_dm.py`, `python tests/test_schedules.py`, `python tests/test_google_calendar.py`, `python tests/test_dm_help.py`(별도 테스트 Postgres, 가짜 Discord·모델·구글·네이버), `systemctl status marong-discord.service` 및 본인 계정의 실제 DM. 운영에서 타인의 DM을 열어 점검하지 않는다.
+- 점검: `python tests/test_discord_dm.py`, `python tests/test_schedules.py`, `python tests/test_google_calendar.py`, `python tests/test_dm_help.py`, `python tests/test_reactions.py`(별도 테스트 Postgres, 가짜 Discord·모델·구글·네이버), `systemctl status marong-discord.service` 및 본인 계정의 실제 DM. 운영에서 타인의 DM을 열어 점검하지 않는다.
 
 ### 구글 캘린더 켜기
 

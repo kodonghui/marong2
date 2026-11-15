@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 import discord
 
+from . import reactions
 from .agent import CAPTION_PROMPT, Agent, Incoming
 from .google_calendar import (CONNECT_TEXT, DISCONNECTED_TEXT, LINK_MARK, NOT_CONNECTED_TEXT, REVOKE_FAILED_TEXT,
                               UNAVAILABLE_TEXT, calendar_lines, command as google_command)
@@ -41,6 +42,7 @@ PHOTO_READ_S = 20       # 첨부 하나를 내려받는 시간 상한(초)
 FOLLOW_UP_S = 1800      # 답한 사진을 이만큼(초) 더 보여 줌: 같은 문제집 사진의 다른 문제를 이어 물을 때
 FOLLOW_UP_PHOTOS = 2    # 그렇게 더 보여 주는 사진은 방마다 최근 이만큼
 FOLLOW_UP_KEPT = 4      # 모든 방을 합친 상한(사진 한 장이 메모리에서 수 MB)
+REACT_S = 4             # 친구 메시지에 반응을 다는 시간 상한(초). 넘으면 반응 없이 답만 보냄
 
 
 @dataclass
@@ -58,6 +60,8 @@ class DiscordIncoming(Incoming):
     google_more: bool = False
     link_url: str | None = None           # replaces LINK_MARK in the sent text only, never in the history
     shopping: list = field(default_factory=list)  # shop_search results, kept in the reply meta
+    may_react: bool = False               # the reaction guide is shown for this reply (not right after a reaction)
+    reaction: dict | None = None          # {"emoji", "ok"}: pressed on this friend message, also the reply's meta
 
 
 def proactive_preference(text: str) -> bool | None:
@@ -97,6 +101,18 @@ async def read_photo(attachment) -> Photo:
     return await prepare(data)
 
 
+async def react(message, emoji: str) -> bool:
+    """Press Marong's reaction on the friend's message. A failure never stops the reply that follows."""
+    try:
+        await asyncio.wait_for(message.add_reaction(emoji), REACT_S)
+    except Exception as e:  # Keep only the error type and Discord's codes (for example 10014 unknown emoji).
+        log.warning("discord_reaction_failed %s status=%s code=%s", type(e).__name__, getattr(e, "status", None),
+                    getattr(e, "code", None))
+        return False
+    log.info("discord_reaction emoji=%s", emoji)
+    return True
+
+
 async def send_text(channel, text: str) -> bool:
     try:
         for chunk in chunks(text):
@@ -118,6 +134,7 @@ class DiscordAgent(Agent):
         self.shop = shop      # shopping.ShopSearch when the Naver keys are set, else None (no tool)
         self.clock = clock
         self._answered_photos = OrderedDict()  # (room, message id) -> (photo block, when it was answered)
+        self._reacted = {}  # room -> [model replies since Marong last reacted there, when (clock)]
 
     def _tools(self, msg):
         # Identity and opt-in never change on model output. Only the friend's own schedule does.
@@ -168,6 +185,8 @@ class DiscordAgent(Agent):
                 lines += calendar_lines(msg.google_link, msg.google_events, msg.google_more, tz, now)
         if self.shop is not None:
             lines += ["", SHOP_GUIDE]
+        if msg.may_react:
+            lines += ["", reactions.GUIDE]
         return "\n".join(lines)
 
     @staticmethod
@@ -306,12 +325,34 @@ class DiscordAgent(Agent):
                       "‘내일 3시에 알려 줘’처럼 말하면 그때 여기로 알려 줄게."
                     + (" 구글 캘린더를 붙이려면 ‘구글 캘린더 연결’이라고 보내 줘." if self.google else "")), {}
         msg.saved_id = user_id
+        msg.may_react = self._may_react(msg.room_key)
         reply, meta = await super()._reply(msg, person, user_id, text, timeout, use_memory, held)
         if msg.actions:
             meta["schedule"] = msg.actions
         if msg.shopping:
             meta["shop"] = msg.shopping
-        return reply, meta
+        return self._take_reaction(msg, reply, meta), meta
+
+    def _may_react(self, room_key):
+        last = self._reacted.get(room_key)
+        return last is None or last[0] >= reactions.GAP_REPLIES or self.clock() - last[1] >= reactions.GAP_S
+
+    def _take_reaction(self, msg, reply, meta):
+        """Take Marong's '[반응 ❤️]' mark out of the reply. The friend never sees it as text: when it names an allowed
+        emoji and this reply may react, on_message presses that emoji on the friend's message just before the reply."""
+        text, raw = reactions.split(reply)
+        emoji = reactions.pick(raw)
+        if emoji and text and msg.may_react:
+            msg.reaction = {"emoji": emoji}
+            meta["reaction"] = msg.reaction  # the same dict: on_message adds "ok" before the reply is saved
+            self._reacted[msg.room_key] = [0, self.clock()]
+            return text
+        if msg.room_key in self._reacted:
+            self._reacted[msg.room_key][0] += 1
+        if raw is None:
+            return reply
+        log.info("discord_reaction_skipped why=%s", "gap" if emoji and text else "alone" if emoji else "emoji")
+        return text or emoji or reactions.ALONE_TEXT  # only a mark: say the emoji instead of pressing it
 
 
 class DiscordDM(discord.Client):
@@ -408,6 +449,8 @@ class DiscordDM(discord.Client):
         async def reply(body):
             if incoming.link_url:  # The history keeps the mark; only the friend's DM gets the one-time link.
                 body = body.replace(LINK_MARK, incoming.link_url)
+            if incoming.reaction:  # Like a friend: react to their message, then answer.
+                incoming.reaction["ok"] = await react(msg, incoming.reaction["emoji"])
             return await send_text(msg.channel, body)
 
         async with self.room_lock(room):

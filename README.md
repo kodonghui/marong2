@@ -77,6 +77,7 @@ bash deploy/ovh.sh logs          # 로그 보기(Ctrl+C 로 나옴)
 - 고민: 상담사·병원에 넘기지 않고 마롱이가 직접 들어 줘요. 스스로 해치고 싶다는 분명한 신호일 때만 자살예방상담전화 109 를 한 번 알려 줘요("전문가한테 이야기하라고 하지말고 지가 좀 상담해주라 해봐").
 - 19금(2026-10-30 동희님 문안): 연애·성 얘기와 수위 있는 농담에 피하거나 훈계하지 않고 적극적으로 대화해요. 마롱이가 먼저 꺼내도 되고, 단체방에서도 다 같이 그런 얘기를 할 때 적극적으로 해요. 선톡은 19금으로 시작하지 않아요(`marong/agent.py` 의 `PROACTIVE_GUIDE`). 다른 친구에게 옮기지 않아요(공유 메모에서도 빼요). 동희님 문안 중 '성행위를 자세히 묘사하거나 야한 상황극을 이어 가도 좋아'는 Anthropic 이용 정책(Do Not Generate Sexually Explicit Content: 성행위 묘사·에로틱 채팅 금지, 예외 없음)이 금지하는 걸 요청하는 문장이라 Claude 가 저장소에 넣지 않았어요. 그런 요청은 모델과 API 안전 검사가 막고, 막히면 `REFUSAL_TEXT` 가 나가요.
 - 부르는 말·이모티콘(2026-11-15 정리, 같은 날 동희님 결정): 친구들이 여러 번 싫다고 한 버릇 두 가지를 지시문에서 빼고, 보내기 전에 코드(`marong/style.py`)로 한 번 더 고쳐요. 이름 없이 '야'로 부르거나 말을 '야'로 시작하면 1:1 에서는 처음 한 번만 이름으로('현경아 뭐해') 바꾸고 그 밖에는 빼요. '야식'·'3시야'처럼 낱말에 붙은 '야'는 그대로예요. 한숨 이모티콘은 지워요. 답·선톡·디스코드 알림 모두 그래요. 고친 답은 meta `tidy` 에 남아요.
+- 반응(2026-11-15 동희님 "야 대화에서 하트 이런거도 눌러주고 그래라"): 디스코드 DM에서 친구 메시지에 ❤️ 😂 🎉 같은 이모지 반응을 가끔 달아요. 정해 둔 12가지만, 한 DM에서 많아야 네 번에 한 번이에요(`marong/reactions.py`). 한숨 이모티콘은 목록에 없어요. 카카오에는 반응 기능이 없어요([반응 달기](docs/discord-dm.md#반응-달기)).
 - 창의성(temperature): Haiku 5.5 는 기본값(1.0, 가장 높은 값)만 받아요. 다른 값을 넣으면 API 가 거절해서, 답이 뻔하지 않게 하는 건 위 말투 규칙으로 해요.
 
 ## 친구들(서로 아는 사이)
@@ -227,6 +228,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements.txt
 .venv/Scripts/python tests/test_schedules.py  # 디스코드 일정·알림: 시각 계산·반복·도구·친구끼리 안 보임·한 번만 보냄·늦음·놓침·다시 보내기
 .venv/Scripts/python tests/test_google_calendar.py  # 구글 캘린더(가짜 구글): 연결 링크·허용·한 번만·일정 보기·친구끼리 안 보임·마롱이 캘린더 넣기·빼기·끊김·끊기·비밀값이 로그에 없음
 .venv/Scripts/python tests/test_dm_help.py    # 말 다듬기('야'·한숨 이모티콘)·디스코드 DM 사진·네이버 쇼핑 검색(가짜 응답)·공부·쇼핑 지시문
+.venv/Scripts/python tests/test_reactions.py  # 디스코드 DM 반응: 표시 빼기·고른 이모지만(한숨 안 됨)·네 번에 한 번까지·답보다 먼저·실패해도 답·카카오·선톡엔 없음
 ```
 
 (맥·리눅스는 `.venv/bin/python`.) 노트북에서 `python run.py`(봇 모드)는 켜지 마세요. 서버의 봇과 같은 토큰이라 서로 끊어 내요.
@@ -243,6 +245,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements.txt
 | `marong/google_calendar.py`, `marong/migrations/013_google_calendar.sql`, `deploy/marong-discord-google.conf` | 디스코드 DM 구글 캘린더: 각자 구글 로그인으로 연결, 내 캘린더 보기, 날짜 있는 일정을 '마롱이' 캘린더에 넣기·빼기, 127.0.0.1 의 `/google/` 콜백 |
 | `marong/photo.py` | 사진: 카카오 CDN 주소 알아보기·내려받기, 사진 크기 맞추기(디스코드 DM 첨부도 같이 씀) |
 | `marong/style.py` | 보내기 전 말 다듬기: 이름 없이 '야'로 부르기·한숨 이모티콘 고치기 |
+| `marong/reactions.py` | 디스코드 DM 반응 달기: 답 맨 앞 `[반응 ❤️]` 표시 빼기, 정해 둔 이모지만, 너무 잦지 않게, 마롱이에게 주는 안내 |
 | `marong/shopping.py`, `deploy/marong-discord-shopping.conf` | 디스코드 DM 네이버 쇼핑 검색 도구(`shop_search`)와 키를 넘기는 systemd drop-in |
 | `marong/store.py`, `marong/schema.sql` | Postgres 저장소와 표·권한 |
 | `marong/embed.py` | 서버 CPU 임베딩(embeddinggemma-300m) |
