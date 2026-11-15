@@ -23,7 +23,7 @@ if (!validId(appId) || !Array.isArray(configured) || !configured.length ||
 }
 const rooms = new Map(configured.map(({ guild_id, channel_id, user_id }) =>
   [guild_id, { guildId: guild_id, channelId: channel_id, ownerId: user_id,
-    current: null, clientId: randomUUID(), retry: null, joining: false, callStarted: false }]));
+    current: null, clientId: randomUUID(), retry: null, joining: false, callStarted: false, hungUp: false }]));
 
 const RELAY = 'ws+unix:///run/marong-discord-voice/live.sock:/live';
 const SOCKET = '/run/marong-discord-voice/live.sock';
@@ -72,7 +72,7 @@ function available(room) {
 }
 
 function schedule(guild, room, ms = 2_000) {
-  if (room.retry !== null || room.current || !eligible(guild, room)) return;
+  if (room.hungUp || room.retry !== null || room.current || !eligible(guild, room)) return;
   room.retry = setTimeout(() => {
     room.retry = null;
     reconcile(guild);
@@ -85,6 +85,7 @@ function close(session, reason, explicit = false) {
   clearInterval(session.padding);
   clearTimeout(session.voiceLoss);
   clearTimeout(session.providerSetup);
+  clearTimeout(session.hangupTimer);
   session.input?.destroy();
   session.player.stop(true);
   session.playback.destroy();
@@ -102,7 +103,7 @@ function close(session, reason, explicit = false) {
 
 function sendMic(session, frame) {
   const ws = session.ws;
-  if (!session.providerReady || !eligible(session.guild, session.room) || ws?.readyState !== WebSocket.OPEN) return;
+  if (session.hangingUp || !session.providerReady || !eligible(session.guild, session.room) || ws?.readyState !== WebSocket.OPEN) return;
   if (ws.bufferedAmount > 12_800) {
     session.counts.input_drops++;
     return;
@@ -140,9 +141,40 @@ function attachInput(session) {
   }, FRAME_MS);
 }
 
+// Marong ends the call when the owner asked for it (the relay checks the
+// words). Let the goodbye play out, leave, and stay out until the owner leaves
+// the room: entering it again starts the next call.
+function hangUp(session) {
+  if (session.closed || session.hangingUp) return;
+  session.hangingUp = true;
+  const { room } = session;
+  room.hungUp = true;
+  const started = performance.now();
+  const check = () => {
+    session.hangupTimer = null;
+    if (session.closed) return;
+    // A late goodbye chunk reopens the turn; play it without waiting for more.
+    session.playback.finish();
+    const waited = performance.now() - started;
+    if (!(session.playback.idle && waited >= 300) && waited < 15_000) {
+      session.hangupTimer = setTimeout(check, 100);
+      return;
+    }
+    // Discord clients still hold a few frames after the last one is sent.
+    session.hangupTimer = setTimeout(() => {
+      if (session.closed) return;
+      close(session, 'marong_hung_up', true);
+      room.clientId = randomUUID();
+      room.callStarted = false;
+    }, 400);
+  };
+  check();
+}
+
 function attachRelay(session) {
   const ws = new WebSocket(RELAY, {
-    headers: headersFor(session.room, session.clientId), handshakeTimeout: 5_000, maxPayload: 256_000,
+    headers: { ...headersFor(session.room, session.clientId), 'X-Marong-Hangup': '1' },
+    handshakeTimeout: 5_000, maxPayload: 256_000,
   });
   session.ws = ws;
   session.providerSetup = setTimeout(() => {
@@ -158,6 +190,7 @@ function attachRelay(session) {
     let item;
     try { item = JSON.parse(data); } catch { return; }
     if (item.type === 'call_busy') return close(session, 'caller_busy');
+    if (item.type === 'hangup') return hangUp(session);
     if (item.type === 'audio_reset' || item.type === 'interrupted') {
       session.playback.clear(item.epoch);
       return;
@@ -269,6 +302,7 @@ function reconcile(guild) {
     room.retry = null;
     const left = gatewayReady && guild.available &&
       guild.voiceStates.cache.get(room.ownerId)?.channelId !== room.channelId;
+    if (left) room.hungUp = false;
     if (room.current) close(room.current, left ? 'participant_left' : 'voice_paused', left);
     if (left && (room.callStarted || room.joining)) {
       if (room.callStarted) finishCall(room, room.clientId);
@@ -277,6 +311,8 @@ function reconcile(guild) {
     }
     return;
   }
+  // After Marong hung up, the owner leaves and enters the room again to call.
+  if (room.hungUp) return;
   if (!room.current && !room.joining && room.retry === null) void startWhenAvailable(guild, room);
 }
 
