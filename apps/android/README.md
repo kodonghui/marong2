@@ -8,7 +8,7 @@
 | `www/error.html` | 통화 주소를 못 열 때의 화면(SCR-102) |
 | `android/app/src/main/assets/marong_page.js` | 통화 주소에만 넣는 페이지 스크립트: 통화 시작·끝, 마이크 거절, 테마를 앱에 알리고, 이 폰을 서버에 보고하고(기기 보고), 약속 전화를 저절로 받아요 |
 | `android/app/src/main/java/com/corthexhq/marong/` | 통화 유지 서비스·알림, 주소 규칙, 웹뷰 처리, FCM 받기(`MarongMessagingService`), 알림 채널, 벨 알림·벨 화면(`Ring`, `RingActivity`), 앱 연결(`MarongCall`, `MarongPush`) |
-| `test/` | 페이지 스크립트·앱 설정 단위 시험, 실제 통화 화면·글 대화 화면 브라우저 시험, 대역 통화 서버(`node test/support/call-site.cjs 8787`로 에뮬레이터 시험에도 써요)와 대역 글 대화 서버 |
+| `test/` | 페이지 스크립트·앱 설정 단위 시험, 실제 통화 화면·글 대화 화면 브라우저 시험, 대역 통화 서버(`node test/support/call-site.cjs 8787`로 1단계 에뮬레이터 시험에도 써요), 대역 글 대화 서버, 둘을 한 주소로 묶은 2·3단계 에뮬레이터 시험용 대역 서버(`node test/support/emulator-site.cjs 8787 fid.txt`) |
 
 ```sh
 npm ci

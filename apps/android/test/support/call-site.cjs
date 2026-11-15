@@ -63,7 +63,8 @@ function readFrames(socket, onFrame) {
 }
 
 // chat: the status /chat/api/me answers (the call page shows its '글 대화' link only on 200, SPEC-124).
-// ready: more fields for the 'ready' message, such as {ring: true} for Marong's own call (SPEC-136).
+// ready: more fields for the 'ready' message, such as {ring: true} for Marong's own call (SPEC-136), or a function
+// of the /live address that returns them.
 async function startCallSite({ status = {}, port = 0, log = () => {}, chat = 404, ready = {} } = {}) {
   const received = [];
   const upgrades = [];
@@ -103,7 +104,8 @@ async function startCallSite({ status = {}, port = 0, log = () => {}, chat = 404
     socket.on('error', () => {});
     const accept = crypto.createHash('sha1').update(key + WS_GUID).digest('base64');
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
-    socket.write(frame(JSON.stringify({ type: 'ready', callId: 'test-call', memoryConnected: false, ...ready })));
+    const extra = typeof ready === 'function' ? ready(req.url) : ready;
+    socket.write(frame(JSON.stringify({ type: 'ready', callId: 'test-call', memoryConnected: false, ...extra })));
     readFrames(socket, (opcode, payload) => {
       if (opcode === 1) {
         const message = JSON.parse(payload.toString('utf8'));

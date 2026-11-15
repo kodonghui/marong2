@@ -12,6 +12,7 @@ import android.os.Build;
 import android.os.IBinder;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.ServiceCompat;
+import androidx.core.content.ContextCompat;
 import com.getcapacitor.Logger;
 
 /**
@@ -109,6 +110,7 @@ public class CallService extends Service {
 
         return new NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_call)
+            .setColor(ContextCompat.getColor(this, R.color.marong_accent))
             .setContentTitle(getString(R.string.call_notification_title))
             .setContentText(getString(R.string.call_notification_text))
             .setCategory(NotificationCompat.CATEGORY_CALL)

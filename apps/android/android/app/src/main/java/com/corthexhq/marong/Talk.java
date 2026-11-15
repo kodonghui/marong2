@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.service.notification.StatusBarNotification;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
+import androidx.core.content.ContextCompat;
 import com.getcapacitor.Logger;
 import com.google.firebase.messaging.RemoteMessage;
 import java.util.Map;
@@ -45,6 +46,7 @@ final class Talk {
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, reminder ? Channels.REMINDER : Channels.TALK)
             .setSmallIcon(R.drawable.ic_stat_marong)
+            .setColor(ContextCompat.getColor(context, R.color.marong_accent)) // as FCM shows it in the background
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(new NotificationCompat.BigTextStyle().bigText(body))

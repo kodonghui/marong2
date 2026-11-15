@@ -1,6 +1,6 @@
 # 마롱이 안드로이드 앱
 
-상태: 1단계(통화 앱) 구현·자동 시험·에뮬레이터 시험 끝(고장 3개 고침, 0.1.1), 실제 폰 시험(로그인 유지·소리·삼성 배터리) 대기. 2·3단계(앱 알림·글 대화·마롱이가 먼저 거는 전화)는 앱 0.2.0으로 구현·자동 시험 끝, 에뮬레이터·폰 시험과 서버 반영 대기 (2026-11-15, Claude). 코드는 `apps/android/`, 시작점은 `codex/marong-vertex-live`의 `8c78988`이에요.
+상태: 1단계(통화 앱) 구현·자동 시험·에뮬레이터 시험 끝(고장 3개 고침, 0.1.1), 실제 폰 시험(로그인 유지·소리·삼성 배터리) 대기. 2·3단계(앱 알림·글 대화·마롱이가 먼저 거는 전화)는 앱 0.2.0으로 구현·자동 시험·에뮬레이터 시험 끝(고장 2개 고침), 폰 시험과 서버 반영 대기 (2026-11-15, Claude). 코드는 `apps/android/`, 시작점은 `codex/marong-vertex-live`의 `8c78988`이에요.
 이 문서 하나에 앱 범위의 CORTHEX 02 요구사항, 03 흐름, 04 기능 명세, 07·08 화면, 10 작업, 12 시험을 모았어요([Discord 음성 설계](discord-voice-design.md)와 같은 방식). 병행 작업과 겹치지 않게 ID는 101번대를 써요. 웹 통화 화면과 서버의 계약은 기존 [요구사항](02-prd/requirements.md)과 [기능 명세](04-functional-spec/spec.md)가 그대로 정본이에요. 기획 기록과 결정 원문은 Notion 마롱이 통화 기능 프로젝트의 '마롱이 안드로이드 앱' 행과 '결정할 것' D17에 있어요.
 
 ## 출처 표기
@@ -182,6 +182,7 @@ flowchart LR
 - `apps/android/android`: `gradle testDebugUnitTest assembleDebug assembleRelease lintDebug`에서 JVM 5개 통과, lint 오류 0개와 경고 9개(쓰지 않는 템플릿 리소스 4, 더 새 의존성 2, 테마 아이콘용 단색 레이어 없음 2, 더 새 Gradle 1).
 - 릴리스 APK `0.1.0`(versionCode 1): 3,703,888바이트, APK 서명 v2 확인, 서명자 1명(RSA 4096). 인증서 SHA-256 `b42ce187 0fe2c90e 88d850db bd571896 9b0d1e1c 07f1a6d2 13247cc8 657c45f9`.
 - 릴리스 APK `0.1.1`(versionCode 2, BUG-101~103 고침): 3,704,668바이트, 파일 SHA-256 `a43053b2 b7a9789b 02c76d02 031800a6 7fa2b422 eed945fb afd3f14d 49fcb572`, APK 서명 v2 확인, 0.1.0과 같은 인증서. 권한은 명세의 7개와 AndroidX가 넣는 앱 안 전용 권한 1개(`DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`)예요.
+- 릴리스 APK `0.2.0`(versionCode 3, 2·3단계, 에뮬레이터에서 찾은 BUG-104·105 고침): 5,033,800바이트, 파일 SHA-256 `af6aa114 1366627e c9102d64 cf747c57 489b2440 bebaa05d dba770d1 36a0e349`, APK 서명 v2 확인, 0.1.0과 같은 인증서, 합친 권한 11개([app-chat.md](app-chat.md) TC-133). 같은 날 `npm test` 25개, `npm run test:browser` 20개, JVM 11개 통과, lint 오류 0개와 경고 11개(쓰지 않는 템플릿 리소스 4, 더 새 의존성 4, 테마 아이콘용 단색 레이어 없음 2, 더 새 Gradle 1).
 
 ## 8. 위험과 남은 확인
 
@@ -232,6 +233,13 @@ rm app/google-services.json
 5. 화면 끄기는 `adb shell input keyevent 26`, 깊은 절전은 `adb shell dumpsys battery unplug`와 `adb shell dumpsys deviceidle force-idle`이에요. 끝나면 `dumpsys deviceidle unforce`와 `dumpsys battery reset`으로 되돌려요.
 6. 화면 얼림(BUG-103)은 대역 서버 기록의 '10초 동안 받은 마이크 소리'가 0바이트가 되는지로 봐요. DevTools로 페이지에 `freeze`·`resume`·`visibilitychange` 기록을 붙이면 시각이 남아요.
 
+2·3단계(앱 알림·벨, 0.2.0) 에뮬레이터 시험([app-chat.md](app-chat.md) TC-135, [app-ring.md](app-ring.md) TC-147):
+
+7. 에뮬레이터는 구글 Play 서비스가 있는 이미지여야 FCM에 등록돼요. 시험 빌드에는 Firebase 시험용 앱(`com.corthexhq.marong.standin`)의 `google-services.json`을 빌드 때만 넣어요.
+8. 대역 서버는 `node test/support/emulator-site.cjs 8787 fid.txt`예요. 글 대화(`/chat/`)와 통화 화면을 한 주소로 열고, 기기 보고를 받으면 봇처럼 알림·벨이 갈 곳을 기록에 적어요. FID는 기록에 적지 않고 `fid.txt`(본인만 읽기)에만 써요. 실행 중에 `say <글>`·`remind <글>`·`missed <글>`로 글 대화에 마롱이 말을 더하고, `state`로 상태를 보고, `quit`으로 꺼요.
+9. 보내기는 서비스 계정 키가 있는 곳에서 `python tools/fcm_test_send.py <키 파일> proactive|reply|reminder|missed_call <글> < fid.txt`, 벨은 `python tools/fcm_test_send.py <키 파일> ring [벨 id] < fid.txt`예요. 봇과 같은 메시지를 보내고 결과(ok, gone, auth, failed)와 벨 id만 찍어요. 만든 글로 내 시험 기기에만 보내고, 끝나면 `fid.txt`를 지워요.
+10. 잠금 화면 시험은 `adb shell locksettings set-disabled false`(끝나면 `true`), 전체 화면 권한 끄기는 `adb shell appops set com.corthexhq.marong.standin USE_FULL_SCREEN_INTENT deny`(되돌리기는 `default`, 설정 화면에서 켰으면 `appops set --uid`로도 `default`)예요. 알림 버튼 이름은 에뮬레이터 언어를 따라요.
+
 ## 10. 2단계: 선톡 알림과 앱 안 글 대화 (D17·D18)
 
 설계는 [app-chat.md](app-chat.md)에 따로 있어요(요구사항 REQ-111~, 흐름 FL-105~, 명세 SPEC-110~, 표 TBL-101, API 계약 [api/app-chat.openapi.yaml](../api/app-chat.openapi.yaml)). 요약:
@@ -240,7 +248,7 @@ rm app/google-services.json
 - 알림은 Firebase Cloud Messaging(FCM)의 FID 등록 방식으로 받아요. 웹뷰에는 알림 API가 없어서예요.
 - D18대로 알림 받을 기기가 있으면 선톡·일정 알림을 앱으로만 보내고, 없거나 실패하면 디스코드 DM으로 보내요.
 - 서버 변경과 배포는 동희님 확인 뒤에만 해요.
-- 앱 쪽은 0.2.0에 들어갔어요: FCM 받기(`MarongMessagingService`), 알림 채널 세 개(`Channels`), 앱 연결 `MarongPush`(기기 상태, 글 대화가 보이는지, 알림 설정 열기), 알림 누르기, 페이지 스크립트의 기기 보고(v2).
+- 앱 쪽은 0.2.0에 들어갔어요: FCM 받기(`MarongMessagingService`), 알림 채널 세 개(`Channels`), 앱 연결 `MarongPush`(기기 상태, 글 대화가 보이는지, 알림 설정 열기), 알림 누르기, 페이지 스크립트의 기기 보고(v2). 실제 Firebase 에뮬레이터 시험을 마쳤어요([app-chat.md](app-chat.md) TC-135).
 
 ## 11. 3단계: 마롱이가 먼저 거는 전화
 
@@ -250,4 +258,4 @@ rm app/google-services.json
 - 그 시각에 FCM 높은 우선순위 데이터 메시지로 앱이 전화처럼 울려요(CallStyle 알림, 잠금 화면 전체 화면 벨, 45초).
 - 받으면 통화 화면이 저절로 시작되고, 통화 서버가 약속 전화인 걸 알아 마롱이가 먼저 인사해요. 5분 안에 안 받으면 못 받은 전화 한마디를 남겨요.
 - 벨 받을 앱이 없으면 디스코드 DM으로 통화하자고 보내고, 10분 안에 들어온 통화를 약속 전화로 받아요.
-- 앱 쪽은 0.2.0에 들어갔어요: 벨 알림(`Ring`), 잠금 화면 벨 화면(`RingActivity`, SCR-110), 거절(`RingDeclineReceiver`), 받기 처리(`MainActivity`, 이 폰이 받은 벨만), 페이지 스크립트의 `autoAnswer`.
+- 앱 쪽은 0.2.0에 들어갔어요: 벨 알림(`Ring`), 잠금 화면 벨 화면(`RingActivity`, SCR-110), 거절(`RingDeclineReceiver`), 받기 처리(`MainActivity`, 이 폰이 받은 벨만), 페이지 스크립트의 `autoAnswer`. 실제 Firebase 에뮬레이터 시험을 마쳤어요([app-ring.md](app-ring.md) TC-147).

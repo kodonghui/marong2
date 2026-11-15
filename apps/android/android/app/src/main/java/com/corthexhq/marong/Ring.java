@@ -13,6 +13,7 @@ import android.service.notification.StatusBarNotification;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.core.app.Person;
+import androidx.core.content.ContextCompat;
 import androidx.core.graphics.drawable.IconCompat;
 import com.getcapacitor.Logger;
 
@@ -94,6 +95,7 @@ final class Ring {
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, Channels.RING)
             .setSmallIcon(R.drawable.ic_stat_marong)
+            .setColor(ContextCompat.getColor(context, R.color.marong_accent))
             .setContentText(context.getString(R.string.ring_text))
             .setStyle(NotificationCompat.CallStyle.forIncomingCall(marong, decline, answer))
             .addPerson(marong)
