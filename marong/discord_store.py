@@ -1,6 +1,7 @@
 """Account binding, private history and persistent Discord DM delivery slots."""
 import re
 
+from .google_calendar import GoogleStore
 from .schedules import ScheduleStore
 from .store import Store
 
@@ -80,7 +81,7 @@ SELECT d.*, f.name, true AS is_channel, d.last_incoming_at AS last_said,
 """
 
 
-class DiscordStore(ScheduleStore, Store):
+class DiscordStore(GoogleStore, ScheduleStore, Store):
     def _reply_rooms(self, room: str) -> str:
         # No memory_room traversal: it would pull in linked Kakao group chats.
         return f"""(SELECT source.room_key FROM marong.discord_dm_links d
@@ -110,6 +111,10 @@ class DiscordStore(ScheduleStore, Store):
 
     async def link(self, discord_user_id: str) -> dict | None:
         return await self._one(DM_STATE + " AND d.discord_user_id=%s", (discord_user_id,))
+
+    async def dm_target(self, friend_id: int) -> dict | None:
+        """The friend's own DM channel and room, for notes Marong sends outside a reply."""
+        return await self._one("SELECT channel_id, room_key FROM marong.discord_dm_links WHERE friend_id=%s", (friend_id,))
 
     async def incoming(self, user_id: str, channel_id: str, message_key: str, preference: bool | None) -> bool:
         row = await self._one(

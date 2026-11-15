@@ -99,7 +99,7 @@ bash deploy/ovh.sh logs          # 로그 보기(Ctrl+C 로 나옴)
 
 ## 선톡(마롱이가 먼저 말 걸기)
 
-디스코드 1:1에서는 [별도 사용·운영 안내](docs/discord-dm.md)의 계정 연결과 선톡 설정을 사용해요. 카카오의 기존 일정은 해당 사람이 디스코드에서 선톡을 켜면 그쪽으로 옮겨져요. 디스코드 DM에서 "내일 3시에 알려 줘"처럼 부탁한 알림은 선톡과 따로, 선톡을 꺼도 가요([일정과 알림](docs/discord-dm.md#일정과-알림)).
+디스코드 1:1에서는 [별도 사용·운영 안내](docs/discord-dm.md)의 계정 연결과 선톡 설정을 사용해요. 카카오의 기존 일정은 해당 사람이 디스코드에서 선톡을 켜면 그쪽으로 옮겨져요. 디스코드 DM에서 "내일 3시에 알려 줘"처럼 부탁한 알림은 선톡과 따로, 선톡을 꺼도 가요([일정과 알림](docs/discord-dm.md#일정과-알림)). DM에서 **구글 캘린더 연결**을 보내면 각자 자기 구글 캘린더를 붙여서, 마롱이가 일정을 보고 말해 준 일정은 **마롱이** 캘린더에 넣어요([구글 캘린더](docs/discord-dm.md#구글-캘린더)).
 
 기본은 꺼져 있고(`PROACTIVE=off`) 서버는 켜 뒀어요. 켜면 이렇게 움직여요.
 
@@ -222,6 +222,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements.txt
 .venv/Scripts/python tests/test_report.py     # 리포트: 엑셀·시트 탭 내용(최신이 위·대화 줄 색)·들어간 기억·'지금 새로고침' 묻기·시트 주소가 안 새어 나감
 .venv/Scripts/python tests/test_discord_dm.py # 디스코드 DM(requirements-discord.txt 필요): 연결된 계정만·선톡 동의·기억 분리
 .venv/Scripts/python tests/test_schedules.py  # 디스코드 일정·알림: 시각 계산·반복·도구·친구끼리 안 보임·한 번만 보냄·늦음·놓침·다시 보내기
+.venv/Scripts/python tests/test_google_calendar.py  # 구글 캘린더(가짜 구글): 연결 링크·허용·한 번만·일정 보기·친구끼리 안 보임·마롱이 캘린더 넣기·빼기·끊김·끊기·비밀값이 로그에 없음
 ```
 
 (맥·리눅스는 `.venv/bin/python`.) 노트북에서 `python run.py`(봇 모드)는 켜지 마세요. 서버의 봇과 같은 토큰이라 서로 끊어 내요.
@@ -235,6 +236,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements.txt
 | `marong/memory.py` | 뒤 작업: 10턴마다 요약, 새 말이 오면 친구별 메모 먼저 고치기, 공유 메모 거르기, 임베딩 |
 | `marong/proactive.py` | 선톡: 방마다 일정대로 1:1 친구와 관리자가 켠 단체방에 먼저 말 걸기(짧은 말 몇 개를 연달아) |
 | `marong/schedules.py`, `marong/migrations/012_schedules.sql` | 디스코드 DM 일정·알림: 저장·취소·찾기 도구, 때가 되면 그 친구 DM으로 먼저 말하기(`marong/discord_dm.py` 의 `DiscordReminders`) |
+| `marong/google_calendar.py`, `marong/migrations/013_google_calendar.sql`, `deploy/marong-discord-google.conf` | 디스코드 DM 구글 캘린더: 각자 구글 로그인으로 연결, 내 캘린더 보기, 날짜 있는 일정을 '마롱이' 캘린더에 넣기·빼기, 127.0.0.1 의 `/google/` 콜백 |
 | `marong/photo.py` | 사진: 카카오 CDN 주소 알아보기·내려받기 |
 | `marong/store.py`, `marong/schema.sql` | Postgres 저장소와 표·권한 |
 | `marong/embed.py` | 서버 CPU 임베딩(embeddinggemma-300m) |

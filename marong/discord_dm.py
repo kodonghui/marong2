@@ -2,7 +2,7 @@
 import asyncio
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import time
 from zoneinfo import ZoneInfo
@@ -10,10 +10,12 @@ from zoneinfo import ZoneInfo
 import discord
 
 from .agent import Agent, Incoming
+from .google_calendar import (CONNECT_TEXT, DISCONNECTED_TEXT, LINK_MARK, NOT_CONNECTED_TEXT, REVOKE_FAILED_TEXT,
+                              UNAVAILABLE_TEXT, calendar_lines, command as google_command)
 from .llm import brief
 from .proactive import PART_GAP_S, Proactive, parts, schedule, slot
 from .schedules import (GUIDE as SCHEDULE_GUIDE, LATE_LIMIT, SCHEDULE_TOOL_NAMES, SCHEDULE_TOOLS, occurrence,
-                        reminder_text, run_tool as run_schedule_tool, schedule_lines)
+                        parse_when, reminder_text, run_tool as run_schedule_tool, schedule_lines)
 
 log = logging.getLogger("marong.discord")
 ON = {
@@ -28,6 +30,9 @@ GUIDE = {"도움말", "사용법"}
 NO_MENTIONS = discord.AllowedMentions.none()
 REMIND_CHECK_S = 15     # 때가 된 일정 알림을 확인하는 간격(초)
 TIDY_S = 600            # 지난 일정을 끝으로 정리하는 간격(초)
+GOOGLE_CONTEXT_S = 4    # 답하기 전에 구글 캘린더를 기다리는 한도(초). 넘으면 못 읽었다고 하고 답함
+GOOGLE_LIST_S = 6
+UNKNOWN_LINK = {"status": "unknown"}  # google_links 를 못 읽음
 
 
 @dataclass
@@ -39,6 +44,11 @@ class DiscordIncoming(Incoming):
     schedule_rows: list | None = None     # upcoming schedules shown to the model (None: not read)
     schedule_total: int = 0
     actions: list = field(default_factory=list)  # schedule tool results, kept in the reply meta
+    google_command: str | None = None     # connect | disconnect, from the exact phrases only
+    google_link: dict | None = None       # google_links state when answering (None: never linked)
+    google_events: list | None = None     # upcoming Google events shown to the model (None: not read)
+    google_more: bool = False
+    link_url: str | None = None           # replaces LINK_MARK in the sent text only, never in the history
 
 
 def proactive_preference(text: str) -> bool | None:
@@ -74,9 +84,10 @@ async def send_text(channel, text: str) -> bool:
 
 
 class DiscordAgent(Agent):
-    def __init__(self, settings, store, embeddings, llm, on_saved=None, *, first_replies=None):
+    def __init__(self, settings, store, embeddings, llm, on_saved=None, *, first_replies=None, google=None):
         super().__init__(settings, store, embeddings, llm, on_saved=on_saved)
         self.first_replies = first_replies or {}
+        self.google = google  # GoogleCalendar when the Google client is set up on this server
 
     def _tools(self, msg):
         # Identity and opt-in never change on model output. Only the friend's own schedule does.
@@ -101,8 +112,11 @@ class DiscordAgent(Agent):
         if not msg.friend_id:
             return "\n".join(lines)
         tz = ZoneInfo(self.s.timezone)
-        return "\n".join(lines + ["", SCHEDULE_GUIDE]
-                         + schedule_lines(msg.schedule_rows, msg.schedule_total, tz, datetime.now(tz)))
+        now = datetime.now(tz)
+        lines += ["", SCHEDULE_GUIDE] + schedule_lines(msg.schedule_rows, msg.schedule_total, tz, now)
+        if self.google:
+            lines += calendar_lines(msg.google_link, msg.google_events, msg.google_more, tz, now)
+        return "\n".join(lines)
 
     @staticmethod
     def _dm_lines(link, private=False):
@@ -132,10 +146,64 @@ class DiscordAgent(Agent):
                     self.store.upcoming_schedules(msg.friend_id, datetime.now(tz), tz), 2)
             except Exception as e:  # Answer without the list; the model is told it could not be read.
                 log.warning("schedule_context_error %s", type(e).__name__)
+            if self.google:
+                await self._google_context(msg, tz)
         system, messages, memory = await super()._context(msg, person, user_id, text, held)
         if isinstance(msg, DiscordIncoming) and msg.schedule_rows is not None:
             memory["schedules"] = [row["id"] for row in msg.schedule_rows]
         return system, messages, memory
+
+    async def _google_context(self, msg, tz):
+        """The friend's Google link and upcoming events. A slow or failing Google never blocks the answer."""
+        try:
+            msg.google_link = await asyncio.wait_for(self.store.google_link(msg.friend_id), 2)
+        except Exception as e:
+            log.warning("google_context_error %s", type(e).__name__)
+            msg.google_link = UNKNOWN_LINK
+            return
+        link = msg.google_link
+        if not link or link["status"] != "connected" or not link["can_read"]:
+            return
+        try:
+            got = await asyncio.wait_for(self.google.upcoming(msg.friend_id, datetime.now(tz)), GOOGLE_CONTEXT_S)
+            if got is None:  # Google refused the token just now: show the link as it is now (broken).
+                msg.google_link = await asyncio.wait_for(self.store.google_link(msg.friend_id), 2) or UNKNOWN_LINK
+            else:
+                msg.google_events, msg.google_more = got
+        except Exception as e:  # The model is told the calendar could not be read.
+            log.warning("google_events_error %s", type(e).__name__)
+
+    async def _google_list(self, friend_id, inp):
+        """Google events for schedule_list's period, appended to its result."""
+        tz = ZoneInfo(self.s.timezone)
+        try:
+            start = parse_when(inp.get("start"), tz)[0].replace(hour=0, minute=0, second=0, microsecond=0)
+            end = parse_when(inp.get("end"), tz)[0].replace(hour=0, minute=0, second=0, microsecond=0)
+            return await asyncio.wait_for(
+                self.google.list_text(friend_id, start, end + timedelta(days=1), datetime.now(tz)), GOOGLE_LIST_S)
+        except Exception as e:
+            log.warning("google_list_error %s", type(e).__name__)
+            return "\n구글 캘린더는 지금 못 읽었어."
+
+    async def _google_command(self, msg):
+        """'구글 캘린더 연결·끊기': the link goes out only in the sent text, the history keeps LINK_MARK."""
+        if msg.google_command == "connect":
+            if not self.google or not msg.friend_id:
+                return UNAVAILABLE_TEXT, {"google": "unavailable"}
+            msg.link_url = self.google.new_link(msg.friend_id)
+            log.info("google_link_sent")
+            return CONNECT_TEXT, {"google": "link"}
+        if not self.google or not msg.friend_id:
+            return NOT_CONNECTED_TEXT, {"google": "not_connected"}
+        try:
+            done, revoked = await self.google.disconnect(msg.friend_id)
+        except Exception as e:
+            log.error("google_disconnect_error %s", type(e).__name__)
+            return ("지금은 구글 캘린더 연결을 못 끊었어. 조금 있다가 다시 '구글 캘린더 끊기'라고 보내 줘.",
+                    {"google": "error"})
+        if not done:
+            return NOT_CONNECTED_TEXT, {"google": "not_connected"}
+        return DISCONNECTED_TEXT + ("" if revoked else REVOKE_FAILED_TEXT), {"google": "disconnected"}
 
     async def _run_tool(self, block, msg):
         result = {"type": "tool_result", "tool_use_id": block.id}
@@ -151,6 +219,8 @@ class DiscordAgent(Agent):
             msg.actions.append({"tool": block.name, "result": "db_error"})
             return {**result, "is_error": True,
                     "content": "저장소 오류로 못 했어. 맞춰 뒀다고 하지 말고, 지금은 저장이 안 된다고 솔직하게 말해."}
+        if block.name == "schedule_list" and action["result"] == "ok" and self.google:
+            content += await self._google_list(friend_id, block.input or {})
         msg.actions.append(action)
         log.info("schedule_tool name=%s result=%s", block.name, action["result"])
         out = {**result, "content": content}
@@ -159,6 +229,8 @@ class DiscordAgent(Agent):
     async def _reply(self, msg: DiscordIncoming, person, user_id, text, timeout, use_memory=True, held=None):
         if msg.proactive_preference is False:
             return "응, 먼저 연락하는 건 멈출게.", {}
+        if msg.google_command:
+            return await self._google_command(msg)
         opening = self.first_replies.get(str((person or {}).get("friend_id")))
         if opening and use_memory and user_id is not None:
             replay = isinstance(opening, dict)
@@ -173,7 +245,8 @@ class DiscordAgent(Agent):
                              f"하루 최대 {link['per_day']}번이야. " if link else "")
             return ("여기서 평소처럼 말 걸어 줘. 이 대화는 연구용 시트에 기록돼. " + schedule_text
                     + "원하면 ‘먼저 톡해 줘’, 그만 받으려면 ‘선톡 끄기’라고 말해 줘. "
-                      "‘내일 3시에 알려 줘’처럼 말하면 그때 여기로 알려 줄게."), {}
+                      "‘내일 3시에 알려 줘’처럼 말하면 그때 여기로 알려 줄게."
+                    + (" 구글 캘린더를 붙이려면 ‘구글 캘린더 연결’이라고 보내 줘." if self.google else "")), {}
         msg.saved_id = user_id
         reply, meta = await super()._reply(msg, person, user_id, text, timeout, use_memory, held)
         if msg.actions:
@@ -253,17 +326,32 @@ class DiscordDM(discord.Client):
         if preference is not None:
             log.info("discord_proactive_preference changed=%s", preference)
 
+        room = link["room_key"]
+        incoming = DiscordIncoming(room, link["user_key"], text, kakao_id=message_key, proactive_preference=preference,
+                                   friend_id=link["friend_id"], dm_link=link, google_command=google_command(text))
+
         async def reply(body):
+            if incoming.link_url:  # The history keeps the mark; only the friend's DM gets the one-time link.
+                body = body.replace(LINK_MARK, incoming.link_url)
             return await send_text(msg.channel, body)
 
-        room = link["room_key"]
         async with self.room_lock(room):
-            result = await self.agent.handle(
-                DiscordIncoming(room, link["user_key"], text, kakao_id=message_key,
-                                proactive_preference=preference, friend_id=link["friend_id"], dm_link=link), reply,
-            )
+            result = await self.agent.handle(incoming, reply)
         if result is not None:
             log.info("discord_dm_replied")
+
+    async def tell(self, friend_id: int, text: str, meta: dict) -> bool:
+        """Send a short note to a friend's own linked DM and keep it in the history, for example after Google links."""
+        target = await self.store.dm_target(friend_id)
+        if not self.available or not target or not target["channel_id"]:
+            return False
+        async with self.room_lock(target["room_key"]):
+            channel = self.get_partial_messageable(int(target["channel_id"]), type=discord.ChannelType.private)
+            ok = await send_text(channel, text)
+            await self.store.add_message(target["room_key"], "assistant", text,
+                                         meta={**meta, "delivered": ok, "transport": "discord"})
+        self.agent.on_saved()
+        return ok
 
 
 class DiscordProactive(Proactive):
