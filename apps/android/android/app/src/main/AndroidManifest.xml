@@ -14,6 +14,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Marong's own call: the ring screen over the lock screen (docs/app-ring.md SPEC-132, SPEC-133). -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application
         android:allowBackup="false"
@@ -46,6 +48,49 @@
             android:name=".CallService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- Messages and rings from Marong's server through FCM (docs/app-chat.md SPEC-121,
+             docs/app-ring.md SPEC-132). Only FCM starts it. -->
+        <service
+            android:name=".MarongMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- The ring screen (SCR-110): only the ring notification opens it. -->
+        <activity
+            android:name=".RingActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:launchMode="singleTop"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|uiMode|density"
+            android:theme="@style/AppTheme.NoActionBar" />
+
+        <!-- 거절 on the ring notification: stops the ring in the app only. -->
+        <receiver
+            android:name=".RingDeclineReceiver"
+            android:exported="false" />
+
+        <!-- FCM addresses this installation by its Firebase installation id, not by a token (SPEC-117, SPEC-121). -->
+        <meta-data
+            android:name="firebase_messaging_installation_id_enabled"
+            android:value="true" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="marong_talk" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_marong" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/marong_accent" />
+        <!-- No analytics: the app sends nothing about its use (REQ-118). -->
+        <meta-data
+            android:name="firebase_analytics_collection_enabled"
+            android:value="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

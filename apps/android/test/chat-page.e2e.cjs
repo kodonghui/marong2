@@ -7,6 +7,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { startChatSite, seoul, ME } = require('./support/chat-site.cjs');
 
+// The app's own page script (SPEC-123), injected as the app injects it.
+const PAGE_SCRIPT = path.join(__dirname, '..', 'android', 'app', 'src', 'main', 'assets', 'marong_page.js');
+
 let chromium = null;
 try {
   ({ chromium } = require('playwright'));
@@ -292,7 +295,11 @@ describe('chat page', { skip }, () => {
     await plain.page.waitForSelector('#menu:not([hidden])');
     assert.equal(await plain.page.textContent('#menu-delivery'), '알림이 꺼져 있어서 디스코드 DM으로 받고 있어.');
     assert.equal(await plain.page.isHidden('#menu-settings'), true, 'no button without the app');
-    assert.equal(await plain.page.textContent('#menu-ring'), '약속 전화는 이 폰이 울려(잠금 화면 전체 벨은 꺼져 있어).');
+    // SPEC-140: a browser cannot ring, whatever the friend's phone does.
+    assert.equal(await plain.page.textContent('#menu-ring'), '약속 전화 벨은 마롱이 앱에서 울려. 앱이 없으면 디스코드로 알려 줄게.');
+    for (const id of ['#menu-ring-settings', '#menu-full-screen', '#menu-samsung']) {
+      assert.equal(await plain.page.isHidden(id), true, `${id} only in the app`);
+    }
     assert.equal(await plain.page.getAttribute('#menu-button', 'aria-expanded'), 'true');
     await plain.context.close();
 
@@ -313,5 +320,137 @@ describe('chat page', { skip }, () => {
     assert.equal(await off.page.isHidden('#menu-ring'), true, 'no ring line while rings are off on the server');
     assert.equal(await off.page.textContent('#menu-delivery'), '디스코드 DM으로 받고 있어. 알림은 마롱이 앱에서 받을 수 있어.');
     await off.context.close();
+  });
+
+  it('SPEC-140: in the app, the ring line with its settings buttons and the Samsung note', async () => {
+    reset();
+    const bridge = `window.__calls = [];
+      window.__marongApp = {
+        openNotificationSettings(channel) { window.__calls.push(['notifications', channel === undefined ? null : channel]); return true; },
+        openFullScreenSettings() { window.__calls.push(['fullScreen']); return true; },
+        deviceState() { return Promise.resolve({ samsung: true, fullScreenSettings: true }); },
+      };`;
+    site.state.me = { status: 200, body: { ...ME, delivery: { to: 'app', reason: 'app_on' },
+      ring: { to: 'app', reason: 'app_on', fullScreen: false } } };
+    const ringing = await openChat({ init: bridge, at: NIGHT });
+    await ready(ringing.page);
+    await ringing.page.click('#menu-button');
+    await ringing.page.waitForSelector('#menu-samsung:not([hidden])');
+    assert.equal(await ringing.page.textContent('#menu-ring'),
+      '약속 전화는 이 폰이 울려. 잠금 화면에는 전체 화면 대신 위에 뜨는 알림으로 와.');
+    assert.equal(await ringing.page.textContent('#menu-samsung'), "벨이 늦게 울리면 배터리 설정에서 마롱이를 '절전 예외 앱'에 넣어 줘.");
+    assert.equal(await ringing.page.isHidden('#menu-ring-settings'), true);
+    await ringing.page.click('#menu-full-screen');
+    assert.deepEqual(await ringing.page.evaluate(() => window.__calls), [['fullScreen']]);
+    const box = await ringing.page.locator('#menu-full-screen').boundingBox();
+    assert.ok(box.height >= 44, `the button is ${box.height}px tall`);
+    await shot(ringing.page, 'chat-menu-ring');
+    await ringing.context.close();
+
+    site.state.me = { status: 200, body: { ...ME, delivery: { to: 'app', reason: 'app_on' },
+      ring: { to: 'discord', reason: 'ring_off', fullScreen: true } } };
+    const channelOff = await openChat({ init: bridge });
+    await ready(channelOff.page);
+    await channelOff.page.click('#menu-button');
+    await channelOff.page.waitForSelector('#menu-ring-settings:not([hidden])');
+    assert.equal(await channelOff.page.textContent('#menu-ring'), '전화 알림이 꺼져 있어서 약속 전화는 디스코드 DM으로 통화하자고 보내.');
+    assert.equal(await channelOff.page.isHidden('#menu-settings'), true, '선톡 still reach the phone');
+    assert.equal(await channelOff.page.isHidden('#menu-samsung'), true, 'no ring on the phone, no Samsung note');
+    await channelOff.page.click('#menu-ring-settings');
+    assert.deepEqual(await channelOff.page.evaluate(() => window.__calls), [['notifications', 'ring']], 'the 마롱이 전화 channel');
+    await channelOff.context.close();
+
+    site.state.me = { status: 200, body: { ...ME, delivery: { to: 'discord', reason: 'notifications_off' },
+      ring: { to: 'discord', reason: 'notifications_off', fullScreen: true } } };
+    const allOff = await openChat({ init: bridge });
+    await ready(allOff.page);
+    await allOff.page.click('#menu-button');
+    await allOff.page.waitForSelector('#menu-settings:not([hidden])');
+    assert.equal(await allOff.page.isHidden('#menu-ring-settings'), true, 'one button for one setting');
+    await allOff.context.close();
+
+    site.state.me = { status: 200, body: { ...ME, ring: { to: 'discord', reason: 'no_device', fullScreen: null } } };
+    const noDevice = await openChat({ init: bridge });
+    await ready(noDevice.page);
+    await noDevice.page.click('#menu-button');
+    await noDevice.page.waitForSelector('#menu:not([hidden])');
+    assert.equal(await noDevice.page.textContent('#menu-ring'), '약속 전화는 디스코드 DM으로 통화하자고 보내.');
+    for (const id of ['#menu-ring-settings', '#menu-full-screen', '#menu-samsung']) {
+      assert.equal(await noDevice.page.isHidden(id), true, `${id} hidden`);
+    }
+    await noDevice.context.close();
+  });
+
+  it("SPEC-123 with the app's page script: the phone report, chat on screen, and the menu after a change", async () => {
+    reset();
+    site.state.devices = [];
+    site.state.deviceStatus = 201;
+    site.state.me = { status: 200, body: { ...ME, delivery: { to: 'app', reason: 'app_on' },
+      ring: { to: 'app', reason: 'app_on', fullScreen: true } } };
+    const INSTALL = '0f8fad5b-d9cb-469f-a165-70867728950e';
+    // A stand-in for Capacitor's bridge, then the app's own page script, both at document start as in the app.
+    const fake = `window.__native = []; window.__listeners = {};
+      window.__state = { installId: '${INSTALL}', fid: 'fid_AAAAAAAAAAAAAAAAAAAA', notifications: 'granted', appVersion: '0.2.0',
+        ring: { channel: 'enabled', fullScreen: 'granted' }, fullScreenSettings: true, samsung: false };
+      window.Capacitor = {
+        nativePromise(plugin, method, options) {
+          window.__native.push([plugin, method, JSON.parse(JSON.stringify(options || {}))]);
+          return Promise.resolve(plugin === 'MarongPush' && method === 'state' ? JSON.parse(JSON.stringify(window.__state)) : {});
+        },
+        addListener(plugin, event, callback) { (window.__listeners[plugin + '.' + event] ||= []).push(callback); return { remove() {} }; },
+      };`;
+    const context = await browser.newContext(PHONE);
+    contexts.push(context);
+    await context.addInitScript(fake);
+    await context.addInitScript({ path: PAGE_SCRIPT });
+    const page = await context.newPage();
+    await page.goto(`${site.url}/chat/`);
+    await ready(page);
+    for (let i = 0; i < 40 && site.state.devices.length < 1; i++) await page.waitForTimeout(50);
+    assert.equal(site.state.devices.length, 1, 'one report');
+    assert.deepEqual(site.state.devices[0], { installId: INSTALL, origin: site.url, type: 'application/json',
+      body: { fid: 'fid_AAAAAAAAAAAAAAAAAAAA', notifications: 'granted', appVersion: '0.2.0', ring: { channel: 'enabled', fullScreen: 'granted' } } });
+    const visible = await page.evaluate(() => window.__native.filter(([p, m]) => p === 'MarongPush' && m === 'chatVisible').map(([, , o]) => o.visible));
+    assert.deepEqual(visible.slice(-1), [true], 'the chat is on screen');
+
+    // The same phone a moment later: nothing to send.
+    await page.reload();
+    await ready(page);
+    await page.waitForTimeout(300);
+    assert.equal(site.state.devices.length, 1, 'unchanged, so no second report');
+
+    // The menu is open when Android's settings change the ring: the page reports it and the menu follows.
+    await page.click('#menu-button');
+    await page.waitForSelector('#menu-ring:not([hidden])');
+    assert.equal(await page.textContent('#menu-ring'), '약속 전화는 이 폰이 울려.');
+    const asked = site.state.meCount;
+    site.state.me = { status: 200, body: { ...ME, delivery: { to: 'app', reason: 'app_on' },
+      ring: { to: 'discord', reason: 'ring_off', fullScreen: true } } };
+    await page.evaluate(() => {
+      window.__state.ring = { channel: 'disabled', fullScreen: 'granted' };
+      for (const callback of window.__listeners['MarongPush.resumed'] || []) callback({});
+    });
+    for (let i = 0; i < 40 && site.state.devices.length < 2; i++) await page.waitForTimeout(50);
+    assert.equal(site.state.devices.length, 2);
+    assert.deepEqual(site.state.devices[1].body.ring, { channel: 'disabled', fullScreen: 'granted' });
+    await page.waitForFunction(() => document.getElementById('menu-ring').textContent.startsWith('전화 알림이 꺼져'));
+    assert.ok(site.state.meCount > asked, 'the menu asked the server again');
+
+    // A new id from FCM is reported at once.
+    await page.evaluate(() => {
+      window.__state.fid = 'fid_BBBBBBBBBBBBBBBBBBBB';
+      for (const callback of window.__listeners['MarongPush.registered'] || []) callback({});
+    });
+    for (let i = 0; i < 40 && site.state.devices.length < 3; i++) await page.waitForTimeout(50);
+    assert.equal(site.state.devices[2].body.fid, 'fid_BBBBBBBBBBBBBBBBBBBB');
+
+    // Hidden (screen off, another app): messages come as notifications again.
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    const last = await page.evaluate(() => window.__native.filter(([p, m]) => p === 'MarongPush' && m === 'chatVisible').at(-1)[2]);
+    assert.deepEqual(last, { visible: false });
+    await context.close();
   });
 });

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 받기 on the ring screen: the call page's accent, as its call button. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="#33000000">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/ring_answer" />
+            <corners android:radius="36dp" />
+        </shape>
+    </item>
+</ripple>

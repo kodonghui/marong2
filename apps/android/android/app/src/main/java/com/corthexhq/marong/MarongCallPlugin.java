@@ -139,6 +139,7 @@ public class MarongCallPlugin extends Plugin {
         Activity activity = getActivity();
         if (activity == null || activity.isFinishing()) {
             callActive = false;
+            CallControl.setActive(false);
             CallService.hide(getContext());
             return;
         }
@@ -146,8 +147,11 @@ public class MarongCallPlugin extends Plugin {
             return;
         }
         callActive = active;
+        CallControl.setActive(active);
         WebView webView = bridge.getWebView();
         if (active) {
+            // A call started: a ring still sounding stops (docs/app-ring.md SPEC-132).
+            Ring.cancel(getContext());
             activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && webView != null) {
                 webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
@@ -193,6 +197,7 @@ public class MarongCallPlugin extends Plugin {
     protected void handleOnDestroy() {
         main.removeCallbacks(releaseAfterHangUp);
         callActive = false;
+        CallControl.setActive(false);
         CallService.hide(getContext());
         CallControl.detach(this);
         super.handleOnDestroy();

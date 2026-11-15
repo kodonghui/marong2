@@ -1,7 +1,7 @@
 'use strict';
 // TC-145 (docs/app-ring.md) and the call page's '글 대화' link (docs/app-chat.md SPEC-124) in a browser: the real
 // call page (tools/vertex_live/static) against test/support/call-site.cjs. Nothing leaves 127.0.0.1.
-// The app's page script with autoAnswer comes with the app 0.2.0; until then a one-line stand-in says it.
+// In-app cases run the app's own page script (0.2.0, autoAnswer) with a stand-in for Capacitor's bridge.
 const { describe, it, before, after, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -17,6 +17,13 @@ try {
 
 const PHONE = { viewport: { width: 412, height: 915 }, deviceScaleFactor: 1, isMobile: true, hasTouch: true, locale: 'ko-KR' };
 const RING = '6f1c1d2e-3b4a-4c5d-8e9f-0a1b2c3d4e5f';
+const PAGE_SCRIPT = path.join(__dirname, '..', 'android', 'app', 'src', 'main', 'assets', 'marong_page.js');
+// Capacitor's bridge as the page script sees it: it records the app calls and has no phone to report.
+const BRIDGE = `window.__native = [];
+window.Capacitor = {
+  nativePromise(plugin, method) { window.__native.push(plugin + '.' + method); return Promise.resolve(null); },
+  addListener() { return { remove() {} }; },
+};`;
 const SHOTS = process.env.MARONG_SCREENSHOTS || '';
 const STATUSES = `window.__statuses = [];
 new MutationObserver(() => {}).observe(document, { childList: true });
@@ -44,12 +51,16 @@ describe('call page: Marong\'s own call and the chat link', { skip }, () => {
     await browser?.close();
   });
 
-  async function open(options, address = '/', init = '', { idle = false } = {}) {
+  async function open(options, address = '/', init = '', { idle = false, app = false } = {}) {
     const site = await startCallSite(options);
     sites.push(site);
     const context = await browser.newContext(PHONE);
     contexts.push(context);
     await context.addInitScript(STATUSES + init);
+    if (app) {
+      await context.addInitScript(BRIDGE);
+      await context.addInitScript({ path: PAGE_SCRIPT });
+    }
     const page = await context.newPage();
     await page.goto(`${site.url}${address}`);
     if (idle) await page.waitForTimeout(1500);  // another screen's call keeps the button off
@@ -104,17 +115,19 @@ describe('call page: Marong\'s own call and the chat link', { skip }, () => {
     assert.ok(!(await page.evaluate(() => window.__statuses)).includes('약속 시간이 지나서 보통 전화로 이어졌어.'));
   });
 
-  it('TC-145: inside the app (autoAnswer) the ring answers itself', async () => {
-    const { site, page } = await open({ ready: { ring: true } }, `/?ring=${RING}`, 'window.__marongApp = { autoAnswer: true };');
+  it('TC-145: inside the app (the page script\'s autoAnswer) the ring answers itself', async () => {
+    const { site, page } = await open({ ready: { ring: true } }, `/?ring=${RING}`, '', { app: true });
     await inCall(page);
     assert.ok((await socketURL(site)).includes(`&ring=${RING}`));
     assert.equal(site.upgrades.length, 1);
     assert.equal(await page.evaluate(() => location.search), '');
+    assert.equal(await page.evaluate(() => window.__marongApp.version), 2);
+    // The page took the microphone: the app keeps the call alive and stops the ring (SPEC-132).
+    await page.waitForFunction(() => window.__native.includes('MarongCall.callStarted'));
   });
 
   it('TC-145: no auto answer while another screen is in a call', async () => {
-    const { site, page } = await open({ status: { active: true } }, `/?ring=${RING}`, 'window.__marongApp = { autoAnswer: true };',
-      { idle: true });
+    const { site, page } = await open({ status: { active: true } }, `/?ring=${RING}`, '', { idle: true, app: true });
     assert.equal(site.upgrades.length, 0);
     assert.equal(await page.textContent('#headline'), '마롱이한테 전화할래?');
   });

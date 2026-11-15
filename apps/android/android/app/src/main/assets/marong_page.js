@@ -1,15 +1,32 @@
 // Injected by the 마롱이 Android app into the call site only (SPEC-102 to SPEC-106).
 // It reads the page and reports to the app; it changes no call behaviour of the page.
+// From 0.2.0 it also reports this phone for messages and rings (docs/app-chat.md SPEC-123,
+// docs/app-ring.md SPEC-135, SPEC-139 and SPEC-140).
 (() => {
   'use strict';
   if (window.__marongApp) return;
 
   // Capacitor's bridge script is added after this one, so look it up when it is needed.
-  const send = (plugin, method, options) => {
+  const ask = (plugin, method, options) => {
     try {
       const cap = window.Capacitor;
-      if (!cap || typeof cap.nativePromise !== 'function') return false;
-      cap.nativePromise(plugin, method, options || {}).catch(() => {});
+      if (!cap || typeof cap.nativePromise !== 'function') return null;
+      return cap.nativePromise(plugin, method, options || {});
+    } catch {
+      return null;
+    }
+  };
+  const send = (plugin, method, options) => {
+    const answer = ask(plugin, method, options);
+    if (!answer) return false;
+    Promise.resolve(answer).catch(() => {});
+    return true;
+  };
+  const listen = (plugin, event, callback) => {
+    try {
+      const cap = window.Capacitor;
+      if (!cap || typeof cap.addListener !== 'function') return false;
+      cap.addListener(plugin, event, callback);
       return true;
     } catch {
       return false;
@@ -143,7 +160,112 @@
     return true;
   };
 
+  // This phone for 선톡, reminders, replies and rings (docs/app-chat.md SPEC-123, docs/app-ring.md
+  // SPEC-139): sent when it changed, when FCM gives a new id, and at least every 12 hours.
+  const REPORT_KEY = 'marong.app.deviceReport';
+  const REPORT_EVERY_MS = 12 * 60 * 60 * 1000;
+  const INSTALL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  const lastReport = () => {
+    try {
+      const last = JSON.parse(localStorage.getItem(REPORT_KEY) || 'null');
+      return last && typeof last === 'object' ? last : null;
+    } catch {
+      return null;
+    }
+  };
+  const sendReport = async () => {
+    const state = await ask('MarongPush', 'state');
+    if (!state || !INSTALL_ID.test(state.installId)) return;
+    const body = JSON.stringify({
+      fid: typeof state.fid === 'string' ? state.fid : null,
+      notifications: state.notifications,
+      appVersion: state.appVersion,
+      ring: state.ring,
+    });
+    const last = lastReport();
+    const age = last ? Date.now() - last.at : NaN;
+    if (last && last.installId === state.installId && last.body === body && age >= 0 && age < REPORT_EVERY_MS) return;
+    const res = await fetch(`/chat/api/devices/${state.installId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body,
+      credentials: 'same-origin',
+      redirect: 'manual',
+      cache: 'no-store',
+    });
+    // Anything else (signed out, server down) is tried again when a page opens or comes back.
+    if (res.status !== 200 && res.status !== 201) return;
+    try {
+      localStorage.setItem(REPORT_KEY, JSON.stringify({ installId: state.installId, body, at: Date.now() }));
+    } catch {
+      // Without storage the page reports again next time.
+    }
+    window.dispatchEvent(new Event('marongdevice'));
+  };
+  let reporting = null;
+  let reportAgain = false;
+  const report = () => {
+    if (reporting) {
+      reportAgain = true;
+      return reporting;
+    }
+    reporting = sendReport()
+      .catch(() => {})
+      .then(() => {
+        reporting = null;
+        if (reportAgain) {
+          reportAgain = false;
+          report();
+        }
+      });
+    return reporting;
+  };
+
+  // While the chat is on screen, its messages show there and not as notifications (SPEC-121, SPEC-123).
+  let chatShown = null;
+  const syncChat = (leaving, force) => {
+    const path = location.pathname;
+    const visible = !leaving && path.startsWith('/chat/') && document.visibilityState === 'visible';
+    if (!force && visible === chatShown) return;
+    if (send('MarongPush', 'chatVisible', { visible })) chatShown = visible;
+  };
+
+  let started = false;
+  const startApp = () => {
+    if (started || !window.Capacitor) return;
+    started = true;
+    listen('MarongPush', 'registered', () => report());
+    // Back from Android's settings or another app: notifications may have been turned on or off.
+    listen('MarongPush', 'resumed', () => {
+      syncChat(false, true);
+      report();
+    });
+    syncChat(false, true);
+    report();
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startApp, { once: true });
+  else startApp();
+  window.addEventListener('pageshow', () => {
+    startApp();
+    syncChat(false, true);
+  });
+  window.addEventListener('pagehide', () => syncChat(true, false));
+  document.addEventListener('visibilitychange', () => {
+    syncChat(false, false);
+    if (started && document.visibilityState === 'visible') report();
+  });
+
   Object.defineProperty(window, '__marongApp', {
-    value: Object.freeze({ version: 1, endCall, isCallActive: () => active }),
+    value: Object.freeze({
+      version: 2,
+      // A ring answered in the app starts the call without a second tap (docs/app-ring.md SPEC-135).
+      autoAnswer: true,
+      endCall,
+      isCallActive: () => active,
+      // The chat menu's buttons (SCR-109, SPEC-140). Each returns false when the app cannot do it.
+      openNotificationSettings: (channel) => send('MarongPush', 'openNotificationSettings', channel === 'ring' ? { channel: 'ring' } : {}),
+      openFullScreenSettings: () => send('MarongPush', 'openFullScreenSettings'),
+      deviceState: () => Promise.resolve(ask('MarongPush', 'state')).catch(() => null),
+    }),
   });
 })();

@@ -45,7 +45,7 @@ const ui = {
   menu: $('menu'), menuButton: $('menu-button'),
 };
 const app = {
-  ready: false, blocked: null, me: null,
+  ready: false, blocked: null, me: null, device: null,
   first: null, last: 0, hasMore: false, loadingMore: false,
   waiting: false, waitControl: null, backoff: 0, typing: false,
   until: 0, countdown: null,
@@ -480,35 +480,80 @@ const DELIVERY = {
   fcm_off: () => '지금은 디스코드 DM으로 받고 있어.',
 };
 
+// Marong's own call (docs/app-ring.md SPEC-140): where it rings, and what this phone can fix.
+const RING = {
+  app: '약속 전화는 이 폰이 울려.',
+  appNoFullScreen: '약속 전화는 이 폰이 울려. 잠금 화면에는 전체 화면 대신 위에 뜨는 알림으로 와.',
+  off: '전화 알림이 꺼져 있어서 약속 전화는 디스코드 DM으로 통화하자고 보내.',
+  discord: '약속 전화는 디스코드 DM으로 통화하자고 보내.',
+  browser: '약속 전화 벨은 마롱이 앱에서 울려. 앱이 없으면 디스코드로 알려 줄게.',
+};
+
+const bridgeCan = (name) => Boolean(window.__marongApp && typeof window.__marongApp[name] === 'function');
+
 function showMenu() {
   const me = app.me;
   if (!me) return;
   const why = me.delivery.reason;
   $('menu-delivery').textContent = (DELIVERY[why] || DELIVERY.fcm_off)();
   const settings = $('menu-settings');
-  const opener = window.__marongApp && window.__marongApp.openNotificationSettings;
-  settings.hidden = !(why === 'notifications_off' && typeof opener === 'function');
+  settings.hidden = !(why === 'notifications_off' && bridgeCan('openNotificationSettings'));
   const ring = $('menu-ring');
+  const ringSettings = $('menu-ring-settings');
+  const fullScreen = $('menu-full-screen');
+  const samsung = $('menu-samsung');
+  ringSettings.hidden = true;
+  fullScreen.hidden = true;
+  samsung.hidden = true;
   ring.hidden = me.ring.reason === 'ring_disabled';
-  if (!ring.hidden) {
-    ring.textContent = me.ring.to === 'app'
-      ? `약속 전화는 이 폰이 울려${me.ring.fullScreen === false ? '(잠금 화면 전체 벨은 꺼져 있어)' : ''}.`
-      : '약속 전화는 디스코드 DM으로 통화하자고 보내.';
+  if (ring.hidden) return;
+  if (!inApp()) {
+    ring.textContent = RING.browser;
+    return;
+  }
+  if (me.ring.to === 'app') {
+    const noFullScreen = me.ring.fullScreen === false;
+    ring.textContent = noFullScreen ? RING.appNoFullScreen : RING.app;
+    fullScreen.hidden = !(noFullScreen && bridgeCan('openFullScreenSettings'));
+    samsung.hidden = !(app.device && app.device.samsung === true);
+  } else if (me.ring.reason === 'ring_off' || me.ring.reason === 'notifications_off') {
+    ring.textContent = RING.off;
+    ringSettings.hidden = !settings.hidden || !bridgeCan('openNotificationSettings');
+  } else {
+    ring.textContent = RING.discord;
   }
 }
 
-ui.menuButton.addEventListener('click', async () => {
+async function refreshMenu() {
+  if (bridgeCan('deviceState')) {
+    window.__marongApp.deviceState().then((device) => {
+      app.device = device || null;
+      showMenu();
+    }, () => {});
+  }
+  const r = await api('/me');
+  if (r.status === 200) { app.me = r.body; showMenu(); } else handle(r);
+}
+
+ui.menuButton.addEventListener('click', () => {
   const open = ui.menu.hidden;
   ui.menu.hidden = !open;
   ui.menuButton.setAttribute('aria-expanded', String(open));
   if (!open) return;
   showMenu();
-  const r = await api('/me');
-  if (r.status === 200) { app.me = r.body; showMenu(); } else handle(r);
+  refreshMenu();
 });
 $('menu-settings').addEventListener('click', () => {
   try { window.__marongApp.openNotificationSettings(); } catch { /* old app */ }
 });
+$('menu-ring-settings').addEventListener('click', () => {
+  try { window.__marongApp.openNotificationSettings(app.me && app.me.ring.reason === 'ring_off' ? 'ring' : undefined); } catch { /* old app */ }
+});
+$('menu-full-screen').addEventListener('click', () => {
+  try { window.__marongApp.openFullScreenSettings(); } catch { /* old app */ }
+});
+// The app reported a changed phone (back from Android's settings): show the new state.
+window.addEventListener('marongdevice', () => { if (!ui.menu.hidden) refreshMenu(); });
 $('state-retry').addEventListener('click', () => (app.blocked === 'login' ? location.reload() : start()));
 
 // ── start ────────────────────────────────────────────────────

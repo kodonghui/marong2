@@ -1,8 +1,9 @@
 'use strict';
 // A stand-in for the bot's in-app chat (marong/app_chat.py), for browser tests of the chat page only
 // (docs/app-chat.md TC-132). It serves the real page files (marong/app_chat_static) and answers API-101 to
-// API-104 from a script the test controls: who signs in, the stored messages, what a send gets back, when Marong
-// is "writing" and what she says. No model, no database, nothing beyond 127.0.0.1.
+// API-105 from a script the test controls: who signs in, the stored messages, what a send gets back, when Marong
+// is "writing" and what she says, and what a device report gets back. No model, no database, nothing beyond
+// 127.0.0.1.
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
@@ -33,6 +34,9 @@ async function startChatSite({ waitMs = 1500 } = {}) {
     waits: [],                              // every wait query string, in order
     openWaits: 0,
     nextId: 1,
+    meCount: 0,                             // GET /chat/api/me answered
+    devices: [],                            // every PUT /chat/api/devices/{installId}, in order
+    deviceStatus: 201,                      // what the next device report gets: 200 | 201 | 401
   };
   const waiters = new Set();
 
@@ -81,6 +85,7 @@ async function startChatSite({ waitMs = 1500 } = {}) {
       }
     }
     if (pathname === '/chat/api/me' && req.method === 'GET') {
+      state.meCount++;
       if (state.me.status !== 200) { problem(res, state.me.status, state.me.code || 'unauthenticated'); return; }
       json(res, 200, state.me.body);
       return;
@@ -113,6 +118,18 @@ async function startChatSite({ waitMs = 1500 } = {}) {
           setTimeout(() => { state.typing = false; add('marong', reply.text); }, reply.afterMs);
         }
       }, state.postDelayMs));
+      return;
+    }
+    const device = pathname.match(/^\/chat\/api\/devices\/([0-9a-f-]{36})$/);
+    if (device && req.method === 'PUT') {
+      let raw = '';
+      req.on('data', (chunk) => { raw += chunk; });
+      req.on('end', () => {
+        state.devices.push({ installId: device[1], body: JSON.parse(raw), origin: req.headers.origin || null,
+          type: req.headers['content-type'] || null });
+        if (state.deviceStatus >= 400) { problem(res, state.deviceStatus, 'unauthenticated'); return; }
+        json(res, state.deviceStatus, { delivery: state.me.body.delivery, ring: state.me.body.ring });
+      });
       return;
     }
     if (pathname === '/chat/api/messages/wait' && req.method === 'GET') {

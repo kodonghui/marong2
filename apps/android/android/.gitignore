@@ -61,8 +61,8 @@ captures/
 .externalNativeBuild
 .cxx/
 
-# Google Services (e.g. APIs or Firebase)
-# google-services.json
+# Google Services: kept outside Git, copied in only for a build (docs/app-chat.md SPEC-127)
+google-services.json
 
 # Freeline
 freeline.py

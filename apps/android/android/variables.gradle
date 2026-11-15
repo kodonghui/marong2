@@ -13,4 +13,6 @@ ext {
     androidxJunitVersion = '1.3.0'
     androidxEspressoCoreVersion = '3.7.0'
     cordovaAndroidVersion = '14.0.1'
+    // In-app notifications and Marong's own call (docs/app-chat.md SPEC-121, docs/app-ring.md SPEC-132).
+    firebaseMessagingVersion = '26.0.1'
 }

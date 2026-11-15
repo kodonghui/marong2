@@ -1,6 +1,6 @@
 # 마롱이 안드로이드 앱
 
-상태: 1단계(통화 앱) 구현·자동 시험·에뮬레이터 시험 끝(고장 3개 고침, 0.1.1), 실제 폰 시험(로그인 유지·소리·삼성 배터리) 대기 (2026-11-15, Claude). 코드는 `apps/android/`, 시작점은 `codex/marong-vertex-live`의 `8c78988`이에요.
+상태: 1단계(통화 앱) 구현·자동 시험·에뮬레이터 시험 끝(고장 3개 고침, 0.1.1), 실제 폰 시험(로그인 유지·소리·삼성 배터리) 대기. 2·3단계(앱 알림·글 대화·마롱이가 먼저 거는 전화)는 앱 0.2.0으로 구현·자동 시험 끝, 에뮬레이터·폰 시험과 서버 반영 대기 (2026-11-15, Claude). 코드는 `apps/android/`, 시작점은 `codex/marong-vertex-live`의 `8c78988`이에요.
 이 문서 하나에 앱 범위의 CORTHEX 02 요구사항, 03 흐름, 04 기능 명세, 07·08 화면, 10 작업, 12 시험을 모았어요([Discord 음성 설계](discord-voice-design.md)와 같은 방식). 병행 작업과 겹치지 않게 ID는 101번대를 써요. 웹 통화 화면과 서버의 계약은 기존 [요구사항](02-prd/requirements.md)과 [기능 명세](04-functional-spec/spec.md)가 그대로 정본이에요. 기획 기록과 결정 원문은 Notion 마롱이 통화 기능 프로젝트의 '마롱이 안드로이드 앱' 행과 '결정할 것' D17에 있어요.
 
 ## 출처 표기
@@ -208,12 +208,16 @@ flowchart LR
 cd apps/android
 npm ci
 npm run sync                      # www와 설정을 android/로 복사
-npm test                          # 페이지 스크립트
-npm run test:browser              # Playwright가 있을 때: 실제 통화 화면
+npm test                          # 페이지 스크립트, 앱 설정
+npm run test:browser              # Playwright가 있을 때: 실제 통화 화면·글 대화 화면
 cd android
-MARONG_KEYSTORE_PROPERTIES=/키/폴더/keystore.properties ./gradlew testDebugUnitTest assembleRelease
+cp /키/폴더/google-services.json app/   # 0.2.0부터: 빌드 때만 복사(Git이 막아요)
+MARONG_KEYSTORE_PROPERTIES=/키/폴더/keystore.properties ./gradlew testDebugUnitTest assembleRelease lintDebug
+rm app/google-services.json
 # 결과: app/build/outputs/apk/release/app-release.apk
 ```
+
+`google-services.json`(Firebase 프로젝트 `marong-app`의 앱 설정)이 없으면 빌드는 되지만 앱이 FCM에 등록하지 못해서 알림·벨을 받지 못하고 디스코드로 받아요([app-chat.md](app-chat.md) SPEC-127). 빌드 뒤 `npm test`를 다시 돌리면 합친 매니페스트의 권한 목록(TC-133)도 확인해요.
 
 `keystore.properties`에는 `storeFile`(절대 경로), `storePassword`, `keyAlias`, `keyPassword` 네 줄이 있어요. 새 버전을 낼 때는 `app/build.gradle`의 `versionCode`를 1씩 올리고 `versionName`과 `capacitor.config.json`의 사용자 에이전트를 함께 바꿔요.
 
@@ -236,6 +240,7 @@ MARONG_KEYSTORE_PROPERTIES=/키/폴더/keystore.properties ./gradlew testDebugUn
 - 알림은 Firebase Cloud Messaging(FCM)의 FID 등록 방식으로 받아요. 웹뷰에는 알림 API가 없어서예요.
 - D18대로 알림 받을 기기가 있으면 선톡·일정 알림을 앱으로만 보내고, 없거나 실패하면 디스코드 DM으로 보내요.
 - 서버 변경과 배포는 동희님 확인 뒤에만 해요.
+- 앱 쪽은 0.2.0에 들어갔어요: FCM 받기(`MarongMessagingService`), 알림 채널 세 개(`Channels`), 앱 연결 `MarongPush`(기기 상태, 글 대화가 보이는지, 알림 설정 열기), 알림 누르기, 페이지 스크립트의 기기 보고(v2).
 
 ## 11. 3단계: 마롱이가 먼저 거는 전화
 
@@ -245,3 +250,4 @@ MARONG_KEYSTORE_PROPERTIES=/키/폴더/keystore.properties ./gradlew testDebugUn
 - 그 시각에 FCM 높은 우선순위 데이터 메시지로 앱이 전화처럼 울려요(CallStyle 알림, 잠금 화면 전체 화면 벨, 45초).
 - 받으면 통화 화면이 저절로 시작되고, 통화 서버가 약속 전화인 걸 알아 마롱이가 먼저 인사해요. 5분 안에 안 받으면 못 받은 전화 한마디를 남겨요.
 - 벨 받을 앱이 없으면 디스코드 DM으로 통화하자고 보내고, 10분 안에 들어온 통화를 약속 전화로 받아요.
+- 앱 쪽은 0.2.0에 들어갔어요: 벨 알림(`Ring`), 잠금 화면 벨 화면(`RingActivity`, SCR-110), 거절(`RingDeclineReceiver`), 받기 처리(`MainActivity`, 이 폰이 받은 벨만), 페이지 스크립트의 `autoAnswer`.

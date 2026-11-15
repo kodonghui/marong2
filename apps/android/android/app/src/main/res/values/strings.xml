@@ -15,4 +15,15 @@
     <string name="mic_denied_message">마롱이와 목소리로 이야기하려면 설정의 권한에서 마이크를 허용해 주세요.</string>
     <string name="mic_denied_open_settings">설정 열기</string>
     <string name="mic_denied_close">닫기</string>
+
+    <string name="talk_channel_name">마롱이 톡</string>
+    <string name="talk_channel_description">마롱이가 먼저 보내는 말과 글 대화의 답이에요.</string>
+    <string name="reminder_channel_name">일정 알림</string>
+    <string name="reminder_channel_description">마롱이에게 부탁한 일정과 약속을 알려 줘요.</string>
+    <string name="ring_channel_name">마롱이 전화</string>
+    <string name="ring_channel_description">약속한 시간에 마롱이가 거는 전화예요. 폰 벨소리로 울려요.</string>
+    <string name="ring_caller">마롱이</string>
+    <string name="ring_text">약속한 전화예요</string>
+    <string name="ring_answer">받기</string>
+    <string name="ring_decline">거절</string>
 </resources>
