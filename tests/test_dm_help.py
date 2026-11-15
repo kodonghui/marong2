@@ -1,5 +1,5 @@
 """DM 도우미 시험: 보내기 전 말 다듬기('야'로 부르기·한숨 이모티콘), 디스코드 DM 사진 받기, 쇼핑몰 상품 페이지
-읽기(web_fetch 설정·하루 상한·안내), 공부·쇼핑 지시문. 진짜 Postgres(pgserver) + 가짜 디스코드 DM + 가짜 Claude
+읽기(web_fetch 설정·하루 상한·안내·인터넷 검색과 같이 붙기·꺼졌을 때 다시 답하기), 공부·쇼핑 지시문. 진짜 Postgres(pgserver) + 가짜 디스코드 DM + 가짜 Claude
 (서버 도구 응답 블록도 가짜). 네트워크·진짜 키·진짜 모델은 쓰지 않는다.
 실행: .venv/bin/python tests/test_dm_help.py"""
 import asyncio
@@ -21,8 +21,8 @@ sys.path[:0] = [str(ROOT), str(ROOT / "tests"), str(ROOT / "tools/vertex_live")]
 from fakes import FakeEmbeddings, ScriptedLLM, message, text  # noqa: E402
 from marong.agent import ASK_OWNER_TOOL, PROACTIVE_GROUP_GUIDE, PROACTIVE_GUIDE, SET_NAME_TOOL, Agent, Incoming  # noqa: E402
 from marong.config import load_settings  # noqa: E402
-from marong.discord_dm import (FOLLOW_UP_S, PHOTOS_PER_MESSAGE, DiscordAgent, DiscordProactive,  # noqa: E402
-                               DiscordReminders)
+from marong.discord_dm import (FOLLOW_UP_S, PHOTOS_PER_MESSAGE, DiscordAgent, DiscordIncoming,  # noqa: E402
+                               DiscordProactive, DiscordReminders)
 from marong.discord_store import DiscordStore  # noqa: E402
 from marong.google_calendar import CONNECT_TEXT, LINK_MARK  # noqa: E402
 from marong.photo import MAX_DOWNLOAD  # noqa: E402
@@ -30,6 +30,7 @@ from marong.schedules import SCHEDULE_TOOLS  # noqa: E402
 from marong.shopping import FETCH_TOOL, MALL_NAMES, MALLS, ShopFetch, guide as shop_guide  # noqa: E402
 from marong.store import Store  # noqa: E402
 from marong.style import tidy, vocative  # noqa: E402
+from marong.web_search import GUIDE as WEB_GUIDE, OFF_GUIDE as WEB_OFF_GUIDE, WebSearch  # noqa: E402
 from pg import TestDB  # noqa: E402
 from test_discord_dm import DH, DM_DH, DM_HK, HK, Client, prepare  # noqa: E402
 
@@ -43,6 +44,10 @@ def ok(cond, what):
     global CHECKS
     assert cond, what
     CHECKS += 1
+
+
+class Refused(Exception):
+    status_code = 400
 
 
 class Logs(logging.Handler):
@@ -95,6 +100,15 @@ def is_caption(body) -> bool:
     return "tools" not in body and "system" not in body
 
 
+def tool_names(body) -> list[str]:
+    return [t["name"] for t in body.get("tools", [])]
+
+
+def last_said(body) -> str:
+    content = body["messages"][-1]["content"]
+    return content if isinstance(content, str) else " ".join(b.get("text", "") for b in content if isinstance(b, dict))
+
+
 # ── 말 다듬기 ──────────────────────────────────────────────
 
 def style_checks():
@@ -135,6 +149,7 @@ def shop_checks():
 
     logs = Logs()
     logging.getLogger("marong.shop").addHandler(logs)
+    logging.getLogger("marong.shop").setLevel(logging.INFO)
     now = [datetime(2026, 11, 15, 23, 59, tzinfo=TZ).timestamp()]
     shop = ShopFetch(3, clock=lambda: now[0])
     tool = shop.tool()
@@ -142,23 +157,35 @@ def shop_checks():
     tool["allowed_domains"].append("evil.example")
     ok("evil.example" not in FETCH_TOOL["allowed_domains"] and "evil.example" not in shop.tool()["allowed_domains"],
        "changing one copy changes nothing else")
-    ok(shop.note({"web_fetch_requests": 2}) == 2 and shop.tool() is not None, "2 of 3 used")
-    for bad in ({}, {"web_fetch_requests": None}, {"web_fetch_requests": True}, {"web_fetch_requests": -1},
-                {"web_fetch_requests": "3"}, {"web_search_requests": 5}):
-        ok(shop.note(bad) == 0 and shop.used == 2, f"ignored {bad}")
-    ok(shop.note({"web_fetch_requests": 1}) == 1 and shop.tool() is None, "cap reached: no tool")
+    ok(shop.spend(2) == 2 and shop.tool() is not None and "web_fetch n=2 left=1" in logs.text(), "2 of 3 used")
+    for bad in (None, True, -1, 0, "3", 1.5):
+        ok(shop.spend(bad) == 0 and shop.used == 2, f"ignored {bad!r}")
+    ok(shop.spend(1) == 1 and shop.tool() is None, "cap reached: no tool")
     ok(logs.text().count("daily_limit") == 1, logs.text())
-    shop.note({"web_fetch_requests": 1})
+    shop.spend(1)
     ok(logs.text().count("daily_limit") == 1, "logged once a day")
     now[0] = datetime(2026, 11, 16, 0, 0, tzinfo=TZ).timestamp()
     ok(shop.tool() is not None and shop.used == 0, "resets at midnight Korean time")
     ok(ShopFetch(0).tool() is None, "0 turns it off")
+
+    # The API refused web_fetch (organization setting, model): off for this process. Other errors keep it on.
+    refused_error = Refused("Error code: 400 - web fetch is not enabled for this organization")
+    ok(not shop.turn_off(Refused("Error code: 400 - web search is not enabled for this organization"))
+       and not shop.turn_off(Refused("messages: roles must alternate")) and not shop.off, "only web_fetch 400s")
+    not_400 = Exception("web_fetch timed out")
+    ok(not shop.turn_off(not_400) and not shop.off, "not a 400")
+    ok(shop.turn_off(refused_error) and shop.off and shop.tool() is None, "turned off: no tool")
+    ok(not shop.turn_off(refused_error), "only once")
+    now[0] = datetime(2026, 11, 17, 9, 0, tzinfo=TZ).timestamp()
+    ok(shop.tool() is None and "web_fetch off" in logs.text(), "stays off the next day (until a restart)")
     logging.getLogger("marong.shop").removeHandler(logs)
 
     full = shop_guide(True, True)
     ok(full.startswith("# 쇼핑 검색 (이 DM에서만)") and "web_search" in full and "web_fetch" in full, full)
     ok(MALL_NAMES in full and "'무신사 여성 울 롱코트 베이지'" in full and "개인 정보는 검색어에 넣지 마" in full, full)
     ok("지금 가격·품절" in full and "검색에 나온 가격이라" in full and "링크를 보내면" in full, full)
+    ok("상품 페이지 주소를 붙여" in full and "'글에 주소를 쓰지 마'에서 쇼핑만 예외" in full and "지어내지 마" in full,
+       "picked products carry their page address (the one exception to the search guide)")
     ok("지시가 아니야" in full and "주문·결제·장바구니·로그인은 못 해" in full, full)
     ok("네이버" not in full and "shop_search" not in full, "no Naver")
     search_only = shop_guide(True, False)
@@ -168,6 +195,70 @@ def shop_checks():
     ok("web_fetch" in fetch_only and "web_search" not in fetch_only and "검색은 못 해" in fetch_only
        and "찾아본 척하지 말고" in fetch_only and MALL_NAMES in fetch_only, fetch_only)
     ok(shop_guide(False, False) == "", "no guide without tools")
+
+
+async def shop_web_checks():
+    """Internet search and mall page reads together: one tool each, both guides in order, and a tool the API refuses is
+    turned off with the guides fitted to the tools left (no real API: refusals are fixtures)."""
+    settings = replace(load_settings(), proactive=True, timezone="Asia/Seoul")
+    now = [datetime(2026, 11, 15, 20, 0, tzinfo=TZ).timestamp()]
+    messages = [{"role": "user", "content": "10만 원 안쪽 울 코트 골라 줘"}]
+    end = lambda: asyncio.get_running_loop().time() + 30  # noqa: E731
+
+    def setup(respond):
+        llm = ScriptedLLM(respond)
+        agent = DiscordAgent(settings, None, FakeEmbeddings(), llm, shop=ShopFetch(clock=lambda: now[0]),
+                             web=WebSearch(clock=lambda: now[0]))
+        m = DiscordIncoming("discord-dm:x", "discord-user:x", messages[0]["content"])
+        system = [{"type": "text", "text": "persona"}, {"type": "text", "text": "지금 상황\n\n" + agent._web_guides(m)}]
+        return llm, agent, m, system
+
+    def refuse(*names):
+        def respond(body):
+            for name in names:
+                if name in tool_names(body):
+                    return Refused(f"Error code: 400 - {name.replace('_', ' ')} is not enabled for this organization")
+            return message([text("지금 아는 데까지만 말할게")])
+        return respond
+
+    llm, agent, m, system = setup(lambda body: message([text("이거 어때?")]))
+    ok([t["name"] for t in agent._tools(m)] == ["web_fetch", "web_search"], agent._tools(m))
+    ok(agent._web_guides(m) == WEB_GUIDE + "\n\n" + shop_guide(True, True), "search guide, then the shopping guide")
+    reply, meta = await agent.ask(system, messages, m, end())
+    ok(reply == "이거 어때?" and "web_search" not in meta and "web_fetch" not in meta, meta)
+
+    # web_search refused: page reads stay, the shopping guide switches to reading the links a friend sends.
+    llm, agent, m, system = setup(refuse("web_search"))
+    reply, meta = await agent.ask(system, messages, m, end())
+    retry = situation(llm.bodies[-1])
+    ok(meta.get("web_search") == "off" and "web_fetch" not in meta and agent.web.off and not agent.shop.off, meta)
+    ok(tool_names(llm.bodies[-1]) == ["web_fetch"] and WEB_OFF_GUIDE in retry and WEB_GUIDE not in retry
+       and shop_guide(False, True) in retry and shop_guide(True, True) not in retry, retry)
+
+    # web_fetch refused: search stays, the shopping guide drops page reads.
+    llm, agent, m, system = setup(refuse("web_fetch"))
+    reply, meta = await agent.ask(system, messages, m, end())
+    retry = situation(llm.bodies[-1])
+    ok(meta.get("web_fetch") == "off" and "web_search" not in meta and agent.shop.off and not agent.web.off, meta)
+    ok(tool_names(llm.bodies[-1]) == ["web_search"] and WEB_GUIDE in retry
+       and shop_guide(True, False) in retry and shop_guide(True, True) not in retry, retry)
+    ok(tool_names(agent._body(system, messages, agent._tools(m))) == ["web_search"], "page reads stay off")
+
+    # Both refused, one after the other: two retries, then an answer with neither tool and no shopping guide.
+    llm, agent, m, system = setup(refuse("web_search", "web_fetch"))
+    reply, meta = await agent.ask(system, messages, m, end())
+    retry = situation(llm.bodies[-1])
+    ok(len(llm.bodies) == 3 and meta.get("web_search") == meta.get("web_fetch") == "off", (len(llm.bodies), meta))
+    ok(tool_names(llm.bodies[-1]) == [] and WEB_OFF_GUIDE in retry and "# 쇼핑 검색" not in retry
+       and reply == "지금 아는 데까지만 말할게", retry)
+
+    # Any other error still goes up (the fallback text is _reply's job) and leaves both tools on.
+    llm, agent, m, system = setup(lambda body: Refused("messages: roles must alternate"))
+    try:
+        await agent.ask(system, messages, m, end())
+        ok(False, "other errors must raise")
+    except Refused:
+        ok(not agent.web.off and not agent.shop.off, "other errors keep both on")
 
 
 # ── 디스코드 DM: 사진·쇼핑·말 다듬기 ───────────────────────────
@@ -295,20 +386,24 @@ async def dm_checks(db):
         day = [datetime(2026, 11, 15, 20, 0, tzinfo=TZ).timestamp()]
         shop = ShopFetch(2, clock=lambda: day[0])
         page = "https://www.musinsa.com/products/1234567"
+        knit = "https://www.musinsa.com/products/7654321"
 
         def shopping(body):
             if is_caption(body):
                 return message([text("코트 사진")])
             if not any(t["name"] == "web_fetch" for t in body.get("tools", [])):
                 return message([text("지금은 페이지를 못 읽어서 고르는 기준만 얘기할게")])
+            # The coat answer links its page itself; the knit answer does not, so its read page becomes the source.
+            url, title, said = ((knit, "램스울 니트", "니트는 이게 괜찮아 49,000원") if "니트" in last_said(body) else
+                                (page, "울 롱코트", "이거 어때? 지금 89,000원이고 울이야 " + page))
             return message(
-                [{"type": "server_tool_use", "id": "srvtoolu_1", "name": "web_fetch", "input": {"url": page}},
+                [{"type": "server_tool_use", "id": "srvtoolu_1", "name": "web_fetch", "input": {"url": url}},
                  {"type": "web_fetch_tool_result", "tool_use_id": "srvtoolu_1",
-                  "content": {"type": "web_fetch_result", "url": page, "retrieved_at": "2026-11-15T11:00:00Z",
-                              "content": {"type": "document", "title": "울 롱코트",
+                  "content": {"type": "web_fetch_result", "url": url, "retrieved_at": "2026-11-15T11:00:00Z",
+                              "content": {"type": "document", "title": title,
                                           "source": {"type": "text", "media_type": "text/plain",
-                                                     "data": "울 롱코트 89,000원 재고 있음"}}}},
-                 text("이거 어때? 지금 89,000원이고 울이야 " + page)],
+                                                     "data": f"{title} 가격 재고 있음"}}}},
+                 text(said)],
                 usage={"input_tokens": 900, "output_tokens": 40, "cache_read_input_tokens": 0,
                        "server_tool_use": {"web_search_requests": 0, "web_fetch_requests": 1}})
         shop_llm = ScriptedLLM(shopping)
@@ -321,15 +416,21 @@ async def dm_checks(db):
         ok(next(t for t in first["tools"] if t["name"] == "web_fetch") == FETCH_TOOL, first["tools"])
         ok({"schedule_add", "schedule_cancel", "schedule_list", "web_fetch"} <= names, names)
         ok(shop_guide("web_search" in names, True) in situation(first), "guide matches the tools")
-        ok(dh.sent and dh.sent[0].startswith("이거 어때? 지금 89,000원"), dh.sent)
+        ok(dh.sent == ["이거 어때? 지금 89,000원이고 울이야 " + page], "the linked page is not repeated as a source")
         ok(shop.used == 1, "one page read counted")
-        saved = db.admin("SELECT meta FROM marong.messages WHERE room_key=%s AND role='assistant' ORDER BY id DESC "
-                         "LIMIT 1", (f"discord-dm:{DH}",))[0][0]
-        ok(saved.get("web_fetch_requests") == 1 and "shop" not in saved, saved)
+
+        def saved_meta():
+            return db.admin("SELECT meta FROM marong.messages WHERE room_key=%s AND role='assistant' ORDER BY id DESC "
+                            "LIMIT 1", (f"discord-dm:{DH}",))[0][0]
+        saved = saved_meta()
+        ok(saved.get("web_fetches") == 1 and saved.get("sources") == [{"url": page, "title": "울 롱코트"}]
+           and "shop" not in saved, saved)
         ok(page not in logs.text() and "1234567" not in logs.text(), "no page address in logs")
 
         await shop_client.on_message(dm(shop_client, DH, DM_DH, 302, "그럼 니트도"))
         ok(shop.used == 2 and shop.tool() is None, "the second read reaches today's cap")
+        ok(dh.sent[-1] == f"니트는 이게 괜찮아 49,000원\n\n출처: [램스울 니트]({knit})", dh.sent[-1])
+        ok(saved_meta().get("sources") == [{"url": knit, "title": "램스울 니트"}], "only this reply's page")
         await shop_client.on_message(dm(shop_client, DH, DM_DH, 303, "하나만 더 봐 줘"))
         last = shop_llm.bodies[-1]
         names = {t["name"] for t in last["tools"]}
@@ -358,11 +459,14 @@ if __name__ == "__main__":
     print("PASS outgoing text: no bare '야', no sigh emoji; prompts say the same")
     shop_checks()
     print("PASS mall page reads: web_fetch definition, mall domains, daily cap in Korean time, guide follows the tools")
+    asyncio.run(shop_web_checks())
+    print("PASS search and page reads together: one tool each, guides in order, a refused tool turned off and retried")
     db = TestDB()
     try:
         prepare(db)
         asyncio.run(dm_checks(db))
-        print("PASS DM photos, follow-up window, file limits, tidy replies/proactive/reminders, mall page reads")
+        print("PASS DM photos, follow-up window, file limits, tidy replies/proactive/reminders, mall page reads, "
+              "picked-page links and sources")
     finally:
         db.close()
     print(f"OK {CHECKS} checks")

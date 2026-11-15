@@ -21,7 +21,7 @@ from .config import PER_DAY_MAX, Settings
 from .embed import Embeddings
 from .fmt import now_line, short_key, short_time
 from .knowledge import load_knowledge
-from .llm import LLM, brief, text_of
+from .llm import LLM, SERVER_BLOCKS, brief, server_tool_counts, text_of
 from .photo import Photo
 from .store import Store, speaker_label
 from .style import tidy
@@ -39,7 +39,7 @@ EMPTY_NUDGE = "방금 답이 글로 나오지 않았어. 생각한 내용을 바
 
 MAX_INPUT_CHARS = 2000
 NAME_MAX = 20
-MAX_STEPS = 4            # 도구 쓰기·빈 답 다시 쓰기를 합친 Claude 호출 횟수 상한
+MAX_STEPS = 4            # 도구 쓰기·빈 답 다시 쓰기·웹 검색 이어 받기(pause_turn)를 합친 Claude 호출 횟수 상한
 MIN_BUDGET_S = 15        # 콜백 토큰(5분) 남은 시간이 이보다 적으면 Claude 를 부르지 않음
 RECENT_SUMMARIES = 3
 RECALL_CANDIDATES = 12
@@ -582,16 +582,23 @@ class Agent:
             body["output_config"] = {"effort": self.s.anthropic_effort}
         return body
 
+    def _server_tools_used(self, msg: Incoming, resp, searches: int, fetches: int) -> None:
+        """서버 도구(웹 검색·웹 가져오기) 블록이나 사용 횟수가 있는 응답마다 불린다. 하루 횟수·출처는 DM 쪽이 센다."""
+
     async def ask(self, system: list[dict], messages: list[dict], msg: Incoming, end: float,
                   tools: list[dict] | None = None) -> tuple[str, dict]:
         """도구(set_name 등) 처리까지 해서 친구에게 보낼 글과 기록용 meta 를 돌려준다.
-        tools 를 안 주면 이 방에서 쓸 수 있는 도구 전부, [] 면 도구 없이."""
+        tools 를 안 주면 이 방에서 쓸 수 있는 도구 전부, [] 면 도구 없이.
+        웹 검색(서버 도구)은 Anthropic 서버가 한 응답 안에서 돌린다. 오래 걸리면 pause_turn 으로 멈추는데, 받은 응답을
+        그대로 assistant 로 돌려 보내면(새 user 말 없이) 이어서 답한다. 검색한 횟수는 meta.web_searches·web_fetches."""
         loop = asyncio.get_running_loop()
         tools = self._tools(msg) if tools is None else tools
         convo = list(messages)
         meta = {"model": self.s.anthropic_model, "effort": self.s.anthropic_effort or None, "calls": 0,
                 "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0}
-        earlier: list[str] = []  # 도구를 부르기 전에 쓴 글(마지막 답이 비면 이걸 보냄)
+        # 마지막 답 전에 쓴 글. 도구를 부르기 전 말('잠깐 볼게')은 마지막 답이 있으면 버리고(비면 이걸 보냄),
+        # 웹 검색 결과를 보고 쓴 글(True)은 답의 일부라 마지막 답 앞에 그대로 남긴다.
+        said: list[tuple[str, bool]] = []
         nudged = False
         for _ in range(MAX_STEPS):
             resp = await self.llm.create(self._body(system, convo, tools), end - loop.time())
@@ -602,30 +609,44 @@ class Agent:
             meta["output_tokens"] += usage.output_tokens or 0
             meta["cache_read_tokens"] += getattr(usage, "cache_read_input_tokens", None) or 0
             meta["cache_write_tokens"] += getattr(usage, "cache_creation_input_tokens", None) or 0
+            searches, fetches = server_tool_counts(usage)
+            if searches:
+                meta["web_searches"] = meta.get("web_searches", 0) + searches
+            if fetches:
+                meta["web_fetches"] = meta.get("web_fetches", 0) + fetches
+            server = any(b.type in SERVER_BLOCKS for b in resp.content)
+            if server or searches or fetches:
+                self._server_tools_used(msg, resp, searches, fetches)
             if resp.stop_reason == "refusal":
                 details = getattr(resp, "stop_details", None)
                 meta["refusal"] = getattr(details, "category", None)
                 log.info("refusal category=%s", meta["refusal"])
                 return REFUSAL_TEXT, meta
             text = text_of(resp)
+            if resp.stop_reason == "pause_turn":
+                if text:
+                    said.append((text, True))
+                # 생각·검색 블록까지 받은 그대로 돌려줘야 이어서 답함(손대거나 '계속' 같은 말을 더하면 안 됨)
+                convo = [*convo, {"role": "assistant", "content": resp.content}]
+                continue
             if resp.stop_reason == "tool_use":
                 if text:
-                    earlier.append(text)
+                    said.append((text, server))
                 results = [await self._run_tool(b, msg) for b in resp.content if b.type == "tool_use"]
                 # 생각 블록까지 응답 그대로 돌려줘야 함(손대면 400)
                 convo = [*convo, {"role": "assistant", "content": resp.content}, {"role": "user", "content": results}]
                 continue
             if text:
-                return text, meta
-            if earlier:
-                return "\n\n".join(earlier), meta
+                return "\n\n".join([t for t, keep in said if keep] + [text]), meta
+            if said:
+                return "\n\n".join(t for t, _ in said), meta
             if resp.stop_reason == "max_tokens":
                 log.warning("stop_reason=max_tokens 인데 글이 없음 → LLM_MAX_TOKENS 를 늘리거나 effort 를 낮출 것")
             if nudged:
                 break
             convo = [*convo, {"role": "system", "content": EMPTY_NUDGE}]
             nudged = True
-        return ("\n\n".join(earlier) if earlier else FALLBACK_TEXT), meta
+        return ("\n\n".join(t for t, _ in said) if said else FALLBACK_TEXT), meta
 
     async def _run_tool(self, block, msg: Incoming) -> dict:
         result = {"type": "tool_result", "tool_use_id": block.id}

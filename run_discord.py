@@ -16,6 +16,7 @@ from marong.llm import LLM
 from marong.memory import MemoryWorker
 from marong.shopping import FETCH_DAILY, ShopFetch
 from marong.store import Store
+from marong.web_search import DAILY as WEB_DAILY, PER_REPLY as WEB_PER_REPLY, WebSearch
 
 
 async def main():
@@ -39,6 +40,17 @@ async def main():
         greeting = reply.get("once") if isinstance(reply, dict) else reply
         if not friend_id.isdecimal() or not isinstance(greeting, str) or not greeting.strip():
             raise SystemExit("Invalid Discord first-reply configuration")
+    # Internet search (Claude's web_search server tool). MARONG_WEB_SEARCH_DAILY=0 turns it off.
+    try:
+        web_daily = int(os.environ.get("MARONG_WEB_SEARCH_DAILY", WEB_DAILY))
+        web_per_reply = int(os.environ.get("MARONG_WEB_SEARCH_PER_REPLY", WEB_PER_REPLY))
+    except ValueError as e:
+        raise SystemExit("Invalid web search limits") from e
+    if web_daily < 0 or not 1 <= web_per_reply <= 10:
+        raise SystemExit("Invalid web search limits")
+    web = WebSearch(web_per_reply, web_daily, settings.timezone) if web_daily else None
+    logging.getLogger("marong.web").info(
+        "web_search %s", f"on daily={web_daily} per_reply={web_per_reply}" if web else "off")
     # Shopping-mall product page reads (Claude web_fetch, mall domains only): a daily cap, 0 turns them off.
     shop_daily = os.environ.get("MARONG_SHOP_FETCH_PER_DAY", str(FETCH_DAILY)).strip()
     if not shop_daily.isdecimal():
@@ -68,7 +80,7 @@ async def main():
         if worker:
             tasks.append(asyncio.create_task(worker.run()))
         agent = DiscordAgent(settings, store, emb, llm, on_saved=worker.kick if worker else None,
-                             first_replies=first_replies, google=google, shop=shop)
+                             first_replies=first_replies, google=google, shop=shop, web=web)
         client = DiscordDM(agent, store, int(os.environ["MARONG_DISCORD_APP_ID"]), int(os.environ["MARONG_DISCORD_GUILD_ID"]))
         async with client:
             tasks.append(asyncio.create_task(DiscordProactive(settings, store, agent, client).run()))

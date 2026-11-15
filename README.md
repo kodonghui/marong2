@@ -20,6 +20,7 @@
 6. 선톡을 켜면 1:1 친구와 관리자가 켠 단체방에 하루에 두어 번(방마다 따로 정할 수 있어요) 짧은 말 몇 개를 연달아 보내며 먼저 말을 걸어요(아래 '선톡'). 2026-11-05 부터 카카오가 1:1 선톡을 막아서 지금은 단체방에만 가요.
 7. 친구가 사진을 보내면 사진을 보고 반응해요(아래 '사진').
 8. 친구가 공부를 물어보면 같이 풀고 설명해 주고, 살 걸 고민하면 같이 골라 줘요(`prompt.md` 의 '공부 같이 하기'·'같이 고르기'). 디스코드 DM에서는 무신사·29CM·지그재그·올리브영 같은 쇼핑몰 상품을 찾아보고, 권할 상품은 그 페이지를 읽어 지금 가격도 확인해요([디스코드 DM 안내](docs/discord-dm.md#같이-고르기쇼핑몰-찾기)).
+9. 디스코드 DM에서는 날씨·뉴스·경기 결과처럼 지금 확인해야 하는 걸 인터넷에서 찾아보고, 찾은 곳 링크를 답 끝에 붙여요(Claude `web_search`, 답마다 3번·하루 40번까지, [디스코드 DM 안내](docs/discord-dm.md#인터넷-검색)). 카톡에는 없어요.
 
 ## 기록은 지워지지 않아요
 
@@ -226,7 +227,8 @@ uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements.txt
 .venv/Scripts/python tests/test_discord_dm.py # 디스코드 DM(requirements-discord.txt 필요): 연결된 계정만·선톡 동의·기억 분리
 .venv/Scripts/python tests/test_schedules.py  # 디스코드 일정·알림: 시각 계산·반복·도구·친구끼리 안 보임·한 번만 보냄·늦음·놓침·다시 보내기
 .venv/Scripts/python tests/test_google_calendar.py  # 구글 캘린더(가짜 구글): 연결 링크·허용·한 번만·일정 보기·친구끼리 안 보임·마롱이 캘린더 넣기·빼기·끊김·끊기·비밀값이 로그에 없음
-.venv/Scripts/python tests/test_dm_help.py    # 말 다듬기('야'·한숨 이모티콘)·디스코드 DM 사진·쇼핑몰 페이지 읽기(설정·하루 상한·안내)·공부·쇼핑 지시문
+.venv/Scripts/python tests/test_dm_help.py    # 말 다듬기('야'·한숨 이모티콘)·디스코드 DM 사진·쇼핑몰 페이지 읽기(설정·하루 상한·안내·검색과 같이 붙기·꺼졌을 때 다시 답하기)·공부·쇼핑 지시문
+.venv/Scripts/python tests/test_web_search.py # 디스코드 DM 인터넷 검색(가짜 Claude): 도구 하나·답마다·하루 상한·이어 받기(pause_turn)·출처는 보내는 글에만·꺼졌을 때 다시 답하기
 ```
 
 (맥·리눅스는 `.venv/bin/python`.) 노트북에서 `python run.py`(봇 모드)는 켜지 마세요. 서버의 봇과 같은 토큰이라 서로 끊어 내요.
@@ -244,6 +246,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements.txt
 | `marong/photo.py` | 사진: 카카오 CDN 주소 알아보기·내려받기, 사진 크기 맞추기(디스코드 DM 첨부도 같이 씀) |
 | `marong/style.py` | 보내기 전 말 다듬기: 이름 없이 '야'로 부르기·한숨 이모티콘 고치기 |
 | `marong/shopping.py` | 디스코드 DM 같이 고르기: 쇼핑몰 상품 페이지 읽기(`web_fetch`, 몰 도메인만·하루 상한)와 쇼핑 안내 |
+| `marong/web_search.py` | 디스코드 DM 인터넷 검색: Claude 서버 도구 `web_search` 정의 하나, 답마다·하루(한국 날짜) 상한, 출처 줄 |
 | `marong/store.py`, `marong/schema.sql` | Postgres 저장소와 표·권한 |
 | `marong/embed.py` | 서버 CPU 임베딩(embeddinggemma-300m) |
 | `marong/llm.py` | Claude 호출(주 키 → 백업 키) |
