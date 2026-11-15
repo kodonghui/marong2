@@ -131,6 +131,16 @@ def call_transcripts(c, start, until):
         WHERE started_at >= %s AND started_at < %s ORDER BY started_at,id""", (start, until)).fetchall()
 
 
+def rung_calls(c, call_ids) -> set:
+    """Calls that answered a call Marong placed at a time the friend set (marong.app_rings, docs/app-ring.md
+    SPEC-142). Empty before 015_app_ring.sql."""
+    if not call_ids or not c.execute("SELECT to_regclass('marong.app_rings') AS rings").fetchone()['rings']:
+        return set()
+    return {str(r['call_id']) for r in c.execute(
+        "SELECT call_id FROM marong.app_rings WHERE status = 'answered' AND call_id = ANY(%s::uuid[])",
+        (sorted({str(i) for i in call_ids}),)).fetchall()}
+
+
 def hits(memory: dict, field: str) -> list[tuple[str, int, float | None]]:
     """meta.memory 의 candidates·recalled → (종류, 번호, 비슷함). 모양이 틀린 항목은 건너뜀."""
     out = []
@@ -286,6 +296,7 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
     data = fetch(c, start, until, vectors)
     msgs, embs = data["messages"], data["embeddings"]
     voice = call_transcripts(c, start, until)
+    rung = rung_calls(c, {t["call_id"] for t in voice})
     ref_msgs, ref_sums = data["ref_messages"], data["ref_summaries"]
     names: dict[str, set[str]] = {}
     for s in data["speakers"]:
@@ -306,11 +317,18 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         return "마롱이" if m["role"] == "assistant" else (m["name"] or key(m["user_key"]))
 
     def kind(m):
+        # '(앱)': said in the in-app chat, or shown on the phone as an app notification (docs/app-chat.md SPEC-126)
         meta = m["meta"] or {}
+        return what(m, meta) + ("(앱)" if meta.get("transport") == "app" else "")
+
+    def what(m, meta):
         if m["role"] == "user":
             return "친구 말"
+        if meta.get("missed"):
+            return "알림(못 받은 전화)"
         if meta.get("reminder"):
-            return "알림(부탁한 일정)"
+            ring = meta.get("ring")
+            return "알림(늦은 전화 약속)" if ring == "late" else "알림(전화 약속)" if ring else "알림(부탁한 일정)"
         if meta.get("google") == "connected":
             return "알림(구글 캘린더 연결)"
         if meta.get("proactive"):
@@ -324,7 +342,7 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         return "답장"
 
     def no_memory(meta):
-        if meta.get("reminder"):
+        if meta.get("reminder") or meta.get("missed"):
             return "알림(검색 안 함)"
         if meta.get("google"):
             return "구글 캘린더(검색 안 함)"
@@ -363,6 +381,7 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
             mine = t['role'] == 'assistant'
             label = ('통화(중단)' if t['interrupted'] else '통화(전사 중)' if not t['finalized']
                      else '통화(응답)' if mine else '통화(글)' if t['input_kind'] == 'text' else '통화(전사)')
+            label += '(마롱이가 걺)' if str(t['call_id']) in rung else ''  # docs/app-ring.md SPEC-142
             room_label = 'Discord 통화' if t.get('entrypoint') == 'discord' else '통화'
             row = [f"V{t['id']}", at(t['started_at']), room_label + ' #' + str(t['call_id'])[:8],
                    '마롱이' if mine else (t['caller_name'] or '통화 사용자'), label, t['content'],
@@ -401,6 +420,7 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         asked = ref_msgs.get(m["reply_to"]) if m["reply_to"] else None
         base = [m["id"], at(m["created_at"]), room(m["room_key"]),
                 (asked or {}).get("content") if m["reply_to"] else ("(선톡)" if meta.get("proactive") else
+                                                                    "(못 받은 전화)" if meta.get("missed") else
                                                                     "(부탁한 알림)" if meta.get("reminder") else
                                                                     "(구글 캘린더 연결)" if meta.get("google") else None),
                 cut(m["content"], REPLY_CHARS)]
@@ -562,6 +582,9 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         "그때도 임베딩 검색은 했지만 무엇을 찾아 넣었는지는 적지 않았어요.",
         "- '안 함(말이 짧아서)'은 'ㅋㅋ'처럼 짧은 말이라 검색하지 않은 것.",
         "- 시각은 모두 한국 시각이에요. 카카오 키 원문 대신 관리 명령(admin)과 같은 #짧은키를 적었어요.",
+        "- 종류 칸의 '(앱)'은 마롱이 앱의 글 대화에서 오간 말이나 폰에 앱 알림으로 간 말이에요(방은 같은 Discord DM). "
+        "'알림(전화 약속)'은 앱이 없어서 디스코드로 보낸 통화 초대, '알림(못 받은 전화)'는 마롱이가 건 전화를 못 받았을 때의 "
+        "한마디, '(마롱이가 걺)'은 마롱이가 약속한 때 먼저 건 전화를 받은 통화예요.",
     ]
     if not vectors:
         lines.append("- 시트 메뉴 '마롱이 > 지금 새로고침'을 누르면 1분쯤 뒤에 새로 채워요. 안 눌러도 5분마다 새로 채워요.")

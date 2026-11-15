@@ -78,6 +78,9 @@ header {display: flex; align-items: center; justify-content: space-between}
 .brand-star {display: inline-block; color: var(--star); font-size: 15px; vertical-align: top; margin: 0 0 0 5px; transform: rotate(10deg)}
 .connection {display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px}
 .connection i {width: 5px; height: 5px; border-radius: 50%; background: var(--accent)}
+.header-end {display: flex; align-items: center; gap: 10px}
+/* The in-app chat (docs/app-chat.md SPEC-124): shown only when the chat knows this friend */
+.chat-link {display: inline-grid; place-items: center; min-height: 44px; padding: 0 16px; border-radius: 22px; background: var(--raised); color: var(--text); font-size: 13px; font-weight: 650; text-decoration: none}
 .scene {position: relative; display: flex; align-items: center; flex-direction: column; text-align: center; padding-top: 41px}
 .sky {position: absolute; inset: 0; pointer-events: none; color: var(--star)}
 .sky span {position: absolute; font-size: 15px}

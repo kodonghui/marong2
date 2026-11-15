@@ -5,19 +5,66 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 from zoneinfo import ZoneInfo
 
+import psycopg
+
+from marong.access import AccessConfig, AccessVerifier
+from marong.app_chat import DEFAULT_PORT as APP_PORT, AppChat
+from marong.app_push import AppPush
 from marong.cache_warm import CacheWarmer
 from marong.config import load_dotenv, load_settings
-from marong.discord_dm import DiscordAgent, DiscordDM, DiscordProactive, DiscordReminders
+from marong.discord_dm import DEFAULT_ORIGIN, DiscordAgent, DiscordDM, DiscordProactive, DiscordReminders
 from marong.discord_store import DiscordStore
 from marong.embed import Embeddings
+from marong.fcm import FCM
 from marong.google_calendar import DEFAULT_PORT, GoogleCalendar, GoogleConfig, serve as serve_google
 from marong.llm import LLM
 from marong.memory import MemoryWorker
 from marong.shopping import FETCH_DAILY, ShopFetch
 from marong.store import Store
 from marong.web_search import DAILY as WEB_DAILY, PER_REPLY as WEB_PER_REPLY, WebSearch
+
+
+ORIGIN = re.compile(r"https://[a-z0-9-]+(\.[a-z0-9-]+)+(:[0-9]{1,5})?\Z")
+app_log = logging.getLogger("marong.app")
+
+
+def app_settings(credentials: Path) -> dict | None:
+    """The Marong app (docs/app-chat.md, docs/app-ring.md): None unless MARONG_APP_CHAT=1. Then the in-app chat with
+    the Access check, app notifications when the FCM key is loaded, and Marong's own calls with MARONG_APP_RING=1."""
+    if os.environ.get("MARONG_APP_CHAT", "0").strip() != "1":
+        app_log.info("app off")
+        return None
+    origin = os.environ.get("MARONG_APP_ORIGIN", DEFAULT_ORIGIN).strip().rstrip("/")
+    port = os.environ.get("MARONG_APP_PORT", str(APP_PORT)).strip()
+    if not ORIGIN.fullmatch(origin) or not port.isdecimal() or not 1024 <= int(port) <= 65535:
+        raise SystemExit("Invalid MARONG_APP_ORIGIN or MARONG_APP_PORT")
+    access = AccessConfig.from_env()
+    if access is None:  # TC-119: without the Access values the chat server never starts
+        app_log.warning("app off: Cloudflare Access settings missing")
+        return None
+    try:
+        sender = FCM.from_credentials(str(credentials))  # LoadCredential=fcm-service-account.json (SPEC-127)
+    except (ValueError, OSError, KeyError, TypeError) as e:
+        app_log.warning("fcm off: unreadable key %s", type(e).__name__)
+        sender = None
+    ring = os.environ.get("MARONG_APP_RING", "0").strip() == "1"
+    app_log.info("app on fcm=%s ring=%s", "on" if sender else "off", "on" if ring else "off")
+    return {"origin": origin, "port": int(port), "access": access, "fcm": sender, "ring": ring}
+
+
+async def app_tables(store) -> bool:
+    """014_app_chat.sql and 015_app_ring.sql with their grants. Without them the bot runs as before."""
+    try:
+        await store.app_login("0" * 64)
+        await store.app_devices(0)
+        await store.recent_ring(0)
+        return True
+    except psycopg.Error as e:
+        app_log.warning("app off: tables unavailable %s", type(e).__name__)
+        return False
 
 
 async def main():
@@ -34,6 +81,8 @@ async def main():
                          if google_file.exists() else None)
     except (ValueError, OSError) as e:
         raise SystemExit("Invalid Google client configuration") from e
+    app_config = app_settings(credentials)
+    fcm_client = app_config["fcm"] if app_config else None
     first_replies = json.loads(os.environ.get("MARONG_DISCORD_FIRST_REPLIES", "{}"))
     if not isinstance(first_replies, dict):
         raise SystemExit("Invalid Discord first-reply configuration")
@@ -74,6 +123,7 @@ async def main():
     worker = MemoryWorker(settings, worker_store, emb, llm) if worker_store else None
     tasks = []
     google, google_web = None, None
+    push, chat = None, None
     try:
         await store.open(wait=True)
         await store.proactive_rooms()  # Fail before login if the private binding schema is unavailable.
@@ -81,6 +131,8 @@ async def main():
         if google_config:
             await store.google_pending(0)  # And for 013_google_calendar.sql when Google is set up.
             google = GoogleCalendar(google_config, store, ZoneInfo(settings.timezone))
+        if app_config and not await app_tables(store):
+            app_config = None
         if worker_store:
             await worker_store.open(wait=True)
         emb.start()
@@ -92,9 +144,25 @@ async def main():
             agent.warmer = CacheWarmer(llm, settings.timezone)
             tasks.append(asyncio.create_task(agent.warmer.run()))
         client = DiscordDM(agent, store, int(os.environ["MARONG_DISCORD_APP_ID"]), int(os.environ["MARONG_DISCORD_GUILD_ID"]))
+        origin = DEFAULT_ORIGIN
+        if app_config:
+            origin = app_config["origin"]
+            push = AppPush(store, app_config["fcm"], ring_enabled=app_config["ring"])
+            agent.ring = app_config["ring"]
+            chat = AppChat(store, agent, client, AccessVerifier(app_config["access"]), push, origin=origin,
+                           port=app_config["port"], timezone=settings.timezone)
+            saved = agent.on_saved
+
+            def on_saved():  # every saved message also wakes the chat screens' waits (SPEC-114)
+                saved()
+                chat.pulse()
+
+            agent.on_saved = on_saved
+            await chat.serve()
         async with client:
-            tasks.append(asyncio.create_task(DiscordProactive(settings, store, agent, client).run()))
-            tasks.append(asyncio.create_task(DiscordReminders(settings, store, agent, client).run()))
+            tasks.append(asyncio.create_task(DiscordProactive(settings, store, agent, client, app=push).run()))
+            tasks.append(asyncio.create_task(
+                DiscordReminders(settings, store, agent, client, app=push, origin=origin).run()))
             if google:
                 google.notify = client.tell
                 google_web = await serve_google(google)
@@ -104,6 +172,10 @@ async def main():
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        if chat:
+            await chat.close()
+        if fcm_client:
+            await fcm_client.close()
         if google_web:
             await google_web.cleanup()
         if google:

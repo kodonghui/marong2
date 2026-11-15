@@ -4,6 +4,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import logging
+import random
 import time
 from zoneinfo import ZoneInfo
 
@@ -11,13 +12,15 @@ import discord
 
 from . import reactions
 from .agent import CAPTION_PROMPT, Agent, Incoming
+from .app_delivery import RingCalls
+from .app_push import TALK, can_notify
 from .google_calendar import (CONNECT_TEXT, DISCONNECTED_TEXT, LINK_MARK, NOT_CONNECTED_TEXT, REVOKE_FAILED_TEXT,
                               UNAVAILABLE_TEXT, calendar_lines, command as google_command)
 from .llm import brief
 from .photo import MAX_DOWNLOAD, Photo, prepare
 from .proactive import PART_GAP_S, Proactive, parts, schedule, slot
-from .schedules import (GUIDE as SCHEDULE_GUIDE, LATE_LIMIT, SCHEDULE_TOOL_NAMES, SCHEDULE_TOOLS, occurrence,
-                        parse_when, reminder_text, run_tool as run_schedule_tool, schedule_lines)
+from .schedules import (LATE_LIMIT, SCHEDULE_TOOL_NAMES, occurrence, parse_when, reminder_text,
+                        run_tool as run_schedule_tool, schedule_guide, schedule_lines, schedule_tools)
 from .shopping import guide as shop_guide
 from .style import tidy
 from .web_search import GUIDE as WEB_GUIDE, OFF_GUIDE as WEB_OFF_GUIDE, sources_line, sources_of
@@ -45,6 +48,11 @@ FOLLOW_UP_PHOTOS = 2    # 그렇게 더 보여 주는 사진은 방마다 최근
 FOLLOW_UP_KEPT = 4      # 모든 방을 합친 상한(사진 한 장이 메모리에서 수 MB)
 REACT_S = 4             # 친구 메시지에 반응을 다는 시간 상한(초). 넘으면 반응 없이 답만 보냄
 SOURCES_FIT = 1800      # 답과 출처 줄을 합쳐 이 길이까지는 한 메시지로, 넘으면 출처를 따로 보냄(링크가 잘리지 않게)
+PROACTIVE_APP_TTL_S = 7200  # 앱으로 보낸 선톡 알림을 FCM 이 들고 있는 시간(docs/app-chat.md SPEC-118)
+APP_LINE = ("- 이 말은 마롱이 앱의 글 대화 화면에서 왔어. 디스코드 DM과 같은 대화라 앞의 이야기를 그대로 이어 가. "
+            "사진은 앱 글 대화로는 아직 못 보내.")
+APP_GOOGLE_TEXT = "구글 캘린더 연결은 디스코드 DM에서 ‘구글 캘린더 연결’이라고 보내 줘. 일회용 링크라 거기서만 줄 수 있어."
+DEFAULT_ORIGIN = "https://marong.corthex-hq.com"  # 통화·글 대화 주소(MARONG_APP_ORIGIN 으로 바꿈)
 
 
 @dataclass
@@ -65,6 +73,8 @@ class DiscordIncoming(Incoming):
     reaction: dict | None = None          # {"emoji", "ok"}: pressed on this friend message, also the reply's meta
     sources: list = field(default_factory=list)   # web search/fetch sources: end of the sent text and the meta only
     answer: str | None = None                     # the model's own answer (sources go only under that)
+    via: str = "discord"                  # app: from the in-app chat (docs/app-chat.md SPEC-112)
+    presaved_id: int | None = None        # the in-app chat stored this text before answering (Agent.handle)
 
 
 def proactive_preference(text: str) -> bool | None:
@@ -128,6 +138,7 @@ async def send_text(channel, text: str) -> bool:
 
 class DiscordAgent(Agent):
     caption_prompt = CAPTION_PROMPT.replace("카카오톡", "디스코드 DM")
+    ring = False  # MARONG_APP_RING=1: schedule_add takes call promises (docs/app-ring.md SPEC-128)
 
     def __init__(self, settings, store, embeddings, llm, on_saved=None, *, first_replies=None, google=None, shop=None,
                  web=None, clock=time.monotonic):
@@ -142,7 +153,7 @@ class DiscordAgent(Agent):
 
     def _tools(self, msg):
         # Identity and opt-in never change on model output. Only the friend's own schedule does.
-        tools = list(SCHEDULE_TOOLS) if getattr(msg, "friend_id", None) else []
+        tools = list(schedule_tools(self.ring)) if getattr(msg, "friend_id", None) else []
         # Mall product pages only (web_fetch). None once today's reads are used up or the API refused the tool.
         fetch = self.shop.tool() if self.shop is not None else None
         tools += [fetch] if fetch else []
@@ -186,10 +197,12 @@ class DiscordAgent(Agent):
         lines = [line for line in text.split("\n") if "ask_owner" not in line]
         at = next((i + 1 for i, line in enumerate(lines) if line.startswith("- 지금 말 건 친구")), 2)
         lines[at:at] = self._dm_lines(msg.dm_link, private=(person or {}).get("share") is False)
+        if msg.via == "app":
+            lines.insert(at, APP_LINE)
         if msg.friend_id:
             tz = ZoneInfo(self.s.timezone)
             now = datetime.now(tz)
-            lines += ["", SCHEDULE_GUIDE] + schedule_lines(msg.schedule_rows, msg.schedule_total, tz, now)
+            lines += ["", schedule_guide(self.ring)] + schedule_lines(msg.schedule_rows, msg.schedule_total, tz, now)
             if self.google:
                 lines += calendar_lines(msg.google_link, msg.google_events, msg.google_more, tz, now)
         guides = self._web_guides(msg)
@@ -291,6 +304,8 @@ class DiscordAgent(Agent):
 
     async def _google_command(self, msg):
         """'구글 캘린더 연결·끊기': the link goes out only in the sent text, the history keeps LINK_MARK."""
+        if msg.via == "app":  # a one-time link is given in the Discord DM only (SPEC-112)
+            return APP_GOOGLE_TEXT, {"google": "app"}
         if msg.google_command == "connect":
             if not self.google or not msg.friend_id:
                 return UNAVAILABLE_TEXT, {"google": "unavailable"}
@@ -352,7 +367,7 @@ class DiscordAgent(Agent):
         try:
             content, action = await run_schedule_tool(
                 self.store, block.name, block.input or {}, friend_id=friend_id, room_key=msg.room_key,
-                source="discord", source_message_id=msg.saved_id, tz=ZoneInfo(self.s.timezone))
+                source="discord", source_message_id=msg.saved_id, tz=ZoneInfo(self.s.timezone), ring=self.ring)
         except Exception as e:
             log.error("db_error %s", brief(e))
             msg.actions.append({"tool": block.name, "result": "db_error"})
@@ -366,6 +381,12 @@ class DiscordAgent(Agent):
         return {**out, "is_error": True} if action["result"] == "error" else out
 
     async def _reply(self, msg: DiscordIncoming, person, user_id, text, timeout, use_memory=True, held=None):
+        reply, meta = await self._dm_reply(msg, person, user_id, text, timeout, use_memory, held)
+        if msg.via == "app":  # the answer went to the in-app chat (the record sheet's '(앱)', SPEC-126)
+            meta = {**meta, "transport": "app"}
+        return reply, meta
+
+    async def _dm_reply(self, msg: DiscordIncoming, person, user_id, text, timeout, use_memory=True, held=None):
         if msg.proactive_preference is False:
             return "응, 먼저 연락하는 건 멈출게.", {}
         if msg.google_command:
@@ -387,7 +408,7 @@ class DiscordAgent(Agent):
                       "‘내일 3시에 알려 줘’처럼 말하면 그때 여기로 알려 줄게."
                     + (" 구글 캘린더를 붙이려면 ‘구글 캘린더 연결’이라고 보내 줘." if self.google else "")), {}
         msg.saved_id = user_id
-        msg.may_react = self._may_react(msg.room_key)
+        msg.may_react = msg.via != "app" and self._may_react(msg.room_key)  # the app shows no reactions
         reply, meta = await super()._reply(msg, person, user_id, text, timeout, use_memory, held)
         if msg.actions:
             meta["schedule"] = msg.actions
@@ -544,19 +565,31 @@ class DiscordDM(discord.Client):
 
 
 class DiscordProactive(Proactive):
-    def __init__(self, settings, store, agent, client, *, clock=None, **kwargs):
+    def __init__(self, settings, store, agent, client, *, clock=None, app=None, **kwargs):
         super().__init__(settings, store, agent, None, client.room_lock, **kwargs)
         self.client = client
+        self.app = app  # app_push.AppPush: friends with a phone for app notifications get it there (D18)
         self.clock = clock or (lambda: datetime.now(ZoneInfo(settings.timezone)))
 
+    def ready(self) -> bool:
+        return self.client.available or (self.app is not None and self.app.enabled)
+
+    async def _app_phone(self, room) -> bool:
+        """The friend has a phone that takes app notifications (SPEC-116)."""
+        if self.app is None or not self.app.enabled:
+            return False
+        return any(can_notify(d) for d in await self.store.app_devices(room["friend_id"]))
+
     async def step(self, now=None):
-        return await super().step(now or self.clock()) if self.client.available else 0
+        return await super().step(now or self.clock()) if self.ready() else 0
 
     async def deliver(self, room, dry=False):
         empty = {"text": None, "ok": False, "code": None}
         planned = self.plan(room, self.clock())
-        if not self.client.available or planned is None:
+        if not self.ready() or planned is None:
             return empty
+        if not self.client.available and not await self._app_phone(room):
+            return empty  # Discord is away and no phone takes it: keep the slot for when Discord is back
         begin = planned[0]
         if not dry and not await self.store.claim_slot(room, begin):
             return empty
@@ -566,6 +599,17 @@ class DiscordProactive(Proactive):
         text, meta = made
         if dry:
             return {**empty, "text": text}
+        # D18: the app only when the friend has a phone for it; every phone failing falls back to Discord (SPEC-118).
+        if self.app is not None and self.app.enabled and await self.still_current(room, begin, discord=False):
+            accepted, _ = await self.app.notify(room["friend_id"], "proactive", text, channel=TALK,
+                                                ttl_s=PROACTIVE_APP_TTL_S)
+            if accepted:
+                await self.store.record_delivery(room, begin, True)
+                await self.store.add_message(room["room_key"], "assistant", text, meta={
+                    **meta, "proactive": True, "delivered": True, "transport": "app", "devices": accepted})
+                self.agent.on_saved()
+                log.info("app_proactive_sent devices=%d", accepted)
+                return {"text": text, "ok": True, "code": None}
 
         channel = self.client.get_partial_messageable(int(room["channel_id"]), type=discord.ChannelType.private)
         done = []
@@ -590,8 +634,8 @@ class DiscordProactive(Proactive):
         log.info("discord_proactive_sent ok=%s parts=%d/%d", bool(done), len(done), len(sentences))
         return {"text": text, "ok": bool(done), "code": None}
 
-    async def still_current(self, room, begin):
-        if not self.client.available:
+    async def still_current(self, room, begin, discord=True):
+        if discord and not self.client.available:
             return False
         hours, count = schedule(room, self.s)
         current = slot(self.clock(), hours, count)
@@ -603,14 +647,19 @@ class DiscordProactive(Proactive):
         ))
 
 
-class DiscordReminders:
-    """Deliver the reminders friends asked for to their own linked DM, separately from proactive greetings."""
+class DiscordReminders(RingCalls):
+    """Deliver the reminders friends asked for to their own linked DM, separately from proactive greetings.
+    With the app (app_delivery): to the friend's phone when they have one for it (D18), and call promises ring it."""
 
-    def __init__(self, settings, store, agent, client, *, clock=None):
+    def __init__(self, settings, store, agent, client, *, clock=None, app=None, origin=DEFAULT_ORIGIN,
+                 rng=random.random):
         self.s = settings
         self.store = store
         self.agent = agent
         self.client = client
+        self.app = app          # app_push.AppPush or None (no app tables on this server)
+        self.origin = origin    # the call page address in the Discord call invitation
+        self.rng = rng
         self.tz = ZoneInfo(settings.timezone)
         self.clock = clock or (lambda: datetime.now(self.tz))
         self.tidied = 0.0
@@ -628,8 +677,13 @@ class DiscordReminders:
                 log.warning("discord_reminder_step_error %s", type(e).__name__)
 
     async def step(self) -> int:
-        """Send every due reminder once and return how many reached Discord."""
-        if not self.client.available:
+        """Send every due reminder once and return how many reached the friend (Discord or the app)."""
+        if self.app is not None:
+            try:
+                await self.sweep_rings()  # calls nobody answered (docs/app-ring.md SPEC-138)
+            except Exception as e:  # never keeps the reminders below from going out
+                log.warning("ring_sweep_error %s", type(e).__name__)
+        if not (self.client.available or (self.app is not None and self.app.enabled)):
             return 0
         sent = 0
         for row in await self.store.claim_due_reminders():
@@ -645,17 +699,7 @@ class DiscordReminders:
             log.info("discord_reminder_missed id=%s late_min=%d dm=%s", row["id"], late.total_seconds() // 60,
                      bool(row["channel_id"]))
             return 0
+        if row.get("action") == "call" and self.app is not None and self.app.ring_enabled:
+            return await self.place_call(row, late, following)
         text, _ = tidy(reminder_text(row, self.tz, late))
-        channel = self.client.get_partial_messageable(int(row["channel_id"]), type=discord.ChannelType.private)
-        ok = self.client.available and await send_text(channel, text)
-        state = await self.store.finish_reminder(row, "sent" if ok else "failed", following)
-        if ok or state == "done":  # Keep one record per reminder, not one per retry.
-            try:
-                await self.store.add_message(row["dm_room"], "assistant", text, meta={
-                    "reminder": row["id"], "delivered": ok, "transport": "discord",
-                    "late_s": int(late.total_seconds())})
-                self.agent.on_saved()
-            except Exception as e:
-                log.error("db_error %s", brief(e))
-        log.info("discord_reminder_sent id=%s ok=%s state=%s", row["id"], ok, state)
-        return int(ok)
+        return await self.remind(row, text, following, {"reminder": row["id"], "late_s": int(late.total_seconds())})

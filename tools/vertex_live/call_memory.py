@@ -216,6 +216,28 @@ class MemoryStore:
                 VALUES(%s,%s,%s,%s,%s) RETURNING id""", (p.caller_id, client_id, prompt_version, voice, entrypoint))
             return str((await cur.fetchone())['id']), False
 
+    async def claim_ring(self, p, call_id, ring_id=None):
+        """A call Marong placed at a time the friend set (marong.app_rings, docs/app-ring.md SPEC-136).
+        The ringing row (this one when ring_id is given, else the caller's latest whose answer window is open) becomes
+        answered by this call: fresh=True. A call that already answered it (a reconnect) gets it again: fresh=False.
+        None: an ordinary call."""
+        async with self.pool.connection() as c, c.transaction():
+            cur = await c.execute("""UPDATE marong.app_rings SET status='answered',answered_at=now(),call_id=%(call)s
+                WHERE id=(SELECT id FROM marong.app_rings WHERE caller_id=%(caller)s AND status='ringing'
+                          AND answer_until>now() AND (%(ring)s::uuid IS NULL OR id=%(ring)s::uuid)
+                          ORDER BY created_at DESC LIMIT 1 FOR UPDATE SKIP LOCKED)
+                  AND status='ringing'
+                RETURNING id,title,say,created_at,now()-created_at AS waited""",
+                {'call': call_id, 'caller': p.caller_id, 'ring': ring_id})
+            row = await cur.fetchone()
+            if row:
+                return {**row, 'fresh': True}
+            cur = await c.execute("""SELECT id,title,say,created_at FROM marong.app_rings
+                WHERE caller_id=%s AND status='answered' AND call_id=%s ORDER BY created_at DESC LIMIT 1""",
+                (p.caller_id, call_id))
+            row = await cur.fetchone()
+            return {**row, 'fresh': False} if row else None
+
     async def recover_entrypoint(self, entrypoint):
         async with self.pool.connection() as c, c.transaction():
             await c.execute("""UPDATE call.calls SET status='resting' WHERE status='live' AND entrypoint=%s""",

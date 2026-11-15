@@ -1,6 +1,6 @@
 # 마롱이 앱 2단계: 글 대화와 선톡·일정 알림
 
-상태: 설계 초안(2026-11-15, Claude). 구현 전이에요. 동희님 검토, Firebase 준비물, 서버 변경 확인이 필요해요(11절). 3단계 '마롱이가 먼저 거는 전화'는 [app-ring.md](app-ring.md)예요.
+상태: 구현 중(2026-11-15, Claude). 봇의 글 대화 서버·앱 알림·글 대화 화면과 자동 시험은 끝났어요(8·9절). 앱 0.2.0, 에뮬레이터·폰 시험, 서버 반영이 남았어요(11·12절). Firebase 준비물은 11/15에 받았어요(11절). 3단계 '마롱이가 먼저 거는 전화'는 [app-ring.md](app-ring.md)예요.
 1단계 [안드로이드 앱](android-app.md)에 이어 D17·D18을 CORTHEX 02~08·10·12단계로 이 문서 하나에 모았어요. ID는 1단계 다음 번호(REQ-111, FL-105, SPEC-110, SCR-107, TASK-111, TC-119)부터 쓰고, 표는 TBL-101, API는 API-101부터 써요. API 계약 원본은 [api/app-chat.openapi.yaml](../api/app-chat.openapi.yaml)이에요. 서버 코드는 일정·알림(PR #14)과 DM 도우미(PR #17)가 고친 디스코드 DM 봇 위에 붙어요.
 
 목표: 안드로이드 앱을 깐 사람은 선톡과 일정 알림을 앱 알림으로 받고, 알림을 누르면 앱 안 글 대화에서 바로 답해요. 앱이 없거나 알림을 끄면 지금처럼 디스코드 DM으로 받아요. 마롱이 성격과 기억은 바꾸지 않아요.
@@ -137,11 +137,11 @@ flowchart LR
 | SPEC-111 누구인지 확인 | 모든 API 요청의 `Cf-Access-Jwt-Assertion`을 통화 서버와 같은 규칙으로 확인해요(RS256, 팀 주소의 공개키와 `kid`, `aud`, `iss`, `exp`·`iat`·`sub`·`email` 필수, 이메일 허용 목록). 소문자 이메일의 sha256으로 `call.caller_logins` → 켜진 `call.callers` → 그 친구의 디스코드 DM 링크(봇의 `DM_STATE` 조건 그대로, `channel_id` 있음)를 찾아요. 쓰기(POST·PUT)는 `Origin`이 `https://marong.corthex-hq.com`이어야 해요. 통화 서버의 초대 쿠키 길은 쓰지 않아요. | 증명 없음·틀림 401 `unauthenticated`, 허용 목록 밖·통화 꺼짐 403 `not_allowed`, DM 링크 없음·첫 DM 전 403 `no_dm`, 다른 사이트 403 `cross_site`, DB 문제 503 `db_unavailable`. | TC-119, TC-120 | REQ-117 |
 | SPEC-112 말 보내기(API-103) | `{clientId(UUID), text}`를 받아요. 글은 앞뒤 공백을 빼고 1~2,000자예요. 같은 방에 `kakao_id = 'app:<clientId>'`로 저장해서 같은 말은 한 번만 들어가요. 새 말이면 202로 바로 답하고, 뒤에서 그 방의 잠금(`room_lock`, 디스코드 DM과 같은 잠금) 안에서 `agent.handle`을 불러요. 디스코드 DM과 같이 선톡 받기·그만 말은 선톡 설정을 바꾸고 `last_incoming_at`을 새로 적어요. 마롱이에게는 이 말이 앱 글 대화에서 왔다는 한 줄을 더 알려요. | 같은 `clientId`가 다시 오면 200과 처음 저장한 메시지를 주고 답을 다시 만들지 않아요. 구글 캘린더 연결·끊기 명령이면 모델 없이 "구글 캘린더 연결은 디스코드 DM에서 '구글 캘린더 연결'이라고 보내 줘."로 답해요(일회용 링크라서). 1분에 20번을 넘으면 429 `too_many_messages`와 `Retry-After`. 답 만들기가 실패하면 디스코드 DM과 같은 실패 문구가 기록과 화면에 남아요. | TC-121, TC-122 | REQ-114, REQ-116, REQ-121 |
 | SPEC-113 대화 읽기(API-102) | DM 방(`room_key`)의 메시지만 오래된 것부터 줘요(기본 30개, 최대 50개, `before`로 앞 쪽). 묶인 카카오 방의 옛 기록은 주지 않아요. 전달되지 않은 마롱이 말(`delivered=false`)과 통화에서 지운 기억(기존 `_call_guard`)은 빼요. 항목은 id, 누가(`me`/`marong`), 글, 시각, 온 길(`app`/`discord`), 종류(`chat`/`proactive`/`reminder`/`note`)예요. | 사진 말은 저장된 '[사진] 설명' 글 그대로예요. 일회용 링크 표시는 '(일회용 링크)'로 바꿔요. | TC-124 | REQ-115 |
-| SPEC-114 새 메시지 기다리기(API-104) | `after` 뒤의 메시지가 있으면 바로, 없으면 25초까지 기다렸다가 빈 목록을 줘요. 같은 프로세스의 저장 신호로 바로 깨고, 다른 길로 저장된 것도 잡도록 5초마다 DB를 봐요. 늦게 커밋된 메시지를 놓치지 않게 최근 60초 안의 메시지도 함께 주고, 화면이 id로 겹침을 지워요. 응답의 `typing`은 그 방에서 마롱이가 답을 만드는 중인지예요. | 한 친구의 기다리는 요청은 4개까지예요. 넘으면 가장 오래된 것을 빈 응답으로 끝내요. 화면이 숨으면 기다리기를 멈추고, 다시 보이면 이어요. | TC-123 | REQ-115 |
+| SPEC-114 새 메시지 기다리기(API-104) | `after` 뒤의 메시지가 있으면 바로, 없으면 25초까지 기다렸다가 빈 목록을 줘요. 같은 프로세스의 저장 신호로 바로 깨고, 다른 길로 저장된 것도 잡도록 5초마다 DB를 봐요. 늦게 커밋된 메시지를 놓치지 않게 최근 60초 안의 메시지도 함께 주고, 화면이 id로 겹침을 지워요. 응답의 `typing`은 그 방에서 마롱이가 답을 만드는 중인지예요(방 잠금을 잡았고 마지막 말이 친구 말). 화면은 지금 보이는 `typing`(0·1)을 같이 보내고, 서버의 `typing`이 그와 달라지면 새 메시지가 없어도 바로 끝내요(쓰는 중 표시가 늦지 않게). | 한 친구의 기다리는 요청은 4개까지예요. 넘으면 가장 오래된 것을 빈 응답으로 끝내요. 화면이 숨으면 기다리기를 멈추고, 다시 보이면 이어요. | TC-123 | REQ-115 |
 | SPEC-115 기기 등록(API-105) | 앱의 페이지 스크립트가 `PUT /chat/api/devices/{installId}`로 `{fid, notifications, appVersion}`을 보내요. 없으면 만들고(201) 있으면 고치고(200), `seen_at`을 지금으로 적어요. 응답은 이 기기로 보낼지(`app`/`discord`)와 그 이유예요. | 같은 installId가 다른 친구로 오면 그 친구로 옮겨요(같은 폰에서 다른 사람이 로그인). 같은 FID가 다른 installId에 있으면 옛 줄의 FID를 지워요. FID가 없으면(구글 Play 서비스가 없는 폰 등) `discord`/`no_fid`. | TC-125, TC-130 | REQ-111, REQ-112, REQ-120 |
 | SPEC-116 알림 받을 기기 | 서버에 FCM 키가 있고, 기기에 FID가 있고, 알림이 `granted`이고, `seen_at`이 30일 안이면 '알림 받을 기기'예요(Firebase가 기본으로 쓰는 기준이 '한 달'). 친구에게 하나라도 있으면 앱으로 보내요. | FCM 키가 없으면(준비 전) 기기가 있어도 디스코드로 보내요. | TC-125 | REQ-111, REQ-112 |
-| SPEC-117 FCM 보내기 | HTTP v1 `POST https://fcm.googleapis.com/v1/projects/<FCM_PROJECT_ID>/messages:send`, 대상은 `fid`예요(`token` 칸은 지원 중단). 인증은 서비스 계정 키로 서명한 JWT를 `https://oauth2.googleapis.com/token`에서 바꾼 1시간짜리 토큰이에요(범위 `https://www.googleapis.com/auth/firebase.messaging`, 만료 5분 전 갱신, 메모리에만 둠). 메시지는 `notification`(제목 '마롱이', 본문은 글의 첫 120자, 줄 바꿈은 띄어쓰기, 넘으면 '…'), `data`(`kind`, `open: "/chat/"`, `messageId`), `android`(`priority: HIGH`, `ttl`, `notification.channel_id`, `notification.visibility: PRIVATE`)예요. 200이면 보낸 거예요. | 404 `UNREGISTERED`나 400 `INVALID_ARGUMENT`이면 그 기기의 FID를 지우고 끊긴 때를 적어요. 429·500·503은 `Retry-After`(10초까지)를 따르거나 1초·2초 뒤 두 번까지 다시 보내요. 401·403(키·권한 문제)은 실패로 하고 경고 로그를 1시간에 한 번 남겨요. 한 번 보내기는 10초 안에 끝내요. | TC-126 | REQ-111, REQ-112, REQ-118 |
-| SPEC-118 선톡 보내는 곳 | `DiscordProactive.deliver`에서 슬롯 잡기와 글 만들기는 그대로 두고, 보내기 직전(`still_current` 확인 뒤) 알림 받을 기기가 있으면 FCM으로 한 번 보내요(`kind: proactive`, 채널 `marong_talk`, `ttl` 2시간). 한 기기라도 받으면 `record_delivery(ok)`와 메시지 저장(`proactive: true`, `delivered: true`, `transport: "app"`, `devices: n`)으로 끝내요. | 모든 기기가 실패하면 지금의 디스코드 문장 나눠 보내기로 가요. 앱으로 보낼 수 있으면 디스코드가 끊겨 있어도 보내요. | TC-127 | REQ-111, REQ-112 |
+| SPEC-117 FCM 보내기 | HTTP v1 `POST https://fcm.googleapis.com/v1/projects/<FCM_PROJECT_ID>/messages:send`, 대상은 `fid`예요(`token` 칸은 지원 중단). 인증은 서비스 계정 키로 서명한 JWT를 `https://oauth2.googleapis.com/token`에서 바꾼 1시간짜리 토큰이에요(범위 `https://www.googleapis.com/auth/firebase.messaging`, 만료 5분 전 갱신, 메모리에만 둠). 메시지는 `notification`(제목 '마롱이', 본문은 글의 첫 120자, 줄 바꿈은 띄어쓰기, 넘으면 '…'), `data`(`kind`, `open`: 누르면 열 주소, 보통 `/chat/`), `android`(`priority: HIGH`, `ttl`, `notification.channel_id`, `notification.visibility: PRIVATE`)예요. 200이면 보낸 거예요. | 404 `UNREGISTERED`나 400 `INVALID_ARGUMENT`이면 그 기기의 FID를 지우고 끊긴 때를 적어요. 429·500·503은 `Retry-After`(10초까지)를 따르거나 1초·2초 뒤 두 번까지 다시 보내요. 401·403(키·권한 문제)은 실패로 하고 경고 로그를 1시간에 한 번 남겨요. 한 번 보내기는 10초 안에 끝내요. | TC-126 | REQ-111, REQ-112, REQ-118 |
+| SPEC-118 선톡 보내는 곳 | `DiscordProactive.deliver`에서 슬롯 잡기와 글 만들기는 그대로 두고, 보내기 직전(`still_current` 확인 뒤) 알림 받을 기기가 있으면 FCM으로 한 번 보내요(`kind: proactive`, 채널 `marong_talk`, `ttl` 2시간). 한 기기라도 받으면 `record_delivery(ok)`와 메시지 저장(`proactive: true`, `delivered: true`, `transport: "app"`, `devices: n`)으로 끝내요. | 모든 기기가 실패하면 지금의 디스코드 문장 나눠 보내기로 가요. 앱으로 보낼 수 있으면 디스코드가 끊겨 있어도 보내요. 디스코드가 끊겼고 알림 받을 기기도 없으면 슬롯을 잡지 않고 글도 만들지 않아요(다음 확인 때 다시). | TC-127 | REQ-111, REQ-112 |
 | SPEC-119 일정 알림 보내는 곳 | `DiscordReminders.deliver`에서 알림 받을 기기가 있으면 FCM으로 보내요(`kind: reminder`, 채널 `marong_reminder`, `ttl`은 3시간에서 늦은 만큼 뺀 값, 최소 60초). 저장 메시지의 `transport`는 실제로 간 길이에요. | 3시간 넘게 늦은 알림은 지금처럼 놓침이에요. 앱이 실패하면 디스코드 DM, 둘 다 실패하면 지금처럼 `failed`(1분 뒤 다시). | TC-128 | REQ-111, REQ-112 |
 | SPEC-120 답 알림 | 앱에서 온 말(`kakao_id`가 `app:`)에 대한 답이 저장될 때 그 친구의 기다리는 요청(SPEC-114)이 하나도 없으면, 알림 받을 기기로 보내요(`kind: reply`, 채널 `marong_talk`, `ttl` 1시간). | 실패해도 디스코드로 보내지 않아요. 답은 글 대화 기록에 있어요. | TC-129 | REQ-119 |
 | SPEC-121 앱의 알림 받기 | `com.google.firebase:firebase-messaging:26.0.1`(2026-10-21, minSdk 24), Google 서비스 Gradle 플러그인, Git 밖의 `google-services.json`을 써요. 매니페스트에 `firebase_messaging_installation_id_enabled=true`, 기본 채널 `marong_talk`, 기본 아이콘 `ic_stat_marong`(단색 얼굴), 애널리틱스 끔(`firebase_analytics_collection_enabled=false`)을 넣어요. 앱이 시작할 때 채널 두 개를 만들어요: '마롱이 톡'(`marong_talk`, 기본 중요도: 소리, 머리 알림 없음)과 '일정 알림'(`marong_reminder`, 높은 중요도: 머리 알림). `FirebaseMessaging.register()`를 부르고 `onRegistered(fid)`로 받은 FID를 앱 저장소에 둬요. `installId`(UUID)는 처음 한 번 만들고, 1단계처럼 백업하지 않아요. | 앱이 앞에 있을 때 온 알림(`onMessageReceived`)은 글 대화 화면이 보이면 띄우지 않고, 아니면 같은 채널·모양으로 띄워요. 구글 Play 서비스가 없으면 등록이 실패하고 FID 없이 보고해 디스코드로 받아요. | TC-133, TC-135 | REQ-111, REQ-113, REQ-118 |
@@ -212,39 +212,39 @@ COMMIT;
 
 | ID | 작업 | 상태 |
 | --- | --- | --- |
-| TASK-111 | 마이그레이션 014와 저장소 함수(기기 등록·고르기, 로그인 찾기, 앱 말 들어옴, 대화 읽기) | 대기 |
-| TASK-112 | Access 확인 공용 모듈(통화 서버 규칙 그대로)과 시험 | 대기 |
-| TASK-113 | 글 대화 웹 서버와 API-101~106(aiohttp, 기다리기 신호, 보내기 한도) | 대기 |
-| TASK-114 | FCM 보내기(서비스 계정 인증, 오류 처리)와 가짜 FCM 서버 시험 | 대기 |
-| TASK-115 | 선톡·일정 알림·답의 보내는 곳 고르기(D18), PR #14·#17 코드 위 | 대기 |
-| TASK-116 | 글 대화 화면(SCR-107·109)과 통화 화면 '글 대화' 링크 | 대기 |
+| TASK-111 | 마이그레이션 014와 저장소 함수(기기 등록·고르기, 로그인 찾기, 앱 말 들어옴, 대화 읽기) | 끝(`marong/app_store.py`) |
+| TASK-112 | Access 확인 공용 모듈(통화 서버 규칙 그대로)과 시험 | 끝(`marong/access.py`) |
+| TASK-113 | 글 대화 웹 서버와 API-101~106(aiohttp, 기다리기 신호, 보내기 한도) | 끝(`marong/app_chat.py`, `run_discord.py`) |
+| TASK-114 | FCM 보내기(서비스 계정 인증, 오류 처리)와 가짜 FCM 서버 시험 | 끝(`marong/fcm.py`) |
+| TASK-115 | 선톡·일정 알림·답의 보내는 곳 고르기(D18), PR #14·#17 코드 위 | 끝(`marong/app_push.py`, `marong/app_delivery.py`, 서버에 올라간 #14·#17·#18·#19 위) |
+| TASK-116 | 글 대화 화면(SCR-107·109)과 통화 화면 '글 대화' 링크 | 끝(`marong/app_chat_static/`) |
 | TASK-117 | 앱 0.2.0: Firebase 등록, 알림 채널·아이콘, 앱 연결 `MarongPush`, 누르기 처리, 페이지 스크립트 기기 보고. 3단계 벨(TASK-126)도 같은 0.2.0에 넣어요 | 대기 |
-| TASK-118 | 배포: systemd drop-in(`deploy/marong-discord-app.conf`), 설정 이름, 터널 경로, 되돌리기 문서 | 대기 |
-| TASK-119 | 시험: 자동(서버·페이지·JVM·브라우저), 에뮬레이터(시험용 Firebase), 실제 폰 | 대기 |
-| TASK-120 | 동희님 준비물 받기와 서버 반영(확인 뒤) | 대기 |
+| TASK-118 | 배포: systemd drop-in(`deploy/marong-discord-app.conf`), 설정 이름, 터널 경로, 되돌리기 문서 | 끝(11절) |
+| TASK-119 | 시험: 자동(서버·페이지·JVM·브라우저), 에뮬레이터(시험용 Firebase), 실제 폰 | 서버·브라우저 끝, 앱(JVM)·에뮬레이터·폰 남음 |
+| TASK-120 | 동희님 준비물 받기와 서버 반영(확인 뒤) | 준비물 받음(11/15), 서버 반영 남음 |
 
-순서: TASK-111~114를 먼저 만들고(가짜 FCM으로 시험), PR #14·#17이 합쳐지면 TASK-115를 그 위에 맞춰요.
+순서: TASK-111~114를 먼저 만들고(가짜 FCM으로 시험), TASK-115는 서버에 올라간 PR #14·#17·#18·#19 코드 위에 맞췄어요.
 
 ## 9. 시험 (12)
 
-모두 구현 전이라 결과는 비어 있어요. 가짜 FCM 서버와 가짜 Access 서명 키는 시험 안에서만 만들고, 실제 키와 실제 Firebase는 에뮬레이터·폰 시험에서만 써요.
+결과는 2026-11-15 실행이에요. 자동 시험은 pgserver Postgres, 가짜 Access 서명 키, 가짜 OAuth·FCM(httpx MockTransport), 가짜 디스코드·Claude로 돌렸고 실제 키와 네트워크는 쓰지 않았어요. 실제 Firebase는 에뮬레이터·폰 시험에서만 써요. 서버 시험은 `tests/test_app_chat.py`(336개 확인), 화면 시험은 `apps/android/test/chat-page.e2e.cjs`(Playwright Chromium 8개)예요.
 
 | ID | 확인할 것 | 방법 | 결과 |
 | --- | --- | --- | --- |
-| TC-119 | Access 증명의 서명·`aud`·`iss`·만료·허용 목록이 틀리면 401·403, 맞으면 그 친구의 DM 방을 찾아요. Access 값이 없으면 웹 서버가 켜지지 않아요 | 단위(가짜 서명 키) | 대기 |
-| TC-120 | 다른 사이트에서 온 POST·PUT은 403 `cross_site` | 단위 | 대기 |
-| TC-121 | 같은 clientId를 두 번 보내면 한 번 저장되고 답도 한 번이에요 | 단위, DB | 대기 |
-| TC-122 | 글 대화에서 보낸 말이 디스코드 DM과 같은 방에 저장되고, 동시에 온 디스코드 말과 같은 잠금으로 차례대로 답해요. 선톡 그만 말이 설정을 바꿔요. 1분에 21번째는 429 | 단위 | 대기 |
-| TC-123 | 기다리기: 새 메시지가 오면 1초 안에, 없으면 25초 뒤 빈 응답. 늦게 커밋된 메시지도 와요. 숨은 화면은 기다리지 않아요 | 단위, 브라우저 | 대기 |
-| TC-124 | 대화 읽기에서 전달 안 된 말, 통화에서 지운 기억, 카카오 방 기록, 다른 친구 방이 빠져요 | DB | 대기 |
-| TC-125 | 알림 받을 기기: 알림 거절, 30일 지남, FID 없음, 끊김, FCM 키 없음이면 디스코드 | 단위 | 대기 |
-| TC-126 | FCM 응답별 처리: 200, 404 `UNREGISTERED`, 400 `INVALID_ARGUMENT`, 429(`Retry-After`), 503, 401, 시간 초과 | 가짜 FCM 서버 | 대기 |
-| TC-127 | 선톡: 기기 있음 → 앱만, 모두 실패 → 디스코드, 기기 없음 → 디스코드, 디스코드가 끊겨도 앱으로 | 단위 | 대기 |
-| TC-128 | 일정 알림: 같은 네 경우, 3시간 넘게 늦으면 놓침, `ttl` 계산 | 단위 | 대기 |
-| TC-129 | 답 알림: 기다리는 요청이 있으면 보내지 않고, 없으면 보내요 | 단위 | 대기 |
-| TC-130 | 기기 등록: 같은 폰에 다른 사람이 로그인하면 옮기고, 같은 FID가 다른 installId로 오면 옛 줄을 비워요 | DB | 대기 |
-| TC-131 | 로그에 글·FID·installId·이메일·토큰이 없어요(로그를 잡아 검사) | 단위 | 대기 |
-| TC-132 | 글 대화 화면의 상태 전부, 글은 `textContent`로만, 링크, 52px 버튼, 다시 보내기의 같은 clientId, 낮밤 색 | 브라우저(가짜 API) | 대기 |
+| TC-119 | Access 증명의 서명·`aud`·`iss`·만료·허용 목록이 틀리면 401·403, 맞으면 그 친구의 DM 방을 찾아요. Access 값이 없으면 웹 서버가 켜지지 않아요 | 단위(가짜 서명 키) | 통과(서버) |
+| TC-120 | 다른 사이트에서 온 POST·PUT은 403 `cross_site` | 단위 | 통과(서버) |
+| TC-121 | 같은 clientId를 두 번 보내면 한 번 저장되고 답도 한 번이에요 | 단위, DB | 통과(서버) |
+| TC-122 | 글 대화에서 보낸 말이 디스코드 DM과 같은 방에 저장되고, 동시에 온 디스코드 말과 같은 잠금으로 차례대로 답해요. 선톡 그만 말이 설정을 바꿔요. 1분에 21번째는 429 | 단위 | 통과(서버) |
+| TC-123 | 기다리기: 새 메시지가 오면 1초 안에, 없으면 25초 뒤 빈 응답. 늦게 커밋된 메시지도 와요. 숨은 화면은 기다리지 않아요 | 단위, 브라우저 | 통과(서버, 브라우저: 새 메시지 1초 안, 숨은 화면은 기다리기 멈춤) |
+| TC-124 | 대화 읽기에서 전달 안 된 말, 통화에서 지운 기억, 카카오 방 기록, 다른 친구 방이 빠져요 | DB | 통과(DB) |
+| TC-125 | 알림 받을 기기: 알림 거절, 30일 지남, FID 없음, 끊김, FCM 키 없음이면 디스코드 | 단위 | 통과(서버) |
+| TC-126 | FCM 응답별 처리: 200, 404 `UNREGISTERED`, 400 `INVALID_ARGUMENT`, 429(`Retry-After`), 503, 401, 시간 초과 | 가짜 FCM 서버 | 통과(가짜 OAuth·FCM) |
+| TC-127 | 선톡: 기기 있음 → 앱만, 모두 실패 → 디스코드, 기기 없음 → 디스코드, 디스코드가 끊겨도 앱으로 | 단위 | 통과(서버) |
+| TC-128 | 일정 알림: 같은 네 경우, 3시간 넘게 늦으면 놓침, `ttl` 계산 | 단위 | 통과(서버) |
+| TC-129 | 답 알림: 기다리는 요청이 있으면 보내지 않고, 없으면 보내요 | 단위 | 통과(서버) |
+| TC-130 | 기기 등록: 같은 폰에 다른 사람이 로그인하면 옮기고, 같은 FID가 다른 installId로 오면 옛 줄을 비워요 | DB | 통과(DB) |
+| TC-131 | 로그에 글·FID·installId·이메일·토큰이 없어요(로그를 잡아 검사) | 단위 | 통과(봇의 웹 서버를 빈 포트에 띄워 접근 로그 없음·127.0.0.1만 확인 포함) |
+| TC-132 | 글 대화 화면의 상태 전부, 글은 `textContent`로만, 링크, 52px 버튼, 다시 보내기의 같은 clientId, 낮밤 색 | 브라우저(가짜 API) | 통과(브라우저 8개, 통화 화면 '글 대화' 링크는 `apps/android/test/call-ring.e2e.cjs`) |
 | TC-133 | 앱 설정: FID 사용 표시와 기본 채널·아이콘, 권한 목록(FCM이 더하는 권한까지로 TC-118 기대 목록 고침), 버전 0.2.0 세 곳, 저장소에 `google-services.json` 없음 | 단위 | 대기 |
 | TC-134 | 알림 누르기: `open`이 정확히 `/chat/`일 때만 글 대화, 다른 값·다른 주소는 무시 | JVM | 대기 |
 | TC-135 | 에뮬레이터(구글 Play 서비스 이미지)에서 실제 등록 → 대역 서버로 FID 보고 → 시험용 Firebase 프로젝트로 알림 → 누르면 글 대화. 앱이 앞에 있을 때와 글 대화를 보고 있을 때 | 에뮬레이터 | 대기 |
@@ -269,17 +269,16 @@ COMMIT;
 
 ## 11. 동희님 준비물과 서버 변경
 
-동희님이 해 주실 것(약 15분):
+준비물(끝, 2026-11-15): 동희님이 11/15 20:42 KST 이 스레드의 결정 카드에서 'Aside로 전부 하기'를 골라, 학원 컴퓨터 Aside로 만들었어요.
 
-1. Firebase 콘솔(console.firebase.google.com)에서 동희님 구글 계정으로 새 프로젝트를 만들어요. Google 애널리틱스는 꺼요. 무료 요금제 그대로 둬요.
-2. 프로젝트에 안드로이드 앱을 더하고 패키지 이름 `com.corthexhq.marong`을 넣어요. 받은 `google-services.json`은 프로젝트 파일 `marong-app/` 폴더에 올려 주세요(Git·채팅에 붙이지 않기).
-3. 구글 클라우드 콘솔 IAM에서 서비스 계정을 만들고 역할 'Firebase Cloud Messaging API Admin' 하나만 줘요. JSON 키는 동희님이 서버의 `/etc/marong-discord/fcm-service-account.json`(root:root 600)에 직접 두세요. 채팅·Git·Notion에는 넣지 않아요. 조직 정책으로 키 만들기가 막혀 있으면 알려 주세요.
-4. Firebase 프로젝트 ID를 알려 주세요(비밀 아님).
+1. Firebase 프로젝트 `marong-app`(무료 요금제, 애널리틱스 끔).
+2. 안드로이드 앱 두 개: `com.corthexhq.marong`(실제 앱), `com.corthexhq.marong.standin`(에뮬레이터 시험용). `google-services.json`은 프로젝트 파일 `marong-app/firebase/`에 있어요(Git·채팅·Notion·로그에 넣지 않아요, REQ-122).
+3. 서비스 계정 하나(역할 'Firebase Cloud Messaging API Admin'만). JSON 키는 값을 보지 않고 서버의 비공개 폴더로 옮겨 해시를 맞춘 뒤 학원 컴퓨터 사본을 지웠어요. `/etc/marong-discord/fcm-service-account.json`(root:root 600)에 두는 일은 서버 반영 때 해요.
 
-서버 변경(동희님 확인 뒤에만, PR #14·#17 반영 뒤):
+서버 변경(동희님이 11/15 19:58 KST 프로젝트 채팅에서 '만들어지는대로 계속 넣어'라고 하셔서 시험이 끝난 것부터 넣어요. DB 백업 뒤, 통화가 없을 때 다시 시작해요):
 
 1. DB 백업 뒤 `marong/migrations/014_app_chat.sql` 적용.
-2. 봇 코드 배포. 봇에 새 의존성 하나 `PyJWT[crypto]==2.15.1`(통화 서버와 같은 고정 버전, Access 확인과 서비스 계정 서명).
+2. 봇 코드 배포. 봇에 새 의존성 `PyJWT[crypto]==2.15.1`과 `cryptography==50.0.2`(통화 서버와 같은 고정 버전, Access 확인과 서비스 계정 서명). `requirements-discord.txt`에 있어요.
 3. `/etc/marong-discord/config`에 `MARONG_APP_CHAT=1`, `FCM_PROJECT_ID`, Access 값 세 개(통화 서버와 같은 값, Git 밖). 포트를 바꿀 때만 `MARONG_APP_PORT`.
 4. `deploy/marong-discord-app.conf`를 `/etc/systemd/system/marong-discord.service.d/app.conf`로 설치(`LoadCredential=fcm-service-account.json:...`).
 5. 터널: 경로 `^/chat(/|$)`만 `http://127.0.0.1:8796`으로. Access 앱 설정은 그대로예요.

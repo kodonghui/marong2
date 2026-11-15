@@ -62,8 +62,11 @@ function readFrames(socket, onFrame) {
   });
 }
 
-async function startCallSite({ status = {}, port = 0, log = () => {} } = {}) {
+// chat: the status /chat/api/me answers (the call page shows its '글 대화' link only on 200, SPEC-124).
+// ready: more fields for the 'ready' message, such as {ring: true} for Marong's own call (SPEC-136).
+async function startCallSite({ status = {}, port = 0, log = () => {}, chat = 404, ready = {} } = {}) {
   const received = [];
+  const upgrades = [];
   const audio = { frames: 0, bytes: 0 };
   const requests = [];
   const sockets = new Set();
@@ -73,6 +76,11 @@ async function startCallSite({ status = {}, port = 0, log = () => {} } = {}) {
     if (pathname === '/status') {
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify({ ready: true, active: false, webRTC: false, memoryConnected: false, ...status }));
+      return;
+    }
+    if (pathname === '/chat/api/me') {
+      res.writeHead(chat, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(chat === 200 ? { name: '현경', textMax: 2000 } : { code: 'unauthenticated' }));
       return;
     }
     if (req.method === 'POST') { res.writeHead(204); res.end(); return; }
@@ -85,6 +93,7 @@ async function startCallSite({ status = {}, port = 0, log = () => {} } = {}) {
     const { pathname } = new URL(req.url, 'http://127.0.0.1');
     const key = req.headers['sec-websocket-key'];
     if (pathname !== '/live' || !key) { socket.destroy(); return; }
+    upgrades.push(req.url);
     sockets.add(socket);
     log(`/live opened (${sockets.size} open)`);
     socket.on('close', () => {
@@ -94,7 +103,7 @@ async function startCallSite({ status = {}, port = 0, log = () => {} } = {}) {
     socket.on('error', () => {});
     const accept = crypto.createHash('sha1').update(key + WS_GUID).digest('base64');
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
-    socket.write(frame(JSON.stringify({ type: 'ready', callId: 'test-call', memoryConnected: false })));
+    socket.write(frame(JSON.stringify({ type: 'ready', callId: 'test-call', memoryConnected: false, ...ready })));
     readFrames(socket, (opcode, payload) => {
       if (opcode === 1) {
         const message = JSON.parse(payload.toString('utf8'));
@@ -112,6 +121,7 @@ async function startCallSite({ status = {}, port = 0, log = () => {} } = {}) {
   return {
     url: `http://127.0.0.1:${server.address().port}`,
     received,
+    upgrades,
     requests,
     audio,
     openSockets: () => sockets.size,

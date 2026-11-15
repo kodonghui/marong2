@@ -13,7 +13,7 @@ from memory_tools import TranscriptRecorder,execute_tool
 from hangup import Consent
 from call_search import queries as search_queries
 
-BUILD='20261115-search'
+BUILD='20261115-ring'
 FRAME=struct.Struct('!4sIIIII')
 # Marong ends a call only when the friend asked (hangup.Consent). Gemini can
 # send toolCall before the last goodbye audio, or say goodbye only after the
@@ -30,10 +30,14 @@ HANGUP_LATE_CAPTION_S=2
 # time to play out (its audio length plus this slack) and nobody has spoken since.
 SEARCH_CUT_SLACK_S=2.0
 OUTPUT_RATE=24000
+# A call Marong placed at a time the friend set (docs/app-ring.md): the friend's answer opens it with this text,
+# once, on the connection that answered the ring. It is not a turn of the friend's and is never recorded.
+RING_ANSWERED_TEXT='(전화 연결됨)'
+RING_CLAIM_S=1
 
 
 class LiveSession:
-    def __init__(self,ws,owner,store,principal,setup,headers,resume,diagnostics,location,model,voice,client_id,*,entry_transport=None,hangup=False,search=None):
+    def __init__(self,ws,owner,store,principal,setup,headers,resume,diagnostics,location,model,voice,client_id,*,entry_transport=None,hangup=False,search=None,ring=None):
         self.ws=ws;self.owner=owner;self.store=store;self.p=principal;self.setup=setup;self.headers=headers
         self.resume=resume;self.d=diagnostics;self.location=location;self.model=model;self.voice=voice;self.client_id=client_id
         self.call_id=str(uuid.uuid4());self.segment=None;self.logical_resumed=False
@@ -53,6 +57,8 @@ class LiveSession:
         # Google Search: call_search.SearchBudget shared by this process, or None (no search, no guide).
         self.search=search;self.searches=0;self.search_live=False;self.planned_reconnect=False
         self.activity_at=0.;self.turn_done_at=None;self.turn_started_at=0.;self.playback_end=0.
+        # ring: the ring id the page was opened with (/?ring=), or None. ring_info: the promise this call answers.
+        self.ring_id=ring;self.ring_info=None;self.ring_greet=False
 
     def log_transport(self,mode,reason):
         self.d['audioPath']=mode
@@ -191,6 +197,7 @@ class LiveSession:
             self.call_id,self.logical_resumed=await self.store.start_call(
                 self.p,self.client_id,self.voice,BUILD,
                 entrypoint='discord' if self.entry_transport=='discord' else 'web')
+            await self.claim_ring()
         elif self.resume.get('owner')==self.owner and time.time()-self.resume.get('updated',0)<600:
             self.call_id=self.resume.get('call_id',self.call_id)
         self.d.update(build=BUILD,callId=self.call_id,startedAt=time.time(),providerInterruptions=0,providerReconnects=0)
@@ -218,6 +225,23 @@ class LiveSession:
                 self.rtc.session=None;self.rtc.idle_at=time.monotonic()
                 if self.explicit:await self.rtc.close()
             self.d['endedAt']=time.time();self.d['memoryWriteFailures']=self.recorder.failed+self.d.get('memoryWriteFailures',0)
+
+    async def claim_ring(self):
+        """Is this the call Marong placed (SPEC-136)? A slow or failing database means an ordinary call."""
+        try:got=await asyncio.wait_for(self.store.claim_ring(self.p,self.call_id,self.ring_id),RING_CLAIM_S)
+        except asyncio.CancelledError:raise
+        except Exception as error:
+            print('ring_claim_failed',type(error).__name__,flush=True);got=None
+        if not got:
+            if self.ring_id:self.d['ring']='none';print('ring_not_answered',flush=True)
+            return
+        at=got['created_at']
+        self.ring_info={'title':got['title'],'say':got['say'],'at':at}
+        self.d['ring']='answered' if got['fresh'] else 'again'
+        if got['fresh']:
+            # A new Gemini session that carries the promise: never resume a handle left from before the ring.
+            self.ring_greet=True;self.handle=None;self.pending.clear();self.resume.clear()
+            print('ring_answered',f"wait_s={int(got['waited'].total_seconds())}",flush=True)
 
     async def watch_revision(self):
         while not self.stop.is_set():
@@ -267,6 +291,7 @@ class LiveSession:
                         mode=self.search_mode();self.search_live=mode=='on'
                         options={'hangup':self.hangup}
                         if mode:options['search']=mode
+                        if self.ring_info:options['ring']=self.ring_info
                         await upstream.send_json(self.setup(self.handle,seed,bool(self.p and self.segment),**options))
                         first=await upstream.receive(timeout=20)
                         if first.type not in (WSMsgType.TEXT,WSMsgType.BINARY) or 'setupComplete' not in json.loads(first.data):
@@ -274,8 +299,14 @@ class LiveSession:
                             raise ConnectionError('setup_rejected')
                         self.ready=True;delay=1
                         await self.emit({'type':'ready','resumed':bool(self.handle) or self.logical_resumed,'callId':self.call_id,
-                            'build':BUILD,'audioFormat':2,'epoch':self.epoch,'audioTransport':self.entry_transport or ('webrtc' if self.rtc else 'pcm'),'memoryConnected':bool(self.p and self.segment)})
+                            'build':BUILD,'audioFormat':2,'epoch':self.epoch,'audioTransport':self.entry_transport or ('webrtc' if self.rtc else 'pcm'),'memoryConnected':bool(self.p and self.segment),
+                            'ring':bool(self.ring_info)})
                         self.logical_resumed=True
+                        if self.ring_greet:
+                            # The friend just answered Marong's call: she speaks first (SPEC-137), only this once.
+                            self.ring_greet=False
+                            await self.controls.put({'clientContent':{'turns':[{'role':'user','parts':[{'text':RING_ANSWERED_TEXT}]}],'turnComplete':True}})
+                            self.available.set()
                         await self.provider(upstream)
             except asyncio.CancelledError:raise
             except Exception as error:

@@ -226,7 +226,7 @@ paths:
     get:
       operationId: waitChatMessages
       summary: 새 메시지 기다리기(25초)
-      description: after 뒤의 메시지가 있으면 바로, 없으면 25초까지 기다렸다가 빈 목록을 줘요. 최근 60초 안의 메시지도 함께 주니 화면은 id로 겹침을 지워요. typing은 그 방에서 마롱이가 답을 만드는 중인지예요. 한 친구의 기다리는 요청은 4개까지이고, 넘으면 가장 오래된 것을 빈 응답으로 끝내요(SPEC-114).
+      description: after 뒤의 메시지가 있거나 마롱이가 쓰는 중인지가 화면이 보낸 typing과 달라지면 바로, 아니면 25초까지 기다렸다가 빈 목록을 줘요. 최근 60초 안의 메시지도 함께 주니 화면은 id로 겹침을 지워요. typing은 그 방에서 마롱이가 답을 만드는 중인지예요. 한 친구의 기다리는 요청은 4개까지이고, 넘으면 가장 오래된 것을 빈 응답으로 끝내요(SPEC-114).
       x-corthex:
         id: API-104
         spec:
@@ -237,6 +237,7 @@ paths:
           '429': 기다리는 요청 한도는 오류 대신 가장 오래된 요청을 빈 응답으로 끝냄
       parameters:
       - $ref: '#/components/parameters/After'
+      - $ref: '#/components/parameters/Typing'
       responses:
         '200':
           description: 새 메시지(없으면 빈 목록)
@@ -486,6 +487,17 @@ components:
         type: integer
         format: int64
         minimum: 0
+    Typing:
+      name: typing
+      in: query
+      required: false
+      description: 화면이 지금 '마롱이가 쓰는 중'을 보이는지(1) 아닌지(0). 서버의 typing이 이 값과 달라지면 기다리기가 바로 끝나요
+      schema:
+        type: integer
+        enum:
+        - 0
+        - 1
+        default: 0
     Limit:
       name: limit
       in: query
@@ -666,6 +678,7 @@ components:
                 - text
                 - before
                 - after
+                - typing
                 - limit
                 - installId
                 - fid
