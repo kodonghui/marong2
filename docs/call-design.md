@@ -118,9 +118,9 @@ sequenceDiagram
 | 단계 | 원본 | ID |
 | --- | --- | --- |
 | 01 도메인 | [docs/01-domain/domain.md](01-domain/domain.md) | CTX-001\~006, TERM-001\~020 |
-| 02 요구사항 | [docs/02-prd/requirements.md](02-prd/requirements.md) | REQ-001\~066 |
+| 02 요구사항 | [docs/02-prd/requirements.md](02-prd/requirements.md) | REQ-001\~066, REQ-076 |
 | 03 흐름 | [docs/03-user-flow/](03-user-flow/) | FL-001\~010 |
-| 04 기능 명세 | [docs/04-functional-spec/spec.md](04-functional-spec/spec.md) | SPEC-001\~031, AI 호출 5개 |
+| 04 기능 명세 | [docs/04-functional-spec/spec.md](04-functional-spec/spec.md) | SPEC-001\~031, SPEC-041, AI 호출 5개 |
 | 05 DB | [marong/call/schema.sql](../marong/call/schema.sql), [docs/05-erd/erd.md](05-erd/erd.md) | TBL-001\~012 |
 | 06 API | [api/openapi.yaml](../api/openapi.yaml) | API-001\~012(계약 0.2.0-draft) |
 | 07 화면 목록 | [docs/07-sitemap/sitemap.md](07-sitemap/sitemap.md) | SCR-001\~005 |

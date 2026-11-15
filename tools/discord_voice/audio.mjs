@@ -93,6 +93,9 @@ export class CallPlayback extends Readable {
 
   finish() { this.#finished = true; }
 
+  // Nothing left to send: every queued sample has gone out as a frame.
+  get idle() { return this.#queued === 0; }
+
   _read() {
     if (this.#timer !== null) return;
     this.#timer = setTimeout(() => {

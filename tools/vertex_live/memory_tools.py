@@ -10,6 +10,9 @@ DECLARATIONS=[
   'parameters':{'type':'OBJECT','properties':{'query':{'type':'STRING','description':'찾을 짧은 한국어 주제'}},'required':['query']}},
  {'name':'current_time','description':'현재 한국 날짜·요일·시간을 확인한다.','parameters':{'type':'OBJECT','properties':{}}}
 ]
+# Only offered to clients that can end the call (live_session.LiveSession.hangup).
+END_CALL={'name':'end_call','description':'친구가 지금 이 통화를 끊어 달라거나 꺼 달라고 분명히 말했을 때만 부른다. 짧은 작별 인사를 한 문장 한 다음 부른다. 조용하거나 피곤해 보이거나 얘기가 끝난 것 같다는 이유로는 절대 부르지 않는다.',
+  'parameters':{'type':'OBJECT','properties':{}}}
 
 
 class TranscriptRecorder:

@@ -16,7 +16,9 @@ The change to WebRTC followed a measured public-browser failure: the provider de
 
 New clients supply a `client` UUID to `/live`. Binary frames have a 24-byte big-endian `MRG2` header: magic, epoch, turn, sequence, source sample offset, sample count, then little-endian PCM16. Previously loaded clients without the query keep headerless PCM until refreshed.
 
-`/status.diagnostics` distinguishes received/played samples, queued audio, actual underruns, source starvation, rebuffer waiting, browser arrival gaps, server send waiting, provider interruptions/reconnects, and AudioContext suspension. It contains no conversation text. There is no application duration/count cutoff or model hang-up tool. Provider GoAway and transport loss resume automatically; explicit user stop ends the logical call.
+`/status.diagnostics` distinguishes received/played samples, queued audio, actual underruns, source starvation, rebuffer waiting, browser arrival gaps, server send waiting, provider interruptions/reconnects, and AudioContext suspension. It contains no conversation text. There is no application duration/count cutoff. Provider GoAway and transport loss resume automatically; explicit user stop ends the logical call.
+
+Marong never ends a call on her own. When the friend asks her to ("끊어 줘", "전화 꺼"), she says a one-sentence goodbye and calls `end_call`. The tool is offered only to clients that can end a call on a `hangup` message: pages that open `/live?hangup=1` and the Discord bot, which sends `X-Marong-Hangup: 1`. Pages loaded earlier get no tool. The server answers `refused` unless the friend's own words in the last 90 seconds of this call ask to end it, or agree to Marong's "끊을까?" (`hangup.py`; it waits up to 2 s for a late input caption). After `ending`, microphone audio no longer reaches Google, and the server sends `hangup` once the goodbye audio has stopped (1.2 s of model silence; a goodbye that only starts after the answer gets 3 s to begin; at most 15 s). The page plays what it has received, then ends the call; if no client stop arrives within 25 s, the server ends the call itself. The segment closes as `close_requested`. The Discord bot plays the goodbye, leaves the voice channel and stays out until the friend leaves and enters again.
 
 ## Identity and bidirectional memory
 
@@ -40,7 +42,7 @@ For the verified Google API-key route, key rotation procedure, open ports, mid-c
 - App: `/home/opc/marong-vertex-test/app`, user unit `marong-vertex-live.service`.
 - Call instruction: `call_instruction.md` (Korean) is the Live `systemInstruction` for web and Discord calls. The service reads it at start, and a missing or empty file stops the start. It reads the file again for each Google connection, so an edited file reaches the next call or reconnection without a restart; a failed read keeps the last good text. Replace it atomically (write a temporary file, then `mv`). Its counseling and crisis rules (`고민 들어 주기`, `위험한 순간`) match the same two sections of the text-chat `prompt.md` (used by the Discord DM bot), and `tests/test_counsel_prompts.py` checks that they agree.
 - Pinned Python runtime: `/home/opc/marong-vertex-test/venv-memory2`.
-- Discord voice relay: `marong-discord-voice-relay.service` imports its own copies of `server.py`, `live_session.py` and `call_instruction.md` from `/opt/marong-discord-voice-relay/` (checked on the server 2026-11-15), not the app folder. A change to the call code or instruction goes to both folders. Restarting the relay also restarts `marong-discord-voice.service`.
+- Discord voice relay: `marong-discord-voice-relay.service` imports its own copies of `server.py`, `live_session.py` and `call_instruction.md` from `/opt/marong-discord-voice-relay/` (checked on the server 2026-11-15), not the app folder. A change to the call code or instruction goes to both folders. From the hang-up change on, `live_session.py` also imports `hangup.py`, so that file goes to both folders too, and the Discord bot's `index.mjs` and `audio.mjs` change with it. Restarting the relay also restarts `marong-discord-voice.service`.
 - Organizer: user unit `marong-voice-memory.service`.
 - Media: user unit `marong-rtc.service`; server-only `.config/marong-call/livekit.json` and `livekit.yaml` are never included in the repository or copied. `/api/rtc` checks identity, Origin and active-call ownership. `/rtc` remains behind the same authentication boundary. Native WebRTC packet loss/concealment and source-buffer underruns are reported separately.
 - Kakao: `/opt/marong`, system unit `marong.service`.
@@ -58,6 +60,7 @@ Credit balance and expiry remain controlled by Google Billing. This change does 
 python tools/vertex_live/test_access.py
 python tools/vertex_live/test_relay.py
 python tools/vertex_live/test_instruction.py
+python tools/vertex_live/test_hangup.py
 python tools/vertex_live/test_transcripts.py
 python tools/vertex_live/test_rtc_api.py
 node tools/vertex_live/test_capture.cjs
@@ -65,6 +68,7 @@ node tools/vertex_live/test_playback.cjs
 node tools/vertex_live/test_transport.cjs
 node tools/vertex_live/test_fallback.cjs
 node tools/vertex_live/test_rtc_watchdog.cjs
+node tools/vertex_live/test_hangup_client.cjs
 python tools/vertex_live/test_midcall.py
 python tools/vertex_live/test_call_report.py  # isolated restored test database only
 ```

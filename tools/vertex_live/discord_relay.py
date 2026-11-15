@@ -93,9 +93,11 @@ class DiscordRelay:
             ws = web.WebSocketResponse(heartbeat=15, max_msg_size=32_000)
             await ws.prepare(request)
             diagnostics = {}
+            # A bot that can leave the room on 'hangup' says so; an older bot would rejoin.
             session = LiveSession(ws, f'discord:{person.caller_id}', self.store, person,
                                   setup, google_headers, call.resume, diagnostics,
-                                  LOCATION, MODEL, VOICE, client_id, entry_transport='discord')
+                                  LOCATION, MODEL, VOICE, client_id, entry_transport='discord',
+                                  hangup=request.headers.get('X-Marong-Hangup') == '1')
             call.session = session
             try:
                 await session.run()
@@ -108,8 +110,8 @@ class DiscordRelay:
             finally:
                 call.session = None
                 await ws.close()
-                log.info('session_closed explicit=%s transcripts_failed=%s upstream_reconnects=%s samples=%s',
-                         session.explicit, diagnostics.get('memoryWriteFailures', 0),
+                log.info('session_closed explicit=%s hangup=%s transcripts_failed=%s upstream_reconnects=%s samples=%s',
+                         session.explicit, diagnostics.get('hangup', '-'), diagnostics.get('memoryWriteFailures', 0),
                          diagnostics.get('providerReconnects', 0), diagnostics.get('receivedSamples', 0))
             return ws
 

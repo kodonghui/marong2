@@ -10,13 +10,24 @@ from collections import deque
 
 from aiohttp import ClientSession,ClientTimeout,WSMsgType
 from memory_tools import TranscriptRecorder,execute_tool
+from hangup import Consent
 
-BUILD='20261115-listening'
+BUILD='20261115-hangup'
 FRAME=struct.Struct('!4sIIIII')
+# Marong ends a call only when the friend asked (hangup.Consent). Gemini can
+# send toolCall before the last goodbye audio, or say goodbye only after the
+# answer, and may skip turnComplete. So the call ends once the model has been
+# quiet for a while after the answer, never later than the cap. The client then
+# has a while to finish playback before the server ends the call itself.
+HANGUP_QUIET_S=1.2
+HANGUP_REPLY_S=3
+HANGUP_MAX_S=15
+HANGUP_CLIENT_S=25
+HANGUP_LATE_CAPTION_S=2
 
 
 class LiveSession:
-    def __init__(self,ws,owner,store,principal,setup,headers,resume,diagnostics,location,model,voice,client_id,*,entry_transport=None):
+    def __init__(self,ws,owner,store,principal,setup,headers,resume,diagnostics,location,model,voice,client_id,*,entry_transport=None,hangup=False):
         self.ws=ws;self.owner=owner;self.store=store;self.p=principal;self.setup=setup;self.headers=headers
         self.resume=resume;self.d=diagnostics;self.location=location;self.model=model;self.voice=voice;self.client_id=client_id
         self.call_id=str(uuid.uuid4());self.segment=None;self.logical_resumed=False
@@ -29,6 +40,10 @@ class LiveSession:
         self.rtc=None
         self.entry_transport=entry_transport
         self.pcm_forced=False;self.connection_id=str(uuid.uuid4());self.transport_log=[]
+        # The client ends the call on a 'hangup' message: the web page asks with
+        # ?hangup=1, the Discord bot with X-Marong-Hangup. Older clients get no tool.
+        self.hangup=hangup;self.consent=Consent();self.hanging_up=None;self.hangup_answered=None
+        self.goodbye_done=asyncio.Event();self.last_model_audio=0.;self.close_reason=None
 
     def log_transport(self,mode,reason):
         self.d['audioPath']=mode
@@ -72,6 +87,7 @@ class LiveSession:
 
     def caption(self,role,text,key):
         self.turn_segments.setdefault(key,self.segment)
+        self.consent.note(role,key,text)
         if self.entry_transport=='discord':return
         if not self.output.full():self.output.put_nowait(('json',{'type':'transcript','who':'user' if role=='user' else 'marong','text':text,'key':key,'replace':True}))
 
@@ -90,6 +106,11 @@ class LiveSession:
                 kind,data=await self.output.get();before=time.monotonic()
                 try:
                     if kind=='transport':await self.switch_pcm(data)
+                    elif kind=='hangup':
+                        # Sent after every queued sample. WebRTC audio may still be
+                        # waiting in the bridge, so the page waits that much longer.
+                        pending=round(self.rtc.queued_ms()) if self.rtc else 0
+                        await asyncio.wait_for(self.ws.send_json({'type':'hangup','epoch':data,'pendingMs':pending,'callId':self.call_id}),5)
                     elif kind=='bytes':
                         if self.rtc and self.rtc.closed:await self.switch_pcm('rtc_server_lost')
                         if self.rtc:
@@ -130,6 +151,7 @@ class LiveSession:
                         text=str(item.get('text',''))[:2000]
                         if not text:continue
                         key=str(item.get('id') or uuid.uuid4())[:100]
+                        self.consent.note('user','text:'+key,text)
                         try:await asyncio.wait_for(self.recorder.text(text,'text:'+key),3)
                         except Exception:self.d['memoryWriteFailures']=self.d.get('memoryWriteFailures',0)+1
                         if not self.controls.full():
@@ -180,7 +202,7 @@ class LiveSession:
             if self.store and self.p:
                 try:await asyncio.wait_for(self.flush_transport(),4)
                 except Exception:self.d['transportLogFailed']=True
-                try:await asyncio.wait_for(self.store.finish(self.p,self.call_id,self.explicit,client_id=self.client_id),4)
+                try:await asyncio.wait_for(self.store.finish(self.p,self.call_id,self.explicit,client_id=self.client_id,reason=self.close_reason),4)
                 except Exception:self.d['memoryCloseFailed']=True
             if self.explicit:self.resume.clear()
             if self.rtc:
@@ -218,7 +240,7 @@ class LiveSession:
                 url=f'wss://{self.location}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent'
                 async with ClientSession(timeout=ClientTimeout(total=None,connect=15)) as http:
                     async with http.ws_connect(url,headers=await self.headers(),max_msg_size=2_000_000,heartbeat=20) as upstream:
-                        await upstream.send_json(self.setup(self.handle,seed,bool(self.p and self.segment)))
+                        await upstream.send_json(self.setup(self.handle,seed,bool(self.p and self.segment),hangup=self.hangup))
                         first=await upstream.receive(timeout=20)
                         if first.type not in (WSMsgType.TEXT,WSMsgType.BINARY) or 'setupComplete' not in json.loads(first.data):
                             if self.handle:self.handle=None;self.pending.clear()
@@ -240,6 +262,43 @@ class LiveSession:
                 except TimeoutError:pass
                 delay=min(30,delay*2)
 
+    async def end_call_requested(self):
+        """Answer Gemini's end_call. Only the friend's own words in this call allow it."""
+        if not self.hangup:
+            return {'result':'unavailable','reason':'이 화면에서는 네가 통화를 끊을 수 없어. 친구가 직접 끊으면 된다고 짧게 말해 줘.'}
+        if self.hanging_up is None:
+            # Input captions arrive independently of tool calls: allow the last words to land.
+            deadline=time.monotonic()+HANGUP_LATE_CAPTION_S
+            while not self.consent.asked() and time.monotonic()<deadline:await asyncio.sleep(.1)
+            if not self.consent.asked():
+                self.d['hangupRefused']=self.d.get('hangupRefused',0)+1;print('hangup_refused',flush=True)
+                return {'result':'refused','reason':"친구가 이 통화를 끊어 달라고 하지 않았어. 통화는 계속돼. 끊을지 헷갈리면 '이제 끊을까?' 하고 한 번만 묻고, 아니면 하던 얘기를 이어 가."}
+            self.hanging_up=time.monotonic();self.close_reason='close_requested'
+            self.d['hangup']='accepted';print('hangup_accepted',flush=True)
+            self.background(self.finish_after_goodbye())
+        return {'result':'ending','note':'친구 부탁대로 통화가 곧 끊겨. 작별 인사를 아직 안 했으면 한 문장으로만 하고, 이미 했으면 아무 말도 하지 마.'}
+
+    async def finish_after_goodbye(self):
+        """Send 'hangup' after the goodbye's last sample, then end the call if the client does not."""
+        while not self.stop.is_set():
+            now=time.monotonic();answered=self.hangup_answered
+            if now-self.hanging_up>=HANGUP_MAX_S:break
+            if answered is not None:
+                spoke=self.last_model_audio>answered;quiet=now-max(answered,self.last_model_audio)
+                # turnComplete after goodbye audio that followed the answer: the goodbye is out.
+                if spoke and self.goodbye_done.is_set() and quiet>=.5:break
+                # Otherwise wait for silence, and give a goodbye that only starts after the answer time to begin.
+                if quiet>=HANGUP_QUIET_S and (spoke or now-answered>=HANGUP_REPLY_S):break
+            await asyncio.sleep(.1)
+        if self.stop.is_set():return
+        if self.in_turn:
+            # A tool call can end the turn without turnComplete: close the turn for playback.
+            self.in_turn=False;await self.emit({'type':'audio_end','epoch':self.epoch,'turn':self.turn})
+        await self.output.put(('hangup',self.epoch))
+        try:await asyncio.wait_for(self.stop.wait(),HANGUP_CLIENT_S)
+        except TimeoutError:
+            self.d['hangupServerEnded']=True;self.explicit=True;self.stop.set()
+
     async def provider(self,upstream):
         sequence=0;last_audio=None;tool_tasks={};speaking=False;go_away=False;audio_finished=False
         async def send(payload,remember=True):
@@ -260,12 +319,20 @@ class LiveSession:
                 while not self.controls.empty():await send(await self.controls.get())
                 while self.audio:
                     at,pcm=self.audio.popleft()
+                    # After the friend's hang-up request the microphone no longer
+                    # reaches Gemini: an overlapping '응 잘 자' must not cut the goodbye.
+                    if self.hanging_up is not None:continue
                     if time.monotonic()-at>.4:
                         self.d['inputDroppedFrames']=self.d.get('inputDroppedFrames',0)+1;continue
                     await send({'realtimeInput':{'audio':{'mimeType':'audio/pcm;rate=16000','data':base64.b64encode(pcm).decode()}}})
 
         async def tool(call):
             name=call.get('name','');identifier=str(call.get('id',''))[:200]
+            if name=='end_call':
+                result=await self.end_call_requested()
+                await send({'toolResponse':{'functionResponses':[{'id':identifier,'name':name,'response':result}]}})
+                if result['result']=='ending' and self.hangup_answered is None:self.hangup_answered=time.monotonic()
+                return
             try:
                 result=await asyncio.wait_for(execute_tool(self.store,self.p,self.call_id,self.segment,name,call.get('args',{}),self.segment+':'+identifier if self.segment else identifier,self.recorder),6)
             except asyncio.CancelledError:raise
@@ -299,7 +366,8 @@ class LiveSession:
                         if not self.in_turn:
                             self.turn+=1;self.offset=0;self.in_turn=True;last_audio=None;audio_finished=False
                         if last_audio:self.d['maxProviderArrivalGapMs']=max(self.d.get('maxProviderArrivalGapMs',0),round((now-last_audio)*1000))
-                        last_audio=now;speaking=True
+                        last_audio=now;speaking=True;self.last_model_audio=now
+                        if self.hangup_answered is not None:self.goodbye_done.clear()
                         pcm=base64.b64decode(inline['data']);count=len(pcm)//2;self.sequence+=1
                         packet=FRAME.pack(b'MRG2',self.epoch,self.turn,self.sequence,self.offset,count)+pcm
                         self.offset+=count;self.d['receivedSamples']=self.d.get('receivedSamples',0)+count
@@ -315,6 +383,7 @@ class LiveSession:
                     self.recorder.feed('assistant',finished=True)
                     if self.in_turn and not audio_finished:await self.emit({'type':'audio_end','epoch':self.epoch,'turn':self.turn})
                     speaking=False;self.in_turn=False;await self.emit({'type':'turn'})
+                    if self.hangup_answered is not None:self.goodbye_done.set()
                     if go_away and self.handle:return
                 for call in data.get('toolCall',{}).get('functionCalls',[]):
                     identifier=str(call.get('id',''))
