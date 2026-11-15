@@ -18,8 +18,9 @@ from .photo import MAX_DOWNLOAD, Photo, prepare
 from .proactive import PART_GAP_S, Proactive, parts, schedule, slot
 from .schedules import (GUIDE as SCHEDULE_GUIDE, LATE_LIMIT, SCHEDULE_TOOL_NAMES, SCHEDULE_TOOLS, occurrence,
                         parse_when, reminder_text, run_tool as run_schedule_tool, schedule_lines)
-from .shopping import GUIDE as SHOP_GUIDE, SHOP_TOOL
+from .shopping import guide as shop_guide
 from .style import tidy
+from .web_search import GUIDE as WEB_GUIDE, OFF_GUIDE as WEB_OFF_GUIDE, sources_line, sources_of
 
 log = logging.getLogger("marong.discord")
 ON = {
@@ -43,6 +44,7 @@ FOLLOW_UP_S = 1800      # 답한 사진을 이만큼(초) 더 보여 줌: 같은
 FOLLOW_UP_PHOTOS = 2    # 그렇게 더 보여 주는 사진은 방마다 최근 이만큼
 FOLLOW_UP_KEPT = 4      # 모든 방을 합친 상한(사진 한 장이 메모리에서 수 MB)
 REACT_S = 4             # 친구 메시지에 반응을 다는 시간 상한(초). 넘으면 반응 없이 답만 보냄
+SOURCES_FIT = 1800      # 답과 출처 줄을 합쳐 이 길이까지는 한 메시지로, 넘으면 출처를 따로 보냄(링크가 잘리지 않게)
 
 
 @dataclass
@@ -59,9 +61,10 @@ class DiscordIncoming(Incoming):
     google_events: list | None = None     # upcoming Google events shown to the model (None: not read)
     google_more: bool = False
     link_url: str | None = None           # replaces LINK_MARK in the sent text only, never in the history
-    shopping: list = field(default_factory=list)  # shop_search results, kept in the reply meta
     may_react: bool = False               # the reaction guide is shown for this reply (not right after a reaction)
     reaction: dict | None = None          # {"emoji", "ok"}: pressed on this friend message, also the reply's meta
+    sources: list = field(default_factory=list)   # web search/fetch sources: end of the sent text and the meta only
+    answer: str | None = None                     # the model's own answer (sources go only under that)
 
 
 def proactive_preference(text: str) -> bool | None:
@@ -127,11 +130,12 @@ class DiscordAgent(Agent):
     caption_prompt = CAPTION_PROMPT.replace("카카오톡", "디스코드 DM")
 
     def __init__(self, settings, store, embeddings, llm, on_saved=None, *, first_replies=None, google=None, shop=None,
-                 clock=time.monotonic):
+                 web=None, clock=time.monotonic):
         super().__init__(settings, store, embeddings, llm, on_saved=on_saved)
         self.first_replies = first_replies or {}
         self.google = google  # GoogleCalendar when the Google client is set up on this server
-        self.shop = shop      # shopping.ShopSearch when the Naver keys are set, else None (no tool)
+        self.shop = shop      # shopping.ShopFetch: reads shopping-mall product pages (web_fetch), None = off
+        self.web = web        # web_search.WebSearch (Claude's web_search server tool), None when turned off
         self.clock = clock
         self._answered_photos = OrderedDict()  # (room, message id) -> (photo block, when it was answered)
         self._reacted = {}  # room -> [model replies since Marong last reacted there, when (clock)]
@@ -139,7 +143,12 @@ class DiscordAgent(Agent):
     def _tools(self, msg):
         # Identity and opt-in never change on model output. Only the friend's own schedule does.
         tools = list(SCHEDULE_TOOLS) if getattr(msg, "friend_id", None) else []
-        return tools + ([SHOP_TOOL] if self.shop is not None else [])
+        # Mall product pages only (web_fetch). None once today's reads are used up or the API refused the tool.
+        fetch = self.shop.tool() if self.shop is not None else None
+        tools += [fetch] if fetch else []
+        # The one web_search definition (a second tool with the same name is a 400). None once today's searches are spent.
+        search = self.web.tool() if self.web is not None else None
+        return tools + ([search] if search else [])
 
     def _shown_photos(self, room_key, first):
         # A photo already answered stays visible for a while, so "then what about question 5?" still sees the page.
@@ -183,11 +192,35 @@ class DiscordAgent(Agent):
             lines += ["", SCHEDULE_GUIDE] + schedule_lines(msg.schedule_rows, msg.schedule_total, tz, now)
             if self.google:
                 lines += calendar_lines(msg.google_link, msg.google_events, msg.google_more, tz, now)
-        if self.shop is not None:
-            lines += ["", SHOP_GUIDE]
+        guides = self._web_guides(msg)
+        if guides:
+            lines += ["", guides]
         if msg.may_react:
             lines += ["", reactions.GUIDE]
         return "\n".join(lines)
+
+    def _shop_guide(self, msg):
+        # Follows the tools this reply really gets: search is the shared web_search, page reads the mall-only
+        # web_fetch. With neither, prompt.md's rule applies (no made-up prices).
+        names = {t.get("name") for t in self._tools(msg)}
+        return shop_guide(search="web_search" in names, fetch="web_fetch" in names)
+
+    def _web_guides(self, msg):
+        """End of the situation: the internet search guide, then the shopping guide (it refers back to the first)."""
+        parts = [self.web.guide()] if self.web is not None else []
+        shop = self._shop_guide(msg)
+        return "\n\n".join(parts + ([shop] if shop else []))
+
+    def _swap_guides(self, text, msg):
+        """After the API refused a web tool: the search and shopping guides in a system block, fitted to the tools left."""
+        if self.web is not None and self.web.off:
+            text = text.replace(WEB_GUIDE, WEB_OFF_GUIDE)
+        now = self._shop_guide(msg)
+        for search, fetch in ((True, True), (True, False), (False, True)):
+            was = shop_guide(search, fetch)
+            if was != now and was in text:
+                return text.replace(was, now)
+        return text
 
     @staticmethod
     def _dm_lines(link, private=False):
@@ -276,14 +309,43 @@ class DiscordAgent(Agent):
             return NOT_CONNECTED_TEXT, {"google": "not_connected"}
         return DISCONNECTED_TEXT + ("" if revoked else REVOKE_FAILED_TEXT), {"google": "disconnected"}
 
+    def _server_tools_used(self, msg, resp, searches, fetches):
+        if self.web is not None:
+            self.web.spend(searches)
+        if self.shop is not None:
+            self.shop.spend(fetches)
+        if isinstance(msg, DiscordIncoming):
+            known = {s["url"] for s in msg.sources}
+            msg.sources += [s for s in sources_of(resp.content) if s["url"] not in known]
+
+    async def ask(self, system, messages, msg, end, tools=None):
+        off = {}
+        while True:
+            try:
+                text, meta = await super().ask(system, messages, msg, end, tools)
+                break
+            except Exception as e:
+                # Web search or mall page reading turned off for the organization (Console) or refused: answer again
+                # without that tool. Each one turns off once and stays off in this process, so at most two retries.
+                if tools is not None:
+                    raise
+                if self.web is not None and self.web.turn_off(e):
+                    off["web_search"] = "off"
+                elif self.shop is not None and self.shop.turn_off(e):
+                    off["web_fetch"] = "off"
+                else:
+                    raise
+                system = [{**b, "text": self._swap_guides(b["text"], msg)} if b.get("type") == "text" else b
+                          for b in system]
+                if isinstance(msg, DiscordIncoming):
+                    msg.sources.clear()  # the retry starts over without those results
+        meta.update(off)
+        if isinstance(msg, DiscordIncoming):
+            msg.answer = text
+        return text, meta
+
     async def _run_tool(self, block, msg):
         result = {"type": "tool_result", "tool_use_id": block.id}
-        if block.name == SHOP_TOOL["name"] and self.shop is not None:
-            content, action = await self.shop.run(block.input or {})
-            if isinstance(msg, DiscordIncoming):
-                msg.shopping.append(action)
-            out = {**result, "content": content}
-            return {**out, "is_error": True} if action["result"] == "error" else out
         friend_id = getattr(msg, "friend_id", None)
         if block.name not in SCHEDULE_TOOL_NAMES or not friend_id:
             return {**result, "content": f"{block.name} 도구는 없어.", "is_error": True}
@@ -329,8 +391,10 @@ class DiscordAgent(Agent):
         reply, meta = await super()._reply(msg, person, user_id, text, timeout, use_memory, held)
         if msg.actions:
             meta["schedule"] = msg.actions
-        if msg.shopping:
-            meta["shop"] = msg.shopping
+        if msg.sources and reply != msg.answer:  # a fallback or a changed-memory notice: no sources under it
+            msg.sources.clear()
+        if msg.sources:
+            meta["sources"] = msg.sources[:8]
         return self._take_reaction(msg, reply, meta), meta
 
     def _may_react(self, room_key):
@@ -451,7 +515,12 @@ class DiscordDM(discord.Client):
                 body = body.replace(LINK_MARK, incoming.link_url)
             if incoming.reaction:  # Like a friend: react to their message, then answer.
                 incoming.reaction["ok"] = await react(msg, incoming.reaction["emoji"])
-            return await send_text(msg.channel, body)
+            # Web search sources go under the answer in the DM only; the history keeps the answer alone.
+            # A page the answer already links (a picked product) is not repeated there.
+            line = sources_line([s for s in incoming.sources if s["url"] not in body])
+            if not line or len(body) + len(line) <= SOURCES_FIT:
+                return await send_text(msg.channel, body + line)
+            return await send_text(msg.channel, body) and await send_text(msg.channel, line.strip())
 
         async with self.room_lock(room):
             for item in items[:-1]:
