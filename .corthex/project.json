@@ -1,0 +1,73 @@
+{
+  "name": "marong",
+  "title": "마롱이",
+  "team": false,
+  "language": "ko",
+  "records": {
+    "kind": "notion",
+    "location": "https://app.notion.com/p/416bf16cc3ec81549d92ffa38b4aa834"
+  },
+  "stages": {
+    "01-domain": {
+      "human": "github",
+      "source": "docs/01-domain/domain.md",
+      "truth": "source",
+      "note": "2026-11-12 통화 기능을 기존 제품에 더하는 일이라 이벤트 스토밍 보드 없이 한 번에 초안으로 씀. 사람 보기는 Miro 보드 대신 GitHub PR(Claude 선택, 동희님 기본 규칙 '제품 명세는 제품 Git, Notion은 의도·결정과 링크'에 맞춤)."
+    },
+    "02-prd": {
+      "human": "github",
+      "source": "docs/02-prd/requirements.md",
+      "truth": "source",
+      "note": "기본 사람 보기는 Notion DB 행이지만 같은 명세를 Notion에 한 번 더 만들지 않으려고 GitHub PR에서 봄. Notion 설계 문서 행은 요약·결정·링크만 가짐(2026-11-12, Claude 선택, 동희님이 바꿀 수 있음)."
+    },
+    "03-user-flow": {
+      "human": "github",
+      "source": "docs/03-user-flow/",
+      "truth": "source",
+      "note": "Mermaid 흐름을 GitHub에서 그림으로 봄. 02-prd와 같은 이유(2026-11-12)."
+    },
+    "04-functional-spec": {
+      "human": "github",
+      "source": "docs/04-functional-spec/spec.md",
+      "truth": "source",
+      "note": "02-prd와 같은 이유(2026-11-12)."
+    },
+    "05-erd": {
+      "human": "github",
+      "link": "docs/05-erd/erd.md",
+      "source": "marong/call/schema.sql",
+      "truth": "source",
+      "note": "카톡 마롱이 표(marong/schema.sql)는 그대로 두고 통화 표는 같은 DB의 call 스키마에 둠. ERD Editor는 이 작업 환경에서 쓸 수 없어 Mermaid erDiagram(docs/05-erd/erd.md)으로 봄(2026-11-12)."
+    },
+    "06-api": {
+      "human": "swagger-ui",
+      "source": "api/openapi.yaml",
+      "truth": "source"
+    },
+    "07-sitemap": {
+      "human": "github",
+      "link": "docs/07-sitemap/sitemap.md",
+      "source": "docs/07-sitemap/sitemap.yaml",
+      "truth": "source",
+      "note": "화면이 다섯 개뿐이라 보드·목록·슬라이드 세 보기를 sitemap.md 한 파일에 Mermaid와 표로 그림(2026-11-12)."
+    },
+    "08-screen-states": {
+      "human": "artifact",
+      "link": "https://claude.ai/artifact/FDFCuk2xc8JE8SCUuh7hL2",
+      "source": "docs/08-screens/",
+      "truth": "source",
+      "note": "와이어프레임은 기본 경로(docs/08-screens/wireframes.html) 대신 Claude 디자인 캔버스 '마롱이 통화 화면 설계'의 '와이어프레임' 페이지에 그림(상태 38개, 폭 360px·430px). 09 목업 후보와 한 링크로 봄. 캔버스 파일은 Git에 넣지 않으며, 화면과 상태의 원본은 docs/08-screens/의 정의(2026-11-12)."
+    },
+    "09-mockup": {
+      "human": "artifact",
+      "link": "https://claude.ai/artifact/FDFCuk2xc8JE8SCUuh7hL2",
+      "source": "design/base.tokens.json",
+      "truth": "source",
+      "note": "같은 캔버스의 '목업 후보' 페이지. 통화 홈·통화 중 화면만 두 안(A 밤하늘, B 군밤 크림). 방향은 현경님이 첫 시험 전에 고르고, 고른 쪽만 토큰에 남김(2026-11-12)."
+    },
+    "13-presentation": {
+      "skip": true,
+      "note": "개인용 기능이라 발표 없음(분석 문서 11절, 2026-11-12)."
+    }
+  }
+}

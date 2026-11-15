@@ -1,0 +1,475 @@
+{
+  "$description": "마롱이 통화 웹앱 디자인 토큰(DTCG 2025.10). 한국 시간 08:00부터 20:00 직전까지 color.b '군밤 크림', 나머지 시간은 color.a '밤하늘'을 적용한다.",
+  "color": {
+    "$type": "color",
+    "a": {
+      "$description": "후보 A 밤하늘: 어두운 남색 바탕, 군밤 호박색 강조",
+      "bg": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.0706,
+            0.0902,
+            0.1608
+          ],
+          "hex": "#121729"
+        }
+      },
+      "surface": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.1098,
+            0.1373,
+            0.251
+          ],
+          "hex": "#1C2340"
+        }
+      },
+      "surface-2": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.1451,
+            0.1804,
+            0.3216
+          ],
+          "hex": "#252E52"
+        }
+      },
+      "text": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.9569,
+            0.9451,
+            0.9176
+          ],
+          "hex": "#F4F1EA"
+        }
+      },
+      "text-muted": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.7059,
+            0.698,
+            0.7765
+          ],
+          "hex": "#B4B2C6"
+        }
+      },
+      "accent": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.9098,
+            0.6392,
+            0.3608
+          ],
+          "hex": "#E8A35C"
+        }
+      },
+      "on-accent": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.102,
+            0.0706,
+            0.0314
+          ],
+          "hex": "#1A1208"
+        }
+      },
+      "hangup": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.898,
+            0.2824,
+            0.302
+          ],
+          "hex": "#E5484D"
+        }
+      },
+      "on-hangup": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hex": "#FFFFFF"
+        }
+      },
+      "star": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.9647,
+            0.8353,
+            0.4784
+          ],
+          "hex": "#F6D57A"
+        }
+      },
+      "line": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.2,
+            0.251,
+            0.4196
+          ],
+          "hex": "#33406B"
+        }
+      }
+    },
+    "b": {
+      "$description": "후보 B 군밤 크림: 밝은 크림 바탕, 밤색 강조",
+      "bg": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.9843,
+            0.9647,
+            0.9333
+          ],
+          "hex": "#FBF6EE"
+        }
+      },
+      "surface": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hex": "#FFFFFF"
+        }
+      },
+      "surface-2": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.9451,
+            0.902,
+            0.8392
+          ],
+          "hex": "#F1E6D6"
+        }
+      },
+      "text": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.1686,
+            0.1294,
+            0.102
+          ],
+          "hex": "#2B211A"
+        }
+      },
+      "text-muted": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.4196,
+            0.3569,
+            0.3098
+          ],
+          "hex": "#6B5B4F"
+        }
+      },
+      "accent": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.5412,
+            0.2941,
+            0.1412
+          ],
+          "hex": "#8A4B24"
+        }
+      },
+      "on-accent": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hex": "#FFFFFF"
+        }
+      },
+      "accent-soft": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.9529,
+            0.8627,
+            0.7686
+          ],
+          "hex": "#F3DCC4"
+        }
+      },
+      "hangup": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.7843,
+            0.2157,
+            0.1765
+          ],
+          "hex": "#C8372D"
+        }
+      },
+      "on-hangup": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "hex": "#FFFFFF"
+        }
+      },
+      "line": {
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.8863,
+            0.8275,
+            0.749
+          ],
+          "hex": "#E2D3BF"
+        }
+      }
+    }
+  },
+  "font": {
+    "$type": "fontFamily",
+    "body": {
+      "$value": [
+        "Noto Sans KR",
+        "system-ui",
+        "sans-serif"
+      ]
+    },
+    "display-b": {
+      "$description": "후보 B의 인사·이름",
+      "$value": [
+        "Gowun Dodum",
+        "Noto Sans KR",
+        "system-ui",
+        "sans-serif"
+      ]
+    }
+  },
+  "font-weight": {
+    "$type": "fontWeight",
+    "regular": {
+      "$value": 400
+    },
+    "bold": {
+      "$value": 700
+    }
+  },
+  "font-size": {
+    "$type": "dimension",
+    "caption": {
+      "$value": {
+        "value": 13,
+        "unit": "px"
+      }
+    },
+    "body": {
+      "$value": {
+        "value": 16,
+        "unit": "px"
+      }
+    },
+    "title": {
+      "$value": {
+        "value": 22,
+        "unit": "px"
+      }
+    },
+    "display": {
+      "$value": {
+        "value": 28,
+        "unit": "px"
+      }
+    }
+  },
+  "line-height": {
+    "$type": "number",
+    "body": {
+      "$value": 1.5
+    },
+    "title": {
+      "$value": 1.3
+    }
+  },
+  "space": {
+    "$type": "dimension",
+    "xs": {
+      "$value": {
+        "value": 4,
+        "unit": "px"
+      }
+    },
+    "sm": {
+      "$value": {
+        "value": 8,
+        "unit": "px"
+      }
+    },
+    "md": {
+      "$value": {
+        "value": 16,
+        "unit": "px"
+      }
+    },
+    "lg": {
+      "$value": {
+        "value": 24,
+        "unit": "px"
+      }
+    },
+    "xl": {
+      "$value": {
+        "value": 32,
+        "unit": "px"
+      }
+    },
+    "xxl": {
+      "$value": {
+        "value": 48,
+        "unit": "px"
+      }
+    }
+  },
+  "radius": {
+    "$type": "dimension",
+    "sm": {
+      "$value": {
+        "value": 8,
+        "unit": "px"
+      }
+    },
+    "md": {
+      "$value": {
+        "value": 16,
+        "unit": "px"
+      }
+    },
+    "lg": {
+      "$value": {
+        "value": 24,
+        "unit": "px"
+      }
+    },
+    "full": {
+      "$value": {
+        "value": 999,
+        "unit": "px"
+      }
+    }
+  },
+  "size": {
+    "$type": "dimension",
+    "touch-min": {
+      "$value": {
+        "value": 48,
+        "unit": "px"
+      }
+    },
+    "control": {
+      "$value": {
+        "value": 64,
+        "unit": "px"
+      }
+    },
+    "call-button": {
+      "$value": {
+        "value": 88,
+        "unit": "px"
+      }
+    },
+    "avatar": {
+      "$value": {
+        "value": 168,
+        "unit": "px"
+      }
+    },
+    "face-call": {
+      "$value": {
+        "value": 248,
+        "unit": "px"
+      },
+      "$description": "통화 중 화면의 마롱이 얼굴 그림(SPEC-029, 후보 A 기준). 원보다 커서 물음표·Zzz·하트가 원 밖으로 나올 수 있음"
+    },
+    "face-home": {
+      "$value": {
+        "value": 200,
+        "unit": "px"
+      },
+      "$description": "통화 홈의 마롱이 얼굴 그림(SPEC-029, 후보 A 기준. 후보 B는 84)"
+    },
+    "face-small": {
+      "$value": {
+        "value": 152,
+        "unit": "px"
+      },
+      "$description": "끝난 화면의 마롱이 얼굴 그림(SPEC-029)"
+    }
+  },
+  "duration": {
+    "$type": "duration",
+    "fast": {
+      "$value": {
+        "value": 150,
+        "unit": "ms"
+      }
+    },
+    "normal": {
+      "$value": {
+        "value": 240,
+        "unit": "ms"
+      }
+    },
+    "blink-half-close": {
+      "$value": {
+        "value": 50,
+        "unit": "ms"
+      },
+      "$description": "깜빡임에서 감기 시작하는 반쯤 감은 칸(18번, 말하는 중이면 20·22번). 동희님이 올린 GPT 깜빡임 GIF와 같음"
+    },
+    "blink-closed": {
+      "$value": {
+        "value": 70,
+        "unit": "ms"
+      },
+      "$description": "깜빡임의 감은 칸(19번, 말하는 중이면 21·23번). GPT 깜빡임 GIF와 같음"
+    },
+    "blink-half-open": {
+      "$value": {
+        "value": 60,
+        "unit": "ms"
+      },
+      "$description": "깜빡임에서 눈을 뜨는 반쯤 감은 칸. GPT 깜빡임 GIF와 같음"
+    },
+    "breathe": {
+      "$value": {
+        "value": 4000,
+        "unit": "ms"
+      },
+      "$description": "잠든 얼굴(12번)이 1.00~1.02배로 한 번 숨쉬는 시간"
+    }
+  }
+}

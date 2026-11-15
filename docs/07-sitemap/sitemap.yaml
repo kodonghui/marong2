@@ -1,0 +1,41 @@
+# 마롱이 통화 웹앱 화면 목록(07단계 원본). 보기는 sitemap.md 에 이 파일에서 그려요.
+# 모든 화면은 Cloudflare Access 뒤에 있어서, 허용된 Google 계정으로 로그인한 통화하는 친구(지금은 현경님)만 봐요(REQ-001).
+# FL-010(카톡 마롱이가 통화를 이어 알기)은 카톡에서 일어나서 화면이 없어요.
+# without a screen: TERM-004(로그인 이메일, Access 로그인 화면은 Cloudflare가 그림), TERM-008(위임, 목소리로만 답함), TERM-013(신호), TERM-016(sideband)
+- id: SCR-001
+  name: 통화 홈
+  path: /
+  access: 허용된 Google 계정(통화하는 친구)
+  status: active
+  flows: [FL-001, FL-002, FL-006, FL-007, FL-008, FL-009]
+  terms: [CTX-002, CTX-006, TERM-001, TERM-003, TERM-014, TERM-018]
+  children:
+    - id: SCR-002
+      name: 통화 중
+      path: /call
+      access: 허용된 Google 계정(통화하는 친구)
+      status: active
+      flows: [FL-002, FL-003, FL-004, FL-005, FL-006, FL-007, FL-009]
+      terms: [CTX-002, CTX-003, TERM-001, TERM-002, TERM-009, TERM-010, TERM-011, TERM-012, TERM-017, TERM-018, TERM-019]
+    - id: SCR-003
+      name: 지난 통화
+      path: /calls
+      access: 허용된 Google 계정(통화하는 친구)
+      status: active
+      flows: [FL-008]
+      terms: [CTX-004, TERM-001, TERM-006]
+      children:
+        - id: SCR-004
+          name: 통화 상세
+          path: /calls/:id
+          access: 허용된 Google 계정(통화하는 친구, 자기 통화만)
+          status: active
+          flows: [FL-007, FL-008]
+          terms: [CTX-004, TERM-001, TERM-005, TERM-006, TERM-007, TERM-015]
+    - id: SCR-005
+      name: 마롱이 기억
+      path: /memories
+      access: 허용된 Google 계정(통화하는 친구, 자기 기억만)
+      status: active
+      flows: [FL-008]
+      terms: [CTX-004, TERM-007]

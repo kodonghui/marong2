@@ -20,12 +20,16 @@
 #   proactive <이름|#키|#방키> [--dry]  그 친구의 1:1 방(또는 그 방)에 선톡 한 개를 지금 보냄(시험용). --dry 면 만든 말만 보여 줌
 #   report <저장할 파일.xlsx> [시간] [끝 시각]  지난 24시간(기본) 대화·임베딩·답에 들어간 기억·요약/메모를 엑셀로 받음
 #                끝 시각 예: 2026-10-27T19:00+09:00 (비우면 지금). 서버엔 파일을 남기지 않음
-#   sheet url|on|off|now|status  구글 시트에 최근 30일 기록을 30분마다 보냄(서버가 함, 노트북은 꺼져도 됨. tools/sheet.gs)
-#                url: 시트 웹 앱 주소 넣기(화면엔 안 보임)와 한 번 보내 보기 / on·off: 30분마다 보내기와 시트 메뉴
+#   sheet url|on|off|now|status  구글 시트에 최근 30일 기록을 5분마다 보냄(서버가 함, 노트북은 꺼져도 됨. tools/sheet.gs)
+#                url: 시트 웹 앱 주소 넣기(화면엔 안 보임)와 한 번 보내 보기 / on·off: 5분마다 보내기와 시트 메뉴
 #                '마롱이 > 지금 새로고침'(서버가 1분마다 물어봄) 켜기·끄기
 #                now: 지금 한 번 보내기 / status: 타이머와 최근 결과
 #   backup       DB 백업 파일을 서버의 /var/backups/marong 에 만듦(자동 백업은 하지 않음)
 #   chat         서버에서 터미널로 마롱이와 대화(카카오 없이. 'terminal' 방으로 저장됨)
+#   galaxy-test start|stop|status  통화 갤럭시 시험(기능 명세 7.1). start는 시험 파일만 서버의 ~/marong-galaxy-test 로
+#                올리고 시험 서버(127.0.0.1)와 Cloudflare 임시 주소를 켬. sudo·다른 서비스는 건드리지 않음.
+#                OpenAI 키는 서버의 ~/.config/marong-call/openai.key 에 넣어 둠(값은 화면에 안 보임, 켠 뒤에 넣어도 됨).
+#                cloudflared는 서버의 PATH나 ~/.local/bin에서 찾음. 다른 곳이면 CLOUDFLARED=/서버의/절대/경로 를 앞에 붙임
 set -euo pipefail
 cd "$(dirname "$0")/.."
 HOST=${MARONG_HOST:-ko-family}
@@ -119,7 +123,7 @@ case "${1:-}" in
         echo "넣음. 시트로 한 번 보내 봄:"
         on_server "cd / && sudo -u marong $DEST/.venv/bin/python $DEST/tools/report.py --sheet" ||
           { echo "못 보냄: 웹 앱 배포 설정(실행: 나, 액세스: 모든 사용자)과 주소를 확인"; exit 1; }
-        echo "30분마다 보내려면: bash deploy/ovh.sh sheet on"
+        echo "5분마다 보내려면: bash deploy/ovh.sh sheet on"
         ;;
       on)
         on_server "sudo test -f $DEST/deploy/marong-sheet-ask.timer || { echo '먼저 bash deploy/ovh.sh install'; exit 1; }
@@ -140,7 +144,7 @@ case "${1:-}" in
                    sudo journalctl -u marong-sheet --since "@$t" --no-pager -o cat; exit $rc'
         ;;
       status)
-        on_server 'echo "30분 갱신: $(systemctl is-active marong-sheet.timer 2>/dev/null) · 지금 새로고침(1분마다 물어봄): $(systemctl is-active marong-sheet-ask.timer 2>/dev/null)"
+        on_server 'echo "5분 갱신: $(systemctl is-active marong-sheet.timer 2>/dev/null) · 지금 새로고침(1분마다 물어봄): $(systemctl is-active marong-sheet-ask.timer 2>/dev/null)"
                    systemctl list-timers "marong-sheet*" --all --no-pager
                    sudo journalctl -u marong-sheet -u marong-sheet-ask -n 8 --no-pager -o short-iso'
         ;;
@@ -157,5 +161,21 @@ case "${1:-}" in
     on_server "$AS_MARONG 'cd $DEST && exec .venv/bin/python run.py --proactive \"\$@\"' _ $(printf '%q ' "$@")"
     ;;
   chat) "${SSH[@]}" -t "$HOST" "$AS_MARONG 'cd $DEST && .venv/bin/python run.py --chat'" ;;
-  *) sed -n '2,26p' "$0"; exit 1 ;;
+  galaxy-test)
+    sub=${2:-status}
+    case "$sub" in start|stop|status) ;; *) echo "사용법: bash deploy/ovh.sh galaxy-test start|stop|status"; exit 1 ;; esac
+    port=${MARONG_TEST_PORT:-8791}
+    case "$port" in ''|*[!0-9]*) echo "MARONG_TEST_PORT는 숫자여야 해요"; exit 1 ;; esac
+    # cloudflared가 서버의 PATH나 ~/.local/bin에 없으면 서버 안의 절대 경로를 CLOUDFLARED=… 로 줘요
+    cf=${CLOUDFLARED:-}
+    case "$cf" in ''|/*) ;; *) echo "CLOUDFLARED는 서버 안의 절대 경로여야 해요"; exit 1 ;; esac
+    case "$cf" in *[!A-Za-z0-9/._-]*) echo "CLOUDFLARED 경로에는 영문·숫자·/._- 만 써 주세요"; exit 1 ;; esac
+    if [ "$sub" = start ]; then
+      tar -czf - --exclude __pycache__ tools/galaxy_test call_prompt.md marong/call/static/face/v1/01-neutral.webp |
+        on_server 'rm -rf ~/marong-galaxy-test/src && mkdir -p ~/marong-galaxy-test/src &&
+                   chmod 700 ~/marong-galaxy-test && tar -xzf - -C ~/marong-galaxy-test/src --warning=no-unknown-keyword'
+    fi
+    on_server "CLOUDFLARED=$cf MARONG_TEST_PORT=$port bash ~/marong-galaxy-test/src/tools/galaxy_test/run.sh $sub"
+    ;;
+  *) sed -n '2,32p' "$0"; exit 1 ;;
 esac

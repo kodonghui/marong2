@@ -1,0 +1,28 @@
+[Unit]
+Description=Marong Discord voice relay to Vertex Live
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+User=opc
+Group=marong-discord-voice
+WorkingDirectory=/home/opc/marong-vertex-test/app
+RuntimeDirectory=marong-discord-voice
+RuntimeDirectoryMode=0750
+EnvironmentFile=/etc/marong-discord/voice
+Environment="MARONG_CALL_DSN=dbname=marong user=marong_call"
+Environment=VERTEX_AUTH_MODE=api_key
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/opc/marong-vertex-test/venv-memory2/bin/python /opt/marong-discord-voice-relay/discord_relay.py
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+ProtectHome=read-only
+ProtectSystem=strict
+PrivateTmp=true
+PrivateDevices=true
+UMask=0007
+
+[Install]
+WantedBy=multi-user.target

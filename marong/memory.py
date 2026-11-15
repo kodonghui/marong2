@@ -215,10 +215,11 @@ class MemoryWorker:
         window = self.s.summary_turns * 2
         made = 0
         for room_key in await self.store.rooms_due(window):
+            revision=await self.store.private_revision(room_key)
             rows = await self.store.unsummarized(room_key, window)
             if len(rows) < window:
                 continue
-            await self._summarize_window(room_key, rows)
+            await self._summarize_window(room_key, rows, revision)
             made += 1
             if made >= WINDOWS_PER_STEP:
                 break
@@ -239,6 +240,7 @@ class MemoryWorker:
                 continue
             if done >= NOTES_PER_STEP:
                 return True
+            revision=await self.store.private_revision(room_key)
             rows = await self.store.unsummarized(room_key, window)
             if not rows or len(rows) >= window:
                 continue
@@ -249,13 +251,13 @@ class MemoryWorker:
                 log.warning("note_skipped room=%s %s", short_key(room_key), e)
                 notes = {}
             self._noted_at[room_key] = now
-            await self.store.add_notes(room_key, notes, rows[-1]["id"])
+            await self.store.add_notes(room_key, notes, rows[-1]["id"],private_revision=revision)
             if notes:
                 log.info("메모 먼저 저장 room=%s 메시지 %d개 메모 %d개", short_key(room_key), len(rows), len(notes))
             done += 1
         return False
 
-    async def _summarize_window(self, room_key: str, rows: list[dict]) -> None:
+    async def _summarize_window(self, room_key: str, rows: list[dict], revision=None) -> None:
         first_id, last_id = rows[0]["id"], rows[-1]["id"]
         notes_now = {n["user_key"]: n["content"] for n in await self.store.notes(room_key)}
         meta = {"model": self.s.anthropic_model, "effort": self.s.summary_effort or None}
@@ -270,7 +272,7 @@ class MemoryWorker:
             log.warning("summary_skipped room=%s %s → 빈 요약으로 넘김", short_key(room_key), e)
             summary, notes, meta["skipped"] = "", {}, str(e)[:100]
         self._bad.pop((room_key, last_id), None)
-        sid = await self.store.add_summary(room_key, first_id, last_id, summary, notes, meta)
+        sid = await self.store.add_summary(room_key, first_id, last_id, summary, notes, meta,private_revision=revision)
         log.info("요약 저장 room=%s id=%s 메시지 %d개 메모 %d개", short_key(room_key), sid, len(rows), len(notes))
 
     async def share_due(self) -> bool:

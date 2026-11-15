@@ -1,0 +1,2707 @@
+# 마롱이 통화 API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/spec.md, DB: marong/call/schema.sql
+openapi: 3.1.0
+info:
+  title: 마롱이 통화 API
+  version: 0.2.0-draft
+  description: |-
+    마롱이 통화 웹앱(PWA)과 통화 서버 사이의 계약이에요. 원본은 이 파일이고 코드는 이 파일을 따라가요(06단계).
+
+    - 음성은 이 API를 지나지 않아요. 휴대폰과 OpenAI가 WebRTC로 직접 주고받고, 서버는 sideband로 같은 세션을 지켜봐요(REQ-026). sideband에도 원음 사본이 오지만 서버는 풀지 않고 바로 버려요(SPEC-006, REQ-034).
+    - 모든 요청은 Cloudflare Access를 지나요. 서버는 `Cf-Access-Jwt-Assertion`을 다시 확인해요(SPEC-001). 쓰기 요청은 `Origin`이 앱 주소여야 해요(REQ-006).
+    - 오류는 RFC 9457 Problem Details에 `code`와 `traceId`를 더한 한 모양이에요. 코드 목록은 `components.x-corthex.errors`예요.
+    - 마롱이 얼굴 그림은 API가 아니라 정적 파일 `/static/face/v1/*.webp`예요(1년 캐시, 바뀌면 v2, SPEC-029). 얼굴에 쓰는 느낌만 API-012로 물어요(SPEC-030).
+
+    계약에서 정한 것(Claude 제안, 2026-11-12, 검토 대상). 0.2.0-draft는 독립 검토 반영: `quietMs` 뺌, `renew` 더함, 카드·자막 줄 `forgotten` 더함, OpenAI 지출 한도 처리 바꿈.
+    1. 검증 오류는 400을 써요(422는 쓰지 않음).
+    2. id 형식이 틀리면 400, 없거나 남의 것이면 404예요. 남의 것인지는 드러내지 않아요.
+    3. 끊기를 다시 보내면 같은 200이에요. 지우기를 다시 보내면 404이고 화면은 '이미 지워졌어요'로 처리해요.
+    4. 예산 한도는 성공이 아니라 429 오류예요. OpenAI 지출 한도 429(`project_spend_limit_exceeded`·`organization_spend_limit_exceeded`·`organization_usage_limit_exceeded`)는 우리 예산 오류(`budget_exhausted`·`budget_hard_stop`)로 바꾸고, 그 밖의 OpenAI 오류(크레딧 소진 포함)는 503 `voice_unavailable`로 내요(SPEC-003, SPEC-023).
+    5. 신호(beat)는 상태가 맞지 않아도 409 대신 200의 `action`으로 알려 줘요.
+    6. 새 통화는 201, 다른 화면의 통화를 넘겨받으면 200이에요.
+    7. 느낌 고르기(API-012)의 오류는 화면에 보이지 않아요. 얼굴만 그대로 두고 통화는 이어 가요.
+
+    Open: 개발 서버에서 계약 시험(Schemathesis)을 돌릴 때 쓸 시험용 Access JWT 서명 키는 11단계에서 정해요.
+    Open: 주소 `marong.corthex-hq.com`은 제안이에요(REQ-058).
+servers:
+- url: https://marong.corthex-hq.com
+  description: 제안 주소(Cloudflare Access 뒤)
+- url: http://127.0.0.1:8790
+  description: 서버 안에서 직접(배포 확인용)
+security:
+- cfAccess: []
+paths:
+  /api/me:
+    get:
+      operationId: getMe
+      summary: 내 상태 보기
+      description: 통화 홈이 열릴 때와 돌아올 때 불러요. 예산 금액·80% 경고·이메일은 담지 않아요(SPEC-002).
+      x-corthex:
+        id: API-001
+        spec:
+        - SPEC-001
+        - SPEC-002
+        omit:
+          '400': 입력이 없음
+          '404': 경로가 id를 담지 않음
+          '409': 읽기만 함
+      security:
+      - cfAccess: []
+      responses:
+        '200':
+          description: 내 상태
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+              examples:
+                normal:
+                  value:
+                    caller:
+                      name: 현경
+                    canCall: true
+                    blockedReason: null
+                    activeCall: null
+                budget-blocked:
+                  value:
+                    caller:
+                      name: 현경
+                    canCall: false
+                    blockedReason: budget
+                    activeCall: null
+                active-elsewhere:
+                  value:
+                    caller:
+                      name: 현경
+                    canCall: true
+                    blockedReason: null
+                    activeCall:
+                      id: 8f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f
+                      status: live
+                      thisClient: false
+                      lastBeatAt: '2026-11-12T12:00:15Z'
+        '401':
+          description: 로그인 증명이 없거나 맞지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                no-proof:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/unauthenticated
+                    title: Access 로그인 증명이 없거나 맞지 않음
+                    status: 401
+                    code: unauthenticated
+                    traceId: 0af7651916cd43dd
+        '403':
+          description: 허용되지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                not-allowed:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/not-allowed
+                    title: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+                    status: 403
+                    code: not_allowed
+                    traceId: 4bf92f3577b34da6
+        '503':
+          description: 잠깐 쓸 수 없음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                auth-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/auth-unavailable
+                    title: Access 공개키를 못 받아 로그인을 확인할 수 없음
+                    status: 503
+                    code: auth_unavailable
+                    traceId: e457b5a2e4d86bd1
+                db-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/db-unavailable
+                    title: DB에 닿지 못함
+                    status: 503
+                    code: db_unavailable
+                    traceId: 7c3e1f2a9b8d4c60
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+        default:
+          description: 예상하지 못한 오류
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                server-error:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/internal
+                    title: 예상하지 못한 서버 오류
+                    status: 500
+                    code: internal
+                    traceId: 1d2c3b4a59687f0e
+  /api/calls:
+    post:
+      operationId: startCall
+      summary: 통화 걸기(진행 중 통화가 있으면 넘겨받기)
+      description: 새 통화면 201, 다른 화면의 진행 중 통화를 넘겨받으면 200이에요(SPEC-003, SPEC-009). 음성은 이 API를 지나지 않고 휴대폰과 OpenAI 사이 WebRTC로 오가요. 서버가 붙는 sideband로 원음 사본이 오지만 풀지 않고 바로 버려요(SPEC-006). OpenAI 지출 한도 429는 429 `budget_exhausted`로 바꿔요(SPEC-023). 쓰기 요청이라 Origin이 앱 주소여야 해요.
+      x-corthex:
+        id: API-002
+        spec:
+        - SPEC-001
+        - SPEC-003
+        - SPEC-004
+        - SPEC-005
+        - SPEC-009
+        - SPEC-023
+        omit:
+          '404': 경로가 id를 담지 않음. 진행 중 통화는 서버가 찾음
+      security:
+      - cfAccess: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartCallRequest'
+            examples:
+              new-call:
+                value:
+                  sdp: "v=0\r\no=- 4611731400430051336 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n(이하 생략)"
+                  clientId: 2b7e1516-28ae-4d2a-9b1f-3c4d5e6f7a8b
+      responses:
+        '201':
+          description: 새 통화를 걸었음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallStarted'
+              examples:
+                new-call:
+                  value:
+                    call:
+                      id: 8f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f
+                      status: live
+                    segment:
+                      id: 5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f
+                      mode: start
+                    sdp: "v=0\r\no=- 1234567890 2 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\n(이하 생략)"
+        '200':
+          description: 진행 중 통화를 이 화면으로 넘겨받았음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallStarted'
+              examples:
+                takeover:
+                  value:
+                    call:
+                      id: 8f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f
+                      status: live
+                    segment:
+                      id: 6e7f8091-ab2c-4d3e-9f40-5b6c7d8e9fa0
+                      mode: takeover
+                    sdp: "v=0\r\no=- 1234567890 2 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\n(이하 생략)"
+        '400':
+          description: 요청이 틀림
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                bad-sdp:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/invalid-request
+                    title: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)
+                    status: 400
+                    code: invalid_request
+                    traceId: 0af7651916cd43dd
+                    detail: sdp가 v=0으로 시작하지 않음
+                    errors:
+                    - field: sdp
+                      reason: bad_format
+        '401':
+          description: 로그인 증명이 없거나 맞지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                no-proof:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/unauthenticated
+                    title: Access 로그인 증명이 없거나 맞지 않음
+                    status: 401
+                    code: unauthenticated
+                    traceId: 0af7651916cd43dd
+        '403':
+          description: 허용되지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                not-allowed:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/not-allowed
+                    title: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+                    status: 403
+                    code: not_allowed
+                    traceId: 00f067aa0ba902b7
+                cross-site:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/cross-site
+                    title: 다른 사이트에서 온 쓰기 요청
+                    status: 403
+                    code: cross_site
+                    traceId: 53995c3f42cd8ad8
+        '409':
+          description: 지금 상태와 맞지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                already-connecting:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/already-connecting
+                    title: 같은 화면의 걸기가 이미 진행 중
+                    status: 409
+                    code: already_connecting
+                    traceId: 4bf92f3577b34da6
+        '429':
+          description: 한도에 닿음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                budget-exhausted:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/budget-exhausted
+                    title: 이번 달(UTC) 통화 예산을 다 썼거나 OpenAI 지출 한도(429)에 걸려 새 통화를 막음
+                    status: 429
+                    code: budget_exhausted
+                    traceId: 00f067aa0ba902b7
+                    retryAt: '2026-12-01T00:00:00Z'
+                budget-hard-stop:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/budget-hard-stop
+                    title: 이번 달 예산의 120%에 이르렀거나 통화 중 OpenAI 지출 한도(429)에 걸려 하던 통화도 끝냄
+                    status: 429
+                    code: budget_hard_stop
+                    traceId: 53995c3f42cd8ad8
+                    retryAt: '2026-12-01T00:00:00Z'
+                takeover-limit:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/takeover-limit
+                    title: 10분 안에 넘겨받기가 6번을 넘음
+                    status: 429
+                    code: takeover_limit
+                    traceId: b7ad6b7169203331
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+        '503':
+          description: 잠깐 쓸 수 없음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                voice-unavailable:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/voice-unavailable
+                    title: OpenAI 세션을 못 만듦(키 없음, OpenAI 오류·크레딧 소진·10초 넘김). 지출 한도 429는 예산 오류로 냄
+                    status: 503
+                    code: voice_unavailable
+                    traceId: e457b5a2e4d86bd1
+                capacity-full:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/capacity-full
+                    title: 서버 전체 열린 구간이 3개
+                    status: 503
+                    code: capacity_full
+                    traceId: 7c3e1f2a9b8d4c60
+                auth-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/auth-unavailable
+                    title: Access 공개키를 못 받아 로그인을 확인할 수 없음
+                    status: 503
+                    code: auth_unavailable
+                    traceId: 1d2c3b4a59687f0e
+                db-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/db-unavailable
+                    title: DB에 닿지 못함
+                    status: 503
+                    code: db_unavailable
+                    traceId: 0af7651916cd43dd
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+        default:
+          description: 예상하지 못한 오류
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                server-error:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/internal
+                    title: 예상하지 못한 서버 오류
+                    status: 500
+                    code: internal
+                    traceId: 1d2c3b4a59687f0e
+    get:
+      operationId: listCalls
+      summary: 지난 통화 목록
+      description: 최근순 커서 쪽 나눔이에요(SPEC-018). 목록에는 자막·기억 내용이 없어요.
+      x-corthex:
+        id: API-006
+        spec:
+        - SPEC-018
+        omit:
+          '404': 경로가 id를 담지 않음
+          '409': 읽기만 함
+      security:
+      - cfAccess: []
+      parameters:
+      - $ref: '#/components/parameters/Limit20'
+      - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 통화 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallList'
+              examples:
+                page:
+                  value:
+                    items:
+                    - id: 8f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f
+                      status: ended
+                      startedAt: '2026-11-12T12:00:00Z'
+                      endedAt: '2026-11-12T12:42:10Z'
+                      durationSeconds: 2530
+                      organizeStatus: done
+                      title: 면접 준비랑 주말 성수 카페 얘기
+                    nextCursor: MjAyNi0xMS0xMlQxMjowMDowMFp8OGYxYw
+                empty:
+                  value:
+                    items: []
+                    nextCursor: null
+        '400':
+          description: 요청이 틀림
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                bad-cursor:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/invalid-request
+                    title: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)
+                    status: 400
+                    code: invalid_request
+                    traceId: 4bf92f3577b34da6
+                    detail: 커서를 읽을 수 없음
+                    errors:
+                    - field: cursor
+                      reason: bad_format
+                bad-limit:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/invalid-request
+                    title: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)
+                    status: 400
+                    code: invalid_request
+                    traceId: 00f067aa0ba902b7
+                    detail: limit은 1~50
+                    errors:
+                    - field: limit
+                      reason: out_of_range
+        '401':
+          description: 로그인 증명이 없거나 맞지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                no-proof:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/unauthenticated
+                    title: Access 로그인 증명이 없거나 맞지 않음
+                    status: 401
+                    code: unauthenticated
+                    traceId: 0af7651916cd43dd
+        '403':
+          description: 허용되지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                not-allowed:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/not-allowed
+                    title: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+                    status: 403
+                    code: not_allowed
+                    traceId: 4bf92f3577b34da6
+        '503':
+          description: 잠깐 쓸 수 없음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                auth-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/auth-unavailable
+                    title: Access 공개키를 못 받아 로그인을 확인할 수 없음
+                    status: 503
+                    code: auth_unavailable
+                    traceId: e457b5a2e4d86bd1
+                db-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/db-unavailable
+                    title: DB에 닿지 못함
+                    status: 503
+                    code: db_unavailable
+                    traceId: 7c3e1f2a9b8d4c60
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+        default:
+          description: 예상하지 못한 오류
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                server-error:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/internal
+                    title: 예상하지 못한 서버 오류
+                    status: 500
+                    code: internal
+                    traceId: 1d2c3b4a59687f0e
+  /api/calls/{callId}/segments:
+    post:
+      operationId: openSegment
+      summary: 같은 통화에 새 구간 열기(재연결·깨우기·미리 넘기기)
+      description: 끊김 뒤 자동 재연결(`reconnect`, SPEC-007), 쉬다가 깨우기(`wake`, SPEC-008), 만료 전 미리 넘기기(`renew`, SPEC-031)가 같은 길을 써요. `renew`는 직전 구간이 아직 열려 있을 때 OpenAI 세션을 먼저 만들고, 한 트랜잭션으로 직전 구간을 닫고(`renewed`) 새 구간을 열어요. 재연결 수에 세지 않아요. 예산을 다 써도(100%) 하던 통화라 열어 주고, 120%나 OpenAI 지출 한도면 통화를 끝내요(429 `budget_hard_stop`).
+      x-corthex:
+        id: API-003
+        spec:
+        - SPEC-004
+        - SPEC-007
+        - SPEC-008
+        - SPEC-023
+        - SPEC-031
+      security:
+      - cfAccess: []
+      parameters:
+      - $ref: '#/components/parameters/CallId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SegmentRequest'
+            examples:
+              reconnect:
+                value:
+                  sdp: "v=0\r\no=- 4611731400430051336 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n(이하 생략)"
+                  clientId: 2b7e1516-28ae-4d2a-9b1f-3c4d5e6f7a8b
+                  mode: reconnect
+                  previousSegmentId: 5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f
+              wake:
+                value:
+                  sdp: "v=0\r\no=- 4611731400430051336 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n(이하 생략)"
+                  clientId: 2b7e1516-28ae-4d2a-9b1f-3c4d5e6f7a8b
+                  mode: wake
+                  previousSegmentId: 5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f
+              renew:
+                value:
+                  sdp: "v=0\r\no=- 4611731400430051336 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n(이하 생략)"
+                  clientId: 2b7e1516-28ae-4d2a-9b1f-3c4d5e6f7a8b
+                  mode: renew
+                  previousSegmentId: 5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f
+      responses:
+        '201':
+          description: 새 구간을 열었음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SegmentOpened'
+              examples:
+                reconnect:
+                  value:
+                    segment:
+                      id: 6e7f8091-ab2c-4d3e-9f40-5b6c7d8e9fa0
+                      mode: reconnect
+                    sdp: "v=0\r\no=- 1234567890 2 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\n(이하 생략)"
+                wake:
+                  value:
+                    segment:
+                      id: 6e7f8091-ab2c-4d3e-9f40-5b6c7d8e9fa0
+                      mode: wake
+                    sdp: "v=0\r\no=- 1234567890 2 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\n(이하 생략)"
+                renew:
+                  value:
+                    segment:
+                      id: 6e7f8091-ab2c-4d3e-9f40-5b6c7d8e9fa0
+                      mode: renew
+                    sdp: "v=0\r\no=- 1234567890 2 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\n(이하 생략)"
+        '400':
+          description: 요청이 틀림
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                bad-mode:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/invalid-request
+                    title: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)
+                    status: 400
+                    code: invalid_request
+                    traceId: 53995c3f42cd8ad8
+                    detail: mode는 reconnect·wake·renew 중 하나
+                    errors:
+                    - field: mode
+                      reason: bad_format
+        '401':
+          description: 로그인 증명이 없거나 맞지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                no-proof:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/unauthenticated
+                    title: Access 로그인 증명이 없거나 맞지 않음
+                    status: 401
+                    code: unauthenticated
+                    traceId: 0af7651916cd43dd
+        '403':
+          description: 허용되지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                not-allowed:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/not-allowed
+                    title: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+                    status: 403
+                    code: not_allowed
+                    traceId: 00f067aa0ba902b7
+                cross-site:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/cross-site
+                    title: 다른 사이트에서 온 쓰기 요청
+                    status: 403
+                    code: cross_site
+                    traceId: 53995c3f42cd8ad8
+        '404':
+          description: 없음(남의 것도 404)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                not-found:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/not-found
+                    title: 없는 통화·기억이거나 이 친구 것이 아님
+                    status: 404
+                    code: not_found
+                    traceId: b7ad6b7169203331
+        '409':
+          description: 지금 상태와 맞지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                taken-over:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/taken-over
+                    title: 다른 화면이 이 통화를 가져감
+                    status: 409
+                    code: taken_over
+                    traceId: b7ad6b7169203331
+                stale-segment:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/stale-segment
+                    title: 직전 구간이 이 통화의 마지막 구간이 아님(이미 누가 새 구간을 엶)
+                    status: 409
+                    code: stale_segment
+                    traceId: e457b5a2e4d86bd1
+                call-ended:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/call-ended
+                    title: 통화가 이미 끝남
+                    status: 409
+                    code: call_ended
+                    traceId: 7c3e1f2a9b8d4c60
+        '429':
+          description: 한도에 닿음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                reconnect-limit:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/reconnect-limit
+                    title: 10분 안에 자동 재연결이 3번(안전 필터로 닫힌 뒤의 재연결은 따로 5번)을 넘음. 미리 넘기기는 세지 않음
+                    status: 429
+                    code: reconnect_limit
+                    traceId: 1d2c3b4a59687f0e
+                budget-hard-stop:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/budget-hard-stop
+                    title: 이번 달 예산의 120%에 이르렀거나 통화 중 OpenAI 지출 한도(429)에 걸려 하던 통화도 끝냄
+                    status: 429
+                    code: budget_hard_stop
+                    traceId: 0af7651916cd43dd
+                    retryAt: '2026-12-01T00:00:00Z'
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+        '503':
+          description: 잠깐 쓸 수 없음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                voice-unavailable:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/voice-unavailable
+                    title: OpenAI 세션을 못 만듦(키 없음, OpenAI 오류·크레딧 소진·10초 넘김). 지출 한도 429는 예산 오류로 냄
+                    status: 503
+                    code: voice_unavailable
+                    traceId: 4bf92f3577b34da6
+                capacity-full:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/capacity-full
+                    title: 서버 전체 열린 구간이 3개
+                    status: 503
+                    code: capacity_full
+                    traceId: 00f067aa0ba902b7
+                auth-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/auth-unavailable
+                    title: Access 공개키를 못 받아 로그인을 확인할 수 없음
+                    status: 503
+                    code: auth_unavailable
+                    traceId: 53995c3f42cd8ad8
+                db-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/db-unavailable
+                    title: DB에 닿지 못함
+                    status: 503
+                    code: db_unavailable
+                    traceId: b7ad6b7169203331
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+        default:
+          description: 예상하지 못한 오류
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                server-error:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/internal
+                    title: 예상하지 못한 서버 오류
+                    status: 500
+                    code: internal
+                    traceId: 1d2c3b4a59687f0e
+  /api/calls/{callId}/beat:
+    post:
+      operationId: beat
+      summary: 신호 보내기(15초마다)
+      description: 통화 화면이 쉬는 중에도 15초마다 보내요. 서버는 할 일을 action으로 알려 주고, 상태가 맞지 않아도 409 대신 200의 action으로 답해요(SPEC-010). 쉬기는 서버가 아는 마롱이 소리 시각으로(SPEC-008), 미리 넘기기는 구간 만료 시각으로(SPEC-031) 판단해서 화면이 조용한 시간을 보내지 않아요.
+      x-corthex:
+        id: API-004
+        spec:
+        - SPEC-008
+        - SPEC-009
+        - SPEC-010
+        - SPEC-023
+        - SPEC-031
+        omit:
+          '409': 상태는 200의 action(taken_over, ended)으로 알려 줌
+      security:
+      - cfAccess: []
+      parameters:
+      - $ref: '#/components/parameters/CallId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BeatRequest'
+            examples:
+              talking:
+                value:
+                  clientId: 2b7e1516-28ae-4d2a-9b1f-3c4d5e6f7a8b
+                  segmentId: 5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f
+                  micActive: true
+              resting:
+                value:
+                  clientId: 2b7e1516-28ae-4d2a-9b1f-3c4d5e6f7a8b
+                  segmentId: null
+                  micActive: true
+      responses:
+        '200':
+          description: 할 일
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BeatResponse'
+              examples:
+                none:
+                  value:
+                    action: none
+                rest:
+                  value:
+                    action: rest
+                renew:
+                  value:
+                    action: renew
+                taken-over:
+                  value:
+                    action: taken_over
+                ended:
+                  value:
+                    action: ended
+                    endReason: budget_hard_stop
+        '400':
+          description: 요청이 틀림
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                bad-mic:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/invalid-request
+                    title: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)
+                    status: 400
+                    code: invalid_request
+                    traceId: e457b5a2e4d86bd1
+                    detail: micActive는 true 또는 false
+                    errors:
+                    - field: micActive
+                      reason: bad_format
+        '401':
+          description: 로그인 증명이 없거나 맞지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                no-proof:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/unauthenticated
+                    title: Access 로그인 증명이 없거나 맞지 않음
+                    status: 401
+                    code: unauthenticated
+                    traceId: 0af7651916cd43dd
+        '403':
+          description: 허용되지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                not-allowed:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/not-allowed
+                    title: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+                    status: 403
+                    code: not_allowed
+                    traceId: 00f067aa0ba902b7
+                cross-site:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/cross-site
+                    title: 다른 사이트에서 온 쓰기 요청
+                    status: 403
+                    code: cross_site
+                    traceId: 53995c3f42cd8ad8
+        '404':
+          description: 없음(남의 것도 404)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                not-found:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/not-found
+                    title: 없는 통화·기억이거나 이 친구 것이 아님
+                    status: 404
+                    code: not_found
+                    traceId: b7ad6b7169203331
+        '503':
+          description: 잠깐 쓸 수 없음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                auth-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/auth-unavailable
+                    title: Access 공개키를 못 받아 로그인을 확인할 수 없음
+                    status: 503
+                    code: auth_unavailable
+                    traceId: e457b5a2e4d86bd1
+                db-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/db-unavailable
+                    title: DB에 닿지 못함
+                    status: 503
+                    code: db_unavailable
+                    traceId: 7c3e1f2a9b8d4c60
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+        default:
+          description: 예상하지 못한 오류
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                server-error:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/internal
+                    title: 예상하지 못한 서버 오류
+                    status: 500
+                    code: internal
+                    traceId: 1d2c3b4a59687f0e
+  /api/calls/{callId}/hangup:
+    post:
+      operationId: hangUp
+      summary: 끊기
+      description: 열린 구간을 2초 안에 닫아요. 이미 끝난 통화에 다시 보내도 같은 200이에요(SPEC-011).
+      x-corthex:
+        id: API-005
+        spec:
+        - SPEC-011
+      security:
+      - cfAccess: []
+      parameters:
+      - $ref: '#/components/parameters/CallId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HangupRequest'
+            examples:
+              hangup:
+                value:
+                  clientId: 2b7e1516-28ae-4d2a-9b1f-3c4d5e6f7a8b
+      responses:
+        '200':
+          description: 통화가 끝났음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HangupResponse'
+              examples:
+                ended:
+                  value:
+                    call:
+                      id: 8f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f
+                      status: ended
+                      endReason: hangup
+                already-ended:
+                  value:
+                    call:
+                      id: 8f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f
+                      status: ended
+                      endReason: beat_lost
+        '400':
+          description: 요청이 틀림
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                bad-input:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/invalid-request
+                    title: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)
+                    status: 400
+                    code: invalid_request
+                    traceId: 7c3e1f2a9b8d4c60
+                    detail: 요청 본문이 계약과 맞지 않음
+                    errors:
+                    - field: body
+                      reason: bad_format
+        '401':
+          description: 로그인 증명이 없거나 맞지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                no-proof:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/unauthenticated
+                    title: Access 로그인 증명이 없거나 맞지 않음
+                    status: 401
+                    code: unauthenticated
+                    traceId: 0af7651916cd43dd
+        '403':
+          description: 허용되지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                not-allowed:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/not-allowed
+                    title: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+                    status: 403
+                    code: not_allowed
+                    traceId: 00f067aa0ba902b7
+                cross-site:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/cross-site
+                    title: 다른 사이트에서 온 쓰기 요청
+                    status: 403
+                    code: cross_site
+                    traceId: 53995c3f42cd8ad8
+        '404':
+          description: 없음(남의 것도 404)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                not-found:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/not-found
+                    title: 없는 통화·기억이거나 이 친구 것이 아님
+                    status: 404
+                    code: not_found
+                    traceId: b7ad6b7169203331
+        '409':
+          description: 지금 상태와 맞지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                taken-over:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/taken-over
+                    title: 다른 화면이 이 통화를 가져감
+                    status: 409
+                    code: taken_over
+                    traceId: 1d2c3b4a59687f0e
+        '503':
+          description: 잠깐 쓸 수 없음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                auth-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/auth-unavailable
+                    title: Access 공개키를 못 받아 로그인을 확인할 수 없음
+                    status: 503
+                    code: auth_unavailable
+                    traceId: e457b5a2e4d86bd1
+                db-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/db-unavailable
+                    title: DB에 닿지 못함
+                    status: 503
+                    code: db_unavailable
+                    traceId: 7c3e1f2a9b8d4c60
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+        default:
+          description: 예상하지 못한 오류
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                server-error:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/internal
+                    title: 예상하지 못한 서버 오류
+                    status: 500
+                    code: internal
+                    traceId: 1d2c3b4a59687f0e
+  /api/calls/{callId}/mood:
+    post:
+      operationId: classifyMood
+      summary: 마롱이 문장의 느낌 고르기
+      description: 통화 화면이 마롱이 자막 문장 하나(200자까지)를 보내면 얼굴에 쓸 느낌 하나를 돌려줘요(SPEC-030). 문장과 느낌은 저장하지 않아요. 실패해도 통화는 그대로이고 얼굴만 바뀌지 않아서, 화면은 이 API의 오류를 보여 주지 않아요(REQ-064).
+      x-corthex:
+        id: API-012
+        spec:
+        - SPEC-030
+      security:
+      - cfAccess: []
+      parameters:
+      - $ref: '#/components/parameters/CallId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MoodRequest'
+            examples:
+              laugh:
+                value:
+                  clientId: 2b7e1516-28ae-4d2a-9b1f-3c4d5e6f7a8b
+                  segmentId: 5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f
+                  text: 하하 진짜 웃기다!
+              comfort:
+                value:
+                  clientId: 2b7e1516-28ae-4d2a-9b1f-3c4d5e6f7a8b
+                  segmentId: 5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f
+                  text: 괜찮아, 오늘 진짜 고생 많았어.
+      responses:
+        '200':
+          description: 고른 느낌
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MoodResponse'
+              examples:
+                laugh:
+                  value:
+                    mood: laugh
+                concerned:
+                  value:
+                    mood: concerned
+                neutral:
+                  value:
+                    mood: neutral
+        '400':
+          description: 요청이 틀림
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                too-long:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/invalid-request
+                    title: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)
+                    status: 400
+                    code: invalid_request
+                    traceId: 7c3e1f2a9b8d4c60
+                    detail: text는 1~200자
+                    errors:
+                    - field: text
+                      reason: too_long
+        '401':
+          description: 로그인 증명이 없거나 맞지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                no-proof:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/unauthenticated
+                    title: Access 로그인 증명이 없거나 맞지 않음
+                    status: 401
+                    code: unauthenticated
+                    traceId: 0af7651916cd43dd
+        '403':
+          description: 허용되지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                not-allowed:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/not-allowed
+                    title: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+                    status: 403
+                    code: not_allowed
+                    traceId: 00f067aa0ba902b7
+                cross-site:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/cross-site
+                    title: 다른 사이트에서 온 쓰기 요청
+                    status: 403
+                    code: cross_site
+                    traceId: 53995c3f42cd8ad8
+        '404':
+          description: 없음(남의 것도 404)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                not-found:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/not-found
+                    title: 없는 통화·기억이거나 이 친구 것이 아님
+                    status: 404
+                    code: not_found
+                    traceId: b7ad6b7169203331
+        '409':
+          description: 지금 상태와 맞지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                stale-segment:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/stale-segment
+                    title: 직전 구간이 이 통화의 마지막 구간이 아님(이미 누가 새 구간을 엶)
+                    status: 409
+                    code: stale_segment
+                    traceId: 1d2c3b4a59687f0e
+                taken-over:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/taken-over
+                    title: 다른 화면이 이 통화를 가져감
+                    status: 409
+                    code: taken_over
+                    traceId: 0af7651916cd43dd
+                call-ended:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/call-ended
+                    title: 통화가 이미 끝남
+                    status: 409
+                    code: call_ended
+                    traceId: 4bf92f3577b34da6
+        '429':
+          description: 한도에 닿음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                mood-limit:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/mood-limit
+                    title: 느낌 고르기가 통화별 한도(1초에 1번, 분당 60번)를 넘음
+                    status: 429
+                    code: mood_limit
+                    traceId: 00f067aa0ba902b7
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+        '503':
+          description: 잠깐 쓸 수 없음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                mood-unavailable:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/mood-unavailable
+                    title: 느낌을 고르지 못함(AI-5 시간 넘김·오류·키 없음·설정 꺼짐)
+                    status: 503
+                    code: mood_unavailable
+                    traceId: 53995c3f42cd8ad8
+                auth-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/auth-unavailable
+                    title: Access 공개키를 못 받아 로그인을 확인할 수 없음
+                    status: 503
+                    code: auth_unavailable
+                    traceId: b7ad6b7169203331
+                db-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/db-unavailable
+                    title: DB에 닿지 못함
+                    status: 503
+                    code: db_unavailable
+                    traceId: e457b5a2e4d86bd1
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+        default:
+          description: 예상하지 못한 오류
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                server-error:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/internal
+                    title: 예상하지 못한 서버 오류
+                    status: 500
+                    code: internal
+                    traceId: 1d2c3b4a59687f0e
+  /api/calls/{callId}:
+    get:
+      operationId: getCall
+      summary: 통화 상세
+      description: '카드·이 통화에서 생긴 통화 기억·자막을 돌려줘요. 180일이 지나 자막을 지운 통화는 turns가 null이에요(SPEC-019). 잊기 표시된 카드와 자막 줄도 `forgotten: true`로 그대로 보여요(기능 명세 3.7).'
+      x-corthex:
+        id: API-007
+        spec:
+        - SPEC-019
+        omit:
+          '409': 읽기만 함
+      security:
+      - cfAccess: []
+      parameters:
+      - $ref: '#/components/parameters/CallId'
+      responses:
+        '200':
+          description: 통화 상세
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallDetail'
+              examples:
+                done:
+                  value:
+                    call:
+                      id: 8f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f
+                      status: ended
+                      startedAt: '2026-11-12T12:00:00Z'
+                      endedAt: '2026-11-12T12:42:10Z'
+                      durationSeconds: 2530
+                      organizeStatus: done
+                      title: 면접 준비랑 주말 성수 카페 얘기
+                      endReason: hangup
+                    card:
+                      summary: 목요일 면접 준비 얘기를 하고 주말에 성수 카페에 가기로 했어.
+                      decided:
+                      - 토요일 오후에 성수 카페
+                      undecided:
+                      - 면접 옷
+                      todos:
+                      - 자기소개 1분 버전 연습
+                      askNext:
+                      - 면접 잘 봤는지
+                      truncated: false
+                      forgotten: false
+                    memories:
+                    - id: 41
+                      content: 목요일 오전 10시에 면접
+                      createdAt: '2026-11-12T12:44:00Z'
+                      callId: 8f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f
+                    turns:
+                    - id: 1001
+                      seq: 1
+                      role: assistant
+                      content: 여보세요~ 현경아!
+                      startedAt: '2026-11-12T12:00:02Z'
+                      forgotten: false
+                    - id: 1002
+                      seq: 2
+                      role: user
+                      content: 마롱아 나 목요일에 면접 있어
+                      startedAt: '2026-11-12T12:00:05Z'
+                      forgotten: false
+                    transcriptDeletedAt: null
+                organizing:
+                  value:
+                    call:
+                      id: 8f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f
+                      status: ended
+                      startedAt: '2026-11-12T12:00:00Z'
+                      endedAt: '2026-11-12T12:42:10Z'
+                      durationSeconds: 2530
+                      organizeStatus: running
+                      title: null
+                      endReason: hangup
+                    card: null
+                    memories: []
+                    turns:
+                    - id: 1001
+                      seq: 1
+                      role: assistant
+                      content: 여보세요~ 현경아!
+                      startedAt: '2026-11-12T12:00:02Z'
+                      forgotten: false
+                    transcriptDeletedAt: null
+                transcript-deleted:
+                  value:
+                    call:
+                      id: 8f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f
+                      status: ended
+                      startedAt: '2026-05-12T12:00:00Z'
+                      endedAt: '2026-05-12T12:20:00Z'
+                      durationSeconds: 1200
+                      organizeStatus: done
+                      title: 이사 고민
+                      endReason: hangup
+                    card:
+                      summary: 이사 갈 동네 고민
+                      decided: []
+                      undecided:
+                      - 망원 아니면 합정
+                      todos: []
+                      askNext:
+                      - 집 구했는지
+                      truncated: false
+                      forgotten: false
+                    memories: []
+                    turns: null
+                    transcriptDeletedAt: '2026-11-09T19:00:00Z'
+        '400':
+          description: 요청이 틀림
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                bad-id:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/invalid-request
+                    title: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)
+                    status: 400
+                    code: invalid_request
+                    traceId: 0af7651916cd43dd
+                    detail: callId는 UUID
+                    errors:
+                    - field: callId
+                      reason: bad_format
+        '401':
+          description: 로그인 증명이 없거나 맞지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                no-proof:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/unauthenticated
+                    title: Access 로그인 증명이 없거나 맞지 않음
+                    status: 401
+                    code: unauthenticated
+                    traceId: 0af7651916cd43dd
+        '403':
+          description: 허용되지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                not-allowed:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/not-allowed
+                    title: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+                    status: 403
+                    code: not_allowed
+                    traceId: 4bf92f3577b34da6
+        '404':
+          description: 없음(남의 것도 404)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                not-found:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/not-found
+                    title: 없는 통화·기억이거나 이 친구 것이 아님
+                    status: 404
+                    code: not_found
+                    traceId: b7ad6b7169203331
+        '503':
+          description: 잠깐 쓸 수 없음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                auth-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/auth-unavailable
+                    title: Access 공개키를 못 받아 로그인을 확인할 수 없음
+                    status: 503
+                    code: auth_unavailable
+                    traceId: e457b5a2e4d86bd1
+                db-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/db-unavailable
+                    title: DB에 닿지 못함
+                    status: 503
+                    code: db_unavailable
+                    traceId: 7c3e1f2a9b8d4c60
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+        default:
+          description: 예상하지 못한 오류
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                server-error:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/internal
+                    title: 예상하지 못한 서버 오류
+                    status: 500
+                    code: internal
+                    traceId: 1d2c3b4a59687f0e
+    delete:
+      operationId: deleteCall
+      summary: 통화 지우기
+      description: 끝난 통화만 지워요. 자막·카드·이 통화 기억·위임·구간을 함께 지우고, 이번 달 사용 초는 그대로 둬요(SPEC-020).
+      x-corthex:
+        id: API-008
+        spec:
+        - SPEC-020
+      security:
+      - cfAccess: []
+      parameters:
+      - $ref: '#/components/parameters/CallId'
+      responses:
+        '204':
+          description: 지웠음(본문 없음)
+        '400':
+          description: 요청이 틀림
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                bad-id:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/invalid-request
+                    title: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)
+                    status: 400
+                    code: invalid_request
+                    traceId: 4bf92f3577b34da6
+                    detail: callId는 UUID
+                    errors:
+                    - field: callId
+                      reason: bad_format
+        '401':
+          description: 로그인 증명이 없거나 맞지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                no-proof:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/unauthenticated
+                    title: Access 로그인 증명이 없거나 맞지 않음
+                    status: 401
+                    code: unauthenticated
+                    traceId: 0af7651916cd43dd
+        '403':
+          description: 허용되지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                not-allowed:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/not-allowed
+                    title: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+                    status: 403
+                    code: not_allowed
+                    traceId: 00f067aa0ba902b7
+                cross-site:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/cross-site
+                    title: 다른 사이트에서 온 쓰기 요청
+                    status: 403
+                    code: cross_site
+                    traceId: 53995c3f42cd8ad8
+        '404':
+          description: 없음(남의 것도 404)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                not-found:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/not-found
+                    title: 없는 통화·기억이거나 이 친구 것이 아님
+                    status: 404
+                    code: not_found
+                    traceId: b7ad6b7169203331
+        '409':
+          description: 지금 상태와 맞지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                call-active:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/call-active
+                    title: 진행 중이거나 쉬는 중인 통화는 지울 수 없음
+                    status: 409
+                    code: call_active
+                    traceId: 00f067aa0ba902b7
+        '503':
+          description: 잠깐 쓸 수 없음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                auth-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/auth-unavailable
+                    title: Access 공개키를 못 받아 로그인을 확인할 수 없음
+                    status: 503
+                    code: auth_unavailable
+                    traceId: e457b5a2e4d86bd1
+                db-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/db-unavailable
+                    title: DB에 닿지 못함
+                    status: 503
+                    code: db_unavailable
+                    traceId: 7c3e1f2a9b8d4c60
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+        default:
+          description: 예상하지 못한 오류
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                server-error:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/internal
+                    title: 예상하지 못한 서버 오류
+                    status: 500
+                    code: internal
+                    traceId: 1d2c3b4a59687f0e
+  /api/memories:
+    get:
+      operationId: listMemories
+      summary: 통화 기억 목록
+      description: 활성 통화 기억을 최근순으로 보여 줘요. 대체된 기억은 없어요(SPEC-021).
+      x-corthex:
+        id: API-009
+        spec:
+        - SPEC-021
+        omit:
+          '404': 경로가 id를 담지 않음
+          '409': 읽기만 함
+      security:
+      - cfAccess: []
+      parameters:
+      - $ref: '#/components/parameters/Limit50'
+      - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 통화 기억 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryList'
+              examples:
+                page:
+                  value:
+                    items:
+                    - id: 41
+                      content: 목요일 오전 10시에 면접
+                      createdAt: '2026-11-12T12:44:00Z'
+                      callId: 8f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f
+                    nextCursor: null
+                empty:
+                  value:
+                    items: []
+                    nextCursor: null
+        '400':
+          description: 요청이 틀림
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                bad-limit:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/invalid-request
+                    title: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)
+                    status: 400
+                    code: invalid_request
+                    traceId: 53995c3f42cd8ad8
+                    detail: limit은 1~50
+                    errors:
+                    - field: limit
+                      reason: out_of_range
+        '401':
+          description: 로그인 증명이 없거나 맞지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                no-proof:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/unauthenticated
+                    title: Access 로그인 증명이 없거나 맞지 않음
+                    status: 401
+                    code: unauthenticated
+                    traceId: 0af7651916cd43dd
+        '403':
+          description: 허용되지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                not-allowed:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/not-allowed
+                    title: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+                    status: 403
+                    code: not_allowed
+                    traceId: 4bf92f3577b34da6
+        '503':
+          description: 잠깐 쓸 수 없음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                auth-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/auth-unavailable
+                    title: Access 공개키를 못 받아 로그인을 확인할 수 없음
+                    status: 503
+                    code: auth_unavailable
+                    traceId: e457b5a2e4d86bd1
+                db-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/db-unavailable
+                    title: DB에 닿지 못함
+                    status: 503
+                    code: db_unavailable
+                    traceId: 7c3e1f2a9b8d4c60
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+        default:
+          description: 예상하지 못한 오류
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                server-error:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/internal
+                    title: 예상하지 못한 서버 오류
+                    status: 500
+                    code: internal
+                    traceId: 1d2c3b4a59687f0e
+  /api/memories/{memoryId}:
+    delete:
+      operationId: deleteMemory
+      summary: 통화 기억 하나 지우기
+      description: 그 기억과 그 기억이 대체했던 이전 기억들을 함께 지우고, 잊기 범위(기능 명세 3.7)대로 카드 항목과 자막 줄도 정리해요. 다음 통화 지시문·위임 검색·카톡 '# 최근 통화'에서 바로 빠져요(SPEC-021).
+      x-corthex:
+        id: API-010
+        spec:
+        - SPEC-021
+        omit:
+          '409': 기억에는 지우기를 막는 상태가 없음
+      security:
+      - cfAccess: []
+      parameters:
+      - name: memoryId
+        in: path
+        required: true
+        description: 통화 기억 id(TBL-007 id)
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      responses:
+        '204':
+          description: 지웠음(본문 없음)
+        '400':
+          description: 요청이 틀림
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                bad-id:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/invalid-request
+                    title: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)
+                    status: 400
+                    code: invalid_request
+                    traceId: b7ad6b7169203331
+                    detail: memoryId는 1 이상의 정수
+                    errors:
+                    - field: memoryId
+                      reason: bad_format
+        '401':
+          description: 로그인 증명이 없거나 맞지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                no-proof:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/unauthenticated
+                    title: Access 로그인 증명이 없거나 맞지 않음
+                    status: 401
+                    code: unauthenticated
+                    traceId: 0af7651916cd43dd
+        '403':
+          description: 허용되지 않음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                not-allowed:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/not-allowed
+                    title: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+                    status: 403
+                    code: not_allowed
+                    traceId: 00f067aa0ba902b7
+                cross-site:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/cross-site
+                    title: 다른 사이트에서 온 쓰기 요청
+                    status: 403
+                    code: cross_site
+                    traceId: 53995c3f42cd8ad8
+        '404':
+          description: 없음(남의 것도 404)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                not-found:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/not-found
+                    title: 없는 통화·기억이거나 이 친구 것이 아님
+                    status: 404
+                    code: not_found
+                    traceId: b7ad6b7169203331
+        '503':
+          description: 잠깐 쓸 수 없음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                auth-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/auth-unavailable
+                    title: Access 공개키를 못 받아 로그인을 확인할 수 없음
+                    status: 503
+                    code: auth_unavailable
+                    traceId: e457b5a2e4d86bd1
+                db-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/db-unavailable
+                    title: DB에 닿지 못함
+                    status: 503
+                    code: db_unavailable
+                    traceId: 7c3e1f2a9b8d4c60
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+        default:
+          description: 예상하지 못한 오류
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                server-error:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/internal
+                    title: 예상하지 못한 서버 오류
+                    status: 500
+                    code: internal
+                    traceId: 1d2c3b4a59687f0e
+  /api/healthz:
+    get:
+      operationId: health
+      summary: 서버 살아 있음 확인
+      description: 배포 스크립트가 서버 안에서 `127.0.0.1:8790`으로 불러요. 데이터를 내주지 않아 로그인을 묻지 않아요(SPEC-028).
+      x-corthex:
+        id: API-011
+        spec:
+        - SPEC-028
+        omit:
+          '400': 입력이 없음
+          '401': 로그인을 묻지 않음(내주는 데이터 없음)
+          '403': 부르는 쪽마다 다르지 않음
+          '404': 경로가 id를 담지 않음
+          '409': 읽기만 함
+      security: []
+      responses:
+        '200':
+          description: 살아 있음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+              examples:
+                ok:
+                  value:
+                    status: ok
+        '503':
+          description: 잠깐 쓸 수 없음
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                db-down:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/db-unavailable
+                    title: DB에 닿지 못함
+                    status: 503
+                    code: db_unavailable
+                    traceId: e457b5a2e4d86bd1
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+        default:
+          description: 예상하지 못한 오류
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                server-error:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/internal
+                    title: 예상하지 못한 서버 오류
+                    status: 500
+                    code: internal
+                    traceId: 1d2c3b4a59687f0e
+components:
+  x-corthex:
+    errors:
+      invalid_request:
+        status: 400
+        meaning: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)
+        message: 뭔가 잘못 보냈나 봐. 다시 해 볼게
+        client: 한 번 다시 보내고, 또 오면 오류 상태와 추적 id
+      unauthenticated:
+        status: 401
+        meaning: Access 로그인 증명이 없거나 맞지 않음
+        message: 다시 들어와 줘
+        client: 통화 중이 아니면 페이지를 새로 불러 Access 로그인으로. 통화 중이면 통화는 두고 신호 실패로 둠
+      not_allowed:
+        status: 403
+        meaning: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+        message: 이 계정으로는 마롱이랑 통화할 수 없어
+        client: 권한 상태. 다시 시도하지 않음
+      cross_site:
+        status: 403
+        meaning: 다른 사이트에서 온 쓰기 요청
+        message: 이 화면에서 다시 해 줘
+        client: 오류 상태. 자동으로 다시 보내지 않음
+      not_found:
+        status: 404
+        meaning: 없는 통화·기억이거나 이 친구 것이 아님
+        message: 이미 지워졌거나 없는 통화야
+        client: 목록으로. 지우기 뒤의 404는 이미 지워진 것으로 처리
+      already_connecting:
+        status: 409
+        meaning: 같은 화면의 걸기가 이미 진행 중
+        message: (보여 주지 않음)
+        client: 먼저 보낸 걸기의 결과를 기다림
+      taken_over:
+        status: 409
+        meaning: 다른 화면이 이 통화를 가져감
+        message: 다른 화면에서 통화 중이야
+        client: 통화 중 화면의 taken-over 상태와 '여기서 받기'
+      stale_segment:
+        status: 409
+        meaning: 직전 구간이 이 통화의 마지막 구간이 아님(이미 누가 새 구간을 엶)
+        message: (보여 주지 않음)
+        client: 신호를 바로 보내 상태를 다시 맞춤
+      call_ended:
+        status: 409
+        meaning: 통화가 이미 끝남
+        message: 통화가 끝났어
+        client: 통화 중 화면의 ended 상태와 다시 걸기
+      call_active:
+        status: 409
+        meaning: 진행 중이거나 쉬는 중인 통화는 지울 수 없음
+        message: 통화 끝나고 지울 수 있어
+        client: 상세 화면에 안내 한 줄
+      budget_exhausted:
+        status: 429
+        meaning: 이번 달(UTC) 통화 예산을 다 썼거나 OpenAI 지출 한도(429)에 걸려 새 통화를 막음
+        message: 이번 달 통화는 여기까지야. 다음 달에 또 걸어 줘. 카톡으로는 계속 얘기할 수 있어!
+        client: 통화 홈의 budget 상태. retryAt까지 통화 버튼을 막음
+      budget_hard_stop:
+        status: 429
+        meaning: 이번 달 예산의 120%에 이르렀거나 통화 중 OpenAI 지출 한도(429)에 걸려 하던 통화도 끝냄
+        message: 이번 달 통화는 여기까지야. 다음 달에 또 걸어 줘. 카톡으로는 계속 얘기할 수 있어!
+        client: 통화를 끝내고 ended 상태에 이유 한 줄
+      reconnect_limit:
+        status: 429
+        meaning: 10분 안에 자동 재연결이 3번(안전 필터로 닫힌 뒤의 재연결은 따로 5번)을 넘음. 미리 넘기기는 세지 않음
+        message: 연결이 자꾸 끊겨서 잠깐 끊을게. 다시 걸어 줘
+        client: 통화를 끝내고 다시 걸기
+      takeover_limit:
+        status: 429
+        meaning: 10분 안에 넘겨받기가 6번을 넘음
+        message: 화면을 너무 자주 옮겼어. 조금 있다 다시 걸어 줘
+        client: 안내 한 줄. 자동으로 다시 하지 않음
+      mood_limit:
+        status: 429
+        meaning: 느낌 고르기가 통화별 한도(1초에 1번, 분당 60번)를 넘음
+        message: (보여 주지 않음)
+        client: 그 문장을 버리고 얼굴은 그대로. 다음 문장부터 다시 보냄
+      capacity_full:
+        status: 503
+        meaning: 서버 전체 열린 구간이 3개
+        message: 지금 전화가 몰렸어. 조금 있다 다시 걸어 줘
+        client: 재연결이면 2초·5초 뒤 다시, 새 통화면 다시 걸기
+      voice_unavailable:
+        status: 503
+        meaning: OpenAI 세션을 못 만듦(키 없음, OpenAI 오류·크레딧 소진·10초 넘김). 지출 한도 429는 예산 오류로 냄
+        message: 마롱이가 지금 전화를 못 받아. 조금 있다 다시 걸어 줘
+        client: 재연결이면 2초·5초 뒤 다시, 새 통화면 다시 걸기
+      mood_unavailable:
+        status: 503
+        meaning: 느낌을 고르지 못함(AI-5 시간 넘김·오류·키 없음·설정 꺼짐)
+        message: (보여 주지 않음)
+        client: 얼굴 그대로. 한 구간에서 3번 이어 오면 그 구간 동안 보내지 않음
+      auth_unavailable:
+        status: 503
+        meaning: Access 공개키를 못 받아 로그인을 확인할 수 없음
+        message: 잠깐 문제가 생겼어. 조금 있다 다시 해 줘
+        client: 오류 상태와 다시 시도
+      db_unavailable:
+        status: 503
+        meaning: DB에 닿지 못함
+        message: 잠깐 문제가 생겼어. 조금 있다 다시 해 줘
+        client: 오류 상태와 다시 시도
+      internal:
+        status: 500
+        meaning: 예상하지 못한 서버 오류
+        message: 잠깐 문제가 생겼어. 다시 해 볼래?
+        client: 오류 상태, 다시 시도, 추적 id 보여 줌
+  securitySchemes:
+    cfAccess:
+      type: apiKey
+      in: header
+      name: Cf-Access-Jwt-Assertion
+      description: Cloudflare Access가 붙이는 JWT(RS256). 서버가 Access 공개키로 서명·aud·iss·exp를 확인하고 email의 sha256을 허용 목록과 맞춰요. 브라우저가 직접 넣지 않아요.
+  headers:
+    RetryAfter:
+      description: 다시 해 볼 수 있는 때(초 또는 HTTP 날짜)
+      schema:
+        type: string
+        maxLength: 40
+  parameters:
+    CallId:
+      name: callId
+      in: path
+      required: true
+      description: 통화 id(TBL-003 id)
+      schema:
+        type: string
+        format: uuid
+        pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: 앞 쪽 응답의 nextCursor
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: ^[A-Za-z0-9_-]+$
+    Limit20:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 20
+    Limit50:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 50
+  schemas:
+    Problem:
+      type: object
+      required:
+      - title
+      - status
+      - code
+      - traceId
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+          maxLength: 200
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          maxLength: 300
+        instance:
+          type: string
+          format: uri-reference
+        code:
+          type: string
+          enum:
+          - invalid_request
+          - unauthenticated
+          - not_allowed
+          - cross_site
+          - not_found
+          - already_connecting
+          - taken_over
+          - stale_segment
+          - call_ended
+          - call_active
+          - budget_exhausted
+          - budget_hard_stop
+          - reconnect_limit
+          - takeover_limit
+          - mood_limit
+          - capacity_full
+          - voice_unavailable
+          - mood_unavailable
+          - auth_unavailable
+          - db_unavailable
+          - internal
+        traceId:
+          type: string
+          pattern: ^[0-9a-f]{16}$
+        retryAt:
+          type: string
+          format: date-time
+          description: 예산 오류에서 다음 달 시작(UTC)
+        errors:
+          type: array
+          maxItems: 10
+          description: 검증 오류 위치. 보낸 값은 담지 않음
+          items:
+            type: object
+            required:
+            - field
+            - reason
+            properties:
+              field:
+                type: string
+                enum:
+                - sdp
+                - clientId
+                - mode
+                - previousSegmentId
+                - segmentId
+                - micActive
+                - limit
+                - cursor
+                - callId
+                - memoryId
+                - text
+                - body
+              reason:
+                type: string
+                enum:
+                - required
+                - too_short
+                - too_long
+                - bad_format
+                - out_of_range
+            additionalProperties: false
+      additionalProperties: false
+    Me:
+      type: object
+      required:
+      - caller
+      - canCall
+      - blockedReason
+      - activeCall
+      additionalProperties: false
+      properties:
+        caller:
+          type: object
+          required:
+          - name
+          additionalProperties: false
+          properties:
+            name:
+              type: string
+              minLength: 1
+              maxLength: 100
+              description: 카톡 친구 이름(marong.friends.name)
+        canCall:
+          type: boolean
+        blockedReason:
+          type:
+          - string
+          - 'null'
+          enum:
+          - budget
+          - null
+        activeCall:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ActiveCall'
+    ActiveCall:
+      type: object
+      required:
+      - id
+      - status
+      - thisClient
+      - lastBeatAt
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+        status:
+          type: string
+          enum:
+          - live
+          - resting
+        thisClient:
+          type: boolean
+        lastBeatAt:
+          type: string
+          format: date-time
+    StartCallRequest:
+      type: object
+      required:
+      - sdp
+      - clientId
+      additionalProperties: false
+      properties:
+        sdp:
+          type: string
+          minLength: 10
+          maxLength: 32768
+          pattern: ^v=0
+          description: WebRTC SDP. 32KB까지(SPEC-003)
+        clientId:
+          type: string
+          format: uuid
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          description: 페이지를 열 때 만든 화면 id
+    SegmentRequest:
+      type: object
+      required:
+      - sdp
+      - clientId
+      - mode
+      - previousSegmentId
+      additionalProperties: false
+      properties:
+        sdp:
+          type: string
+          minLength: 10
+          maxLength: 32768
+          pattern: ^v=0
+          description: WebRTC SDP. 32KB까지(SPEC-003)
+        clientId:
+          type: string
+          format: uuid
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+        mode:
+          type: string
+          enum:
+          - reconnect
+          - wake
+          - renew
+        previousSegmentId:
+          type: string
+          format: uuid
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          description: 이 화면이 마지막으로 가진 구간
+    SegmentRef:
+      type: object
+      required:
+      - id
+      - mode
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+        mode:
+          type: string
+          enum:
+          - start
+          - reconnect
+          - wake
+          - takeover
+          - renew
+    CallStarted:
+      type: object
+      required:
+      - call
+      - segment
+      - sdp
+      additionalProperties: false
+      properties:
+        call:
+          type: object
+          required:
+          - id
+          - status
+          additionalProperties: false
+          properties:
+            id:
+              type: string
+              format: uuid
+              pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+            status:
+              type: string
+              enum:
+              - live
+        segment:
+          $ref: '#/components/schemas/SegmentRef'
+        sdp:
+          type: string
+          minLength: 10
+          maxLength: 32768
+          pattern: ^v=0
+          description: OpenAI가 준 answer SDP
+    SegmentOpened:
+      type: object
+      required:
+      - segment
+      - sdp
+      additionalProperties: false
+      properties:
+        segment:
+          $ref: '#/components/schemas/SegmentRef'
+        sdp:
+          type: string
+          minLength: 10
+          maxLength: 32768
+          pattern: ^v=0
+          description: WebRTC SDP. 32KB까지(SPEC-003)
+    BeatRequest:
+      type: object
+      required:
+      - clientId
+      - segmentId
+      - micActive
+      additionalProperties: false
+      properties:
+        clientId:
+          type: string
+          format: uuid
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+        segmentId:
+          oneOf:
+          - type: 'null'
+          - type: string
+            format: uuid
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          description: 쉬는 중이면 null
+        micActive:
+          type: boolean
+          description: 쉬는 중 말소리를 잡을 마이크가 켜져 있는지(SPEC-008). 쉬기 판단에는 쓰지 않음
+    BeatResponse:
+      type: object
+      required:
+      - action
+      additionalProperties: false
+      properties:
+        action:
+          type: string
+          enum:
+          - none
+          - rest
+          - renew
+          - taken_over
+          - ended
+        endReason:
+          type: string
+          enum:
+          - hangup
+          - beat_lost
+          - reconnect_limit
+          - budget_hard_stop
+          - admin
+          description: action이 ended일 때만
+    HangupRequest:
+      type: object
+      required:
+      - clientId
+      additionalProperties: false
+      properties:
+        clientId:
+          type: string
+          format: uuid
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+    HangupResponse:
+      type: object
+      required:
+      - call
+      additionalProperties: false
+      properties:
+        call:
+          type: object
+          required:
+          - id
+          - status
+          - endReason
+          additionalProperties: false
+          properties:
+            id:
+              type: string
+              format: uuid
+              pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+            status:
+              type: string
+              enum:
+              - ended
+            endReason:
+              type: string
+              enum:
+              - hangup
+              - beat_lost
+              - reconnect_limit
+              - budget_hard_stop
+              - admin
+    MoodRequest:
+      type: object
+      required:
+      - clientId
+      - segmentId
+      - text
+      additionalProperties: false
+      properties:
+        clientId:
+          type: string
+          format: uuid
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+        segmentId:
+          type: string
+          format: uuid
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          description: 지금 열린 구간
+        text:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: 마롱이 자막 문장 하나. 서버는 AI-5에만 보내고 저장하지 않음
+    MoodResponse:
+      type: object
+      required:
+      - mood
+      additionalProperties: false
+      properties:
+        mood:
+          type: string
+          enum:
+          - neutral
+          - laugh
+          - excited
+          - sad
+          - crying
+          - surprised
+          - pouting
+          - shy
+          - concerned
+          description: 얼굴 고르기에만 씀(기능 명세 3.5 표 3). AI-5가 목록 밖 값을 주면 neutral
+    CallSummary:
+      type: object
+      required:
+      - id
+      - status
+      - startedAt
+      - endedAt
+      - durationSeconds
+      - organizeStatus
+      - title
+      properties:
+        id:
+          type: string
+          format: uuid
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+        status:
+          type: string
+          enum:
+          - live
+          - resting
+          - ended
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          oneOf:
+          - type: 'null'
+          - type: string
+            format: date-time
+        durationSeconds:
+          type: integer
+          minimum: 0
+          description: 구간이 열려 있던 시간의 합
+        organizeStatus:
+          type: string
+          enum:
+          - none
+          - pending
+          - running
+          - done
+          - skipped
+          - failed
+        title:
+          type:
+          - string
+          - 'null'
+          maxLength: 40
+          description: 카드 요약 앞 40자
+    CallList:
+      type: object
+      required:
+      - items
+      - nextCursor
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/CallSummary'
+        nextCursor:
+          type:
+          - string
+          - 'null'
+          maxLength: 200
+    Card:
+      type: object
+      required:
+      - summary
+      - decided
+      - undecided
+      - todos
+      - askNext
+      - truncated
+      - forgotten
+      additionalProperties: false
+      properties:
+        summary:
+          type: string
+          minLength: 1
+          maxLength: 400
+        decided:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            minLength: 1
+            maxLength: 100
+        undecided:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            minLength: 1
+            maxLength: 100
+        todos:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            minLength: 1
+            maxLength: 100
+        askNext:
+          type: array
+          maxItems: 3
+          items:
+            type: string
+            minLength: 1
+            maxLength: 100
+        truncated:
+          type: boolean
+        forgotten:
+          type: boolean
+          description: 요약에 잊기 표시가 있음(기능 명세 3.7). 다음 통화·카톡·기억 찾기에서 빠짐
+    Turn:
+      type: object
+      required:
+      - id
+      - seq
+      - role
+      - content
+      - startedAt
+      - forgotten
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        seq:
+          type: integer
+          minimum: 1
+        role:
+          type: string
+          enum:
+          - user
+          - assistant
+        content:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        startedAt:
+          type: string
+          format: date-time
+        forgotten:
+          type: boolean
+          description: 잊기 표시된 줄(기능 명세 3.7). 기억 찾기·통화 정리에서 빠짐
+    MemoryItem:
+      type: object
+      required:
+      - id
+      - content
+      - createdAt
+      - callId
+      additionalProperties: false
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        content:
+          type: string
+          minLength: 2
+          maxLength: 200
+        createdAt:
+          type: string
+          format: date-time
+        callId:
+          type: string
+          format: uuid
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+    MemoryList:
+      type: object
+      required:
+      - items
+      - nextCursor
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/MemoryItem'
+        nextCursor:
+          type:
+          - string
+          - 'null'
+          maxLength: 200
+    CallDetail:
+      type: object
+      required:
+      - call
+      - card
+      - memories
+      - turns
+      - transcriptDeletedAt
+      additionalProperties: false
+      properties:
+        call:
+          allOf:
+          - $ref: '#/components/schemas/CallSummary'
+          - type: object
+            required:
+            - endReason
+            properties:
+              endReason:
+                oneOf:
+                - type: 'null'
+                - type: string
+                  enum:
+                  - hangup
+                  - beat_lost
+                  - reconnect_limit
+                  - budget_hard_stop
+                  - admin
+        card:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/Card'
+        memories:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/MemoryItem'
+        turns:
+          oneOf:
+          - type: 'null'
+          - type: array
+            items:
+              $ref: '#/components/schemas/Turn'
+          description: 자막을 지운 통화는 null
+        transcriptDeletedAt:
+          oneOf:
+          - type: 'null'
+          - type: string
+            format: date-time
+    Health:
+      type: object
+      required:
+      - status
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum:
+          - ok

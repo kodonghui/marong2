@@ -1,6 +1,7 @@
 """Postgres 저장소(psycopg 3 비동기).
 대화 원문·요약·메모는 쌓기만 하고 지우거나 고치지 않는다. 봇 계정(marong)에는 그 권한 자체가 없다(schema.sql)."""
 import hashlib
+import os
 import logging
 from datetime import timedelta
 
@@ -55,7 +56,7 @@ ROOM_STATE = (
     "LEFT JOIN LATERAL (SELECT m.user_key FROM marong.messages m "
     "  WHERE m.room_key = coalesce(r.memory_room, r.room_key) AND m.role = 'user' ORDER BY m.id DESC LIMIT 1) w ON true "
     "LEFT JOIN marong.people p ON p.user_key = coalesce(w.user_key, u.user_key) "
-    "WHERE u.kakao_id IS NOT NULL ")
+    "WHERE u.kakao_id IS NOT NULL AND r.room_key NOT LIKE 'discord-dm:%%' ")
 # 선톡 대상: 선톡을 켜 둔 1:1 방(기본 켬)과 관리자가 켠 단체방(group_proactive, 기본 꺼짐, 표 버전 8)
 PROACTIVE_ON = "AND CASE WHEN r.is_channel THEN r.proactive ELSE r.group_proactive END "
 
@@ -73,10 +74,22 @@ def speaker_label(user_key: str | None, name: str | None) -> str:
 
 
 class Store:
-    def __init__(self, conninfo: str, timeout: float = 5):
+    def __init__(self, conninfo: str, timeout: float = 5, call_bridge: bool | None = None):
         # timeout: DB 가 죽어 있을 때 연결을 기다리는 시간. 넘으면 오류 → 기억 없이 답함(답이 너무 늦지 않게)
         self.pool = AsyncConnectionPool(conninfo, min_size=1, max_size=4, open=False, timeout=timeout,
                                         kwargs={"autocommit": True, "row_factory": dict_row})
+        self.call_bridge = os.getenv('MARONG_CALL_MEMORY') == '1' if call_bridge is None else call_bridge
+        # Keep privacy filters on when injection is disabled during a rollback.
+        self.call_context_enabled = os.getenv('MARONG_CALL_CONTEXT', '1') == '1'
+        self.discord_context_enabled = os.getenv("MARONG_DISCORD_CONTEXT") == "1"
+
+    def _call_guard(self, kind: str, source_id: str, room: str, requested: str = '%(room)s', expression=False) -> str:
+        if not self.call_bridge:
+            return ''
+        k = kind if expression else "'" + kind + "'"
+        return (f" AND NOT call.kakao_hidden({k},{source_id},{room}) "
+                f"AND ((SELECT is_channel FROM marong.rooms WHERE room_key={requested}) "
+                f"OR NOT call.kakao_private({k},{source_id},{room})) ")
 
     async def open(self, wait: bool = False, timeout: float = 10) -> None:
         """wait=False 면 DB 가 늦게 떠도 봇은 먼저 켜지고, 연결은 뒤에서 계속 시도한다."""
@@ -84,6 +97,17 @@ class Store:
 
     async def close(self) -> None:
         await self.pool.close()
+
+    async def private_revision(self, room_key: str) -> int | None:
+        if not self.call_bridge:return None
+        row=await self._one("SELECT coalesce(max(c.context_revision),0) AS revision FROM call.kakao_guards g JOIN call.callers c ON c.friend_id=g.friend_id WHERE g.room_key IN " + scope('%s'),(room_key,))
+        return row['revision']
+
+    async def _privacy_write_ok(self,c,room_key,revision):
+        if not self.call_bridge or revision is None:return True
+        await c.execute("SELECT pg_advisory_xact_lock(hashtextextended('call.kakao:'||"+root('%s')+",0))",(room_key,))
+        cur=await c.execute("SELECT coalesce(max(c.context_revision),0) AS revision FROM call.kakao_guards g JOIN call.callers c ON c.friend_id=g.friend_id WHERE g.room_key IN "+scope('%s'),(room_key,))
+        return (await cur.fetchone())['revision']==revision
 
     async def _all(self, sql: str, params=()) -> list[dict]:
         async with self.pool.connection() as c:
@@ -135,15 +159,22 @@ class Store:
             (room_key, user_key, role, content, kakao_id, reply_to, Jsonb(meta or {})))
         return row["id"] if row else None
 
+    def _reply_rooms(self, room: str) -> str:
+        return scope(room)
+
+    def _reply_embedding_filter(self) -> str:
+        return ""
+
     async def recent(self, room_key: str, limit: int, since_id: int | None = None) -> list[dict]:
         """방(묶인 방들 함께)의 최근 메시지(오래된 것부터). since_id 가 있으면 그 메시지부터는 limit 을 넘어도 다 넣는다.
         친구에게 전달되지 못한 마롱이 답은 뺀다."""
         rows = await self._all(
             "SELECT m.id, m.role, m.user_key, p.name, m.content, m.created_at FROM marong.messages m "
             "LEFT JOIN marong.people p ON p.user_key = m.user_key "
-            "WHERE m.room_key IN " + scope("%(room)s") + " AND m.meta->>'delivered' IS DISTINCT FROM 'false' "
+            "WHERE m.room_key IN " + self._reply_rooms("%(room)s") + " AND m.meta->>'delivered' IS DISTINCT FROM 'false' "
+            + self._call_guard('message','m.id','m.room_key') +
             "ORDER BY m.id DESC LIMIT greatest(%(limit)s, "
-            "(SELECT count(*) FROM marong.messages WHERE room_key IN " + scope("%(room)s") + " AND id >= %(since)s))",
+            "(SELECT count(*) FROM marong.messages WHERE room_key IN " + self._reply_rooms("%(room)s") + " AND id >= %(since)s))",
             {"room": room_key, "limit": limit, "since": since_id})
         return rows[::-1]
 
@@ -152,7 +183,7 @@ class Store:
         rows = await self._all(
             "SELECT s.id, s.first_id, s.last_id, s.content, m.created_at AS until FROM marong.summaries s "
             "JOIN marong.messages m ON m.id = s.last_id "
-            "WHERE s.room_key IN " + scope("%(room)s") + " ORDER BY s.last_id DESC LIMIT %(limit)s",
+            "WHERE s.room_key IN " + scope("%(room)s") + self._call_guard('summary','s.id','s.room_key') + " ORDER BY s.last_id DESC LIMIT %(limit)s",
             {"room": room_key, "limit": limit})
         return rows[::-1]
 
@@ -162,6 +193,7 @@ class Store:
         return await self._all(
             "SELECT DISTINCT ON (n.user_key) n.id, n.user_key, p.name, n.content, n.created_at FROM marong.notes n "
             "JOIN marong.people p ON p.user_key = n.user_key WHERE n.room_key IN " + scope("%(room)s") + " "
+            + self._call_guard('note','n.id','n.room_key') +
             "ORDER BY n.user_key, n.room_key = " + root("%(room)s") + " DESC, n.id DESC", {"room": room_key})
 
     async def set_name(self, user_key: str, name: str, room_key: str | None = None) -> int | None:
@@ -297,7 +329,8 @@ class Store:
         return await self._all(
             "WITH q AS (SELECT %s::vector AS v), hits AS ("
             "  SELECT e.source_type, e.source_id, 1 - (e.embedding <=> q.v) AS similarity "
-            "  FROM marong.embeddings e, q WHERE e.model = %s AND e.room_key IN " + scope("%s") + " "
+            "  FROM marong.embeddings e, q WHERE e.model = %s AND e.room_key IN " + self._reply_rooms("%s") + " "
+            + self._reply_embedding_filter() +
             "  AND NOT (e.source_type = 'message' AND e.source_id >= %s) "
             "  AND NOT (e.source_type = 'summary' AND e.source_id = ANY(%s::bigint[])) "
             "  ORDER BY e.embedding <=> q.v LIMIT %s) "
@@ -307,15 +340,18 @@ class Store:
             "LEFT JOIN marong.messages m ON h.source_type = 'message' AND m.id = h.source_id "
             "LEFT JOIN marong.people p ON p.user_key = m.user_key "
             "LEFT JOIN marong.summaries s ON h.source_type = 'summary' AND s.id = h.source_id "
+            "WHERE true " + self._call_guard('h.source_type','h.source_id','coalesce(m.room_key,s.room_key)','%s',True) +
             "ORDER BY h.similarity DESC",
-            (vec(vector), model, room_key, before_id, list(skip_summary_ids), limit))
+            (vec(vector), model, room_key, before_id, list(skip_summary_ids), limit) + ((room_key,) if self.call_bridge else ()))
 
     # ── 선톡(먼저 말 걸기) ──────────────────────────────────────
 
     async def proactive_rooms(self, room_key: str | None = None) -> list[dict]:
         """선톡을 켜 둔 카카오 1:1 방과 관리자가 켠 단체방(오래 조용한 방부터), 일정·조건 재료(ROOM_STATE). 보낼지는
         proactive.py 가 방마다 일정으로 정한다. room_key 를 주면 그 방만."""
-        return await self._all(ROOM_STATE + PROACTIVE_ON + "AND (%(room)s::text IS NULL OR r.room_key = %(room)s) "
+        moved = ("AND NOT EXISTS (SELECT 1 FROM marong.discord_dm_links d WHERE d.proactive_moved_at IS NOT NULL "
+                 "AND d.kakao_room_key = coalesce(r.memory_room,r.room_key)) " if self.discord_context_enabled else "")
+        return await self._all(ROOM_STATE + PROACTIVE_ON + moved + "AND (%(room)s::text IS NULL OR r.room_key = %(room)s) "
                                "ORDER BY u.created_at", {"room": room_key})
 
     async def proactive_count(self, within: timedelta) -> int:
@@ -381,14 +417,16 @@ class Store:
             "  WHERE w.room_key IN " + scope("%(room)s") + ") w "
             "JOIN marong.messages m ON m.room_key = w.room_key AND m.id > w.done "
             "LEFT JOIN marong.people p ON p.user_key = m.user_key "
+            "WHERE true " + self._call_guard('message','m.id','m.room_key') +
             "ORDER BY m.id LIMIT %(limit)s", {"room": room_key, "limit": limit})
 
     async def add_summary(self, room_key: str, first_id: int, last_id: int, content: str,
-                          notes: dict[str, str], meta: dict) -> int | None:
+                          notes: dict[str, str], meta: dict, private_revision=None) -> int | None:
         """요약 한 개와 바뀐 친구 메모를 한 트랜잭션으로 쓴다. 같은 구간이 이미 있으면 None. 묶인 방들을 함께 요약했으면
         meta.rooms 에 그 방들을 적는다(방마다 어디까지 요약했는지 셀 때 씀)."""
         async with self.pool.connection() as c:
             async with c.transaction():
+                if not await self._privacy_write_ok(c,room_key,private_revision):return None
                 cur = await c.execute("SELECT array_agg(room_key ORDER BY room_key) AS rooms FROM marong.rooms "
                                       "WHERE room_key IN " + scope("%s"), (room_key,))
                 rooms = (await cur.fetchone())["rooms"] or []
@@ -419,10 +457,11 @@ class Store:
             "GROUP BY 1 ORDER BY 2")
         return [r["room_key"] for r in rows]
 
-    async def add_notes(self, room_key: str, notes: dict[str, str], last_id: int) -> None:
+    async def add_notes(self, room_key: str, notes: dict[str, str], last_id: int, private_revision=None) -> None:
         """요약 없이 바뀐 친구 메모를 쓰고, 그 방(묶인 방들 함께)을 last_id 까지 메모를 고친 것으로 적는다(한 트랜잭션)."""
         async with self.pool.connection() as c:
             async with c.transaction():
+                if not await self._privacy_write_ok(c,room_key,private_revision):return
                 for user_key, text in notes.items():
                     await c.execute("INSERT INTO marong.notes (room_key, user_key, content) VALUES (%s, %s, %s)",
                                     (room_key, user_key, text))
@@ -435,7 +474,97 @@ class Store:
             "SELECT * FROM (SELECT DISTINCT ON (n.room_key, n.user_key) p.friend_id, f.name, n.id AS note_id, "
             "  n.content, r.is_channel FROM marong.notes n JOIN marong.people p ON p.user_key = n.user_key "
             "  JOIN marong.friends f ON f.id = p.friend_id JOIN marong.rooms r ON r.room_key = n.room_key "
-            "  WHERE f.share ORDER BY n.room_key, n.user_key, n.id DESC) x ORDER BY friend_id, note_id")
+            "  WHERE f.share " + ("AND NOT call.kakao_private('note',n.id,n.room_key) AND NOT call.kakao_hidden('note',n.id,n.room_key) " if self.call_bridge else '') +
+            "ORDER BY n.room_key, n.user_key, n.id DESC) x ORDER BY friend_id, note_id")
+
+    async def call_context(self, room_key: str, user_key: str, user_id: int | None = None) -> dict:
+        """Read only this person's voice memories into their 1:1 Kakao room.
+
+        Before returning content, permanently mark the room's subsequent material
+        private. Sharing then reads its pre-bridge notes, never call-derived notes.
+        """
+        if not self.call_bridge or not self.call_context_enabled:
+            return {}
+        async with self.pool.connection() as c:
+            async with c.transaction():
+                await c.execute("SELECT pg_advisory_xact_lock(hashtextextended('call.kakao:'||"+root('%s')+",0))",(room_key,))
+                cur = await c.execute("""SELECT c.id,c.friend_id FROM marong.people p
+                    JOIN call.callers c ON c.friend_id=p.friend_id JOIN marong.rooms r ON r.room_key=%s
+                    WHERE p.user_key=%s AND r.is_channel AND c.enabled
+                    AND EXISTS(SELECT 1 FROM marong.messages m WHERE m.room_key=r.room_key AND m.user_key=p.user_key)""", (room_key,user_key))
+                caller = await cur.fetchone()
+                if not caller:
+                    return {}
+                cur = await c.execute("""SELECT 'card' AS source,c.id::text AS id,k.summary AS content FROM call.cards k
+                    JOIN call.calls c ON c.id=k.call_id WHERE c.caller_id=%s AND c.deleted_at IS NULL
+                    AND k.forgotten_at IS NULL ORDER BY c.started_at DESC LIMIT 2""", (caller['id'],))
+                cards = await cur.fetchall()
+                cur = await c.execute("""SELECT 'memory' AS source,m.id::text AS id,m.content FROM call.memories m
+                    JOIN call.calls c ON c.id=m.call_id WHERE m.caller_id=%s AND m.status='active'
+                    AND c.deleted_at IS NULL ORDER BY m.created_at DESC LIMIT 10""", (caller['id'],))
+                memories = await cur.fetchall()
+                rows = memories + cards
+                if not rows:
+                    return {}
+                await c.execute("""INSERT INTO call.kakao_guards(room_key,friend_id,message_floor,note_floor,summary_floor)
+                    SELECT r.room_key,%(friend)s,
+                      CASE WHEN r.room_key=%(room)s AND %(user_id)s::bigint IS NOT NULL THEN greatest(0,%(user_id)s-1)
+                        ELSE coalesce((SELECT max(id) FROM marong.messages WHERE room_key=r.room_key),0) END,
+                      coalesce((SELECT max(id) FROM marong.notes WHERE room_key=r.room_key),0),
+                      coalesce((SELECT max(id) FROM marong.summaries WHERE room_key=r.room_key),0)
+                    FROM marong.rooms r WHERE r.room_key IN """ + scope('%(room)s') +
+                    " ON CONFLICT(room_key) DO NOTHING", {'friend':caller['friend_id'],'room':room_key,'user_id':user_id})
+                selected=[];remaining=1200
+                for row in rows:
+                    if remaining<40:break
+                    text=row['content'][:min(400,remaining-30)];remaining-=len(text)+30
+                    selected.append({'source':row['source'],'id':row['id'],'text':text})
+                return {'friend_id':caller['friend_id'],'items':selected}
+
+    async def discord_context(self, room_key: str, user_key: str, user_id: int | None) -> list[dict]:
+        """Only the same friend's Discord DM enters this exact Kakao 1:1 room."""
+        if not self.call_bridge or not self.discord_context_enabled or user_id is None:
+            return []
+        async with self.pool.connection() as c, c.transaction():
+            await c.execute("SELECT pg_advisory_xact_lock(hashtextextended('call.kakao:'||" + root("%s") + ",0))",
+                            (room_key,))
+            cur = await c.execute(
+                """SELECT d.friend_id, d.room_key
+                     FROM marong.discord_dm_links d
+                     JOIN marong.rooms r ON r.room_key=d.kakao_room_key AND r.is_channel AND r.memory_room IS NULL
+                     JOIN marong.people p ON p.user_key=%s AND p.friend_id=d.friend_id
+                     JOIN marong.people dp ON dp.user_key=d.user_key AND dp.friend_id=d.friend_id
+                     JOIN call.kakao_guards g ON g.room_key=d.room_key AND g.friend_id=d.friend_id
+                    WHERE d.kakao_room_key=%s AND d.channel_id IS NOT NULL
+                      AND NOT EXISTS (
+                        SELECT 1 FROM marong.messages m LEFT JOIN marong.people mp USING(user_key)
+                         WHERE m.room_key=r.room_key AND m.role='user' AND mp.friend_id IS DISTINCT FROM d.friend_id
+                      )""", (user_key, room_key),
+            )
+            link = await cur.fetchone()
+            if not link:
+                return []
+            cur = await c.execute(
+                """SELECT id,role,left(content,260) AS text FROM marong.messages
+                    WHERE room_key=%s AND meta->>'delivered' IS DISTINCT FROM 'false'
+                      AND NOT call.kakao_hidden('message',id,room_key)
+                    ORDER BY id DESC LIMIT 8""", (link["room_key"],),
+            )
+            rows = await cur.fetchall()
+            if not rows:
+                return []
+            await c.execute(
+                """INSERT INTO call.kakao_guards(room_key,friend_id,message_floor,note_floor,summary_floor)
+                   VALUES(%(room)s,%(friend)s,greatest(0,%(current)s-1),
+                          coalesce((SELECT max(id) FROM marong.notes WHERE room_key=%(room)s),0),
+                          coalesce((SELECT max(id) FROM marong.summaries WHERE room_key=%(room)s),0))
+                   ON CONFLICT(room_key) DO NOTHING""",
+                {"room": room_key, "friend": link["friend_id"], "current": user_id},
+            )
+            guard = await c.execute("SELECT friend_id FROM call.kakao_guards WHERE room_key=%s", (room_key,))
+            if (await guard.fetchone())["friend_id"] != link["friend_id"]:
+                return []
+            return rows[::-1]
 
     async def shared_sources(self) -> dict[int, tuple[list[int], str | None]]:
         """공유를 켠 친구마다 가장 최근 공유 메모를 만들 때 거른 메모 id 들과 거른 규칙(memory.SHARE_RULES)."""

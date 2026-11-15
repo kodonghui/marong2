@@ -14,6 +14,7 @@ import logging
 import math
 import os
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -41,10 +42,23 @@ SHEET_PREFIX = "https://script.google.com/"  # Apps Script 웹 앱이 아닌 곳
 SHEET_TIMEOUT_S = 120
 ASK_TIMEOUT_S = 30
 HEADER_FILL = PatternFill("solid", fgColor="E8E3F3")
-FRIEND_COLOR, MARONG_COLOR = "#fce8e6", "#e8f0fe"  # 대화 탭 줄 색: 친구 말(분홍)·마롱이 말(파랑)
+FRIEND_COLOR, MARONG_COLOR = "#fce8e6", "#e8f0fe"
+DONGHUI_COLOR, HYUNGKYUNG_COLOR = "#d9ead3", "#fff2cc"
 TOP, TOP_WRAP = Alignment(vertical="top"), Alignment(vertical="top", wrap_text=True)
 RECALL = {"short": "안 함(말이 짧아서)", "off": "안 함(임베딩 준비 안 됨)", "error": "오류(검색 실패)"}
 UNRECORDED = "모름(기록 시작 전)"  # 답마다 넣은 기억을 적기 시작한 2026-10-26 밤 전의 답
+
+
+def speaker_color(role: str, name: str | None) -> str:
+    """카톡과 통화에 기록된 화자 기준. 음성이나 대화 내용으로 신원을 추측하지 않는다."""
+    if role == "assistant":
+        return MARONG_COLOR
+    name = (name or "").strip().removesuffix("님").strip()
+    if name in {"동희", "고동희"}:
+        return DONGHUI_COLOR
+    if name in {"현경", "현경이"}:
+        return HYUNGKYUNG_COLOR
+    return FRIEND_COLOR
 
 
 def key(k: str | None) -> str:
@@ -87,6 +101,36 @@ def tab(name: str, headers: list[str], rows: list[list], widths: list[float], wr
     return t
 
 
+def call_sessions(c, start, until, tz):
+    """The report role sees a metadata-only view, never voice content."""
+    if not c.execute("SELECT to_regclass('call.session_report') AS report").fetchone()['report']:
+        return None  # Older Kakao-only installations still produce their six tabs.
+    records = c.execute("""SELECT * FROM call.session_report
+        WHERE started_at < %s AND (ended_at IS NULL OR ended_at >= %s)
+        ORDER BY started_at DESC,id""", (until, start)).fetchall()
+    state = {'live': '통화 중', 'resting': '연결 대기', 'ended': '종료'}
+    paths = {'webrtc': 'WebRTC', 'pcm': 'WebSocket PCM', 'discord': 'Discord 음성', None: '이전 기록 없음'}
+    organized = {'none': '대기 전', 'pending': '대기', 'running': '정리 중', 'done': '완료', 'skipped': '생략', 'failed': '실패'}
+    reasons = {'start': '시작/재연결', 'rtc_disconnected': 'WebRTC 끊김', 'rtc_reconnecting': 'WebRTC 재연결',
+        'rtc_media_stalled': '음성 수신 정지', 'rtc_track_lost': '음성 트랙 끊김', 'rtc_no_media': '음성 수신 안 됨',
+        'control_reconnect': '인터넷 재연결', 'network_change': '네트워크 변경', 'server_pcm': '서버 PCM 선택',
+        'rtc_server_lost': '음성 중계 연결 끊김', None: '이전 기록 없음'}
+    rows = [[str(r['id']), stamp(r['started_at'], tz), stamp(r['ended_at'], tz), state[r['status']],
+        round(r['session_seconds'], 1), r['segment_count'], paths[r['initial_transport']], paths[r['last_transport']],
+        r['fallback_count'], reasons[r['last_reason']], organized[r['organize_status']]] for r in records]
+    return tab('통화 세션', ['통화 ID', '시작(한국 시각)', '종료(한국 시각)', '상태', '세션 시간(초)', '연결 구간 수',
+        '첫 전송 방식', '마지막 전송 방식', '자동 전환 수', '마지막 연결 사유', '기억 정리'],
+        rows, [42, 21, 21, 12, 16, 15, 20, 20, 15, 24, 12])
+
+
+def call_transcripts(c, start, until):
+    """Saved ASR/output text, including drafts, through the filtered read-only view."""
+    if not c.execute("SELECT to_regclass('call.transcript_report') AS report").fetchone()['report']:
+        return []
+    return c.execute("""SELECT * FROM call.transcript_report
+        WHERE started_at >= %s AND started_at < %s ORDER BY started_at,id""", (start, until)).fetchall()
+
+
 def hits(memory: dict, field: str) -> list[tuple[str, int, float | None]]:
     """meta.memory 의 candidates·recalled → (종류, 번호, 비슷함). 모양이 틀린 항목은 건너뜀."""
     out = []
@@ -119,8 +163,9 @@ def fetch(c, start: datetime, until: datetime, vectors: bool = True) -> dict:
     vector = "e.embedding::text" if vectors else "((e.embedding::real[])[1:8])::text"
     data = {
         "messages": c.execute(
-            "SELECT m.id, m.room_key, m.user_key, p.name, m.role, m.content, m.reply_to, m.meta, m.created_at "
+            "SELECT m.id, m.room_key, m.user_key, p.name, f.name AS friend_name, m.role, m.content, m.reply_to, m.meta, m.created_at "
             "FROM marong.messages m LEFT JOIN marong.people p ON p.user_key = m.user_key "
+            "LEFT JOIN marong.friends f ON f.id = p.friend_id "
             "WHERE m.created_at >= %(s)s AND m.created_at < %(u)s ORDER BY m.id", w).fetchall(),
         "embeddings": c.execute(
             "SELECT e.model, e.source_type, e.source_id, e.room_key, e.created_at, vector_dims(e.embedding) AS dims, "
@@ -236,10 +281,11 @@ def request_text(q: dict, f: dict | None, friend_name: dict[int, str], pairs: di
 def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, threshold: float = 0.4,
           recent_turns: int = 10, vectors: bool = True) -> tuple[list[dict], dict]:
     """기간 [start, until) 의 탭들(엑셀·시트 공용)과 개수. 탭마다 최신이 위. threshold·recent_turns 는 봇 설정(읽는 법 설명용).
-    vectors 가 False 면 임베딩 벡터 전체 칸을 뺌(시트는 30일치를 30분마다 통째로 보내서 무거움)."""
+    vectors 가 False 면 임베딩 벡터 전체 칸을 뺌(시트는 30일치를 5분마다 통째로 보내서 무거움)."""
     now = now or datetime.now(tz)
     data = fetch(c, start, until, vectors)
     msgs, embs = data["messages"], data["embeddings"]
+    voice = call_transcripts(c, start, until)
     ref_msgs, ref_sums = data["ref_messages"], data["ref_summaries"]
     names: dict[str, set[str]] = {}
     for s in data["speakers"]:
@@ -252,7 +298,8 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         if k == "terminal":
             return "터미널"
         who = ", ".join(sorted(names.get(k, ())))
-        kind = "1:1" if (data["rooms"].get(k) or {}).get("is_channel") else "단체"
+        kind = ("Discord DM" if k.startswith("discord-dm:") else
+                "1:1" if (data["rooms"].get(k) or {}).get("is_channel") else "단체")
         return f"{kind} {key(k)}" + (f" {who}" if who else "")
 
     def speaker(m):
@@ -289,7 +336,7 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
 
     tabs = []
 
-    # ── 대화: 친구 말과 마롱이 말은 줄 색을 다르게 ──
+    # ── 대화: 동희(초록), 현경(노랑), 마롱이(파랑), 그 외 친구(분홍) ──
     rows, colors = [], []
     for m in reversed(msgs):
         meta = m["meta"] or {}
@@ -298,11 +345,29 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
                      m["reply_to"], yes(meta.get("delivered")) if mine else "-", meta.get("model"), meta.get("effort"),
                      meta.get("input_tokens"), meta.get("output_tokens"), meta.get("cache_read_tokens"),
                      meta.get("cache_write_tokens"), used(m)])
-        colors.append(MARONG_COLOR if mine else FRIEND_COLOR)
+        colors.append(speaker_color(m["role"], m["friend_name"] or m["name"]))
+    if voice:
+        # Merge only the exported conversation rows. Kakao storage, embeddings,
+        # retrieval statistics and the running voice/bot processes stay intact.
+        merged = [(m['created_at'], 0, m['id'], row, color)
+                  for m, row, color in zip(reversed(msgs), rows, colors)]
+        for t in voice:
+            mine = t['role'] == 'assistant'
+            label = ('통화(중단)' if t['interrupted'] else '통화(전사 중)' if not t['finalized']
+                     else '통화(응답)' if mine else '통화(글)' if t['input_kind'] == 'text' else '통화(전사)')
+            room_label = 'Discord 통화' if t.get('entrypoint') == 'discord' else '통화'
+            row = [f"V{t['id']}", at(t['started_at']), room_label + ' #' + str(t['call_id'])[:8],
+                   '마롱이' if mine else (t['caller_name'] or '통화 사용자'), label, t['content'],
+                   None, '미확인' if mine else '-', t['provider_model'], None, None, None, None, None,
+                   '미집계' if mine else None]
+            merged.append((t['started_at'], 1, t['id'], row, speaker_color(t['role'], t['caller_name'])))
+        merged.sort(key=lambda item: item[:3], reverse=True)
+        rows = [item[3] for item in merged]
+        colors = [item[4] for item in merged]
     tabs.append(tab("대화", ["번호", "시각(한국)", "방", "보낸 쪽", "종류", "내용", "답한 메시지 번호", "전달됨", "모델",
                            "effort", "입력 토큰", "출력 토큰(생각 포함)", "캐시에서 읽은 토큰", "캐시에 쓴 토큰",
                            "들어간 예전 기억 수"],
-                    rows, [7, 19, 22, 9, 10, 70, 9, 7, 17, 7, 9, 10, 10, 9, 12], wrap={6}, colors=colors))
+                    rows, [7, 19, 22, 9, 10, 70, 9, 7, 17, 7, 9, 10, 10, 9, 12], wrap={5, 6}, colors=colors))
 
     # ── 임베딩 ──
     rows = []
@@ -443,6 +508,10 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
                                "마지막으로 본 때"],
                     rows, [10, 6, 40, 50, 50, 60, 19, 19], wrap={3, 4, 5, 6}))
 
+    calls_tab = call_sessions(c, start, until, tz)
+    if calls_tab is not None:
+        tabs.append(calls_tab)
+
     # ── 읽는 법(맨 앞) ──
     replies = [m for m in msgs if m["role"] == "assistant" and not (m["meta"] or {}).get("proactive")]
     proactive = [m for m in msgs if m["role"] == "assistant" and (m["meta"] or {}).get("proactive")]
@@ -454,8 +523,9 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         f"마지막 갱신: {at(now)}",
         "",
         "■ 탭",
-        f"대화: 이 기간에 오간 메시지 {len(msgs)}개(친구 말 {len(msgs) - len(replies) - len(proactive)}, "
-        f"마롱이 답 {len(replies)}, 선톡 {len(proactive)}). 친구 말은 분홍, 마롱이 말은 파랑 줄이에요. "
+        f"대화: 이 기간에 오간 채팅 메시지 {len(msgs)}개(친구 말 {len(msgs) - len(replies) - len(proactive)}, "
+        f"마롱이 답 {len(replies)}, 선톡 {len(proactive)}). 현경이는 노랑, 마롱이는 파랑, 동희는 초록 줄이에요. "
+        "그 외 친구는 분홍이고, 기록된 화자 이름을 기준으로 칠해요. "
         "마지막 칸은 그 답에 임베딩 검색으로 실제로 넣은 예전 기억 수예요.",
         f"임베딩: 이 기간에 만든 임베딩 {len(embs)}개. 메시지·요약을 숫자 벡터로 바꾼 것이고, 뜻이 비슷한 글끼리 숫자도 비슷해요."
         + ("" if vectors else " 벡터 전체는 엑셀(bash deploy/ovh.sh report)에만 있어요."),
@@ -484,8 +554,18 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         "- 시각은 모두 한국 시각이에요. 카카오 키 원문 대신 관리 명령(admin)과 같은 #짧은키를 적었어요.",
     ]
     if not vectors:
-        lines.append("- 시트 메뉴 '마롱이 > 지금 새로고침'을 누르면 1분쯤 뒤에 새로 채워요. 안 눌러도 30분마다 새로 채워요.")
+        lines.append("- 시트 메뉴 '마롱이 > 지금 새로고침'을 누르면 1분쯤 뒤에 새로 채워요. 안 눌러도 5분마다 새로 채워요.")
         lines.append("- 걸어 둔 필터는 새로 채운 뒤에도 그대로예요. 손으로 칠한 색·서식은 새로 채울 때 지워져요.")
+    if calls_tab is not None:
+        counts['calls'] = len(calls_tab['rows'])
+        lines.append(f"- 통화 세션: 기간과 겹치는 통화 {len(calls_tab['rows'])}개. 통화 ID당 한 줄이며 자동 전환·재연결로 중복되지 않아요.")
+        lines.append("- 세션 시간은 해당 통화의 서버 연결 구간을 합한 초예요(연결 대기 시간 제외, Google 청구 시간·요금 아님). 진행 중인 통화는 갱신 시각까지예요.")
+        lines.append("- 통화 원문·요약·기억 내용·로그인 이메일은 이 탭에 보내지 않아요. 전송 방식 기록은 2026-11-13 배포 이후부터예요.")
+    if voice:
+        counts['call_transcripts'] = len(voice)
+        lines.append(f"- 대화 탭에 저장된 통화 전사 {len(voice)}줄도 함께 표시해요. V로 시작하는 번호가 통화 발화이며 카톡·디스코드와 시각순으로 섞여 있어요.")
+        lines.append("- '통화(전사 중)'은 아직 완성되지 않은 글로 다음 갱신에 같은 번호의 내용이 바뀌어요. '통화(중단)'은 중간에 끊긴 발화예요. 사용자 글 입력은 '통화(글)'로 구분해요.")
+        lines.append("- 통화의 '전달됨: 미확인'은 실제 음성 청취 완료를 측정하지 않았다는 뜻이에요. 발화별 토큰·참고한 기억 수는 추정하지 않아요. 삭제·제외된 통화 발화는 내보내지 않아요.")
     tabs.insert(0, tab("읽는 법", ["마롱이 기록 리포트"], [[line] for line in lines], [130], wrap={1}))
     return tabs, counts
 
@@ -534,7 +614,7 @@ def post(url: str, payload: dict, timeout: float, transport=None) -> httpx.Respo
 
 def asked(url: str, transport=None) -> bool:
     """시트에서 '마롱이 > 지금 새로고침'을 눌렀는지 웹 앱에 물어봄(웹 앱은 부탁을 넘기면서 지움).
-    못 물었거나 물어보기를 모르는 예전 sheet.gs 면 False. 1분마다 도는 거라 까닭은 남기지 않음(30분 갱신이 남김)."""
+    못 물었거나 물어보기를 모르는 예전 sheet.gs 면 False. 1분마다 도는 거라 까닭은 남기지 않음(5분 갱신이 남김)."""
     try:
         r = post(url, {"poll": True}, ASK_TIMEOUT_S, transport)
         answer = r.json() if r.status_code == 200 else None
@@ -546,10 +626,18 @@ def asked(url: str, transport=None) -> bool:
 
 def send(url: str, payload: dict, transport=None) -> str | None:
     """시트 웹 앱(tools/sheet.gs)에 탭을 보냄. 잘 되면 None, 아니면 짧은 까닭(주소와 구글의 답 내용은 적지 않음)."""
-    try:
-        r = post(url, payload, SHEET_TIMEOUT_S, transport)
-    except Exception as e:  # 오류 글에 주소가 들어 있을 수 있어서 종류만
-        return type(e).__name__
+    # Replacing the same snapshot is idempotent, including a partially written
+    # Apps Script response. Retry transient HTTP/transport errors, not bad data.
+    for attempt in range(2):
+        try:
+            r = post(url, payload, SHEET_TIMEOUT_S, transport)
+        except (httpx.TransportError, OSError) as e:
+            if attempt == 1: return type(e).__name__
+        except Exception as e:  # 오류 글에 주소가 들어 있을 수 있어서 종류만
+            return type(e).__name__
+        else:
+            if r.status_code not in (429, 500, 502, 503, 504) or attempt == 1: break
+        time.sleep(2 ** (attempt + 1))
     if r.status_code != 200:
         return f"HTTP {r.status_code}"
     try:
@@ -582,7 +670,7 @@ def main(argv: list[str] | None = None, transport=None) -> int:
     start = until - (timedelta(days=float(os.getenv("SHEET_DAYS") or 30)) if args.sheet else timedelta(hours=args.hours))
     url = (os.getenv("SHEET_URL") or "").strip()
     if args.sheet and not url.startswith(SHEET_PREFIX):
-        if args.if_asked:  # 1분마다 같은 말을 남기지 않음(30분 갱신이 남김)
+        if args.if_asked:  # 1분마다 같은 말을 남기지 않음(5분 갱신이 남김)
             return 0
         print("SHEET_URL 이 비었거나 Apps Script 웹 앱 주소가 아님(노트북에서 bash deploy/ovh.sh sheet url)", file=sys.stderr)
         return 1

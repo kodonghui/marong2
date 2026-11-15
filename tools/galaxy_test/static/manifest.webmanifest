@@ -1,0 +1,14 @@
+{
+  "name": "마롱이 갤럭시 시험",
+  "short_name": "마롱이 시험",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fff8f0",
+  "theme_color": "#fff8f0",
+  "icons": [
+    { "src": "/icon-192.webp", "sizes": "192x192", "type": "image/webp", "purpose": "any" },
+    { "src": "/icon-512.webp", "sizes": "512x512", "type": "image/webp", "purpose": "any" }
+  ]
+}
