@@ -1,5 +1,6 @@
 """디스코드 DM 반응 달기 시험: '[반응 ❤️]' 표시 빼기, 고른 이모지만 달기(한숨 이모티콘 안 됨), 너무 잦지 않게,
-답보다 먼저 달기, 실패해도 답은 감, 기록·로그에 표시나 친구 말이 안 남음, 카카오·선톡에는 안내가 없음.
+답보다 먼저 달기, 실패해도 답은 감, 기록·로그에 표시나 친구 말이 안 남음, 카카오·선톡에는 안내가 없음,
+인터넷 검색과 같이(출처 줄은 그대로, 검색이 꺼져 다시 답할 때도 안내와 반응이 남음).
 진짜 Postgres(pgserver) + 가짜 디스코드 DM + 가짜 Claude. 네트워크·진짜 키·진짜 모델은 쓰지 않는다.
 실행: .venv/bin/python tests/test_reactions.py"""
 import asyncio
@@ -24,6 +25,7 @@ from marong.discord_dm import DiscordAgent, DiscordProactive  # noqa: E402
 from marong.discord_store import DiscordStore  # noqa: E402
 from marong.reactions import GAP_REPLIES, GAP_S, GUIDE, REACTIONS, pick, split  # noqa: E402
 from marong.store import Store  # noqa: E402
+from marong.web_search import GUIDE as WEB_GUIDE, OFF_GUIDE as WEB_OFF_GUIDE, WebSearch  # noqa: E402
 from pg import TestDB  # noqa: E402
 from test_discord_dm import DM_HK, HK, Client, prepare  # noqa: E402
 from test_dm_help import Attachment, Logs, is_caption, png, situation  # noqa: E402
@@ -201,6 +203,81 @@ async def dm_checks(db):
         await kakao.close()
 
 
+# ── 인터넷 검색과 같이 ─────────────────────────────────────
+
+class Refused(Exception):
+    status_code = 400
+
+
+def searches(body) -> bool:
+    return any(t.get("name") == "web_search" for t in body.get("tools", []))
+
+
+async def search_checks(db):
+    settings = replace(load_settings(), proactive=True, timezone="Asia/Seoul")  # as run_discord.py
+    store = DiscordStore(db.app_url, call_bridge=True)
+    await store.open(wait=True)
+    try:
+        url, title = "https://www.weather.go.kr/w/index.do", "서울 날씨 - 기상청"
+        found = [{"type": "server_tool_use", "id": "srvtoolu_1", "name": "web_search", "input": {"query": "서울 날씨"}},
+                 {"type": "web_search_tool_result", "tool_use_id": "srvtoolu_1",
+                  "content": [{"type": "web_search_result", "url": url, "title": title, "encrypted_content": "enc",
+                               "page_age": None}]}]
+        cited = {"type": "text", "text": "맑고 18도래", "citations": [
+            {"type": "web_search_result_location", "url": url, "title": title, "cited_text": "맑음",
+             "encrypted_index": "e"}]}
+        used = {"input_tokens": 100, "output_tokens": 20, "cache_read_input_tokens": 0,
+                "server_tool_use": {"web_search_requests": 1, "web_fetch_requests": 0}}
+        refuse = [False]
+
+        def respond(body):
+            if searches(body) and refuse[0]:
+                return Refused("Error code: 400 - web search is not enabled for this organization")
+            if searches(body):  # the mark comes before the search; the answer is written after it
+                return message([text("[반응 👀] "), *found, text("오늘 서울은 "), cited, text(" 저녁엔 쌀쌀해.")], usage=used)
+            return message([text("[반응 👀]\n지금은 인터넷을 못 찾아봐서 정확히는 몰라")])
+
+        llm = ScriptedLLM(respond)
+        clock = [1000.0]
+        agent = DiscordAgent(settings, store, FakeEmbeddings(), llm, web=WebSearch(per_reply=3, daily=5),
+                             clock=lambda: clock[0])
+        client = Client(agent, store)
+        hk = client.channels[DM_HK]
+        room = f"discord-dm:{HK}"
+
+        def last_reply():
+            return db.admin("SELECT content, meta FROM marong.messages WHERE room_key=%s AND role='assistant' "
+                            "ORDER BY id DESC LIMIT 1", (room,))[0]
+
+        # 9) A searched answer with a reaction: the mark goes, the sources line stays under the answer (DM only).
+        m = Msg(client, 901, "오늘 서울 날씨 어때?")
+        before = len(hk.sent)
+        await client.on_message(m)
+        ok(WEB_GUIDE in situation(llm.bodies[-1]) and TITLE in situation(llm.bodies[-1]), "both guides")
+        answer = "오늘 서울은 맑고 18도래 저녁엔 쌀쌀해."
+        ok(m.pressed == [("👀", before)] and hk.sent[before:] == [f"{answer}\n\n출처: [{title}]({url})"],
+           (m.pressed, hk.sent[before:]))
+        content, meta = last_reply()
+        ok(content == answer and meta["reaction"] == {"emoji": "👀", "ok": True}
+           and meta["sources"] == [{"url": url, "title": title}], (content, meta))
+
+        # 10) The API refuses web search: the retry without it keeps the reaction guide, and the reaction still goes.
+        clock[0] += GAP_S
+        refuse[0] = True
+        m = Msg(client, 902, "내일 날씨는?")
+        before = len(hk.sent)
+        await client.on_message(m)
+        retry = llm.bodies[-1]
+        ok(not searches(retry) and WEB_OFF_GUIDE in situation(retry) and TITLE in situation(retry), "retry guides")
+        ok(m.pressed == [("👀", before)] and hk.sent[before:] == ["지금은 인터넷을 못 찾아봐서 정확히는 몰라"],
+           (m.pressed, hk.sent[before:]))
+        meta = last_reply()[1]
+        ok(meta["reaction"] == {"emoji": "👀", "ok": True} and meta["web_search"] == "off" and "sources" not in meta,
+           meta)
+    finally:
+        await store.close()
+
+
 if __name__ == "__main__":
     mark_checks()
     print("PASS reaction marks: removed from text, only listed emoji (no sigh), Discord's heart form")
@@ -209,6 +286,8 @@ if __name__ == "__main__":
         prepare(db)
         asyncio.run(dm_checks(db))
         print("PASS DM reactions: before the reply, not too often, refused emoji, failures, photos, no guide elsewhere")
+        asyncio.run(search_checks(db))
+        print("PASS reactions with web search: sources line kept, guide and reaction survive a refused-search retry")
     finally:
         db.close()
     print(f"OK {CHECKS} checks")
