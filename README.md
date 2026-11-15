@@ -19,7 +19,7 @@
 5. 친구들끼리는 마롱이를 같이 알아요. 아는 사이인 친구에게는 다른 친구의 가벼운 얘기(취향·하는 일)를, 연인·가족 같은 가까운 사이에게는 요즘 근황(일 사정·힘든 점·기분)까지 해요(아래 '친구들'). 1:1 에서 "나 피자 좋아해"라고 하면 1분쯤 뒤부터 다른 친구가 물어봐도 알아요.
 6. 선톡을 켜면 1:1 친구와 관리자가 켠 단체방에 하루에 두어 번(방마다 따로 정할 수 있어요) 짧은 말 몇 개를 연달아 보내며 먼저 말을 걸어요(아래 '선톡'). 2026-11-05 부터 카카오가 1:1 선톡을 막아서 지금은 단체방에만 가요.
 7. 친구가 사진을 보내면 사진을 보고 반응해요(아래 '사진').
-8. 친구가 공부를 물어보면 같이 풀고 설명해 주고, 살 걸 고민하면 같이 골라 줘요(`prompt.md` 의 '공부 같이 하기'·'같이 고르기'). 디스코드 DM에서는 네이버 쇼핑 검색으로 지금 파는 물건과 가격도 찾아봐요([디스코드 DM 안내](docs/discord-dm.md#같이-고르기네이버-쇼핑-검색)).
+8. 친구가 공부를 물어보면 같이 풀고 설명해 주고, 살 걸 고민하면 같이 골라 줘요(`prompt.md` 의 '공부 같이 하기'·'같이 고르기'). 디스코드 DM에서는 무신사·29CM·지그재그·올리브영 같은 쇼핑몰 상품을 찾아보고, 권할 상품은 그 페이지를 읽어 지금 가격도 확인해요([디스코드 DM 안내](docs/discord-dm.md#같이-고르기쇼핑몰-찾기)).
 9. 디스코드 DM에서는 날씨·뉴스·경기 결과처럼 지금 확인해야 하는 걸 인터넷에서 찾아보고, 찾은 곳 링크를 답 끝에 붙여요(Claude `web_search`, 답마다 3번·하루 40번까지, [디스코드 DM 안내](docs/discord-dm.md#인터넷-검색)). 웹 통화·디스코드 음성 통화에서도 제미나이 내장 구글 검색으로 찾아서 말로 알려 줘요(통화마다 10번, 웹 통화·디스코드 음성 각각 하루 60번까지, [통화 안내](tools/vertex_live/README.md)). 카톡에는 없어요.
 
 ## 기록은 지워지지 않아요
@@ -227,7 +227,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements.txt
 .venv/Scripts/python tests/test_discord_dm.py # 디스코드 DM(requirements-discord.txt 필요): 연결된 계정만·선톡 동의·기억 분리
 .venv/Scripts/python tests/test_schedules.py  # 디스코드 일정·알림: 시각 계산·반복·도구·친구끼리 안 보임·한 번만 보냄·늦음·놓침·다시 보내기
 .venv/Scripts/python tests/test_google_calendar.py  # 구글 캘린더(가짜 구글): 연결 링크·허용·한 번만·일정 보기·친구끼리 안 보임·마롱이 캘린더 넣기·빼기·끊김·끊기·비밀값이 로그에 없음
-.venv/Scripts/python tests/test_dm_help.py    # 말 다듬기('야'·한숨 이모티콘)·디스코드 DM 사진·네이버 쇼핑 검색(가짜 응답)·공부·쇼핑 지시문
+.venv/Scripts/python tests/test_dm_help.py    # 말 다듬기('야'·한숨 이모티콘)·디스코드 DM 사진·쇼핑몰 페이지 읽기(설정·하루 상한·안내·검색과 같이 붙기·꺼졌을 때 다시 답하기)·공부·쇼핑 지시문
 .venv/Scripts/python tests/test_web_search.py # 디스코드 DM 인터넷 검색(가짜 Claude): 도구 하나·답마다·하루 상한·이어 받기(pause_turn)·출처는 보내는 글에만·꺼졌을 때 다시 답하기
 .venv/Scripts/python tests/test_counsel_prompts.py  # 고민·위기 규칙: 글 대화 지시문(디스코드 DM)과 통화 지시문이 같은 원칙(DB 없이 글자만)
 ```
@@ -246,7 +246,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements.txt
 | `marong/google_calendar.py`, `marong/migrations/013_google_calendar.sql`, `deploy/marong-discord-google.conf` | 디스코드 DM 구글 캘린더: 각자 구글 로그인으로 연결, 내 캘린더 보기, 날짜 있는 일정을 '마롱이' 캘린더에 넣기·빼기, 127.0.0.1 의 `/google/` 콜백 |
 | `marong/photo.py` | 사진: 카카오 CDN 주소 알아보기·내려받기, 사진 크기 맞추기(디스코드 DM 첨부도 같이 씀) |
 | `marong/style.py` | 보내기 전 말 다듬기: 이름 없이 '야'로 부르기·한숨 이모티콘 고치기 |
-| `marong/shopping.py`, `deploy/marong-discord-shopping.conf` | 디스코드 DM 네이버 쇼핑 검색 도구(`shop_search`)와 키를 넘기는 systemd drop-in |
+| `marong/shopping.py` | 디스코드 DM 같이 고르기: 쇼핑몰 상품 페이지 읽기(`web_fetch`, 몰 도메인만·하루 상한)와 쇼핑 안내 |
 | `marong/web_search.py` | 디스코드 DM 인터넷 검색: Claude 서버 도구 `web_search` 정의 하나, 답마다·하루(한국 날짜) 상한, 출처 줄 |
 | `marong/store.py`, `marong/schema.sql` | Postgres 저장소와 표·권한 |
 | `marong/embed.py` | 서버 CPU 임베딩(embeddinggemma-300m) |

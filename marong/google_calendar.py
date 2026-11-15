@@ -41,6 +41,7 @@ API = "https://www.googleapis.com/calendar/v3"
 READ_SCOPE = "https://www.googleapis.com/auth/calendar.events.readonly"   # 친구 캘린더 일정 보기
 WRITE_SCOPE = "https://www.googleapis.com/auth/calendar.app.created"      # 마롱이가 만든 캘린더와 그 일정만
 START_PATH, CALLBACK_PATH, HEALTH_PATH = "/google/start", "/google/callback", "/google/healthz"
+HOME_PATH, PRIVACY_PATH = "/google/", "/google/privacy"  # 구글 앱 게시에 필요한 소개·개인정보 처리방침
 DEFAULT_PORT = 8795
 LINK_TTL_S = 15 * 60          # 링크를 받고 구글 허용을 마칠 때까지
 LINK_MARK = "[구글 캘린더 연결 링크]"
@@ -99,6 +100,63 @@ main{max-width:420px;margin:0 auto}h1{font-size:22px;margin:0 0 12px}p{margin:0;
 @media (prefers-color-scheme:dark){body{background:#1d1712;color:#f2e6d8}}
 </style></head><body><main><h1>@TITLE@</h1><p>@BODY@</p></main></body></html>
 """
+DOC = """<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>@TITLE@</title><style>
+:root{color-scheme:light dark}
+body{margin:0;padding:40px 20px;background:#fff8ef;color:#3a2a1c;
+font:16px/1.7 system-ui,-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif}
+main{max-width:640px;margin:0 auto}h1{font-size:23px;line-height:1.4;margin:0 0 16px}h2{font-size:18px;margin:28px 0 8px}
+p,li{word-break:keep-all}p{margin:0 0 10px}ul{margin:0;padding-left:22px}a{color:inherit}code{font-size:14px}
+@media (prefers-color-scheme:dark){body{background:#1d1712;color:#f2e6d8}}
+</style></head><body><main>@BODY@</main></body></html>
+"""
+HOME_HTML = DOC.replace("@TITLE@", "마롱이 · 구글 캘린더 연결").replace("@BODY@", """<h1>마롱이 · 구글 캘린더 연결</h1>
+<p>마롱이는 동희가 친구들과 쓰려고 만든 개인용 디스코드 친구 봇이에요. 디스코드 DM에서 "내일 3시에 알려 줘"처럼 말하면
+일정을 기억했다가 그때 먼저 말을 걸어요.</p>
+<p>구글 캘린더를 연결하면 마롱이가 내 캘린더 일정을 보고(보기만) 답하고, 마롱이에게 말한 날짜 있는 일정은 내 구글 캘린더 안의
+'마롱이' 캘린더에 넣어 줘요. 원래 캘린더의 일정은 고치거나 지우지 못해요.</p>
+<h2>연결하는 법</h2>
+<ul><li>디스코드 DM에서 마롱이에게 "구글 캘린더 연결"이라고 보내면 15분 동안 쓸 수 있는 링크가 와요.</li>
+<li>링크를 열고 구글 화면에서 허용하면 끝이에요.</li>
+<li>그만두려면 "구글 캘린더 끊기"라고 보내요.</li></ul>
+<p style="margin-top:24px"><a href="/google/privacy">개인정보 처리방침</a></p>""")
+PRIVACY_HTML = DOC.replace("@TITLE@", "마롱이 · 개인정보 처리방침").replace("@BODY@", """<h1>마롱이 개인정보 처리방침 (구글 캘린더)</h1>
+<p>시행일: 2026년 11월 15일</p>
+<p>마롱이(동희가 친구들과 쓰려고 만든 개인용 디스코드 봇)가 구글 캘린더를 연결한 사람의 구글 사용자 데이터를 어떻게 다루는지
+적었어요.</p>
+<h2>받는 정보</h2>
+<ul><li><b>내 캘린더 일정 보기</b>(<code>calendar.events.readonly</code>): 기본 캘린더에서 오늘부터 14일 동안의 일정 제목,
+시작·끝 시각, 일정 종류와 취소 여부, 내가 초대를 거절했는지만 읽어요. 일정 설명, 장소, 참석자 이메일은 읽지 않아요.</li>
+<li><b>'마롱이' 캘린더</b>(<code>calendar.app.created</code>): 마롱이가 만든 캘린더 하나와 그 안의 일정만 만들고 고치고
+지워요.</li>
+<li>구글이 주는 연결 토큰과 내가 허용한 권한.</li></ul>
+<h2>쓰는 곳</h2>
+<ul><li>디스코드 DM에서 마롱이가 답할 때 내 일정을 참고해요.</li>
+<li>마롱이에게 말한 날짜 있는 일정을 '마롱이' 캘린더에 넣고, 취소하면 빼요.</li>
+<li>광고, 판매, AI 모델 학습 같은 다른 목적으로는 쓰지 않아요.</li></ul>
+<h2>넘기는 곳</h2>
+<p>마롱이의 답을 만들려고, 답할 때마다 일정 제목과 시각이 대화 문맥으로 AI 모델(Anthropic Claude)에 전달돼요. 그 밖의 곳에
+팔거나 넘기지 않아요.</p>
+<h2>남기는 것</h2>
+<ul><li>마롱이 서버의 데이터베이스에 연결 토큰, 허용한 권한, 연결 상태, '마롱이' 캘린더 번호를 둬요. 토큰은 서버에만 있는 앱
+비밀값이 있어야 쓸 수 있어요.</li>
+<li>구글 캘린더 일정 자체는 저장하지 않아요. 답할 때 5분 동안만 메모리에 두고 버려요.</li>
+<li>마롱이와 나눈 대화는 다른 대화처럼 대화 기록에 남아요. 마롱이가 답에서 일정을 말하면 그 대화도 남고, 이 기록은 마롱이를
+관리하는 동희가 볼 수 있어요(기록 시트 포함).</li></ul>
+<h2>지우기와 그만두기</h2>
+<ul><li>디스코드 DM에서 "구글 캘린더 끊기"라고 보내면 구글에 허용 취소를 보내고 저장한 토큰을 지워요.</li>
+<li>구글 계정 설정의 보안에 있는 '서드 파티 앱 및 서비스 연결'에서도 언제든 마롱이의 허용을 지울 수 있어요.</li>
+<li>'마롱이' 캘린더는 내 구글 계정에 남아요. 필요 없으면 구글 캘린더에서 직접 지우면 돼요.</li></ul>
+<h2>보호</h2>
+<p>연결 화면은 마롱이 통화와 같은 로그인(Cloudflare Access) 뒤에 있고, 마롱이 서버는 구글과 암호화된 연결(HTTPS)로만
+이야기해요. 연결 토큰과 일회용 코드는 로그와 대화 기록에 남기지 않아요.</p>
+<h2>구글 정책</h2>
+<p>마롱이가 구글 API에서 받은 정보를 쓰고 다른 앱에 넘기는 방식은 제한적 사용(Limited Use) 요건을 포함한
+<a href="https://developers.google.com/terms/api-services-user-data-policy">Google API 서비스 사용자 데이터 정책</a>을
+따라요.</p>
+<h2>문의</h2>
+<p>궁금한 점은 디스코드에서 동희에게 물어봐 주세요. 이 방침을 바꾸면 이 페이지의 시행일을 고쳐요.</p>""")
 HEADERS = {
     "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
@@ -540,7 +598,8 @@ def page(outcome: str) -> web.Response:
 
 
 def web_app(google: GoogleCalendar) -> web.Application:
-    """/google/start(구글 허용 화면으로), /google/callback(구글이 돌려보내는 곳), /google/healthz."""
+    """/google/start(구글 허용 화면으로), /google/callback(구글이 돌려보내는 곳), /google/healthz,
+    /google/(소개)·/google/privacy(개인정보 처리방침): 구글 콘솔의 앱 홈페이지·개인정보처리방침 주소."""
     async def start(request):
         target = google.consent_url(request.query.get("s", ""))
         if target is None:
@@ -559,10 +618,18 @@ def web_app(google: GoogleCalendar) -> web.Application:
     async def health(request):
         return web.Response(text="ok", headers=HEADERS)
 
+    async def home(request):
+        return web.Response(text=HOME_HTML, content_type="text/html", charset="utf-8", headers=HEADERS)
+
+    async def privacy(request):
+        return web.Response(text=PRIVACY_HTML, content_type="text/html", charset="utf-8", headers=HEADERS)
+
     app = web.Application(client_max_size=1024)
     app.router.add_get(START_PATH, start, allow_head=False)
     app.router.add_get(CALLBACK_PATH, callback, allow_head=False)
     app.router.add_get(HEALTH_PATH, health)
+    app.router.add_get(HOME_PATH, home)
+    app.router.add_get(PRIVACY_PATH, privacy)
     return app
 
 
