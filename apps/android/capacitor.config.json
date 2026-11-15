@@ -1,0 +1,21 @@
+{
+  "appId": "com.corthexhq.marong",
+  "appName": "마롱이",
+  "webDir": "www",
+  "server": {
+    "url": "https://marong.corthex-hq.com",
+    "cleartext": false,
+    "errorPath": "error.html"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "appendUserAgent": "MarongApp/0.1.0"
+  },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "css",
+      "style": "DARK",
+      "initialViewportFitValueHint": "cover"
+    }
+  }
+}

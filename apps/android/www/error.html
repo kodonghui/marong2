@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>마롱이 · 연결 확인</title>
+  <!-- SCR-102: shown by the app when the call site cannot be reached. Self-contained on purpose:
+       only this one file is served from the app (https://localhost/error.html). -->
+  <style>
+    :root {
+      --page: #121729; --surface: #1c2340; --text: #f4f1ea; --muted: #b4b2c6;
+      --accent: #e8a35c; --on-accent: #121729; --star: #f6d57a;
+      font-family: "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+    }
+    * { box-sizing: border-box }
+    body {
+      margin: 0; min-height: 100vh; min-height: 100svh; display: grid; place-items: center;
+      background: var(--page); color: var(--text); -webkit-font-smoothing: antialiased;
+      padding: calc(24px + env(safe-area-inset-top)) 28px calc(24px + env(safe-area-inset-bottom));
+    }
+    main { width: 100%; max-width: 360px; text-align: center }
+    .star { color: var(--star); font-size: 28px; line-height: 1; margin: 0 0 18px }
+    h1 { font-size: 22px; line-height: 1.45; margin: 0 0 10px; word-break: keep-all }
+    p { color: var(--muted); font-size: 15px; line-height: 1.7; margin: 0 0 28px; word-break: keep-all }
+    button {
+      min-width: 180px; min-height: 52px; border: 0; border-radius: 26px; padding: 0 28px;
+      background: var(--accent); color: var(--on-accent); font: inherit; font-size: 16px; font-weight: 700;
+    }
+    button:active { transform: scale(.97) }
+    button:focus-visible { outline: 3px solid var(--star); outline-offset: 3px }
+    .note { font-size: 13px; margin: 18px 0 0 }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="star" aria-hidden="true">✦</div>
+    <h1>마롱이한테 연결하지 못했어</h1>
+    <p id="reason">인터넷 연결을 확인하고 다시 시도해 줘.</p>
+    <button id="retry" type="button">다시 시도</button>
+    <p class="note" id="note" role="status" aria-live="polite"></p>
+  </main>
+  <script>
+    'use strict';
+    const callSite = 'https://marong.corthex-hq.com/';
+    const retry = document.getElementById('retry');
+    const note = document.getElementById('note');
+    function go() {
+      retry.disabled = true;
+      note.textContent = '다시 연결하는 중이야…';
+      location.replace(callSite);
+    }
+    retry.addEventListener('click', go);
+    window.addEventListener('online', go);
+    if (navigator.onLine) {
+      document.getElementById('reason').textContent = '마롱이 쪽이 잠깐 쉬고 있는 것 같아. 조금 있다가 다시 시도해 줘.';
+    }
+  </script>
+</body>
+</html>

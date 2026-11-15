@@ -1,0 +1,18 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">마롱이</string>
+    <string name="title_activity_main">마롱이</string>
+    <string name="package_name">com.corthexhq.marong</string>
+    <string name="custom_url_scheme">com.corthexhq.marong</string>
+
+    <string name="call_channel_name">통화 중 표시</string>
+    <string name="call_channel_description">마롱이와 통화하는 동안 화면을 꺼도 통화가 이어지게 보여 주는 알림이에요.</string>
+    <string name="call_notification_title">마롱이와 통화 중</string>
+    <string name="call_notification_text">누르면 통화 화면으로 돌아가요.</string>
+    <string name="call_notification_hang_up">끊기</string>
+
+    <string name="mic_denied_title">마이크가 꺼져 있어요</string>
+    <string name="mic_denied_message">마롱이와 목소리로 이야기하려면 설정의 권한에서 마이크를 허용해 주세요.</string>
+    <string name="mic_denied_open_settings">설정 열기</string>
+    <string name="mic_denied_close">닫기</string>
+</resources>

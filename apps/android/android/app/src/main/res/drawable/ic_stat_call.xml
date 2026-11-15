@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Same handset as the call button in tools/vertex_live/static/index.html. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M6.7,3.5 L9,7.8 l-2.1,2.1 c1.3,3 3.2,4.9 6.2,6.2 l2.1,-2.1 4.3,2.3 c0.7,0.4 1,1.2 0.7,1.9 -0.7,1.8 -2.1,2.8 -4.2,2.3 C9.4,19 5,14.6 3.5,8 c-0.5,-2.1 0.5,-3.5 2.3,-4.2 0.2,-0.1 0.6,-0.2 0.9,-0.3 Z" />
+</vector>
