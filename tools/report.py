@@ -309,6 +309,10 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         meta = m["meta"] or {}
         if m["role"] == "user":
             return "친구 말"
+        if meta.get("reminder"):
+            return "알림(부탁한 일정)"
+        if meta.get("google") == "connected":
+            return "알림(구글 캘린더 연결)"
         if meta.get("proactive"):
             return "선톡"
         if meta.get("late"):
@@ -320,6 +324,10 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         return "답장"
 
     def no_memory(meta):
+        if meta.get("reminder"):
+            return "알림(검색 안 함)"
+        if meta.get("google"):
+            return "구글 캘린더(검색 안 함)"
         return "기억 없이(늦음·오류)" if meta.get("late") or meta.get("error") else UNRECORDED
 
     def used(m):
@@ -392,7 +400,9 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         memory = meta.get("memory")
         asked = ref_msgs.get(m["reply_to"]) if m["reply_to"] else None
         base = [m["id"], at(m["created_at"]), room(m["room_key"]),
-                (asked or {}).get("content") if m["reply_to"] else ("(선톡)" if meta.get("proactive") else None),
+                (asked or {}).get("content") if m["reply_to"] else ("(선톡)" if meta.get("proactive") else
+                                                                    "(부탁한 알림)" if meta.get("reminder") else
+                                                                    "(구글 캘린더 연결)" if meta.get("google") else None),
                 cut(m["content"], REPLY_CHARS)]
         if memory is None:
             rows.append(base + [no_memory(meta), None] + blank)

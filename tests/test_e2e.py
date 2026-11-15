@@ -182,7 +182,7 @@ async def main():
     assert text_of(CALLBACKS[0]) == "안녕! 너 이름이 뭐야? 🙂", text_of(CALLBACKS[0])
     b = chats()[-1]["body"]
     assert b["model"] == "claude-haiku-5-5" and b["output_config"] == {"effort": "xhigh"} and b["max_tokens"] == 16000, b
-    assert b["tools"][0]["name"] == "set_name" and b["system"][0]["cache_control"] == {"type": "ephemeral"}
+    assert b["tools"][0]["name"] == "set_name" and b["system"][0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
     assert chats()[-1]["version"], "anthropic-version 헤더"
     checks += 1
 

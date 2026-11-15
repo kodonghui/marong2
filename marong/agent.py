@@ -8,7 +8,8 @@
 저장소나 임베딩이 고장 나도 답은 보낸다(그 기억만 빠짐). prompt.md·knowledge/ 는 메시지마다 다시 읽는다.
 답마다 어떤 기억을 넣었는지(최근 대화 범위·요약·메모 id, 임베딩 검색 후보와 넣은 것)를 마롱이 답의 meta.memory 에 남긴다.
 사진은 받자마자 Claude 에게 보여 짧은 설명을 받아 '[사진] 설명'으로 저장하고, 그 사진에 답할 때는 사진 자체도 보여 준다.
-채팅으로 기록을 지우는 기능은 없다. '초기화'·'처음부터'도 보통 말로 받는다."""
+채팅으로 기록을 지우는 기능은 없다. '초기화'·'처음부터'도 보통 말로 받는다.
+보내기 전에 친구들이 싫다고 한 버릇(이름 없이 '야'로 부르기, 한숨 이모티콘)을 style.tidy 로 한 번 더 고친다."""
 import asyncio
 import json
 import logging
@@ -16,13 +17,15 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
+from .cache_warm import hour_writes
 from .config import PER_DAY_MAX, Settings
 from .embed import Embeddings
 from .fmt import now_line, short_key, short_time
 from .knowledge import load_knowledge
-from .llm import LLM, brief, text_of
+from .llm import LLM, SERVER_BLOCKS, brief, server_tool_counts, text_of
 from .photo import Photo
 from .store import Store, speaker_label
+from .style import tidy
 
 log = logging.getLogger("agent")
 
@@ -37,7 +40,7 @@ EMPTY_NUDGE = "방금 답이 글로 나오지 않았어. 생각한 내용을 바
 
 MAX_INPUT_CHARS = 2000
 NAME_MAX = 20
-MAX_STEPS = 4            # 도구 쓰기·빈 답 다시 쓰기를 합친 Claude 호출 횟수 상한
+MAX_STEPS = 4            # 도구 쓰기·빈 답 다시 쓰기·웹 검색 이어 받기(pause_turn)를 합친 Claude 호출 횟수 상한
 MIN_BUDGET_S = 15        # 콜백 토큰(5분) 남은 시간이 이보다 적으면 Claude 를 부르지 않음
 RECENT_SUMMARIES = 3
 RECALL_CANDIDATES = 12
@@ -52,7 +55,8 @@ CAPTION_PROMPT = ("친구가 카카오톡으로 보낸 사진이야. 대화 기�
                   "어디·언제쯤 같은지, 중요한 글자가 있으면 그 글자를 한두 문장, 200자 안쪽으로. 사람은 무엇을 하는지만 쓰고 "
                   "생김새를 평가하지 마. 설명만 써.")
 PHOTO_PROBLEMS = {"big": "(사진이 너무 커서 못 열었어)", "type": "(사진이 아닌 파일이라 못 열었어)",
-                  "error": "(사진이 안 열렸어)", "caption": "(사진은 왔는데 설명을 못 남겼어)"}
+                  "error": "(사진이 안 열렸어)", "caption": "(사진은 왔는데 설명을 못 남겼어)",
+                  "many": "(한 번에 사진이 너무 많아서 나머지는 못 열었어)"}
 
 SET_NAME_TOOL = {
     "name": "set_name",
@@ -105,7 +109,8 @@ ASK_OWNER_TOOL = {
 # 선톡: 친구가 아무 말도 안 했는데 마롱이가 먼저 보낼 말을 만들 때 '지금 상황' 끝에 붙이는 안내
 PROACTIVE_GUIDE = """# 먼저 말 걸기
 - 이번엔 마롱이가 먼저 카톡을 보내는 거야(마롱이는 이 친구에게 하루 {per_day}번쯤 이렇게 먼저 말을 걸어). 친구에게 보낼 말만 써.
-- 사람이 카톡을 연달아 보내듯 짧은 말 2~3개를 빈 줄로 나눠 써(많아야 4개). 빈 줄로 나눈 말은 몇 초 간격으로 따로 가. 말 하나는 한 문장 안팎으로 짧게(예: '야 뭐해' / '나 방금 군밤 사 왔는데 엄청 뜨거워 🌰' / '너는 점심 먹었어?').
+- 사람이 카톡을 연달아 보내듯 짧은 말 2~3개를 빈 줄로 나눠 써(많아야 4개). 빈 줄로 나눈 말은 몇 초 간격으로 따로 가. 말 하나는 한 문장 안팎으로 짧게(예: '뭐 해?' / '나 방금 군밤 사 왔는데 엄청 뜨거워 🌰' / '너는 점심 먹었어?').
+- '야', '야!'로 부르거나 말을 시작하지 마(친구가 싫어해). 부르고 싶으면 '친구' 줄의 이름으로 불러(이름이 민준이면 '민준아').
 - 질문은 하나만 해.
 - 기억 메모·요약·최근 대화에 이어 갈 얘기가 있으면 하나만 골라 자연스럽게 물어봐(예: 시험 본다던 친구에게 시험 어땠는지). 없으면 지금 시각에 맞게 마롱이 일상이나 취향 얘기로 가볍게 시작해. 매번 같은 얘기(밥, 간식)로 시작하지 말고 최근 선톡과 다른 얘기로 해.
 - 최근 대화에서 이미 물어보거나 꺼낸 얘기를 또 하지 마. 마롱이가 먼저 보낸 말에 아직 답이 없으면 그 얘기는 다시 꺼내지 말고 다른 가벼운 얘기로 해.
@@ -119,7 +124,7 @@ LINKED_GUARD = ("- 단체방이라 다른 사람도 이 방에 있을 수 있어
 PROACTIVE_GROUP_GUIDE = """# 단체방에 먼저 말 걸기
 - 이번엔 마롱이가 이 단체방에 먼저 카톡을 보내는 거야(동희가 정한 방이라 하루 {per_day}번쯤 이렇게 먼저 말을 걸어). 방 사람 모두가 봐. 방에 보낼 말만 써.
 - 사람이 카톡을 연달아 보내듯 짧은 말 2~3개를 빈 줄로 나눠 써(많아야 4개). 빈 줄로 나눈 말은 몇 초 간격으로 따로 가. 말 하나는 한 문장 안팎으로 짧게.
-- 다 같이에게 말해도 되고, 이 방에서 말한 친구 한 명을 이름으로 불러도 돼. 질문은 하나만 해.
+- 다 같이에게 말해도 되고, 이 방에서 말한 친구 한 명을 이름으로 불러도 돼. '야', '야!'로 부르거나 말을 시작하지는 마. 질문은 하나만 해.
 - 이 방의 기억 메모·요약·최근 대화에 이어 갈 얘기가 있으면 하나만 골라 자연스럽게 꺼내. 없으면 지금 시각에 맞게 마롱이 일상이나 취향 얘기로 가볍게 시작해. 매번 같은 얘기(밥, 간식)로 시작하지 말고 최근 선톡과 다른 얘기로 해.
 - 이 방에서 나온 얘기만 해. 1:1 에서 들은 얘기, 한 사람만 아는 얘기, 비밀, 건강·몸·돈, 연애 속사정은 꺼내지 마.
 - 최근 대화에서 이미 물어보거나 꺼낸 얘기를 또 하지 마. 마롱이가 먼저 보낸 말에 아직 답이 없으면 그 얘기는 다시 꺼내지 말고 다른 가벼운 얘기로 해.
@@ -149,6 +154,10 @@ def clean_name(raw) -> str:
 
 
 class Agent:
+    caption_prompt = CAPTION_PROMPT
+    warmer = None  # cache_warm.CacheWarmer: 캐시를 쓴 요청의 앞부분을 받아 조용할 때도 캐시를 유지(디스코드 봇이 켬)
+    route = None  # deepseek.Route: 정한 방은 Claude 대신 DeepSeek 로 답함(디스코드 봇이 켬, MARONG_DEEPSEEK_ROOMS)
+
     def __init__(self, settings: Settings, store: Store, embeddings: Embeddings, llm: LLM, on_saved=None):
         self.s = settings
         self.store = store
@@ -189,7 +198,7 @@ class Agent:
             return EMPTY_TEXT
         saved_meta = None
         if msg.photo is not None:  # 기록은 고칠 수 없어서 사진 설명을 먼저 받아 '[사진] 설명'으로 저장
-            text, saved_meta = await self._caption(msg.photo)
+            text, saved_meta = await self._caption(msg.photo, msg.room_key)
         person, user_id, db_ok = None, None, True
         try:
             person = await self.store.touch(msg.room_key, msg.is_channel, msg.user_key)
@@ -227,8 +236,11 @@ class Agent:
         else:
             reply, meta = await self._reply(msg, person, user_id, text, min(self.s.llm_timeout_s, budget - 5),
                                             use_memory=db_ok, held=held)
-        for k in [k for k in self._photos if k[0] == msg.room_key and user_id is not None and k[1] <= user_id]:
-            del self._photos[k]  # 답한 사진은 이제 '[사진] 설명'으로만 기억
+        self._forget_photos(msg.room_key, user_id)
+        reply, fixes = tidy(reply, (person or {}).get("name") if msg.is_channel else None)
+        if fixes:
+            meta = {**meta, "tidy": fixes}
+            log.info("tidy %s", ",".join(fixes))
         ok = await send(reply)
         if db_ok:
             try:
@@ -268,7 +280,14 @@ class Agent:
             meta["memory"] = memory
         return reply, meta
 
-    async def _caption(self, photo: Photo) -> tuple[str, dict]:
+    def _llm_for(self, room_key: str | None):
+        """(이 방에 답할 LLM, DeepSeek 모델 이름 또는 None=Claude)."""
+        route = self.route
+        if route is not None and route.answers(room_key):
+            return route.llm, route.model
+        return self.llm, None
+
+    async def _caption(self, photo: Photo, room_key: str | None = None) -> tuple[str, dict]:
         """사진 메시지로 저장할 글('[사진] 설명')과 meta(image: 종류·크기·설명에 쓴 토큰, 못 열었으면 problem)."""
         block = photo.block()
         if block is None:
@@ -276,10 +295,10 @@ class Agent:
             return f"{PHOTO_MARK} {PHOTO_PROBLEMS.get(problem, PHOTO_PROBLEMS['error'])}", {"image": {"problem": problem}}
         info: dict = {"type": photo.media, "bytes": len(photo.data or b"")}
         body = {"model": self.s.anthropic_model, "max_tokens": 4000, "output_config": {"effort": "low"},
-                "messages": [{"role": "user", "content": [block, {"type": "text", "text": CAPTION_PROMPT}]}]}
+                "messages": [{"role": "user", "content": [block, {"type": "text", "text": self.caption_prompt}]}]}
         caption = ""
         try:
-            resp = await self.llm.create(body, CAPTION_TIMEOUT_S)
+            resp = await self._llm_for(room_key)[0].create(body, CAPTION_TIMEOUT_S)
             info["tokens"] = [resp.usage.input_tokens or 0, resp.usage.output_tokens or 0]
             if resp.stop_reason != "refusal":
                 caption = " ".join(text_of(resp).split())[:400]
@@ -320,9 +339,7 @@ class Agent:
             circle = await self.store.friend_circle(msg.user_key, FRIENDS_SHOWN + OTHERS_SHOWN)
         except Exception as e:  # 친구들을 못 모아도 이 방 기억으로 답함
             log.warning("friends_error %s", brief(e))
-        first = held or user_id  # 이번에 답하는 말들의 사진만 다시 보여 줌
-        photos = {i: b for (room, i), b in self._photos.items()
-                  if room == msg.room_key and first is not None and i >= first}
+        photos = self._shown_photos(msg.room_key, held or user_id)
         messages = self._messages(rows, group=not msg.is_channel or self._merged(person), photos=photos)
         if not rows or rows[-1]["id"] != user_id:  # 저장이 안 됐어도 지금 말은 꼭 넣음
             messages.append({"role": "user", "content": self._current(msg, person, text)})
@@ -356,6 +373,15 @@ class Agent:
             except Exception as e:
                 log.warning('call_memory_unavailable %s',type(e).__name__)
         return self._system(situation), messages, memory
+
+    def _shown_photos(self, room_key: str, first: int | None) -> dict[int, dict]:
+        """답할 때 다시 보여 줄 사진(메시지 id → 사진 블록): 이번에 답하는 말들(first 부터)의 사진만."""
+        return {i: b for (room, i), b in self._photos.items() if room == room_key and first is not None and i >= first}
+
+    def _forget_photos(self, room_key: str, user_id: int | None) -> None:
+        """답한 사진은 이제 '[사진] 설명'으로만 기억한다."""
+        for k in [k for k in self._photos if k[0] == room_key and user_id is not None and k[1] <= user_id]:
+            del self._photos[k]
 
     def _pick(self, hits: list[dict]) -> list[dict]:
         good = [h for h in hits if h["content"] and h["similarity"] >= self.s.recall_min_similarity]
@@ -543,11 +569,13 @@ class Agent:
         return lines
 
     def _system(self, situation: str) -> list[dict]:
-        """앞쪽(성격·말투)은 메시지마다 같아서 캐시하고, 뒤쪽(지금 상황·기억)만 매번 바뀐다."""
+        """앞쪽(성격·말투)은 메시지마다 같아서 캐시하고, 뒤쪽(지금 상황·기억)만 매번 바뀐다.
+        캐시 수명은 ANTHROPIC_CACHE_TTL(기본 1시간). 친구 말·선톡 사이가 5분~1시간인 때가 많아 5분이면 거의 매번 새로 쓴다."""
         blocks = []
         persona = self.persona()
         if persona:
-            blocks.append({"type": "text", "text": persona, "cache_control": {"type": "ephemeral"}})
+            mark = {"type": "ephemeral", "ttl": "1h"} if self.s.cache_ttl == "1h" else {"type": "ephemeral"}
+            blocks.append({"type": "text", "text": persona, "cache_control": mark})
         blocks.append({"type": "text", "text": situation})
         return blocks
 
@@ -556,6 +584,14 @@ class Agent:
     def _tools(self, msg: Incoming) -> list[dict]:
         """설정을 바꾸는 도구는 없다(set_name 은 친구 자신의 이름, ask_owner 는 관리자에게 남기기만 함)."""
         return [SET_NAME_TOOL, ASK_OWNER_TOOL]
+
+    def _cache_used(self, body: dict, usage, meta: dict) -> None:
+        """1시간 수명으로 쓴 캐시 토큰을 meta 에 따로 세고(5분 쓰기와 값이 다름), 캐시 유지에 이 요청의 앞부분을 알린다."""
+        hour = hour_writes(usage)
+        if hour:
+            meta["cache_write_1h_tokens"] = meta.get("cache_write_1h_tokens", 0) + hour
+        if self.warmer is not None:
+            self.warmer.seen(body, usage)
 
     def _body(self, system: list[dict], messages: list[dict], tools: list[dict]) -> dict:
         body = {"model": self.s.anthropic_model, "max_tokens": self.s.llm_max_tokens, "system": system,
@@ -566,19 +602,35 @@ class Agent:
             body["output_config"] = {"effort": self.s.anthropic_effort}
         return body
 
+    def _server_tools_used(self, msg: Incoming, resp, searches: int, fetches: int) -> None:
+        """서버 도구(웹 검색·웹 가져오기) 블록이나 사용 횟수가 있는 응답마다 불린다. 하루 횟수·출처는 DM 쪽이 센다."""
+
     async def ask(self, system: list[dict], messages: list[dict], msg: Incoming, end: float,
                   tools: list[dict] | None = None) -> tuple[str, dict]:
         """도구(set_name 등) 처리까지 해서 친구에게 보낼 글과 기록용 meta 를 돌려준다.
-        tools 를 안 주면 이 방에서 쓸 수 있는 도구 전부, [] 면 도구 없이."""
+        tools 를 안 주면 이 방에서 쓸 수 있는 도구 전부, [] 면 도구 없이.
+        웹 검색(서버 도구)은 Anthropic 서버가 한 응답 안에서 돌린다. 오래 걸리면 pause_turn 으로 멈추는데, 받은 응답을
+        그대로 assistant 로 돌려 보내면(새 user 말 없이) 이어서 답한다. 검색한 횟수는 meta.web_searches·web_fetches."""
         loop = asyncio.get_running_loop()
         tools = self._tools(msg) if tools is None else tools
         convo = list(messages)
-        meta = {"model": self.s.anthropic_model, "effort": self.s.anthropic_effort or None, "calls": 0,
+        llm, deepseek = self._llm_for(msg.room_key)
+        meta = {"model": deepseek or self.s.anthropic_model,
+                "effort": (self.route.effort or None) if deepseek else (self.s.anthropic_effort or None), "calls": 0,
                 "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0}
-        earlier: list[str] = []  # 도구를 부르기 전에 쓴 글(마지막 답이 비면 이걸 보냄)
+        # 마지막 답 전에 쓴 글. 도구를 부르기 전 말('잠깐 볼게')은 마지막 답이 있으면 버리고(비면 이걸 보냄),
+        # 웹 검색 결과를 보고 쓴 글(True)은 답의 일부라 마지막 답 앞에 그대로 남긴다.
+        said: list[tuple[str, bool]] = []
         nudged = False
         for _ in range(MAX_STEPS):
-            resp = await self.llm.create(self._body(system, convo, tools), end - loop.time())
+            body = self._body(system, convo, tools)
+            resp = await llm.create(body, end - loop.time())
+            served = getattr(resp, "served_model", None)
+            if deepseek and served and served != deepseek:  # DeepSeek 가 안 돼서 Claude 가 대신 답함: 이번 답은 끝까지 Claude
+                llm, deepseek = self.llm, None
+                meta.update(model=served, effort=self.s.anthropic_effort or None, fallback="deepseek")
+            if not deepseek:  # DeepSeek 요청은 Claude 캐시 유지에 넣지 않음
+                self._cache_used(body, resp.usage, meta)
             meta["calls"] += 1
             meta["stop_reason"] = resp.stop_reason
             usage = resp.usage
@@ -586,30 +638,44 @@ class Agent:
             meta["output_tokens"] += usage.output_tokens or 0
             meta["cache_read_tokens"] += getattr(usage, "cache_read_input_tokens", None) or 0
             meta["cache_write_tokens"] += getattr(usage, "cache_creation_input_tokens", None) or 0
+            searches, fetches = server_tool_counts(usage)
+            if searches:
+                meta["web_searches"] = meta.get("web_searches", 0) + searches
+            if fetches:
+                meta["web_fetches"] = meta.get("web_fetches", 0) + fetches
+            server = any(b.type in SERVER_BLOCKS for b in resp.content)
+            if server or searches or fetches:
+                self._server_tools_used(msg, resp, searches, fetches)
             if resp.stop_reason == "refusal":
                 details = getattr(resp, "stop_details", None)
                 meta["refusal"] = getattr(details, "category", None)
                 log.info("refusal category=%s", meta["refusal"])
                 return REFUSAL_TEXT, meta
             text = text_of(resp)
+            if resp.stop_reason == "pause_turn":
+                if text:
+                    said.append((text, True))
+                # 생각·검색 블록까지 받은 그대로 돌려줘야 이어서 답함(손대거나 '계속' 같은 말을 더하면 안 됨)
+                convo = [*convo, {"role": "assistant", "content": resp.content}]
+                continue
             if resp.stop_reason == "tool_use":
                 if text:
-                    earlier.append(text)
+                    said.append((text, server))
                 results = [await self._run_tool(b, msg) for b in resp.content if b.type == "tool_use"]
                 # 생각 블록까지 응답 그대로 돌려줘야 함(손대면 400)
                 convo = [*convo, {"role": "assistant", "content": resp.content}, {"role": "user", "content": results}]
                 continue
             if text:
-                return text, meta
-            if earlier:
-                return "\n\n".join(earlier), meta
+                return "\n\n".join([t for t, keep in said if keep] + [text]), meta
+            if said:
+                return "\n\n".join(t for t, _ in said), meta
             if resp.stop_reason == "max_tokens":
                 log.warning("stop_reason=max_tokens 인데 글이 없음 → LLM_MAX_TOKENS 를 늘리거나 effort 를 낮출 것")
             if nudged:
                 break
             convo = [*convo, {"role": "system", "content": EMPTY_NUDGE}]
             nudged = True
-        return ("\n\n".join(earlier) if earlier else FALLBACK_TEXT), meta
+        return ("\n\n".join(t for t, _ in said) if said else FALLBACK_TEXT), meta
 
     async def _run_tool(self, block, msg: Incoming) -> dict:
         result = {"type": "tool_result", "tool_use_id": block.id}
@@ -712,6 +778,10 @@ class Agent:
         if text in (FALLBACK_TEXT, REFUSAL_TEXT) or not text.strip():
             log.info("proactive_skipped room=%s refusal=%s", short_key(room["room_key"]), meta.get("refusal"))
             return None
+        text, fixes = tidy(text.strip(), room.get("name") if room.get("is_channel", True) else None)
+        if fixes:
+            meta["tidy"] = fixes
+            log.info("tidy %s", ",".join(fixes))
         meta["memory"] = {"recent": [rows[0]["id"], rows[-1]["id"]] if rows else [],
                           "summaries": [x["id"] for x in summaries], "notes": [n["id"] for n in notes]}
         return text.strip(), meta

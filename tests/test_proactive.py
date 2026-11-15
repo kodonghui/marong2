@@ -255,7 +255,7 @@ async def main():
            "대상 친구 모두에게, 오래 조용한 친구부터")
         b = llm.bodies[-2]
         ok("tools" not in b and b["messages"] == [{"role": "user", "content": PROACTIVE_TRIGGER}]
-           and b["output_config"] == {"effort": "xhigh"} and b["system"][0]["cache_control"] == {"type": "ephemeral"},
+           and b["output_config"] == {"effort": "xhigh"} and b["system"][0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"},
            "선톡은 도구 없이, 같은 말투 지시문(캐시)과 effort")
         sit = situation(b)
         ok(PROACTIVE_GUIDE.format(per_day=2) in sit and "이름 없이 말해" in sit and "# 최근 대화" in sit

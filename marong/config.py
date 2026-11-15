@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 EFFORTS = ("", "low", "medium", "high", "xhigh", "max")
+CACHE_TTLS = ("5m", "1h")  # Claude 프롬프트 캐시 수명. 둘뿐이고(24시간은 없음) 읽을 때마다 처음부터 다시 셈
 PER_DAY_MAX = 48  # 방 하나의 하루 선톡 수 상한(admin schedule·ask_owner 의 per_day). schema.sql 의 rooms.proactive_per_day CHECK 와 같게
 
 
@@ -63,6 +64,9 @@ class Settings:
     proactive_hours: tuple[int, int]  # 이 시간에만 보냄(한국 시각, 시작 시 이상 끝 시 미만)
     # 방마다 따로 정한 일정(rooms.proactive_per_day·start·end)이 있으면 위 두 값 대신 그것을 씀(tools/admin.py schedule)
     proactive_daily_max: int       # 하루에 보내는 선톡 상한(모든 친구 합, 연달아 보낸 말 묶음이 한 번. 카카오 전송 API 는 하루 1,000건)
+    # 성격(prompt.md+knowledge) 앞부분 캐시 수명. 1h 는 쓰기가 입력의 2배(5m 은 1.25배)지만 친구 말 사이가 5분~1시간인 때가
+    # 많아서 5m 이면 거의 매번 새로 씀. 읽기(0.1배)는 수명을 처음부터 다시 셈
+    cache_ttl: str = "1h"
 
     def problems(self) -> list[str]:
         """실행 전에 비어 있거나 잘못된 값을 알려 준다(값 자체는 출력하지 않음)."""
@@ -84,6 +88,8 @@ class Settings:
             out.append("PROACTIVE_HOURS 는 '12-21' 처럼 시작-끝 시(0~24, 시작이 끝보다 앞)")
         if self.proactive_per_day < 1 or self.proactive_daily_max < 1:
             out.append("PROACTIVE_PER_DAY·PROACTIVE_DAILY_MAX 는 1 이상")
+        if self.cache_ttl not in CACHE_TTLS:
+            out.append("ANTHROPIC_CACHE_TTL 은 5m 또는 1h")
         return out
 
     def anthropic_keys(self) -> list[tuple[str, str]]:
@@ -122,4 +128,5 @@ def load_settings() -> Settings:
         proactive_per_day=int(_env("PROACTIVE_PER_DAY", "2")),
         proactive_hours=_hours(_env("PROACTIVE_HOURS", "12-21")),
         proactive_daily_max=int(_env("PROACTIVE_DAILY_MAX", "60")),
+        cache_ttl=_env("ANTHROPIC_CACHE_TTL", "1h").lower(),
     )

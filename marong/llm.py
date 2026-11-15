@@ -17,9 +17,31 @@ def brief(e: Exception | None) -> str:
     return f"{type(e).__name__}{f' {status}' if status else ''}: {str(e)[:200]}"
 
 
+# 서버 도구(웹 검색·웹 가져오기)는 Anthropic 서버가 돌리고, 그 호출과 결과가 응답 블록으로 같이 온다
+SERVER_BLOCKS = {"server_tool_use", "web_search_tool_result", "web_fetch_tool_result"}
+
+
 def text_of(resp) -> str:
-    """응답의 글(text) 블록만 이어 붙인다. 생각(thinking) 블록이 앞에 올 수 있어 종류로 고른다."""
-    return "".join(b.text for b in resp.content if b.type == "text").strip()
+    """응답의 글(text) 블록만 이어 붙인다. 생각(thinking) 블록이 앞에 올 수 있어 종류로 고른다.
+    인용이 붙은 글은 블록 여러 개로 쪼개져 오므로 그대로 잇고, 서버 도구(웹 검색) 블록을 사이에 둔 글만 빈 줄로 나눈다."""
+    parts, run = [], []
+    for b in resp.content:
+        if b.type == "text":
+            run.append(b.text)
+        elif b.type in SERVER_BLOCKS and run:
+            parts.append("".join(run))
+            run = []
+    parts.append("".join(run))
+    return "\n\n".join(p.strip() for p in parts if p.strip())
+
+
+def server_tool_counts(usage) -> tuple[int, int]:
+    """이 응답에서 서버가 한 (웹 검색, 웹 가져오기) 횟수. usage.server_tool_use 가 없으면 (0, 0)."""
+    used = getattr(usage, "server_tool_use", None)
+    if used is None:
+        return 0, 0
+    get = used.get if isinstance(used, dict) else (lambda key, default=None: getattr(used, key, default))
+    return int(get("web_search_requests", 0) or 0), int(get("web_fetch_requests", 0) or 0)
 
 
 class LLM:
