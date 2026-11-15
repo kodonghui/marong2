@@ -10,7 +10,9 @@ from typing import TypedDict
 import aiohttp
 from langgraph.graph import StateGraph,START,END
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
+from psycopg_pool import AsyncConnectionPool
 
 from call_memory import MemoryStore,Principal,normalized,quoted
 from vertex_transport import PROJECT,google_headers
@@ -138,11 +140,20 @@ class Organizer:
                 await c.execute(f"DELETE FROM call_graph.{table} WHERE thread_id IN(SELECT 'call:'||id::text FROM call.calls WHERE organized_at<now()-interval '7 days')")
 
 
+def checkpoint_pool(dsn):
+    # One long-lived checkpoint connection never recovers after PostgreSQL
+    # restarts (unattended upgrades did this on 2026-11-14), so every later job
+    # failed until the service was restarted. The pool tests a connection
+    # before each use and replaces one the server has closed.
+    return AsyncConnectionPool(dsn+" options='-c search_path=call_graph,public'",min_size=1,max_size=2,open=False,
+        check=AsyncConnectionPool.check_connection,kwargs={'autocommit':True,'prepare_threshold':0,'row_factory':dict_row})
+
+
 async def main():
     os.environ['LANGCHAIN_TRACING_V2']='false';os.environ['LANGSMITH_TRACING']='false'
     dsn=os.environ['MARONG_CALL_DSN'];store=MemoryStore(dsn);await store.open()
-    graph_dsn=dsn+" options='-c search_path=call_graph,public'"
-    async with AsyncPostgresSaver.from_conn_string(graph_dsn) as saver:
+    async with checkpoint_pool(dsn) as pool:
+        saver=AsyncPostgresSaver(pool)
         await saver.setup();worker=Organizer(store);graph=worker.graph(saver);last_sweep=0
         while True:
             try:

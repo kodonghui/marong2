@@ -64,6 +64,7 @@ node tools/vertex_live/test_fallback.cjs
 node tools/vertex_live/test_rtc_watchdog.cjs
 python tools/vertex_live/test_midcall.py
 python tools/vertex_live/test_call_report.py  # isolated restored test database only
+python tools/vertex_live/test_organizer_reconnect.py  # isolated restored test database only
 ```
 
 On the server, `test_rtc.py` uses the private SFU with synthetic audio to check actual encrypted media delivery under 400 ms burst jitter. It sends no Kakao messages and does not use private conversation content.
