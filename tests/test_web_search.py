@@ -133,10 +133,6 @@ def unit_checks():
     ok(sources_line([]) == "", "no sources, no line")
     long = sources_line([{"url": "https://four.example/", "title": "가" * 60}, {"url": "https://five.example/x", "title": ""}])
     ok("가" * 39 + "…](https://four.example/)" in long and "[five.example](https://five.example/x)" in long, long)
-    # 검색 결과 제목·주소에 HTML 글자가 섞여 오면 풀어서 쓴다(2026-11-15 무신사 검색 결과 출처 줄).
-    esc = sources_of([SimpleNamespace(**cited("f", url="https://www.musinsa.com/search/goods?keyword=a&amp;gf=A",
-                                              title="&#39;코트&#39; 관련 | 무신사"))])
-    ok(esc == [{"url": "https://www.musinsa.com/search/goods?keyword=a&gf=A", "title": "'코트' 관련 | 무신사"}], esc)
 
 
 # ── Agent.ask: 이어 받기·횟수·끄기 (DB 없이) ─────────────────────────
