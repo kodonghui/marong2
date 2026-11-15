@@ -1,5 +1,6 @@
 """구글 캘린더 시험: 진짜 Postgres(pgserver) + 가짜 구글(OAuth·캘린더 API, httpx.MockTransport) + 가짜 디스코드·Claude.
 연결 명령과 링크(기록에는 표시만), /google/start → 구글 허용 화면(PKCE S256, 권한 2개) → /google/callback(한 번만, 만료),
+소개·개인정보 처리방침 페이지(/google/, /google/privacy),
 토큰 저장과 DM 알림, 답할 때 구글 일정(14일, 캐시, 거절·근무 위치 제외, 제목은 자료로), 친구끼리 안 보임, schedule_list,
 '마롱이' 캘린더에 넣기·빼기(두 번 안 들어감, 실패 쉬었다 다시, 캘린더가 지워지면 새로), 토큰이 거부되면 끊김 표시, 다시 연결,
 일부 권한만 허용, 거절, 끊기(구글 쪽 취소), 설정이 없을 때, 지우기 권한 없음, 리포트 표시, 로그에 비밀값 없음.
@@ -384,6 +385,21 @@ async def flow_checks(db):
             consent_url = r.headers["Location"]
         code, returned_state = fake.consent(consent_url, "hk")
         ok(returned_state == state, "state round trip")
+
+        # 3b) The home page and privacy policy Google needs for publishing open without a link, read-only and plain.
+        for path, words in (("/google/", ("마롱이 · 구글 캘린더 연결", "구글 캘린더 연결", 'href="/google/privacy"')),
+                            ("/google/privacy", ("개인정보 처리방침", "calendar.events.readonly", "calendar.app.created",
+                                                 "Anthropic Claude", "구글 캘린더 끊기", "Limited Use",
+                                                 "api-services-user-data-policy"))):
+            async with web.get(path, allow_redirects=False) as r:
+                body = await r.text()
+                ok(r.status == 200 and r.content_type == "text/html" and all(w in body for w in words)
+                   and r.headers["Content-Security-Policy"].startswith("default-src 'none'")
+                   and r.headers["Cache-Control"] == "no-store" and "<script" not in body, (path, r.status))
+        async with web.post("/google/privacy") as r:
+            ok(r.status == 405, f"POST privacy {r.status}")
+        async with web.get("/google/nothing") as r:
+            ok(r.status == 404, f"unknown path {r.status}")
 
         # 4) The callback stores the link once, tells the friend in their DM and never works twice.
         async with web.get("/google/callback", params={"state": state, "code": code, "scope": "x"}) as r:
