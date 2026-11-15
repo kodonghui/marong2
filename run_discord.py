@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from marong.cache_warm import CacheWarmer
 from marong.config import load_dotenv, load_settings
+from marong.deepseek import from_env as deepseek_route
 from marong.discord_dm import DiscordAgent, DiscordDM, DiscordProactive, DiscordReminders
 from marong.discord_store import DiscordStore
 from marong.embed import Embeddings
@@ -67,6 +68,9 @@ async def main():
     store = DiscordStore(settings.database_url, call_bridge=True)
     store.discord_context_enabled = False
     llm = LLM(settings)
+    # Text replies via DeepSeek in the rooms MARONG_DEEPSEEK_ROOMS lists ("*" = all; empty = Claude only). Web search and
+    # shop page reads are delegated to Claude. A bad setting or a missing key logs an error and keeps Claude.
+    route = deepseek_route(os.environ, credentials, llm, settings.anthropic_model)
     emb = Embeddings(settings.embed_model, settings.embed_cache_dir)
     # During parallel operation the Kakao process already maintains these tables.
     standalone = os.getenv("MARONG_DISCORD_MEMORY_WORKER") == "1"
@@ -88,6 +92,7 @@ async def main():
             tasks.append(asyncio.create_task(worker.run()))
         agent = DiscordAgent(settings, store, emb, llm, on_saved=worker.kick if worker else None,
                              first_replies=first_replies, google=google, shop=shop, web=web)
+        agent.route = route
         if warm:
             agent.warmer = CacheWarmer(llm, settings.timezone)
             tasks.append(asyncio.create_task(agent.warmer.run()))
@@ -112,6 +117,8 @@ async def main():
             await worker_store.close()
         await store.close()
         await llm.close()
+        if route:
+            await route.llm.close()
 
 
 if __name__ == "__main__":
