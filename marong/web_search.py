@@ -11,6 +11,7 @@
   도구 없이 다시 답한다(off).
 - 검색어와 결과는 로그에 남기지 않는다(횟수만). 출처(주소·제목)는 답 기록 meta 와 친구에게 보내는 글 끝에만 넣고,
   대화 기록 글에는 넣지 않는다(마롱이가 주소를 따라 쓰지 않게)."""
+import html
 import logging
 import time
 from datetime import datetime
@@ -55,14 +56,15 @@ def _url(raw) -> str | None:
 
 
 def sources_of(content) -> list[dict]:
-    """응답 블록에서 출처를 순서대로 모은다: 글의 웹 검색 인용, 그리고 성공한 web_fetch 결과(쇼핑 상품 페이지 등)."""
+    """응답 블록에서 출처를 순서대로 모은다: 글의 웹 검색 인용, 그리고 성공한 web_fetch 결과(쇼핑 상품 페이지 등).
+    검색 결과 제목·주소에 HTML 글자(&#39;, &amp; 등)가 섞여 오면 풀어서 쓴다."""
     out, seen = [], set()
 
     def add(url, title):
-        url = _url(url)
+        url = _url(html.unescape(str(url or "")))
         if url and url not in seen:
             seen.add(url)
-            out.append({"url": url, "title": " ".join(str(title or "").split())[:200]})
+            out.append({"url": url, "title": " ".join(html.unescape(str(title or "")).split())[:200]})
 
     for block in content or []:
         kind = _get(block, "type")
