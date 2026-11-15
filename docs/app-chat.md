@@ -1,6 +1,6 @@
 # 마롱이 앱 2단계: 글 대화와 선톡·일정 알림
 
-상태: 설계 초안(2026-11-15, Claude). 구현 전이에요. 동희님 검토, Firebase 준비물, 서버 변경 확인이 필요해요(11절).
+상태: 설계 초안(2026-11-15, Claude). 구현 전이에요. 동희님 검토, Firebase 준비물, 서버 변경 확인이 필요해요(11절). 3단계 '마롱이가 먼저 거는 전화'는 [app-ring.md](app-ring.md)예요.
 1단계 [안드로이드 앱](android-app.md)에 이어 D17·D18을 CORTHEX 02~08·10·12단계로 이 문서 하나에 모았어요. ID는 1단계 다음 번호(REQ-111, FL-105, SPEC-110, SCR-107, TASK-111, TC-119)부터 쓰고, 표는 TBL-101, API는 API-101부터 써요. API 계약 원본은 [api/app-chat.openapi.yaml](../api/app-chat.openapi.yaml)이에요. 서버 코드는 일정·알림(PR #14)과 DM 도우미(PR #17)가 고친 디스코드 DM 봇 위에 붙어요.
 
 목표: 안드로이드 앱을 깐 사람은 선톡과 일정 알림을 앱 알림으로 받고, 알림을 누르면 앱 안 글 대화에서 바로 답해요. 앱이 없거나 알림을 끄면 지금처럼 디스코드 DM으로 받아요. 마롱이 성격과 기억은 바꾸지 않아요.
@@ -23,7 +23,7 @@
 - **앱 알림**: 선톡, 일정 알림, 글 대화 화면을 닫은 뒤 온 마롱이 답. 누르면 글 대화가 열려요.
 - **보내는 곳 고르기(D18)**: 알림 받을 기기가 있으면 앱으로만, 없으면 디스코드 DM으로 보내요.
 
-하지 않는 것(이번 단계): 글 대화에서 사진 보내기, 구글 캘린더 연결·끊기(둘 다 디스코드 DM에서), 마롱이가 먼저 거는 전화, iOS 앱·웹 푸시, 디스코드 DM이 없는 친구의 글 대화, 읽음 표시와 안 읽은 수, 폰이 알림을 실제로 띄웠는지 확인하기(10절).
+하지 않는 것(이번 단계): 글 대화에서 사진 보내기, 구글 캘린더 연결·끊기(둘 다 디스코드 DM에서), 마롱이가 먼저 거는 전화(3단계 [app-ring.md](app-ring.md)), iOS 앱·웹 푸시, 디스코드 DM이 없는 친구의 글 대화, 읽음 표시와 안 읽은 수, 폰이 알림을 실제로 띄웠는지 확인하기(10절).
 
 글 대화를 어디에 붙일지:
 
@@ -145,10 +145,10 @@ flowchart LR
 | SPEC-119 일정 알림 보내는 곳 | `DiscordReminders.deliver`에서 알림 받을 기기가 있으면 FCM으로 보내요(`kind: reminder`, 채널 `marong_reminder`, `ttl`은 3시간에서 늦은 만큼 뺀 값, 최소 60초). 저장 메시지의 `transport`는 실제로 간 길이에요. | 3시간 넘게 늦은 알림은 지금처럼 놓침이에요. 앱이 실패하면 디스코드 DM, 둘 다 실패하면 지금처럼 `failed`(1분 뒤 다시). | TC-128 | REQ-111, REQ-112 |
 | SPEC-120 답 알림 | 앱에서 온 말(`kakao_id`가 `app:`)에 대한 답이 저장될 때 그 친구의 기다리는 요청(SPEC-114)이 하나도 없으면, 알림 받을 기기로 보내요(`kind: reply`, 채널 `marong_talk`, `ttl` 1시간). | 실패해도 디스코드로 보내지 않아요. 답은 글 대화 기록에 있어요. | TC-129 | REQ-119 |
 | SPEC-121 앱의 알림 받기 | `com.google.firebase:firebase-messaging:26.0.1`(2026-10-21, minSdk 24), Google 서비스 Gradle 플러그인, Git 밖의 `google-services.json`을 써요. 매니페스트에 `firebase_messaging_installation_id_enabled=true`, 기본 채널 `marong_talk`, 기본 아이콘 `ic_stat_marong`(단색 얼굴), 애널리틱스 끔(`firebase_analytics_collection_enabled=false`)을 넣어요. 앱이 시작할 때 채널 두 개를 만들어요: '마롱이 톡'(`marong_talk`, 기본 중요도: 소리, 머리 알림 없음)과 '일정 알림'(`marong_reminder`, 높은 중요도: 머리 알림). `FirebaseMessaging.register()`를 부르고 `onRegistered(fid)`로 받은 FID를 앱 저장소에 둬요. `installId`(UUID)는 처음 한 번 만들고, 1단계처럼 백업하지 않아요. | 앱이 앞에 있을 때 온 알림(`onMessageReceived`)은 글 대화 화면이 보이면 띄우지 않고, 아니면 같은 채널·모양으로 띄워요. 구글 Play 서비스가 없으면 등록이 실패하고 FID 없이 보고해 디스코드로 받아요. | TC-133, TC-135 | REQ-111, REQ-113, REQ-118 |
-| SPEC-122 알림 누르기 | 알림의 `open` 값이 정확히 `/chat/`일 때만 앱 창에 통화 주소 + `/chat/`을 열어요. 앱이 꺼져 있었으면 시작하면서, 켜져 있으면 새 인텐트로 받아요. | 다른 값은 무시하고 평소처럼 열어요. Access 세션이 끝났으면 로그인 화면이 먼저 나와요. 글 대화 주소가 5xx면 1단계 연결 실패 화면이고, '다시 시도'는 지금처럼 통화 주소로 가요. | TC-134, TC-135 | REQ-113 |
+| SPEC-122 알림 누르기 | 알림의 `open` 값이 정확히 `/chat/`일 때만 앱 창에 통화 주소 + `/chat/`을 열어요(3단계에서 못 받은 전화 알림용 `/`를 더해요, [app-ring.md](app-ring.md) SPEC-134). 앱이 꺼져 있었으면 시작하면서, 켜져 있으면 새 인텐트로 받아요. | 다른 값은 무시하고 평소처럼 열어요. Access 세션이 끝났으면 로그인 화면이 먼저 나와요. 글 대화 주소가 5xx면 1단계 연결 실패 화면이고, '다시 시도'는 지금처럼 통화 주소로 가요. | TC-134, TC-135 | REQ-113 |
 | SPEC-123 페이지 스크립트의 기기 보고 | 1단계 페이지 스크립트(통화 주소의 모든 페이지)에 더해요. 새 앱 연결 `MarongPush.state()`로 `{installId, fid, notifications}`를 읽어, 지난 보고와 달라졌거나 12시간이 지났으면 `PUT /chat/api/devices/{installId}`를 보내요. 새 FID가 오면(`registered` 이벤트) 바로 다시 보내요. 글 대화 화면이 보이고 숨을 때 `chatVisible`을 알리고, 보이면 톡·일정 알림을 지워요(통화 알림은 그대로). | 브라우저(앱 밖)에서는 아무것도 하지 않아요. 보고가 실패하면 다음에 페이지를 열 때 다시 해요. | TC-123, TC-133 | REQ-111, REQ-120 |
 | SPEC-124 글 대화 화면 | `/chat/`의 HTML·JS·CSS 세 파일을 봇이 같이 내보내요(외부 글꼴·CDN 없음, 통화 화면과 같은 색·글꼴·낮밤 규칙). 처음 열면 최근 30개와 맨 아래를 보이고, 위로 올리면 앞 대화를 불러요. 마롱이 말은 왼쪽(얼굴 `/face/v1/01-neutral.webp`), 내 말은 오른쪽, 날짜가 바뀌면 날짜 줄이 들어가요. 디스코드에서 온 내 말에는 작은 '디스코드', 선톡과 일정 알림에는 '먼저 톡'·'일정 알림' 표시를 달아요. 글은 `textContent`로만 넣고 주소만 링크로 바꿔요(앱 밖 주소는 폰 브라우저로). 입력칸은 2,000자, 엔터는 줄 바꿈, 보내기는 높이 52px 버튼이에요. 보낸 말은 바로 '보내는 중'으로 보여요. 머리에는 '마롱이', 전화 버튼(`/`로), 메뉴(SCR-109). 통화 화면 머리에는 '글 대화' 링크를 더하고 `GET /chat/api/me`가 200일 때만 보여요. | 보내기가 실패하면 '못 보냄 · 다시 보내기'(같은 clientId). API 요청이 Access 로그인으로 넘어가면(`redirect: 'manual'`의 opaque 응답) 화면을 새로 불러 로그인으로 가요. 401·403·429는 SCR-107 상태로 보여요. | TC-132 | REQ-113, REQ-115, REQ-120 |
-| SPEC-125 표와 마이그레이션 | `marong/migrations/014_app_chat.sql`(PR #14의 012, PR #17의 013 다음)이 TBL-101 `marong.app_devices`를 만들고, 봇 계정(`marong`)에 그 표의 읽기·더하기·고치기와 `call.caller_logins`의 두 칸(`email_sha256`, `caller_id`)만 읽기를 줘요. 이메일을 가린 표시(`email_hint`)는 못 봐요. 메시지는 기존 `marong.messages`에 그대로 쌓여요(앱에서 온 말은 `kakao_id`가 `app:`, 앱으로 간 알림은 `meta.transport = "app"`). | 지우기 권한은 주지 않아요. 기기를 끊을 때는 FID만 비워요. | TC-124, TC-130 | REQ-114, REQ-117 |
+| SPEC-125 표와 마이그레이션 | `marong/migrations/014_app_chat.sql`(PR #14의 012·013 다음)이 TBL-101 `marong.app_devices`를 만들고, 봇 계정(`marong`)에 그 표의 읽기·더하기·고치기와 `call.caller_logins`의 두 칸(`email_sha256`, `caller_id`)만 읽기를 줘요. 이메일을 가린 표시(`email_hint`)는 못 봐요. 메시지는 기존 `marong.messages`에 그대로 쌓여요(앱에서 온 말은 `kakao_id`가 `app:`, 앱으로 간 알림은 `meta.transport = "app"`). | 지우기 권한은 주지 않아요. 기기를 끊을 때는 FID만 비워요. | TC-124, TC-130 | REQ-114, REQ-117 |
 | SPEC-126 로그와 기록 시트 | 로그에는 결과 이름과 개수만 남겨요(예: `app_chat_sent`, `fcm_send kind=proactive result=UNREGISTERED devices=1`). 글, FID, installId, 이메일, Access 토큰, OAuth 토큰은 남기지 않아요. 기록 시트(`tools/report.py`)는 같은 'Discord DM' 방에 두고, 앱에서 온 말과 앱으로 간 알림의 종류 칸에 '(앱)'을 붙여요. | 없음 | TC-131 | REQ-118 |
 | SPEC-127 비밀 다루기 | 서비스 계정 키는 서버의 `/etc/marong-discord/fcm-service-account.json`(root:root 600)에서 systemd `LoadCredential`로만 읽어요. 그 계정의 역할은 'Firebase Cloud Messaging API Admin' 하나예요. `google-services.json`은 프로젝트 파일 폴더에 두고 빌드 때만 `android/app/`에 복사하며, `.gitignore`가 막아요. | 키 파일이 없으면 FCM을 끄고 디스코드로만 보내요(SPEC-116). | TC-133 | REQ-122 |
 
@@ -218,7 +218,7 @@ COMMIT;
 | TASK-114 | FCM 보내기(서비스 계정 인증, 오류 처리)와 가짜 FCM 서버 시험 | 대기 |
 | TASK-115 | 선톡·일정 알림·답의 보내는 곳 고르기(D18), PR #14·#17 코드 위 | 대기 |
 | TASK-116 | 글 대화 화면(SCR-107·109)과 통화 화면 '글 대화' 링크 | 대기 |
-| TASK-117 | 앱 0.2.0: Firebase 등록, 알림 채널·아이콘, 앱 연결 `MarongPush`, 누르기 처리, 페이지 스크립트 기기 보고 | 대기 |
+| TASK-117 | 앱 0.2.0: Firebase 등록, 알림 채널·아이콘, 앱 연결 `MarongPush`, 누르기 처리, 페이지 스크립트 기기 보고. 3단계 벨(TASK-126)도 같은 0.2.0에 넣어요 | 대기 |
 | TASK-118 | 배포: systemd drop-in(`deploy/marong-discord-app.conf`), 설정 이름, 터널 경로, 되돌리기 문서 | 대기 |
 | TASK-119 | 시험: 자동(서버·페이지·JVM·브라우저), 에뮬레이터(시험용 Firebase), 실제 폰 | 대기 |
 | TASK-120 | 동희님 준비물 받기와 서버 반영(확인 뒤) | 대기 |
@@ -292,3 +292,4 @@ COMMIT;
 1. 서버에 글 대화만 켜요(FCM 키 없음). 브라우저와 1단계 앱에서 글 대화를 써 봐요. 선톡·일정 알림은 아직 디스코드예요(SPEC-116).
 2. 앱 0.2.0(알림 등록)을 깔아요. 기기 등록만 쌓이고 보내는 곳은 아직 디스코드예요.
 3. FCM 키를 넣고 봇을 다시 시작해요. 그때부터 알림 받을 기기가 있는 사람은 앱으로 받아요(D18).
+4. 3단계(마롱이가 먼저 거는 전화)는 [app-ring.md](app-ring.md) 12절 순서로 이어요.
