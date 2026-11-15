@@ -255,7 +255,8 @@ class MemoryStore:
                 VALUES(%s,%s,%s,%s,%s,now(),now(),%s,%s,%s) RETURNING id""",(call_id,segment,seq,role,content,key,finalized,interrupted))
             return (await cur.fetchone())['id']
 
-    async def finish(self,p,call_id,explicit,*,entrypoint=None,client_id=None):
+    async def finish(self,p,call_id,explicit,*,entrypoint=None,client_id=None,reason=None):
+        # reason 'close_requested': Marong ended the call because the friend asked.
         async with self.pool.connection() as c,c.transaction():
             row=await self._owned(c,p,call_id)
             if entrypoint is not None and row['entrypoint'] != entrypoint:
@@ -263,7 +264,8 @@ class MemoryStore:
             if client_id is not None and str(row['client_id']) != client_id:
                 return
             if row['status']=='ended':return
-            await c.execute("UPDATE call.segments SET state='closed',closed_at=now(),close_reason=%s WHERE call_id=%s AND state<>'closed'",('user_hangup' if explicit else 'connection_lost',call_id))
+            close=reason if explicit and reason=='close_requested' else 'user_hangup' if explicit else 'connection_lost'
+            await c.execute("UPDATE call.segments SET state='closed',closed_at=now(),close_reason=%s WHERE call_id=%s AND state<>'closed'",(close,call_id))
             if explicit:
                 await c.execute("UPDATE call.calls SET status='ended',ended_at=now(),end_reason='hangup',organize_status='pending',organize_next_at=now() WHERE id=%s",(call_id,))
             else:await c.execute("UPDATE call.calls SET status='resting',last_beat_at=now() WHERE id=%s",(call_id,))

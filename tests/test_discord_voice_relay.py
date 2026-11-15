@@ -26,6 +26,23 @@ GUILD, CHANNEL = '100000000000000021', '100000000000000022'
 OTHER_GUILD, OTHER_CHANNEL = '100000000000000023', '100000000000000024'
 
 
+class HangupUpstream(Upstream):
+    """The owner asks to end the call; Marong says goodbye and calls end_call mid-turn."""
+    async def send_json(self, data):
+        await super().send_json(data)
+        if 'audio' in data.get('realtimeInput', {}) and not getattr(self, 'asked', False):
+            self.asked = True
+            goodbye = base64.b64encode(b'\x00\x01' * 480).decode()
+            await self.queue.put({'serverContent': {'inputTranscription': {'text': '나 이제 끊을게', 'finished': True}}})
+            await self.queue.put({'serverContent': {
+                'outputTranscription': {'text': '응, 알겠어. 또 얘기하자!'},
+                'modelTurn': {'parts': [{'inlineData': {'mimeType': 'audio/pcm;rate=24000', 'data': goodbye}}]}}})
+            await self.queue.put({'toolCall': {'functionCalls': [{'id': 'bye', 'name': 'end_call', 'args': {}}]}})
+        for response in data.get('toolResponse', {}).get('functionResponses', []):
+            self.answer = response['response']
+            await self.queue.put({'serverContent': {'turnComplete': True}})
+
+
 class AudioUpstream(Upstream):
     async def send_json(self, data):
         await super().send_json(data)
@@ -150,7 +167,32 @@ async def check(db, temp, module):
                          if row[2].startswith('Discord 통화')]
                 assert {row[3]: color for row, color in voice} == {'동희': '#d9ead3', '마롱이': '#e8f0fe'}
                 assert len({row[0] for row, _ in voice}) == len(voice) == 2
-            print('PASS two Discord identities, separate room gates and memory, web/Discord ownership, PCM round trip and report')
+            # The bot that can leave the room asks for the hang-up tool; the owner's request ends the call.
+            assert [d['name'] for d in settings['tools'][0]['functionDeclarations']] == ['recall', 'current_time']
+            # The relay passes its process search budget: Google Search is on next to the functions (call_search.py).
+            assert settings['tools'][1:] == [{'googleSearch': {}}], settings['tools']
+            hang = HangupUpstream()
+            with patch.object(module, 'google_headers', AsyncMock(return_value={})), \
+                 patch('live_session.ClientSession', lambda **_: HTTP(hang)):
+                async with http.ws_connect('http://localhost/live', headers={**headers, 'X-Marong-Hangup': '1'}) as ws:
+                    hang_id = (await event(ws, 'ready'))['callId']
+                    names = [d['name'] for d in hang.sent[0]['setup']['tools'][0]['functionDeclarations']]
+                    assert names == ['recall', 'current_time', 'end_call'], names
+                    await ws.send_bytes(b'\x00\x01' * 320)
+                    order = []
+                    while 'hangup' not in order:
+                        message = await ws.receive(timeout=5)
+                        order.append('bytes' if message.type is aiohttp.WSMsgType.BINARY else json.loads(message.data)['type'])
+                    assert hang.answer['result'] == 'ending'
+                    assert order.index('bytes') < order.index('audio_end') < order.index('hangup'), order
+                    await ws.send_bytes(b'\x00\x01' * 320)
+                    await ws.send_json({'type': 'stop'})
+                    await ws.receive(timeout=3)
+            assert json.dumps(hang.sent).count('audio/pcm;rate=16000') == 1, 'microphone reached Vertex after the goodbye'
+            assert (await store.detail(person, hang_id))['status'] == 'ended'
+            assert db.admin('SELECT close_reason FROM call.segments WHERE call_id=%s', (hang_id,)) == [('close_requested',)]
+            print('PASS two Discord identities, separate room gates and memory, web/Discord ownership, PCM round trip and report, '
+                  'owner-requested hang-up (end_call only with X-Marong-Hangup, goodbye before hangup, close_requested)')
     finally:
         await runner.cleanup()
         await store.close()

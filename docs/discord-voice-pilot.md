@@ -8,6 +8,7 @@
 - TASK-002 ← SPEC-035~037, API-013~015. 전용 UID가 접근하는 Unix 소켓의 `/live`와 `/end`로 싱가포르 서버의 기존 Vertex Live 코드를 실행한다. 한국어 `ko-KR`와 목소리 `Sulafat`를 쓴다. 운영 브라우저의 음성 연결과는 별도 프로세스다.
 - TASK-003 ← SPEC-038~039. `006_discord_shared_callers.sql`은 Discord DM과 웹을 같은 사람의 caller에 연결한다. Discord 릴레이는 `MARONG_DISCORD_VOICE_ROOMS`의 사용자·서버·음성방 조합과 DB 연결이 모두 맞아야 통화를 시작한다. 웹과 Discord가 같은 caller로 새 연결을 동시에 열면 먼저 시작한 통화가 유지된다. 반대쪽 연결이 이미 끊긴 경우 그 기록을 닫고 새 통화를 시작한다.
 - TASK-004 ← SPEC-039~040. `call.calls.entrypoint`와 `call.transport_events.mode`에 Discord를 기록한다. 연구용 시트는 5분 타이머에서 기존 발화 ID와 색상 규칙으로 표시한다. Discord 재접속은 웹 전송 전환 수에 포함되지 않는다.
+- 끊기 부탁 ← SPEC-041. 사용자가 이 통화를 끊어 달라거나 꺼 달라고 하면 마롱이가 한 문장으로 인사하고, 봇은 인사를 다 들려준 뒤 음성방에서 나간다. 사용자가 방에 남아 있는 동안은 다시 들어오지 않고, 방을 나갔다 다시 들어오면 새 통화를 건다. 봇을 다시 시작하면 이 상태는 지워져 방에 있는 사용자에게 다시 들어간다. 봇이 `X-Marong-Hangup: 1`을 보내지 않으면 릴레이는 끊기 도구를 주지 않는다.
 
 ## 점검과 운영
 
