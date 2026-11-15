@@ -17,7 +17,7 @@ from .photo import MAX_DOWNLOAD, Photo, prepare
 from .proactive import PART_GAP_S, Proactive, parts, schedule, slot
 from .schedules import (GUIDE as SCHEDULE_GUIDE, LATE_LIMIT, SCHEDULE_TOOL_NAMES, SCHEDULE_TOOLS, occurrence,
                         parse_when, reminder_text, run_tool as run_schedule_tool, schedule_lines)
-from .shopping import GUIDE as SHOP_GUIDE, SHOP_TOOL
+from .shopping import guide as shop_guide
 from .style import tidy
 
 log = logging.getLogger("marong.discord")
@@ -57,7 +57,6 @@ class DiscordIncoming(Incoming):
     google_events: list | None = None     # upcoming Google events shown to the model (None: not read)
     google_more: bool = False
     link_url: str | None = None           # replaces LINK_MARK in the sent text only, never in the history
-    shopping: list = field(default_factory=list)  # shop_search results, kept in the reply meta
 
 
 def proactive_preference(text: str) -> bool | None:
@@ -115,14 +114,15 @@ class DiscordAgent(Agent):
         super().__init__(settings, store, embeddings, llm, on_saved=on_saved)
         self.first_replies = first_replies or {}
         self.google = google  # GoogleCalendar when the Google client is set up on this server
-        self.shop = shop      # shopping.ShopSearch when the Naver keys are set, else None (no tool)
+        self.shop = shop      # shopping.ShopFetch: reads shopping-mall product pages (web_fetch), None = off
         self.clock = clock
         self._answered_photos = OrderedDict()  # (room, message id) -> (photo block, when it was answered)
 
     def _tools(self, msg):
         # Identity and opt-in never change on model output. Only the friend's own schedule does.
         tools = list(SCHEDULE_TOOLS) if getattr(msg, "friend_id", None) else []
-        return tools + ([SHOP_TOOL] if self.shop is not None else [])
+        fetch = self.shop.tool() if self.shop is not None else None  # None once today's page reads are used up
+        return tools + ([fetch] if fetch else [])
 
     def _shown_photos(self, room_key, first):
         # A photo already answered stays visible for a while, so "then what about question 5?" still sees the page.
@@ -166,8 +166,12 @@ class DiscordAgent(Agent):
             lines += ["", SCHEDULE_GUIDE] + schedule_lines(msg.schedule_rows, msg.schedule_total, tz, now)
             if self.google:
                 lines += calendar_lines(msg.google_link, msg.google_events, msg.google_more, tz, now)
-        if self.shop is not None:
-            lines += ["", SHOP_GUIDE]
+        # The shopping guide follows the tools this reply really gets: search is the shared web_search, page reads
+        # are the mall-only web_fetch. With neither, prompt.md's rule applies (no made-up prices).
+        names = {t.get("name") for t in self._tools(msg)}
+        shop = shop_guide(search="web_search" in names, fetch="web_fetch" in names)
+        if shop:
+            lines += ["", shop]
         return "\n".join(lines)
 
     @staticmethod
@@ -259,12 +263,6 @@ class DiscordAgent(Agent):
 
     async def _run_tool(self, block, msg):
         result = {"type": "tool_result", "tool_use_id": block.id}
-        if block.name == SHOP_TOOL["name"] and self.shop is not None:
-            content, action = await self.shop.run(block.input or {})
-            if isinstance(msg, DiscordIncoming):
-                msg.shopping.append(action)
-            out = {**result, "content": content}
-            return {**out, "is_error": True} if action["result"] == "error" else out
         friend_id = getattr(msg, "friend_id", None)
         if block.name not in SCHEDULE_TOOL_NAMES or not friend_id:
             return {**result, "content": f"{block.name} 도구는 없어.", "is_error": True}
@@ -309,8 +307,8 @@ class DiscordAgent(Agent):
         reply, meta = await super()._reply(msg, person, user_id, text, timeout, use_memory, held)
         if msg.actions:
             meta["schedule"] = msg.actions
-        if msg.shopping:
-            meta["shop"] = msg.shopping
+        if self.shop is not None:
+            self.shop.note(meta)  # counts today's page reads from usage (web_fetch_requests); no URLs or text kept
         return reply, meta
 
 
