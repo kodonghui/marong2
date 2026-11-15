@@ -50,6 +50,17 @@ DM에 사진을 붙여 보내면 카톡과 같은 방식으로 본다. 받자마
 
 공부를 물어보면 다른 앱이나 검색으로 넘기지 않고 친구로서 같이 푼다. 답만 말하지 않고 왜 그런지 짚고, 먼저 풀어 보고 싶어 하면 힌트부터 준다. 법 조문·판례·숫자처럼 정확해야 하는 건 확실한 것만 말하고, 자신 없으면 교재에서 확인해 보라고 한다. "퀴즈 내 줘"라고 하면 한 문제씩 낸다. 문제집 사진은 위 '사진'대로 본다. 지시는 `prompt.md`의 '공부 같이 하기'에 있어 카톡에도 같다.
 
+## 인터넷 검색
+
+날씨·뉴스·경기 결과·영업시간처럼 지금 확인해야 하는 걸 물으면 마롱이가 인터넷에서 찾아보고 친구 말투로 짧게 알려 준다. 찾은 곳은 답 끝에 `출처:` 링크로 붙는다(3개까지). 수다·고민 얘기에는 찾지 않는다. 카톡에는 없다.
+
+- 방식: Claude의 서버 도구 `web_search`(`web_search_20250305`, 기본 검색). 검색은 Anthropic 서버가 돌리고 결과와 인용이 답과 같이 온다. 위치는 한국(`Asia/Seoul`)으로만 알려 준다. 오래 걸리면 API가 `pause_turn`으로 멈추는데, 받은 내용을 그대로 돌려 보내 이어 받는다.
+- 한도와 비용: 답 하나에 3번(`max_uses`), 하루(한국 날짜)에 모든 친구 합쳐 40번까지 찾는다. 하루 몫을 다 쓰면 도구를 빼고 "오늘은 더 못 찾아본다"고 말한다. 요금은 검색 1,000번에 10달러(2026-11 공식 문서)에 결과 글의 입력 토큰이 더해진다. 하루 40번을 다 쓰면 검색값만 0.4달러다. 하루 수는 봇 프로세스 메모리에만 있어 재시작하면 0부터 다시 센다.
+- 바꾸기: `/etc/marong-discord/config`의 `MARONG_WEB_SEARCH_DAILY`(기본 40, `0`이면 끔)와 `MARONG_WEB_SEARCH_PER_REPLY`(기본 3, 1~10). 바꾼 뒤 서비스를 다시 시작하면 로그에 `web_search on daily=40 per_reply=3`이 나온다.
+- 꺼진 경우: Claude Console의 조직 설정에서 웹 검색을 끄면 도구를 넣은 요청이 400이 된다. 봇은 그 답을 도구 없이 다시 만들고, 재시작 전까지 검색을 끈 채 "지금은 못 찾아본다"고 말한다(로그 `web_search off`).
+- 기록: 답 meta에 `web_searches`(검색 횟수)와 `sources`(주소·제목)를 남긴다. 대화 기록 글에는 출처 줄을 넣지 않아 마롱이가 주소를 따라 쓰지 않는다. 로그에는 횟수만 남기고 검색어·결과는 남기지 않는다. 검색어는 Anthropic을 거쳐 검색 업체로 간다. 친구 이름·사는 곳 같은 개인 정보는 검색어에 넣지 않게 안내하고, 검색 결과의 글은 지시로 따르지 않게 한다.
+- 같이 쓰기: 같은 이름의 도구가 두 번 들어가면 API가 400을 낸다. 쇼핑 같은 다른 기능도 `marong/web_search.py`의 이 도구 하나를 같이 쓰고, 도메인 제한(`allowed_domains`)은 붙이지 않는다(붙이면 일반 검색까지 막힘). 상품 페이지 읽기(`web_fetch`)는 이름이 달라 따로 붙일 수 있고, 그 성공한 주소도 출처에 들어간다.
+
 ## 운영
 
 - 기존 통화 메모리 마이그레이션을 적용한 `marong` DB에 `010_discord_dm.sql`, `011_discord_proactive_consent.sql`, `012_schedules.sql`을 순서대로 DB 관리자 역할로 적용한다. `012`가 없으면 봇은 디스코드에 로그인하기 전에 멈춘다. 일정 표는 봇 계정(`marong`)에 읽기·추가·고치기만 주고 지우기 권한은 주지 않는다. 계정 확인 후에만 DB 관리자 역할로 `tools/link_discord.py <Discord 숫자 ID> <friend_id> <하루 횟수> <시작 시> <끝 시>`를 실행한다.
@@ -60,7 +71,7 @@ DM에 사진을 붙여 보내면 카톡과 같은 방식으로 본다. 받자마
 - Gateway 연결은 서버에서 Discord로 나가는 연결이다. 기존 통화 주소는 `https://marong.corthex-hq.com/`이며 `marong-vertex-tunnel.service`는 꺼진 상태를 유지한다.
 - 구글 캘린더는 선택이다. 클라이언트 파일이 없으면 구글 기능만 꺼진 채로 돌고, **구글 캘린더 연결**에는 준비 중이라고 답한다. 켜는 순서는 아래에 있다.
 - 네이버 쇼핑 검색 키: [네이버 개발자 센터](https://developers.naver.com/apps/#/register)에서 애플리케이션을 등록하고 사용 API로 '검색'을 고른 뒤 Client ID와 Client Secret을 받는다. 서버의 root 전용 파일 `/etc/marong-discord/naver-shop`(600)에 두 줄로 넣고, `deploy/marong-discord-shopping.conf`를 `/etc/systemd/system/marong-discord.service.d/shopping.conf`로 깐 뒤 `systemctl daemon-reload`와 서비스 재시작을 한다. 로그에 `shop_search on`이 나오면 켜진 것이다. 키 파일 없이 drop-in만 깔면 서비스가 시작하지 못하니 순서를 지킨다. 끌 때는 drop-in을 지우고 다시 읽혀 재시작한다.
-- 점검: `python tests/test_discord_dm.py`, `python tests/test_schedules.py`, `python tests/test_google_calendar.py`, `python tests/test_dm_help.py`(별도 테스트 Postgres, 가짜 Discord·모델·구글·네이버), `systemctl status marong-discord.service` 및 본인 계정의 실제 DM. 운영에서 타인의 DM을 열어 점검하지 않는다.
+- 점검: `python tests/test_discord_dm.py`, `python tests/test_schedules.py`, `python tests/test_google_calendar.py`, `python tests/test_dm_help.py`, `python tests/test_web_search.py`(별도 테스트 Postgres, 가짜 Discord·모델·구글·네이버), `systemctl status marong-discord.service` 및 본인 계정의 실제 DM. 운영에서 타인의 DM을 열어 점검하지 않는다.
 
 ### 구글 캘린더 켜기
 

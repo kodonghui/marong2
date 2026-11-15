@@ -18,6 +18,7 @@ from marong.llm import LLM
 from marong.memory import MemoryWorker
 from marong.shopping import TIMEOUT_S as SHOP_TIMEOUT_S, ShopSearch, load_keys
 from marong.store import Store
+from marong.web_search import DAILY as WEB_DAILY, PER_REPLY as WEB_PER_REPLY, WebSearch
 
 
 async def main():
@@ -45,6 +46,17 @@ async def main():
     shop_keys = load_keys()
     shop_http = httpx.AsyncClient(timeout=SHOP_TIMEOUT_S) if shop_keys else None
     logging.getLogger("marong.shop").info("shop_search %s", "on" if shop_keys else "off")
+    # Internet search (Claude's web_search server tool). MARONG_WEB_SEARCH_DAILY=0 turns it off.
+    try:
+        web_daily = int(os.environ.get("MARONG_WEB_SEARCH_DAILY", WEB_DAILY))
+        web_per_reply = int(os.environ.get("MARONG_WEB_SEARCH_PER_REPLY", WEB_PER_REPLY))
+    except ValueError as e:
+        raise SystemExit("Invalid web search limits") from e
+    if web_daily < 0 or not 1 <= web_per_reply <= 10:
+        raise SystemExit("Invalid web search limits")
+    web = WebSearch(web_per_reply, web_daily, settings.timezone) if web_daily else None
+    logging.getLogger("marong.web").info(
+        "web_search %s", f"on daily={web_daily} per_reply={web_per_reply}" if web else "off")
     store = DiscordStore(settings.database_url, call_bridge=True)
     store.discord_context_enabled = False
     llm = LLM(settings)
@@ -69,7 +81,7 @@ async def main():
             tasks.append(asyncio.create_task(worker.run()))
         agent = DiscordAgent(settings, store, emb, llm, on_saved=worker.kick if worker else None,
                              first_replies=first_replies, google=google,
-                             shop=ShopSearch(shop_http, *shop_keys) if shop_keys else None)
+                             shop=ShopSearch(shop_http, *shop_keys) if shop_keys else None, web=web)
         client = DiscordDM(agent, store, int(os.environ["MARONG_DISCORD_APP_ID"]), int(os.environ["MARONG_DISCORD_GUILD_ID"]))
         async with client:
             tasks.append(asyncio.create_task(DiscordProactive(settings, store, agent, client).run()))
