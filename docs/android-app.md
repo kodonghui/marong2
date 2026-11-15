@@ -139,7 +139,7 @@ flowchart LR
 | TASK-107 | 서명 키(Git 밖)와 릴리스 APK | 끝 |
 | TASK-108 | 자동 시험: 주소 규칙(JVM), 페이지 스크립트(Node), 실제 통화 화면(브라우저) | 끝 |
 | TASK-109 | 기기 시험(TC-110~TC-117): 에뮬레이터, 실제 폰 | 에뮬레이터 시험 끝(BUG-101~103 고침, 0.1.1). 실제 폰의 로그인 유지(TC-114)·소리(TC-115)·삼성 배터리 관리는 대기 |
-| TASK-110 | 2단계 설계: 선톡 알림과 앱 안 글 대화(D17) | 설계 시작. 구현은 Firebase 프로젝트와 서버 변경 확인 뒤 |
+| TASK-110 | 2단계 설계: 선톡 알림과 앱 안 글 대화(D17·D18) | 설계 초안 [app-chat.md](app-chat.md). 구현은 동희님 검토, Firebase 준비물, 서버 변경 확인 뒤 |
 
 ## 7. 시험 (12)
 
@@ -228,11 +228,11 @@ MARONG_KEYSTORE_PROPERTIES=/키/폴더/keystore.properties ./gradlew testDebugUn
 5. 화면 끄기는 `adb shell input keyevent 26`, 깊은 절전은 `adb shell dumpsys battery unplug`와 `adb shell dumpsys deviceidle force-idle`이에요. 끝나면 `dumpsys deviceidle unforce`와 `dumpsys battery reset`으로 되돌려요.
 6. 화면 얼림(BUG-103)은 대역 서버 기록의 '10초 동안 받은 마이크 소리'가 0바이트가 되는지로 봐요. DevTools로 페이지에 `freeze`·`resume`·`visibilitychange` 기록을 붙이면 시각이 남아요.
 
-## 10. 2단계: 선톡 알림과 앱 안 글 대화 (D17)
+## 10. 2단계: 선톡 알림과 앱 안 글 대화 (D17·D18)
 
-D17대로 선톡을 앱 알림으로 받고 앱 안에서 바로 답장해요. 1단계에 이어 /corthex 절차로 설계해요(폰 시험과 나란히). 지금 정해 둔 방향과 필요한 것:
+설계는 [app-chat.md](app-chat.md)에 따로 있어요(요구사항 REQ-111~, 흐름 FL-105~, 명세 SPEC-110~, 표 TBL-101, API 계약 [api/app-chat.openapi.yaml](../api/app-chat.openapi.yaml)). 요약:
 
-- 글 대화 화면은 통화 주소의 웹 화면으로 만들어 앱과 브라우저에서 같이 쓰고, 디스코드 DM과 같은 기억을 써요(새 제안).
-- 알림은 웹뷰에 알림 API가 없어서 Firebase Cloud Messaging(FCM)을 써요. 동희님 구글 계정의 무료 Firebase 프로젝트가 필요해요.
-- 서버에 기기 등록·알림 보내기·글 대화 길을 새로 붙여요. 서버 변경과 배포는 동희님 확인 뒤에만 해요.
-- 선톡과 일정 알림을 다루는 다른 작업(일정·알림, 요구사항 정리)과 겹치지 않게 맞춰요.
+- 글 대화 화면 `/chat/`을 디스코드 DM 봇이 내보내고, 디스코드 DM과 같은 방을 써요. 앱과 브라우저 모두에서 열려요.
+- 알림은 Firebase Cloud Messaging(FCM)의 FID 등록 방식으로 받아요. 웹뷰에는 알림 API가 없어서예요.
+- D18대로 알림 받을 기기가 있으면 선톡·일정 알림을 앱으로만 보내고, 없거나 실패하면 디스코드 DM으로 보내요.
+- 서버 변경과 배포는 동희님 확인 뒤에만 해요.

@@ -1,0 +1,787 @@
+# 마롱이 글 대화 API 계약(OpenAPI 3.1). 설계: docs/app-chat.md, DB: marong/migrations/014_app_chat.sql(TBL-101)
+openapi: 3.1.0
+info:
+  title: 마롱이 글 대화 API
+  version: 0.1.0-draft
+  description: |-
+    마롱이 앱과 브라우저의 글 대화 화면(SCR-107)이 디스코드 DM 봇과 주고받는 계약이에요. 원본은 이 파일이고 코드는 이 파일을 따라가요(06단계). 통화 API(`api/openapi.yaml`)와는 따로예요.
+
+    - 모든 요청은 Cloudflare Access를 지나고, 터널이 `/chat/` 아래만 봇(127.0.0.1:8796)으로 보내요(SPEC-110). 봇은 `Cf-Access-Jwt-Assertion`을 통화 서버와 같은 규칙으로 다시 확인하고, 이메일의 sha256으로 통화 친구와 그 친구의 디스코드 DM 방을 찾아요(SPEC-111).
+    - 쓰기 요청(POST·PUT)은 `Origin`이 `https://marong.corthex-hq.com`이어야 해요.
+    - 오류는 통화 API와 같은 RFC 9457 Problem Details에 `code`와 `traceId`를 더한 모양이에요. 코드 목록은 `components.x-corthex.errors`예요.
+    - 글 대화는 디스코드 DM과 같은 방(`discord-dm:<id>`)이에요. 앱에서 온 말은 `kakao_id = app:<clientId>`로 저장돼요(SPEC-112, SPEC-125).
+    - 로그에는 글·FID·installId·이메일을 남기지 않아요(SPEC-126).
+
+    계약에서 정한 것(Claude 제안, 2026-11-15, 검토 대상).
+    1. 말 보내기는 저장만 하고 202로 바로 돌아와요. 마롱이 답은 기다리기(API-104)로 받아요.
+    2. 같은 `clientId`를 다시 보내면 200과 처음 저장한 메시지예요. 답을 다시 만들지 않아요.
+    3. 검증 오류는 400이에요(422는 쓰지 않음).
+    4. 기다리기는 새 메시지가 없으면 25초 뒤 200과 빈 목록이에요(204는 쓰지 않음). 늦게 커밋된 메시지를 놓치지 않게 최근 60초 안의 메시지도 함께 주고, 화면이 id로 겹침을 지워요.
+    5. 기기 등록은 없으면 201, 있으면 200이에요. 다른 친구가 쓰던 installId면 지금 로그인한 친구로 옮겨요(SPEC-115). 그래서 기기 경로에는 404가 없어요.
+servers:
+- url: https://marong.corthex-hq.com
+  description: Cloudflare Access 뒤. 터널이 /chat/ 아래만 봇으로 보내요
+- url: http://127.0.0.1:8796
+  description: 서버 안에서 직접(배포 확인용). Access 증명이 없어 API는 401이고 /chat/healthz만 돼요
+security:
+- cfAccess: []
+paths:
+  /chat/api/me:
+    get:
+      operationId: getChatMe
+      summary: 내 이름과 선톡·일정 알림이 가는 곳
+      description: 글 대화 화면이 열릴 때 불러요. 통화 화면은 이 응답이 200일 때만 '글 대화' 링크를 보여요(SPEC-124). 이메일은 담지 않아요.
+      x-corthex:
+        id: API-101
+        spec:
+        - SPEC-111
+        - SPEC-116
+        - SPEC-124
+        omit:
+          '400': 입력이 없음
+          '404': 경로가 id를 담지 않음
+          '429': 읽기만 함
+      responses:
+        '200':
+          description: 내 상태
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+              examples:
+                app:
+                  value:
+                    name: 현경
+                    delivery:
+                      to: app
+                      reason: app_on
+                    textMax: 2000
+                discord:
+                  value:
+                    name: 현경
+                    delivery:
+                      to: discord
+                      reason: notifications_off
+                    textMax: 2000
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+  /chat/api/messages:
+    get:
+      operationId: listChatMessages
+      summary: 최근 대화(앞 쪽은 before)
+      description: 디스코드 DM 방의 메시지만 오래된 것부터 줘요. 묶인 카카오 방의 옛 기록, 전달되지 않은 마롱이 말, 통화에서 지운 기억은 빼요(SPEC-113). 일회용 링크 표시는 '(일회용 링크)'로 바꿔요.
+      x-corthex:
+        id: API-102
+        spec:
+        - SPEC-111
+        - SPEC-113
+        omit:
+          '404': 없는 before는 그 앞의 메시지를 줌(빈 목록일 수 있음)
+          '429': 읽기만 함
+      parameters:
+      - $ref: '#/components/parameters/Before'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: 메시지 목록(오래된 것부터)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagePage'
+              examples:
+                recent:
+                  value:
+                    messages:
+                    - id: 48211
+                      from: me
+                      text: 나 오늘 시험 끝났어!
+                      at: '2026-11-15T12:29:40+09:00'
+                      via: discord
+                      kind: chat
+                    - id: 48212
+                      from: marong
+                      text: 와 수고했어! 오늘은 푹 쉬어.
+                      at: '2026-11-15T12:29:46+09:00'
+                      via: discord
+                      kind: chat
+                    - id: 48213
+                      from: marong
+                      text: 점심은 맛있는 거 먹었어?
+                      at: '2026-11-15T14:05:02+09:00'
+                      via: app
+                      kind: proactive
+                    hasMore: true
+                first:
+                  value:
+                    messages: []
+                    hasMore: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+    post:
+      operationId: sendChatMessage
+      summary: 말 보내기
+      description: 같은 방에 저장하고 202로 바로 돌아와요. 마롱이는 디스코드 DM과 같은 방 잠금 안에서 답을 만들고, 답은 기다리기(API-104)로 와요(SPEC-112). 글은 앞뒤 공백을 빼고 1~2,000자예요. 쓰기 요청이라 Origin이 앱 주소여야 해요.
+      x-corthex:
+        id: API-103
+        spec:
+        - SPEC-111
+        - SPEC-112
+        - SPEC-120
+        omit:
+          '404': 경로가 id를 담지 않음. 방은 로그인한 친구로 정해짐
+          '409': 같은 clientId는 오류가 아니라 200
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendRequest'
+            examples:
+              reply:
+                value:
+                  clientId: 3f2a9c4e-8b1d-4e6f-a2c3-5d7e9f0a1b2c
+                  text: 응 김치찌개 먹었어
+      responses:
+        '202':
+          description: 새 말을 저장했어요. 답은 곧 와요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendResult'
+              examples:
+                saved:
+                  value:
+                    message:
+                      id: 48214
+                      from: me
+                      text: 응 김치찌개 먹었어
+                      at: '2026-11-15T14:06:10+09:00'
+                      via: app
+                      kind: chat
+        '200':
+          description: 같은 clientId로 이미 저장된 말이에요. 답을 다시 만들지 않아요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendResult'
+              examples:
+                again:
+                  value:
+                    message:
+                      id: 48214
+                      from: me
+                      text: 응 김치찌개 먹었어
+                      at: '2026-11-15T14:06:10+09:00'
+                      via: app
+                      kind: chat
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyMessages'
+        '500':
+          $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+  /chat/api/messages/wait:
+    get:
+      operationId: waitChatMessages
+      summary: 새 메시지 기다리기(25초)
+      description: after 뒤의 메시지가 있으면 바로, 없으면 25초까지 기다렸다가 빈 목록을 줘요. 최근 60초 안의 메시지도 함께 주니 화면은 id로 겹침을 지워요. typing은 그 방에서 마롱이가 답을 만드는 중인지예요. 한 친구의 기다리는 요청은 4개까지이고, 넘으면 가장 오래된 것을 빈 응답으로 끝내요(SPEC-114).
+      x-corthex:
+        id: API-104
+        spec:
+        - SPEC-111
+        - SPEC-114
+        omit:
+          '404': 없는 after도 그 뒤의 메시지를 줌
+          '429': 기다리는 요청 한도는 오류 대신 가장 오래된 요청을 빈 응답으로 끝냄
+      parameters:
+      - $ref: '#/components/parameters/After'
+      responses:
+        '200':
+          description: 새 메시지(없으면 빈 목록)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WaitResult'
+              examples:
+                reply:
+                  value:
+                    messages:
+                    - id: 48215
+                      from: marong
+                      text: 김치찌개 좋다! 나도 먹고 싶어.
+                      at: '2026-11-15T14:06:16+09:00'
+                      via: app
+                      kind: chat
+                    typing: false
+                quiet:
+                  value:
+                    messages: []
+                    typing: false
+                writing:
+                  value:
+                    messages: []
+                    typing: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+  /chat/api/devices/{installId}:
+    put:
+      operationId: putChatDevice
+      summary: 이 폰의 알림 등록
+      description: 앱의 페이지 스크립트가 FID나 알림 권한이 바뀌었을 때와 12시간마다 보내요(SPEC-123). 없으면 만들고(201) 있으면 고쳐요(200). 같은 FID가 다른 installId에 있으면 옛 줄의 FID를 지워요. 응답은 이 기기로 선톡·일정 알림을 보낼지예요(SPEC-115, SPEC-116). 쓰기 요청이라 Origin이 앱 주소여야 해요.
+      x-corthex:
+        id: API-105
+        spec:
+        - SPEC-111
+        - SPEC-115
+        - SPEC-116
+        - SPEC-123
+        omit:
+          '404': 없는 installId는 만들고, 다른 친구 것이면 지금 친구로 옮김
+          '409': 같은 FID 충돌은 옛 줄을 비워 풂
+          '429': 페이지 스크립트가 12시간에 한 번과 바뀔 때만 보냄
+      parameters:
+      - $ref: '#/components/parameters/InstallId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceRequest'
+            examples:
+              granted:
+                value:
+                  fid: cR3oPkqZT0uWq9x1v2b3n4
+                  notifications: granted
+                  appVersion: 0.2.0
+              denied:
+                value:
+                  fid: cR3oPkqZT0uWq9x1v2b3n4
+                  notifications: denied
+                  appVersion: 0.2.0
+      responses:
+        '201':
+          description: 새 기기를 등록했어요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceResult'
+              examples:
+                app:
+                  value:
+                    delivery:
+                      to: app
+                      reason: app_on
+        '200':
+          description: 기기 정보를 고쳤어요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceResult'
+              examples:
+                notifications-off:
+                  value:
+                    delivery:
+                      to: discord
+                      reason: notifications_off
+                no-key-yet:
+                  value:
+                    delivery:
+                      to: discord
+                      reason: fcm_off
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+  /chat/healthz:
+    get:
+      operationId: chatHealth
+      summary: 서버 안 배포 확인
+      description: 로그인 없이 ok만 줘요. 바깥에서는 Access가 앞에 있어요(SPEC-110).
+      x-corthex:
+        id: API-106
+        spec:
+        - SPEC-110
+        omit:
+          '401': 확인하지 않음
+          '503': 웹 서버가 켜져 있으면 ok. DB 상태는 담지 않음
+      security: []
+      responses:
+        '200':
+          description: 켜져 있어요
+          content:
+            text/plain:
+              schema:
+                type: string
+                const: ok
+components:
+  x-corthex:
+    errors:
+      invalid_request:
+        status: 400
+        meaning: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)
+        message: 뭔가 잘못 보냈나 봐. 다시 해 볼게
+        client: 한 번 다시 보내고, 또 오면 오류 상태와 추적 id
+      unauthenticated:
+        status: 401
+        meaning: Access 로그인 증명이 없거나 맞지 않음
+        message: 다시 들어와 줘
+        client: 페이지를 새로 불러 Access 로그인으로
+      not_allowed:
+        status: 403
+        meaning: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+        message: 이 계정으로는 마롱이랑 이야기할 수 없어
+        client: SCR-107 쓸 수 없는 계정 상태. 다시 시도하지 않음
+      cross_site:
+        status: 403
+        meaning: 다른 사이트에서 온 쓰기 요청
+        message: 이 화면에서 다시 해 줘
+        client: 오류 상태. 자동으로 다시 보내지 않음
+      no_dm:
+        status: 403
+        meaning: 이 친구의 디스코드 DM 연결이 없거나 아직 DM을 한 번도 보내지 않음
+        message: 디스코드 DM에서 마롱이한테 먼저 말 걸어 줘
+        client: SCR-107 디스코드 DM 먼저 상태. 다시 시도하지 않음
+      too_many_messages:
+        status: 429
+        meaning: 1분에 20번 넘게 보냄
+        message: 너무 빨라! 조금 있다가 보내 줘
+        client: Retry-After까지 보내기 버튼을 막고 남은 초를 보여 줌. 쓴 글은 지우지 않음
+      db_unavailable:
+        status: 503
+        meaning: DB에 닿지 않음
+        message: 잠깐 문제가 생겼어. 조금 있다가 다시 해 줘
+        client: 다시 연결하는 중 상태. 기다리기는 5초 뒤부터 늘려 가며 다시
+      internal:
+        status: 500
+        meaning: 예상하지 못한 서버 오류
+        message: 잠깐 문제가 생겼어. 다시 해 볼래?
+        client: 오류 상태, 다시 시도, 추적 id 보여 줌
+  securitySchemes:
+    cfAccess:
+      type: apiKey
+      in: header
+      name: Cf-Access-Jwt-Assertion
+      description: Cloudflare Access가 붙이는 JWT(RS256). 봇이 Access 공개키로 서명·aud·iss·exp를 확인하고 email을 허용 목록과 맞춘 뒤 sha256으로 통화 친구를 찾아요. 브라우저가 직접 넣지 않아요.
+  headers:
+    RetryAfter:
+      description: 다시 보낼 수 있을 때까지의 초
+      schema:
+        type: string
+        pattern: ^[0-9]{1,3}$
+  parameters:
+    Before:
+      name: before
+      in: query
+      required: false
+      description: 이 id보다 앞의 메시지(앞 쪽 불러오기). 없으면 가장 최근
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    After:
+      name: after
+      in: query
+      required: true
+      description: 화면이 가진 가장 큰 메시지 id. 처음이면 0
+      schema:
+        type: integer
+        format: int64
+        minimum: 0
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 30
+    InstallId:
+      name: installId
+      in: path
+      required: true
+      description: 앱이 처음 한 번 만든 UUID(TBL-101 install_id)
+      schema:
+        type: string
+        format: uuid
+        pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+  responses:
+    BadRequest:
+      description: 요청이 틀림
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            too-long:
+              value:
+                type: https://marong.corthex-hq.com/problems/invalid-request
+                title: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)
+                status: 400
+                code: invalid_request
+                traceId: 0af7651916cd43dd
+                errors:
+                - field: text
+                  reason: too_long
+    Unauthenticated:
+      description: 로그인 증명이 없거나 맞지 않음
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            no-proof:
+              value:
+                type: https://marong.corthex-hq.com/problems/unauthenticated
+                title: Access 로그인 증명이 없거나 맞지 않음
+                status: 401
+                code: unauthenticated
+                traceId: 0af7651916cd43dd
+    Forbidden:
+      description: 허용되지 않음(cross_site는 쓰기 요청에서만 나와요)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            not-allowed:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-allowed
+                title: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+                status: 403
+                code: not_allowed
+                traceId: 00f067aa0ba902b7
+            no-dm:
+              value:
+                type: https://marong.corthex-hq.com/problems/no-dm
+                title: 이 친구의 디스코드 DM 연결이 없거나 아직 DM을 한 번도 보내지 않음
+                status: 403
+                code: no_dm
+                traceId: 00f067aa0ba902b7
+            cross-site:
+              value:
+                type: https://marong.corthex-hq.com/problems/cross-site
+                title: 다른 사이트에서 온 쓰기 요청
+                status: 403
+                code: cross_site
+                traceId: 00f067aa0ba902b7
+    TooManyMessages:
+      description: 1분에 20번 넘게 보냄
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            too-many:
+              value:
+                type: https://marong.corthex-hq.com/problems/too-many-messages
+                title: 1분에 20번 넘게 보냄
+                status: 429
+                code: too_many_messages
+                traceId: 4bf92f3577b34da6
+    DbUnavailable:
+      description: DB에 닿지 않음
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            db:
+              value:
+                type: https://marong.corthex-hq.com/problems/db-unavailable
+                title: DB에 닿지 않음
+                status: 503
+                code: db_unavailable
+                traceId: 4bf92f3577b34da6
+    Internal:
+      description: 예상하지 못한 서버 오류
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            internal:
+              value:
+                type: https://marong.corthex-hq.com/problems/internal
+                title: 예상하지 못한 서버 오류
+                status: 500
+                code: internal
+                traceId: 4bf92f3577b34da6
+  schemas:
+    Problem:
+      type: object
+      required:
+      - title
+      - status
+      - code
+      - traceId
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+          maxLength: 200
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          maxLength: 300
+        instance:
+          type: string
+          format: uri-reference
+        code:
+          type: string
+          enum:
+          - invalid_request
+          - unauthenticated
+          - not_allowed
+          - cross_site
+          - no_dm
+          - too_many_messages
+          - db_unavailable
+          - internal
+        traceId:
+          type: string
+          pattern: ^[0-9a-f]{16}$
+        errors:
+          type: array
+          maxItems: 10
+          description: 검증 오류 위치. 보낸 값은 담지 않음
+          items:
+            type: object
+            required:
+            - field
+            - reason
+            properties:
+              field:
+                type: string
+                enum:
+                - body
+                - clientId
+                - text
+                - before
+                - after
+                - limit
+                - installId
+                - fid
+                - notifications
+                - appVersion
+              reason:
+                type: string
+                enum:
+                - required
+                - too_short
+                - too_long
+                - bad_format
+                - out_of_range
+            additionalProperties: false
+      additionalProperties: false
+    Delivery:
+      type: object
+      description: 선톡·일정 알림이 가는 곳(SPEC-116). /me에서는 친구 전체, 기기 등록에서는 이 기기 기준이에요
+      required:
+      - to
+      - reason
+      properties:
+        to:
+          type: string
+          enum:
+          - app
+          - discord
+        reason:
+          type: string
+          description: app_on 알림 받을 기기 있음 | no_device 등록된 기기 없음 | notifications_off 알림 꺼짐 | not_seen 30일 넘게 앱을 안 엶 | no_fid FID 없음·끊김 | fcm_off 서버에 FCM 키 없음
+          enum:
+          - app_on
+          - no_device
+          - notifications_off
+          - not_seen
+          - no_fid
+          - fcm_off
+      additionalProperties: false
+    Me:
+      type: object
+      required:
+      - name
+      - delivery
+      - textMax
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 40
+          description: 마롱이가 부르는 친구 이름
+        delivery:
+          $ref: '#/components/schemas/Delivery'
+        textMax:
+          type: integer
+          const: 2000
+      additionalProperties: false
+    Message:
+      type: object
+      required:
+      - id
+      - from
+      - text
+      - at
+      - via
+      - kind
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        from:
+          type: string
+          enum:
+          - me
+          - marong
+        text:
+          type: string
+          maxLength: 20000
+          description: 화면에는 textContent로만 넣어요
+        at:
+          type: string
+          format: date-time
+        via:
+          type:
+          - string
+          - 'null'
+          enum:
+          - app
+          - discord
+          - null
+          description: 온 길이나 간 길. 앱 이전의 옛 메시지는 null일 수 있어요
+        kind:
+          type: string
+          description: chat 대화 | proactive 선톡 | reminder 일정 알림 | note 마롱이가 따로 보낸 안내(구글 연결 등)
+          enum:
+          - chat
+          - proactive
+          - reminder
+          - note
+      additionalProperties: false
+    MessagePage:
+      type: object
+      required:
+      - messages
+      - hasMore
+      properties:
+        messages:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/Message'
+        hasMore:
+          type: boolean
+          description: 더 앞의 메시지가 있는지
+      additionalProperties: false
+    WaitResult:
+      type: object
+      required:
+      - messages
+      - typing
+      properties:
+        messages:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/Message'
+        typing:
+          type: boolean
+      additionalProperties: false
+    SendRequest:
+      type: object
+      required:
+      - clientId
+      - text
+      properties:
+        clientId:
+          type: string
+          format: uuid
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          description: 화면이 말마다 만드는 id. 다시 보낼 때 같은 값을 써요
+        text:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: \S
+      additionalProperties: false
+    SendResult:
+      type: object
+      required:
+      - message
+      properties:
+        message:
+          $ref: '#/components/schemas/Message'
+      additionalProperties: false
+    DeviceRequest:
+      type: object
+      required:
+      - fid
+      - notifications
+      - appVersion
+      properties:
+        fid:
+          type:
+          - string
+          - 'null'
+          pattern: ^[A-Za-z0-9_-]{16,200}$
+          description: Firebase 설치 ID. 구글 Play 서비스가 없어 등록하지 못했으면 null
+        notifications:
+          type: string
+          enum:
+          - granted
+          - denied
+        appVersion:
+          type: string
+          pattern: ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$
+      additionalProperties: false
+    DeviceResult:
+      type: object
+      required:
+      - delivery
+      properties:
+        delivery:
+          $ref: '#/components/schemas/Delivery'
+      additionalProperties: false
