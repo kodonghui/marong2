@@ -69,7 +69,8 @@ def event(client, user, channel, mid, content, *, group=False, bot=False):
 def prepare(db):
     with psycopg.connect(db.admin_url, autocommit=True) as conn:
         for name in ("marong/call/schema.sql", "marong/call/migrations/002_vertex_memory.sql",
-                     "marong/migrations/010_discord_dm.sql", "marong/migrations/011_discord_proactive_consent.sql"):
+                     "marong/migrations/010_discord_dm.sql", "marong/migrations/011_discord_proactive_consent.sql",
+                     "marong/migrations/012_schedules.sql"):
             conn.execute((ROOT / name).read_text(encoding="utf-8"))
         conn.execute("INSERT INTO marong.friends(name) VALUES ('동희'),('현경')")
         conn.execute("""INSERT INTO marong.rooms(room_key,is_channel,proactive)

@@ -1,6 +1,7 @@
 """Account binding, private history and persistent Discord DM delivery slots."""
 import re
 
+from .schedules import ScheduleStore
 from .store import Store
 
 SNOWFLAKE = re.compile(r"[1-9][0-9]{16,19}\Z")
@@ -79,7 +80,7 @@ SELECT d.*, f.name, true AS is_channel, d.last_incoming_at AS last_said,
 """
 
 
-class DiscordStore(Store):
+class DiscordStore(ScheduleStore, Store):
     def _reply_rooms(self, room: str) -> str:
         # No memory_room traversal: it would pull in linked Kakao group chats.
         return f"""(SELECT source.room_key FROM marong.discord_dm_links d

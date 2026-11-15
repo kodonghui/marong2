@@ -8,12 +8,22 @@
 
 첫 DM부터 대화에 바로 답한다. 사용법 안내는 **도움말**을 요청하면 나온다. 운영 설정에서 친구별 첫 답장을 지정할 수 있으며, 한 번 전달된 뒤에는 평소처럼 대화한다.
 
+## 일정과 알림
+
+DM에서 "내일 3시에 토익 원서 접수 알려 줘", "10분 뒤에 깨워 줘", "6시에 퇴근하니까 그때 톡해 줘", "20일에 토익 시험이야", "매일 아침 8시에 약 먹으라고 해 줘"처럼 말하면 마롱이가 일정으로 저장하고, 알림을 부탁한 때가 되면 같은 DM으로 먼저 말한다.
+
+- 저장: 마롱이(Claude)가 `schedule_add` 도구로 제목, 일정 때, 알림 때, 반복(매일·평일마다·매주·매달), 그때 보낼 말을 넣는다. 시각은 대화 문맥의 지금 시각(한국 시간)으로 계산한다. 날짜·시각이 애매하면 저장하지 않고 한 번 묻는다. 일정만 말하면 알림 없이 기억만 한다. 마롱이는 도구가 저장했다고 돌려준 때에만 "맞춰 뒀어"라고 말한다.
+- 보기·취소: 답할 때마다 그 사람의 다가오는 일정(60일 안, 최대 15개, 번호 포함)을 문맥에 넣는다. 더 먼 일정은 `schedule_list`로 찾는다. 취소는 `schedule_cancel`(번호)이고, 바꾸기는 취소 뒤 새로 저장한다. 다른 사람의 일정은 보이지도 취소되지도 않는다. 한 사람당 진행 중 일정은 50개까지다.
+- 알림: 봇이 15초마다 때가 된 알림을 확인해 보낸다. 보낸 말은 대화 기록에 마롱이 말로 남고(`meta.reminder` = 일정 번호), 연구용 시트 `대화` 탭에 종류 `알림(부탁한 일정)`으로 보인다. 서버나 디스코드 연결이 끊겨 늦으면 3시간 안까지만 "앗 좀 늦었다 미안"을 붙여 보내고, 더 늦거나 DM이 아직 열린 적 없으면 보내지 않고 놓친 것(`missed`)으로 남긴다. 전달이 실패하면 1분 뒤 다시, 세 번 실패하면 놓친 것으로 남긴다. 보내는 중 봇이 꺼지면 5분 뒤 다시 집어 보낸다(같은 알림이 드물게 두 번 갈 수 있음).
+- 선톡과 따로: **선톡 끄기**를 해도 직접 부탁한 알림은 간다. 부탁 자체를 동의로 본다. 알림을 그만 받으려면 마롱이에게 취소해 달라고 하면 된다.
+- 한계: 디스코드 메시지 알림이라 휴대폰 소리·알림을 켜 둬야 들린다. 휴대폰 알람이나 구글 캘린더에 넣지는 않는다. 통화 중에 말한 일정은 아직 저장하지 않는다.
+
 ## 운영
 
-- 기존 통화 메모리 마이그레이션을 적용한 `marong` DB에 `010_discord_dm.sql`, `011_discord_proactive_consent.sql`을 순서대로 적용한다. 계정 확인 후에만 DB 관리자 역할로 `tools/link_discord.py <Discord 숫자 ID> <friend_id> <하루 횟수> <시작 시> <끝 시>`를 실행한다.
+- 기존 통화 메모리 마이그레이션을 적용한 `marong` DB에 `010_discord_dm.sql`, `011_discord_proactive_consent.sql`, `012_schedules.sql`을 순서대로 DB 관리자 역할로 적용한다. `012`가 없으면 봇은 디스코드에 로그인하기 전에 멈춘다. 일정 표는 봇 계정(`marong`)에 읽기·추가·고치기만 주고 지우기 권한은 주지 않는다. 계정 확인 후에만 DB 관리자 역할로 `tools/link_discord.py <Discord 숫자 ID> <friend_id> <하루 횟수> <시작 시> <끝 시>`를 실행한다.
 - 새 봇 토큰은 서버의 root 전용 파일 `/etc/marong-discord/token`에 두고 systemd 자격 증명으로 전달한다. 앱과 비공개 서버 ID는 `/etc/marong-discord/config`의 `MARONG_DISCORD_APP_ID`, `MARONG_DISCORD_GUILD_ID`에 둔다. 코드·시트에는 토큰과 Discord 사용자 ID 원문을 적지 않는다.
 - 첫 답장을 지정할 때는 같은 설정 파일의 `MARONG_DISCORD_FIRST_REPLIES`에 `friend_id`를 키로, 문구를 값으로 쓰는 JSON 객체를 넣는다. 기존 DM에서 한 번 재현하려면 해당 친구의 값을 `{"once":"문구"}`로 지정한다. 전달이 기록된 문구는 재시작 뒤에도 반복하지 않는다.
 - `/opt/marong-discord`에 코드와 `requirements-discord.txt`에 고정된 Discord 의존성을 설치한다. `deploy/marong-discord.service`는 기존 `/opt/marong`의 모델 설정과 DB를 사용한다. 같은 DB의 정리 작업자는 카톡과 병행 중에는 기존 작업자 하나를 쓰고, 카톡을 중지할 때는 Discord 설정에서 `MARONG_DISCORD_MEMORY_WORKER=1`로 옮긴다.
 - `deploy/marong-discord-context.conf`는 카톡 서비스의 drop-in이다. 같은 사람의 디스코드 최근 기록을 카톡 1:1에 연결하고 선톡 전환을 적용한다. 전화 서비스와 스프레드시트 타이머는 재시작할 필요가 없다.
 - Gateway 연결은 서버에서 Discord로 나가는 연결이다. 기존 통화 주소는 `https://marong.corthex-hq.com/`이며 `marong-vertex-tunnel.service`는 꺼진 상태를 유지한다.
-- 점검: `python tests/test_discord_dm.py`(별도 테스트 Postgres, 가짜 Discord·모델), `systemctl status marong-discord.service` 및 본인 계정의 실제 DM. 운영에서 타인의 DM을 열어 점검하지 않는다.
+- 점검: `python tests/test_discord_dm.py`, `python tests/test_schedules.py`(별도 테스트 Postgres, 가짜 Discord·모델), `systemctl status marong-discord.service` 및 본인 계정의 실제 DM. 운영에서 타인의 DM을 열어 점검하지 않는다.

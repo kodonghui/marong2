@@ -1,15 +1,19 @@
 """Discord Gateway transport for private, explicitly linked Marong accounts."""
 import asyncio
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 import logging
+import time
 from zoneinfo import ZoneInfo
 
 import discord
 
 from .agent import Agent, Incoming
+from .llm import brief
 from .proactive import PART_GAP_S, Proactive, parts, schedule, slot
+from .schedules import (GUIDE as SCHEDULE_GUIDE, LATE_LIMIT, SCHEDULE_TOOL_NAMES, SCHEDULE_TOOLS, occurrence,
+                        reminder_text, run_tool as run_schedule_tool, schedule_lines)
 
 log = logging.getLogger("marong.discord")
 ON = {
@@ -22,11 +26,19 @@ OFF = {
 }
 GUIDE = {"도움말", "사용법"}
 NO_MENTIONS = discord.AllowedMentions.none()
+REMIND_CHECK_S = 15     # 때가 된 일정 알림을 확인하는 간격(초)
+TIDY_S = 600            # 지난 일정을 끝으로 정리하는 간격(초)
 
 
 @dataclass
 class DiscordIncoming(Incoming):
     proactive_preference: bool | None = None
+    friend_id: int | None = None          # the linked friend; schedules belong to them
+    dm_link: dict | None = None           # discord_dm_links state when the message arrived
+    saved_id: int | None = None           # stored message id of this text
+    schedule_rows: list | None = None     # upcoming schedules shown to the model (None: not read)
+    schedule_total: int = 0
+    actions: list = field(default_factory=list)  # schedule tool results, kept in the reply meta
 
 
 def proactive_preference(text: str) -> bool | None:
@@ -67,7 +79,8 @@ class DiscordAgent(Agent):
         self.first_replies = first_replies or {}
 
     def _tools(self, msg):
-        return []  # Identity and opt-in never change on model output.
+        # Identity and opt-in never change on model output. Only the friend's own schedule does.
+        return list(SCHEDULE_TOOLS) if getattr(msg, "friend_id", None) else []
 
     def _system(self, situation):
         return super()._system(
@@ -75,6 +88,64 @@ class DiscordAgent(Agent):
             "찾아 주겠다고 말하지 마. 친구처럼 바로 대화하고, 사용법이나 선톡 설정을 먼저 설명하지 마. "
             "먼저 말 걸 때에는 잠금 화면에 보여도 괜찮은 가벼운 이야기만 하고, 개인적인 내용은 인용하지 마."
         )
+
+    def _situation(self, msg, person, notes, summaries, recalled, circle=None):
+        text = super()._situation(msg, person, notes, summaries, recalled, circle)
+        if not isinstance(msg, DiscordIncoming):
+            return text
+        # The shared lines describe Kakao proactive settings and the owner-request tool. A DM has neither:
+        # its proactive state lives in the link, and the friend changes it with fixed phrases.
+        lines = [line for line in text.split("\n") if "ask_owner" not in line]
+        at = next((i + 1 for i, line in enumerate(lines) if line.startswith("- 지금 말 건 친구")), 2)
+        lines[at:at] = self._dm_lines(msg.dm_link)
+        tz = ZoneInfo(self.s.timezone)
+        return "\n".join(lines + ["", SCHEDULE_GUIDE]
+                         + schedule_lines(msg.schedule_rows, msg.schedule_total, tz, datetime.now(tz)))
+
+    @staticmethod
+    def _dm_lines(link):
+        if not link:
+            return []
+        if link.get("opted_in_at"):
+            first = (f"- 마롱이는 이 친구에게 이 DM으로 한국 시간 {link['start_hour']}~{link['end_hour']}시에 하루 "
+                     f"{link['per_day']}번까지 먼저 말을 걸어(선톡). 친구가 '선톡 끄기'라고 하면 바로 멈춰. 횟수와 시간은 "
+                     "동희가 정해.")
+        else:
+            first = "- 지금은 마롱이가 이 친구에게 먼저 말을 걸지 않아(선톡 꺼짐). 친구가 '먼저 톡해 줘'라고 하면 바로 켜져."
+        return [first, "- 선톡과 상관없이, 친구가 정한 때 알려 달라고 하거나 연락해 달라고 하면 schedule_add 로 저장해 그때 "
+                       "이 DM으로 먼저 말할 수 있어."]
+
+    async def _context(self, msg, person, user_id, text, held=None):
+        if isinstance(msg, DiscordIncoming) and msg.friend_id:
+            tz = ZoneInfo(self.s.timezone)
+            try:
+                msg.schedule_rows, msg.schedule_total = await asyncio.wait_for(
+                    self.store.upcoming_schedules(msg.friend_id, datetime.now(tz), tz), 2)
+            except Exception as e:  # Answer without the list; the model is told it could not be read.
+                log.warning("schedule_context_error %s", type(e).__name__)
+        system, messages, memory = await super()._context(msg, person, user_id, text, held)
+        if isinstance(msg, DiscordIncoming) and msg.schedule_rows is not None:
+            memory["schedules"] = [row["id"] for row in msg.schedule_rows]
+        return system, messages, memory
+
+    async def _run_tool(self, block, msg):
+        result = {"type": "tool_result", "tool_use_id": block.id}
+        friend_id = getattr(msg, "friend_id", None)
+        if block.name not in SCHEDULE_TOOL_NAMES or not friend_id:
+            return {**result, "content": f"{block.name} 도구는 없어.", "is_error": True}
+        try:
+            content, action = await run_schedule_tool(
+                self.store, block.name, block.input or {}, friend_id=friend_id, room_key=msg.room_key,
+                source="discord", source_message_id=msg.saved_id, tz=ZoneInfo(self.s.timezone))
+        except Exception as e:
+            log.error("db_error %s", brief(e))
+            msg.actions.append({"tool": block.name, "result": "db_error"})
+            return {**result, "is_error": True,
+                    "content": "저장소 오류로 못 했어. 맞춰 뒀다고 하지 말고, 지금은 저장이 안 된다고 솔직하게 말해."}
+        msg.actions.append(action)
+        log.info("schedule_tool name=%s result=%s", block.name, action["result"])
+        out = {**result, "content": content}
+        return {**out, "is_error": True} if action["result"] == "error" else out
 
     async def _reply(self, msg: DiscordIncoming, person, user_id, text, timeout, use_memory=True, held=None):
         if msg.proactive_preference is False:
@@ -92,8 +163,13 @@ class DiscordAgent(Agent):
             schedule_text = (f"먼저 톡은 한국 시간 {link['start_hour']:02d}:00~{link['end_hour']:02d}:00에 "
                              f"하루 최대 {link['per_day']}번이야. " if link else "")
             return ("여기서 평소처럼 말 걸어 줘. 이 대화는 연구용 시트에 기록돼. " + schedule_text
-                    + "원하면 ‘먼저 톡해 줘’, 그만 받으려면 ‘선톡 끄기’라고 말해 줘."), {}
-        return await super()._reply(msg, person, user_id, text, timeout, use_memory, held)
+                    + "원하면 ‘먼저 톡해 줘’, 그만 받으려면 ‘선톡 끄기’라고 말해 줘. "
+                      "‘내일 3시에 알려 줘’처럼 말하면 그때 여기로 알려 줄게."), {}
+        msg.saved_id = user_id
+        reply, meta = await super()._reply(msg, person, user_id, text, timeout, use_memory, held)
+        if msg.actions:
+            meta["schedule"] = msg.actions
+        return reply, meta
 
 
 class DiscordDM(discord.Client):
@@ -175,7 +251,7 @@ class DiscordDM(discord.Client):
         async with self.room_lock(room):
             result = await self.agent.handle(
                 DiscordIncoming(room, link["user_key"], text, kakao_id=message_key,
-                                proactive_preference=preference), reply,
+                                proactive_preference=preference, friend_id=link["friend_id"], dm_link=link), reply,
             )
         if result is not None:
             log.info("discord_dm_replied")
@@ -239,3 +315,61 @@ class DiscordProactive(Proactive):
         return bool(fresh) and all(fresh[0][k] == room[k] for k in (
             "discord_user_id", "channel_id", "opted_in_at", "last_incoming_at", "per_day", "start_hour", "end_hour",
         ))
+
+
+class DiscordReminders:
+    """Deliver the reminders friends asked for to their own linked DM, separately from proactive greetings."""
+
+    def __init__(self, settings, store, agent, client, *, clock=None):
+        self.s = settings
+        self.store = store
+        self.agent = agent
+        self.client = client
+        self.tz = ZoneInfo(settings.timezone)
+        self.clock = clock or (lambda: datetime.now(self.tz))
+        self.tidied = 0.0
+
+    async def run(self):
+        log.info("discord_reminders_on")
+        while True:
+            await asyncio.sleep(REMIND_CHECK_S - time.time() % REMIND_CHECK_S)
+            try:
+                if time.monotonic() - self.tidied > TIDY_S:
+                    await self.store.close_past_events()
+                    self.tidied = time.monotonic()
+                await self.step()
+            except Exception as e:  # DB or Discord trouble: the next check tries again.
+                log.warning("discord_reminder_step_error %s", type(e).__name__)
+
+    async def step(self) -> int:
+        """Send every due reminder once and return how many reached Discord."""
+        if not self.client.available:
+            return 0
+        sent = 0
+        for row in await self.store.claim_due_reminders():
+            sent += await self.deliver(row)
+        return sent
+
+    async def deliver(self, row) -> int:
+        now = self.clock()
+        following = occurrence(row["repeat_anchor"], row["repeat"], now, self.tz) if row["repeat"] != "none" else None
+        late = row["late"]
+        if late > LATE_LIMIT or not row["channel_id"]:
+            await self.store.finish_reminder(row, "missed", following)
+            log.info("discord_reminder_missed id=%s late_min=%d dm=%s", row["id"], late.total_seconds() // 60,
+                     bool(row["channel_id"]))
+            return 0
+        text = reminder_text(row, self.tz, late)
+        channel = self.client.get_partial_messageable(int(row["channel_id"]), type=discord.ChannelType.private)
+        ok = self.client.available and await send_text(channel, text)
+        state = await self.store.finish_reminder(row, "sent" if ok else "failed", following)
+        if ok or state == "done":  # Keep one record per reminder, not one per retry.
+            try:
+                await self.store.add_message(row["dm_room"], "assistant", text, meta={
+                    "reminder": row["id"], "delivered": ok, "transport": "discord",
+                    "late_s": int(late.total_seconds())})
+                self.agent.on_saved()
+            except Exception as e:
+                log.error("db_error %s", brief(e))
+        log.info("discord_reminder_sent id=%s ok=%s state=%s", row["id"], ok, state)
+        return int(ok)

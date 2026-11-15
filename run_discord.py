@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 from marong.config import load_dotenv, load_settings
-from marong.discord_dm import DiscordAgent, DiscordDM, DiscordProactive
+from marong.discord_dm import DiscordAgent, DiscordDM, DiscordProactive, DiscordReminders
 from marong.discord_store import DiscordStore
 from marong.embed import Embeddings
 from marong.llm import LLM
@@ -40,6 +40,7 @@ async def main():
     try:
         await store.open(wait=True)
         await store.proactive_rooms()  # Fail before login if the private binding schema is unavailable.
+        await store.claim_due_reminders(0)  # Likewise for the schedules table (012_schedules.sql).
         if worker_store:
             await worker_store.open(wait=True)
         emb.start()
@@ -50,6 +51,7 @@ async def main():
         client = DiscordDM(agent, store, int(os.environ["MARONG_DISCORD_APP_ID"]), int(os.environ["MARONG_DISCORD_GUILD_ID"]))
         async with client:
             tasks.append(asyncio.create_task(DiscordProactive(settings, store, agent, client).run()))
+            tasks.append(asyncio.create_task(DiscordReminders(settings, store, agent, client).run()))
             await client.start(token)
     finally:
         for task in tasks:
