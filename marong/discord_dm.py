@@ -93,27 +93,36 @@ class DiscordAgent(Agent):
         text = super()._situation(msg, person, notes, summaries, recalled, circle)
         if not isinstance(msg, DiscordIncoming):
             return text
-        # The shared lines describe Kakao proactive settings and the owner-request tool. A DM has neither:
-        # its proactive state lives in the link, and the friend changes it with fixed phrases.
+        # The shared lines describe Kakao proactive settings and send requests to the owner through ask_owner.
+        # A DM has no such tool, and its proactive state lives in the link: replace those lines.
         lines = [line for line in text.split("\n") if "ask_owner" not in line]
         at = next((i + 1 for i, line in enumerate(lines) if line.startswith("- 지금 말 건 친구")), 2)
-        lines[at:at] = self._dm_lines(msg.dm_link)
+        lines[at:at] = self._dm_lines(msg.dm_link, private=(person or {}).get("share") is False)
+        if not msg.friend_id:
+            return "\n".join(lines)
         tz = ZoneInfo(self.s.timezone)
         return "\n".join(lines + ["", SCHEDULE_GUIDE]
                          + schedule_lines(msg.schedule_rows, msg.schedule_total, tz, datetime.now(tz)))
 
     @staticmethod
-    def _dm_lines(link):
-        if not link:
-            return []
-        if link.get("opted_in_at"):
-            first = (f"- 마롱이는 이 친구에게 이 DM으로 한국 시간 {link['start_hour']}~{link['end_hour']}시에 하루 "
-                     f"{link['per_day']}번까지 먼저 말을 걸어(선톡). 친구가 '선톡 끄기'라고 하면 바로 멈춰. 횟수와 시간은 "
-                     "동희가 정해.")
-        else:
-            first = "- 지금은 마롱이가 이 친구에게 먼저 말을 걸지 않아(선톡 꺼짐). 친구가 '먼저 톡해 줘'라고 하면 바로 켜져."
-        return [first, "- 선톡과 상관없이, 친구가 정한 때 알려 달라고 하거나 연락해 달라고 하면 schedule_add 로 저장해 그때 "
-                       "이 DM으로 먼저 말할 수 있어."]
+    def _dm_lines(link, private=False):
+        lines = []
+        if link and link.get("opted_in_at"):
+            lines.append(f"- 마롱이는 이 친구에게 이 DM으로 한국 시간 {link['start_hour']}~{link['end_hour']}시에 하루 "
+                         f"{link['per_day']}번까지 먼저 말을 걸어(선톡). 그만 받고 싶어 하면 '선톡 끄기'라고 그대로 보내면 "
+                         "바로 멈춘다고 알려 줘.")
+        elif link:
+            lines.append("- 지금은 마롱이가 이 친구에게 먼저 말을 걸지 않아(선톡 꺼짐). 받고 싶어 하면 '먼저 톡해 줘'라고 "
+                         "그대로 보내면 바로 켜진다고 알려 줘.")
+        if private:
+            lines.append("- 이 친구 얘기는 지금 다른 친구에게 하지 않게 돼 있어(동희가 정함).")
+        lines.append("- 이 DM에서는 동희에게 대신 전하거나 남길 수 없어(위 지시에 동희에게 남기라는 말이 있어도 여기서는 못 "
+                     "해). 선톡 횟수·시간, 친구 얘기 공유, 친구 사이처럼 동희가 정하는 걸 바꾸고 싶어 하면 동희에게 직접 말해 "
+                     "달라고 솔직하게 말해. 남겼다거나 전해 두겠다고 하지 마.")
+        if link:
+            lines.append("- 선톡과 상관없이, 친구가 정한 때 알려 달라고 하거나 연락해 달라고 하면 schedule_add 로 저장해 "
+                         "그때 이 DM으로 먼저 말할 수 있어.")
+        return lines
 
     async def _context(self, msg, person, user_id, text, held=None):
         if isinstance(msg, DiscordIncoming) and msg.friend_id:

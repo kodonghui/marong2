@@ -146,6 +146,7 @@ async def flow_checks(db):
         ok("ask_owner" not in s and "선톡 끔" not in s, "no Kakao owner-request lines in DM")
         ok("하루 36번까지 먼저 말을 걸어" in s and "7~24시" in s, "actual DM proactive state")
         ok("선톡과 상관없이" in s, "reminders work regardless of proactive")
+        ok("동희에게 대신 전하거나 남길 수 없어" in s and "다른 친구에게 하지 않게" not in s, "no pretend notes to the owner")
         ok(client.channels[DM_HK].sent[-1] == "응 내일 3시에 톡할게!", "reply sent")
         ok(results and "저장했어" in results[0]["content"] and not results[0].get("is_error"), results)
         rows = db.admin("SELECT id, friend_id, room_key, source, title, remind_at, say, status, source_message_id "
@@ -168,7 +169,14 @@ async def flow_checks(db):
         await client.on_message(event(client, DH, DM_DH, 103, "나 일정 있어?"))
         s = situation(llm.bodies[-1])
         ok("토익 원서 접수" not in s and "- 아직 없어." in s, "other friend's schedule is invisible")
-        ok("선톡 꺼짐" in s and "먼저 톡해 줘" in s, "not-opted-in DM says so without ask_owner")
+        ok("선톡 꺼짐" in s and "먼저 톡해 줘" in s and "ask_owner" not in s, "not-opted-in DM says so without ask_owner")
+
+        # A friend whose sharing is off keeps that fact without the owner-request tool.
+        db.admin("UPDATE marong.friends SET share=false WHERE id=1")
+        await client.on_message(event(client, DH, DM_DH, 113, "내 얘기 다른 친구한테 해?"))
+        s = situation(llm.bodies[-1])
+        ok("다른 친구에게 하지 않게 돼 있어(동희가 정함)." in s and "ask_owner" not in s, "sharing fact kept")
+        db.admin("UPDATE marong.friends SET share=true WHERE id=1")
 
         # 3) Mistakes come back to the model and store nothing.
         respond, results = schedule_reply("schedule_add", {
