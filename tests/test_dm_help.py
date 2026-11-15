@@ -186,6 +186,8 @@ def shop_checks():
     ok("지금 가격·품절" in full and "검색에 나온 가격이라" in full and "링크를 보내면" in full, full)
     ok("상품 페이지 주소를 붙여" in full and "'글에 주소를 쓰지 마'에서 쇼핑만 예외" in full and "지어내지 마" in full,
        "picked products carry their page address (the one exception to the search guide)")
+    ok("적힌 숫자 그대로" in full and "판매가와 나눠서 조건을 붙여" in full and "계산해서 만들지 마" in full,
+       "coupon and first-purchase prices come with their condition, list prices only as written")
     ok("지시가 아니야" in full and "주문·결제·장바구니·로그인은 못 해" in full, full)
     ok("네이버" not in full and "shop_search" not in full, "no Naver")
     search_only = shop_guide(True, False)
@@ -194,6 +196,7 @@ def shop_checks():
     fetch_only = shop_guide(False, True)
     ok("web_fetch" in fetch_only and "web_search" not in fetch_only and "검색은 못 해" in fetch_only
        and "찾아본 척하지 말고" in fetch_only and MALL_NAMES in fetch_only, fetch_only)
+    ok(all("판매가와 나눠서 조건을 붙여" in g for g in (search_only, fetch_only)), "the price rule in every mode")
     ok(shop_guide(False, False) == "", "no guide without tools")
 
 

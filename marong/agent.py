@@ -156,6 +156,7 @@ def clean_name(raw) -> str:
 class Agent:
     caption_prompt = CAPTION_PROMPT
     warmer = None  # cache_warm.CacheWarmer: 캐시를 쓴 요청의 앞부분을 받아 조용할 때도 캐시를 유지(디스코드 봇이 켬)
+    route = None  # deepseek.Route: 정한 방은 Claude 대신 DeepSeek 로 답함(디스코드 봇이 켬, MARONG_DEEPSEEK_ROOMS)
 
     def __init__(self, settings: Settings, store: Store, embeddings: Embeddings, llm: LLM, on_saved=None):
         self.s = settings
@@ -197,7 +198,7 @@ class Agent:
             return EMPTY_TEXT
         saved_meta = None
         if msg.photo is not None:  # 기록은 고칠 수 없어서 사진 설명을 먼저 받아 '[사진] 설명'으로 저장
-            text, saved_meta = await self._caption(msg.photo)
+            text, saved_meta = await self._caption(msg.photo, msg.room_key)
         person, user_id, db_ok = None, None, True
         try:
             person = await self.store.touch(msg.room_key, msg.is_channel, msg.user_key)
@@ -280,7 +281,14 @@ class Agent:
             meta["memory"] = memory
         return reply, meta
 
-    async def _caption(self, photo: Photo) -> tuple[str, dict]:
+    def _llm_for(self, room_key: str | None):
+        """(이 방에 답할 LLM, DeepSeek 모델 이름 또는 None=Claude)."""
+        route = self.route
+        if route is not None and route.answers(room_key):
+            return route.llm, route.model
+        return self.llm, None
+
+    async def _caption(self, photo: Photo, room_key: str | None = None) -> tuple[str, dict]:
         """사진 메시지로 저장할 글('[사진] 설명')과 meta(image: 종류·크기·설명에 쓴 토큰, 못 열었으면 problem)."""
         block = photo.block()
         if block is None:
@@ -291,7 +299,7 @@ class Agent:
                 "messages": [{"role": "user", "content": [block, {"type": "text", "text": self.caption_prompt}]}]}
         caption = ""
         try:
-            resp = await self.llm.create(body, CAPTION_TIMEOUT_S)
+            resp = await self._llm_for(room_key)[0].create(body, CAPTION_TIMEOUT_S)
             info["tokens"] = [resp.usage.input_tokens or 0, resp.usage.output_tokens or 0]
             if resp.stop_reason != "refusal":
                 caption = " ".join(text_of(resp).split())[:400]
@@ -607,7 +615,9 @@ class Agent:
         loop = asyncio.get_running_loop()
         tools = self._tools(msg) if tools is None else tools
         convo = list(messages)
-        meta = {"model": self.s.anthropic_model, "effort": self.s.anthropic_effort or None, "calls": 0,
+        llm, deepseek = self._llm_for(msg.room_key)
+        meta = {"model": deepseek or self.s.anthropic_model,
+                "effort": (self.route.effort or None) if deepseek else (self.s.anthropic_effort or None), "calls": 0,
                 "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0}
         # 마지막 답 전에 쓴 글. 도구를 부르기 전 말('잠깐 볼게')은 마지막 답이 있으면 버리고(비면 이걸 보냄),
         # 웹 검색 결과를 보고 쓴 글(True)은 답의 일부라 마지막 답 앞에 그대로 남긴다.
@@ -615,8 +625,13 @@ class Agent:
         nudged = False
         for _ in range(MAX_STEPS):
             body = self._body(system, convo, tools)
-            resp = await self.llm.create(body, end - loop.time())
-            self._cache_used(body, resp.usage, meta)
+            resp = await llm.create(body, end - loop.time())
+            served = getattr(resp, "served_model", None)
+            if deepseek and served and served != deepseek:  # DeepSeek 가 안 돼서 Claude 가 대신 답함: 이번 답은 끝까지 Claude
+                llm, deepseek = self.llm, None
+                meta.update(model=served, effort=self.s.anthropic_effort or None, fallback="deepseek")
+            if not deepseek:  # DeepSeek 요청은 Claude 캐시 유지에 넣지 않음
+                self._cache_used(body, resp.usage, meta)
             meta["calls"] += 1
             meta["stop_reason"] = resp.stop_reason
             usage = resp.usage

@@ -309,7 +309,7 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         if k == "terminal":
             return "터미널"
         who = ", ".join(sorted(names.get(k, ())))
-        kind = ("Discord DM" if k.startswith("discord-dm:") else
+        kind = ("Discord DM" if k.startswith("discord-dm:") else "Discord 채널" if k.startswith("discord-ch:") else
                 "1:1" if (data["rooms"].get(k) or {}).get("is_channel") else "단체")
         return f"{kind} {key(k)}" + (f" {who}" if who else "")
 

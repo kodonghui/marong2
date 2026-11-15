@@ -84,22 +84,34 @@ SELECT d.*, f.name, true AS is_channel, d.last_incoming_at AS last_said,
 
 class DiscordStore(AppStore, GoogleStore, ScheduleStore, Store):
     def _reply_rooms(self, room: str) -> str:
-        # No memory_room traversal: it would pull in linked Kakao group chats.
-        return f"""(SELECT source.room_key FROM marong.discord_dm_links d
-                    CROSS JOIN LATERAL (
-                      SELECT d.room_key UNION ALL
-                      SELECT k.room_key FROM marong.rooms k
-                      WHERE k.room_key=d.kakao_room_key AND k.is_channel AND k.memory_room IS NULL
-                        AND NOT EXISTS (
-                          SELECT 1 FROM marong.messages m LEFT JOIN marong.people p USING(user_key)
-                           WHERE m.room_key=k.room_key AND m.role='user'
-                             AND p.friend_id IS DISTINCT FROM d.friend_id
-                        )
-                    ) source WHERE d.room_key={room})"""
+        # A DM: the friend's own DM and their verified private Kakao 1:1 room. No memory_room traversal: it would pull
+        # in linked Kakao group chats. A channel of the private server ('discord-ch:'): that channel alone, never a DM.
+        # {room} appears once: some queries pass it as a positional parameter.
+        return f"""(SELECT x.room_key FROM (SELECT {room}::text AS asked) q CROSS JOIN LATERAL (
+                      SELECT q.asked AS room_key WHERE q.asked LIKE 'discord-ch:%%'
+                      UNION ALL
+                      SELECT source.room_key FROM marong.discord_dm_links d
+                      CROSS JOIN LATERAL (
+                        SELECT d.room_key UNION ALL
+                        SELECT k.room_key FROM marong.rooms k
+                        WHERE k.room_key=d.kakao_room_key AND k.is_channel AND k.memory_room IS NULL
+                          AND NOT EXISTS (
+                            SELECT 1 FROM marong.messages m LEFT JOIN marong.people p USING(user_key)
+                             WHERE m.room_key=k.room_key AND m.role='user'
+                               AND p.friend_id IS DISTINCT FROM d.friend_id
+                          )
+                      ) source WHERE d.room_key=q.asked
+                    ) x)"""
 
     def _reply_embedding_filter(self) -> str:
-        # Legacy summaries may combine the direct and linked group rooms.
-        return "AND (e.source_type='message' OR e.room_key LIKE 'discord-dm:%%') "
+        # Legacy summaries may combine the direct and linked group rooms. A channel's own summaries are its own.
+        return "AND (e.source_type='message' OR e.room_key LIKE 'discord-dm:%%' OR e.room_key LIKE 'discord-ch:%%') "
+
+    async def channel_friends(self) -> list[str]:
+        """Names of the friends linked to Marong on Discord: who Marong talks with in the private server's channels."""
+        rows = await self._all("SELECT f.name FROM marong.discord_dm_links d JOIN marong.friends f ON f.id=d.friend_id "
+                               "ORDER BY f.id")
+        return [r["name"] for r in rows]
 
     async def private_revision(self, room_key: str) -> int | None:
         row = await self._one(
