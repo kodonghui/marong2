@@ -57,8 +57,8 @@ SCHEDULE_ADD_TOOL = {
                        "description": "알림 반복. 친구가 매일·평일마다·매주·매달이라고 분명히 말했을 때만(기본 none). "
                                       "반복이면 remind_at 은 첫 알림 때이고 event_at 은 빼."},
             "say": {"type": "string",
-                    "description": f"remind_at 에 보낼 말. 마롱이 말투로 한두 문장, {SAY_MAX}자 안쪽(예: '야 3시야! 토익 원서 "
-                                   "접수 잊지 마 📝'). 연락해 달라는 부탁이면 말을 거는 말로. 반복이면 매번 보내도 어울리게."},
+                    "description": f"remind_at 에 보낼 말. 마롱이 말투로 한두 문장, {SAY_MAX}자 안쪽(예: '3시야! 토익 원서 "
+                                   "접수 잊지 마 📝'). '야'로 시작하지 마. 연락해 달라는 부탁이면 말을 거는 말로. 반복이면 매번 보내도 어울리게."},
         },
         "required": ["title"],
         "additionalProperties": False,

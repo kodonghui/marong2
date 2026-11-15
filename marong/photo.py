@@ -1,7 +1,8 @@
 """친구가 보낸 사진. 카카오는 사진을 서명된(시간이 지나면 만료되는) 카카오 CDN 주소 하나로 보낸다(content 가 그 주소뿐).
 주소 안에 인증값이 들어 있어서 저장·로그에 남기지 않고, 받자마자 내려받아 Claude 에게 보여 준다.
 폰 원본 사진은 Claude 가 한 장에 받는 크기보다 커서, 서버에서 줄여 보낸다.
-기록에는 사진 대신 '[사진] 설명'을 남긴다(설명은 agent.py 가 Claude 에게 사진을 보여 주고 짧게 받은 것)."""
+기록에는 사진 대신 '[사진] 설명'을 남긴다(설명은 agent.py 가 Claude 에게 사진을 보여 주고 짧게 받은 것).
+디스코드 DM 사진은 discord_dm.py 가 첨부를 받아 prepare() 로 같은 처리를 한다."""
 import asyncio
 import base64
 import io
@@ -104,25 +105,29 @@ async def download(http: httpx.AsyncClient, url: str) -> Photo:
                     if len(buf) > MAX_DOWNLOAD:
                         log.warning("photo_download too_big")
                         return Photo(problem="big")
-                data = bytes(buf)
-                media = sniff(data)
-                if media is None:
-                    log.warning("photo_download not_image bytes=%d", len(data))
-                    return Photo(problem="type")
-                if len(data) <= MAX_BYTES:
-                    return Photo(media=media, data=data)
-                try:  # 줄이는 데 CPU 를 써서 다른 방 답이 밀리지 않게 따로 돌림
-                    small = await asyncio.to_thread(shrink, data)
-                except Exception as e:  # 깨진 사진 등. 오류 글에는 내용이 없지만 종류만 남김
-                    log.warning("photo_shrink_error %s bytes=%d", type(e).__name__, len(data))
-                    return Photo(problem="error")
-                if small is None:
-                    log.warning("photo_shrink too_many_pixels bytes=%d", len(data))
-                    return Photo(problem="big")
-                log.info("photo_shrunk %s %d→%d bytes", media, len(data), len(small))
-                return Photo(media="image/jpeg", data=small)
+                return await prepare(bytes(buf))
     except httpx.HTTPError as e:
         log.warning("photo_download_error %s", type(e).__name__)
         return Photo(problem="error")
     log.warning("photo_download bad_redirect")
     return Photo(problem="error")
+
+
+async def prepare(data: bytes) -> Photo:
+    """받은 사진 파일 → Photo. 종류는 파일 앞부분으로 알아내고, Claude 가 받는 크기보다 크면 줄인다."""
+    media = sniff(data)
+    if media is None:
+        log.warning("photo_download not_image bytes=%d", len(data))
+        return Photo(problem="type")
+    if len(data) <= MAX_BYTES:
+        return Photo(media=media, data=data)
+    try:  # 줄이는 데 CPU 를 써서 다른 방 답이 밀리지 않게 따로 돌림
+        small = await asyncio.to_thread(shrink, data)
+    except Exception as e:  # 깨진 사진 등. 오류 글에는 내용이 없지만 종류만 남김
+        log.warning("photo_shrink_error %s bytes=%d", type(e).__name__, len(data))
+        return Photo(problem="error")
+    if small is None:
+        log.warning("photo_shrink too_many_pixels bytes=%d", len(data))
+        return Photo(problem="big")
+    log.info("photo_shrunk %s %d→%d bytes", media, len(data), len(small))
+    return Photo(media="image/jpeg", data=small)

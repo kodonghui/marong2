@@ -9,13 +9,16 @@ from zoneinfo import ZoneInfo
 
 import discord
 
-from .agent import Agent, Incoming
+from .agent import CAPTION_PROMPT, Agent, Incoming
 from .google_calendar import (CONNECT_TEXT, DISCONNECTED_TEXT, LINK_MARK, NOT_CONNECTED_TEXT, REVOKE_FAILED_TEXT,
                               UNAVAILABLE_TEXT, calendar_lines, command as google_command)
 from .llm import brief
+from .photo import MAX_DOWNLOAD, Photo, prepare
 from .proactive import PART_GAP_S, Proactive, parts, schedule, slot
 from .schedules import (GUIDE as SCHEDULE_GUIDE, LATE_LIMIT, SCHEDULE_TOOL_NAMES, SCHEDULE_TOOLS, occurrence,
                         parse_when, reminder_text, run_tool as run_schedule_tool, schedule_lines)
+from .shopping import GUIDE as SHOP_GUIDE, SHOP_TOOL
+from .style import tidy
 
 log = logging.getLogger("marong.discord")
 ON = {
@@ -33,6 +36,11 @@ TIDY_S = 600            # 지난 일정을 끝으로 정리하는 간격(초)
 GOOGLE_CONTEXT_S = 4    # 답하기 전에 구글 캘린더를 기다리는 한도(초). 넘으면 못 읽었다고 하고 답함
 GOOGLE_LIST_S = 6
 UNKNOWN_LINK = {"status": "unknown"}  # google_links 를 못 읽음
+PHOTOS_PER_MESSAGE = 4  # 메시지 하나에서 여는 사진(첨부) 수. 더 있으면 못 열었다고 남김
+PHOTO_READ_S = 20       # 첨부 하나를 내려받는 시간 상한(초)
+FOLLOW_UP_S = 1800      # 답한 사진을 이만큼(초) 더 보여 줌: 같은 문제집 사진의 다른 문제를 이어 물을 때
+FOLLOW_UP_PHOTOS = 2    # 그렇게 더 보여 주는 사진은 방마다 최근 이만큼
+FOLLOW_UP_KEPT = 4      # 모든 방을 합친 상한(사진 한 장이 메모리에서 수 MB)
 
 
 @dataclass
@@ -49,6 +57,7 @@ class DiscordIncoming(Incoming):
     google_events: list | None = None     # upcoming Google events shown to the model (None: not read)
     google_more: bool = False
     link_url: str | None = None           # replaces LINK_MARK in the sent text only, never in the history
+    shopping: list = field(default_factory=list)  # shop_search results, kept in the reply meta
 
 
 def proactive_preference(text: str) -> bool | None:
@@ -73,6 +82,21 @@ def chunks(text: str):
         yield text[start:]
 
 
+async def read_photo(attachment) -> Photo:
+    """Discord attachment -> Photo. The CDN address carries a signature: never log or store it."""
+    media = (attachment.content_type or "").split(";")[0].strip().lower()
+    if media and not media.startswith("image/"):
+        return Photo(problem="type")
+    if (attachment.size or 0) > MAX_DOWNLOAD:
+        return Photo(problem="big")
+    try:
+        data = await asyncio.wait_for(attachment.read(), PHOTO_READ_S)
+    except Exception as e:  # Discord/CDN/network trouble: keep only the error type.
+        log.warning("discord_photo_read_failed %s", type(e).__name__)
+        return Photo(problem="error")
+    return await prepare(data)
+
+
 async def send_text(channel, text: str) -> bool:
     try:
         for chunk in chunks(text):
@@ -84,14 +108,41 @@ async def send_text(channel, text: str) -> bool:
 
 
 class DiscordAgent(Agent):
-    def __init__(self, settings, store, embeddings, llm, on_saved=None, *, first_replies=None, google=None):
+    caption_prompt = CAPTION_PROMPT.replace("카카오톡", "디스코드 DM")
+
+    def __init__(self, settings, store, embeddings, llm, on_saved=None, *, first_replies=None, google=None, shop=None,
+                 clock=time.monotonic):
         super().__init__(settings, store, embeddings, llm, on_saved=on_saved)
         self.first_replies = first_replies or {}
         self.google = google  # GoogleCalendar when the Google client is set up on this server
+        self.shop = shop      # shopping.ShopSearch when the Naver keys are set, else None (no tool)
+        self.clock = clock
+        self._answered_photos = OrderedDict()  # (room, message id) -> (photo block, when it was answered)
 
     def _tools(self, msg):
         # Identity and opt-in never change on model output. Only the friend's own schedule does.
-        return list(SCHEDULE_TOOLS) if getattr(msg, "friend_id", None) else []
+        tools = list(SCHEDULE_TOOLS) if getattr(msg, "friend_id", None) else []
+        return tools + ([SHOP_TOOL] if self.shop is not None else [])
+
+    def _shown_photos(self, room_key, first):
+        # A photo already answered stays visible for a while, so "then what about question 5?" still sees the page.
+        shown = super()._shown_photos(room_key, first)
+        now = self.clock()
+        for (room, i), (block, at) in self._answered_photos.items():
+            if room == room_key and now - at <= FOLLOW_UP_S:
+                shown.setdefault(i, block)
+        return shown
+
+    def _forget_photos(self, room_key, user_id):
+        now = self.clock()
+        for key in [k for k in self._photos if k[0] == room_key and user_id is not None and k[1] <= user_id]:
+            self._answered_photos[key] = (self._photos.pop(key), now)
+        mine = [k for k in self._answered_photos if k[0] == room_key]
+        stale = mine[:-FOLLOW_UP_PHOTOS] + [k for k, (_, at) in self._answered_photos.items() if now - at > FOLLOW_UP_S]
+        for key in stale:
+            self._answered_photos.pop(key, None)
+        while len(self._answered_photos) > FOLLOW_UP_KEPT:
+            self._answered_photos.popitem(last=False)
 
     def _system(self, situation):
         return super()._system(
@@ -109,13 +160,14 @@ class DiscordAgent(Agent):
         lines = [line for line in text.split("\n") if "ask_owner" not in line]
         at = next((i + 1 for i, line in enumerate(lines) if line.startswith("- 지금 말 건 친구")), 2)
         lines[at:at] = self._dm_lines(msg.dm_link, private=(person or {}).get("share") is False)
-        if not msg.friend_id:
-            return "\n".join(lines)
-        tz = ZoneInfo(self.s.timezone)
-        now = datetime.now(tz)
-        lines += ["", SCHEDULE_GUIDE] + schedule_lines(msg.schedule_rows, msg.schedule_total, tz, now)
-        if self.google:
-            lines += calendar_lines(msg.google_link, msg.google_events, msg.google_more, tz, now)
+        if msg.friend_id:
+            tz = ZoneInfo(self.s.timezone)
+            now = datetime.now(tz)
+            lines += ["", SCHEDULE_GUIDE] + schedule_lines(msg.schedule_rows, msg.schedule_total, tz, now)
+            if self.google:
+                lines += calendar_lines(msg.google_link, msg.google_events, msg.google_more, tz, now)
+        if self.shop is not None:
+            lines += ["", SHOP_GUIDE]
         return "\n".join(lines)
 
     @staticmethod
@@ -207,6 +259,12 @@ class DiscordAgent(Agent):
 
     async def _run_tool(self, block, msg):
         result = {"type": "tool_result", "tool_use_id": block.id}
+        if block.name == SHOP_TOOL["name"] and self.shop is not None:
+            content, action = await self.shop.run(block.input or {})
+            if isinstance(msg, DiscordIncoming):
+                msg.shopping.append(action)
+            out = {**result, "content": content}
+            return {**out, "is_error": True} if action["result"] == "error" else out
         friend_id = getattr(msg, "friend_id", None)
         if block.name not in SCHEDULE_TOOL_NAMES or not friend_id:
             return {**result, "content": f"{block.name} 도구는 없어.", "is_error": True}
@@ -251,6 +309,8 @@ class DiscordAgent(Agent):
         reply, meta = await super()._reply(msg, person, user_id, text, timeout, use_memory, held)
         if msg.actions:
             meta["schedule"] = msg.actions
+        if msg.shopping:
+            meta["shop"] = msg.shopping
         return reply, meta
 
 
@@ -304,7 +364,9 @@ class DiscordDM(discord.Client):
         if not link or link["channel_id"] not in (None, channel_id):
             return
         first_dm = link["channel_id"] is None
-        if not isinstance(msg.content, str) or not msg.content.strip():
+        text = msg.content.strip() if isinstance(msg.content, str) else ""
+        attachments = list(getattr(msg, "attachments", None) or [])
+        if not text and not attachments:
             return
         if first_dm:
             # The Gateway may synthesize a partial DMChannel. Verify the actual recipient once.
@@ -318,17 +380,30 @@ class DiscordDM(discord.Client):
         if len(self.seen) > 512:
             self.seen.popitem(last=False)
 
-        text = msg.content.strip()
         message_key = f"discord:{msg.id}"
-        preference = proactive_preference(text)
+        preference = proactive_preference(text) if text else None
         if not await self.store.incoming(user_id, channel_id, message_key, preference):
             return
         if preference is not None:
             log.info("discord_proactive_preference changed=%s", preference)
 
         room = link["room_key"]
-        incoming = DiscordIncoming(room, link["user_key"], text, kakao_id=message_key, proactive_preference=preference,
-                                   friend_id=link["friend_id"], dm_link=link, google_command=google_command(text))
+        common = {"friend_id": link["friend_id"], "dm_link": link}
+        # Photos first (each saved as '[사진] 설명'), then the text; one reply sees them all.
+        photos = list(await asyncio.gather(*(read_photo(a) for a in attachments[:PHOTOS_PER_MESSAGE])))
+        if len(attachments) > PHOTOS_PER_MESSAGE:
+            photos.append(Photo(problem="many"))
+        if photos:
+            log.info("discord_dm_photos n=%d opened=%d", len(attachments), sum(p.block() is not None for p in photos))
+        items = [DiscordIncoming(room, link["user_key"], "", kakao_id=f"{message_key}:{i}", photo=photo, **common)
+                 for i, photo in enumerate(photos, 1)]
+        if text:
+            items.append(DiscordIncoming(room, link["user_key"], text, kakao_id=message_key,
+                                         proactive_preference=preference, google_command=google_command(text),
+                                         **common))
+        else:
+            items[-1].kakao_id = message_key  # a photo-only message: answer at its last photo
+        incoming = items[-1]  # the one that answers
 
         async def reply(body):
             if incoming.link_url:  # The history keeps the mark; only the friend's DM gets the one-time link.
@@ -336,6 +411,8 @@ class DiscordDM(discord.Client):
             return await send_text(msg.channel, body)
 
         async with self.room_lock(room):
+            for item in items[:-1]:
+                await self.agent.handle(item, reply, superseded=lambda: True)
             result = await self.agent.handle(incoming, reply)
         if result is not None:
             log.info("discord_dm_replied")
@@ -456,7 +533,7 @@ class DiscordReminders:
             log.info("discord_reminder_missed id=%s late_min=%d dm=%s", row["id"], late.total_seconds() // 60,
                      bool(row["channel_id"]))
             return 0
-        text = reminder_text(row, self.tz, late)
+        text, _ = tidy(reminder_text(row, self.tz, late))
         channel = self.client.get_partial_messageable(int(row["channel_id"]), type=discord.ChannelType.private)
         ok = self.client.available and await send_text(channel, text)
         state = await self.store.finish_reminder(row, "sent" if ok else "failed", following)

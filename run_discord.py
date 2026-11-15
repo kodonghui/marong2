@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import httpx
+
 from marong.config import load_dotenv, load_settings
 from marong.discord_dm import DiscordAgent, DiscordDM, DiscordProactive, DiscordReminders
 from marong.discord_store import DiscordStore
@@ -14,6 +16,7 @@ from marong.embed import Embeddings
 from marong.google_calendar import DEFAULT_PORT, GoogleCalendar, GoogleConfig, serve as serve_google
 from marong.llm import LLM
 from marong.memory import MemoryWorker
+from marong.shopping import TIMEOUT_S as SHOP_TIMEOUT_S, ShopSearch, load_keys
 from marong.store import Store
 
 
@@ -38,6 +41,10 @@ async def main():
         greeting = reply.get("once") if isinstance(reply, dict) else reply
         if not friend_id.isdecimal() or not isinstance(greeting, str) or not greeting.strip():
             raise SystemExit("Invalid Discord first-reply configuration")
+    # Naver Shopping search keys: optional systemd credential "naver-shop" (two lines). Without it, no shop tool.
+    shop_keys = load_keys()
+    shop_http = httpx.AsyncClient(timeout=SHOP_TIMEOUT_S) if shop_keys else None
+    logging.getLogger("marong.shop").info("shop_search %s", "on" if shop_keys else "off")
     store = DiscordStore(settings.database_url, call_bridge=True)
     store.discord_context_enabled = False
     llm = LLM(settings)
@@ -61,7 +68,8 @@ async def main():
         if worker:
             tasks.append(asyncio.create_task(worker.run()))
         agent = DiscordAgent(settings, store, emb, llm, on_saved=worker.kick if worker else None,
-                             first_replies=first_replies, google=google)
+                             first_replies=first_replies, google=google,
+                             shop=ShopSearch(shop_http, *shop_keys) if shop_keys else None)
         client = DiscordDM(agent, store, int(os.environ["MARONG_DISCORD_APP_ID"]), int(os.environ["MARONG_DISCORD_GUILD_ID"]))
         async with client:
             tasks.append(asyncio.create_task(DiscordProactive(settings, store, agent, client).run()))
@@ -83,6 +91,8 @@ async def main():
             await worker_store.close()
         await store.close()
         await llm.close()
+        if shop_http:
+            await shop_http.aclose()
 
 
 if __name__ == "__main__":

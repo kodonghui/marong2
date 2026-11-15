@@ -268,10 +268,11 @@ async def delivery_checks(db, hk_first):
         def due(schedule_id, ago):
             db.admin("UPDATE marong.schedules SET remind_at=now()-%s WHERE id=%s", (ago, schedule_id))
 
-        # A due one-off reminder goes once, is recorded and finishes.
+        # A due one-off reminder goes once, is recorded and finishes. The saved line began with '야', which friends
+        # asked Marong not to use; it is dropped when sending (style.tidy).
         due(hk_first, timedelta(seconds=5))
         before = len(hk.sent)
-        ok(await reminders.step() == 1 and hk.sent[before:] == ["야 3시야! 토익 원서 접수 잊지 마 📝"], hk.sent)
+        ok(await reminders.step() == 1 and hk.sent[before:] == ["3시야! 토익 원서 접수 잊지 마 📝"], hk.sent)
         ok(await reminders.step() == 0 and len(hk.sent) == before + 1, "sent only once")
         status, count = db.admin("SELECT status, sent_count FROM marong.schedules WHERE id=%s", (hk_first,))[0]
         ok(status == "done" and count == 1, (status, count))
