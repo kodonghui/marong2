@@ -1,0 +1,283 @@
+# 마롱이 선 전화·그림 화두 API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/call-first.md(SPEC-260~283), DB: marong/migrations/018_call_first.sql(TBL-125, TBL-126, TBL-102 바꿈). 코드: marong/app_chat.py, marong/topics.py, marong/app_push.py, tools/vertex_live/
+openapi: 3.1.0
+info:
+  title: 마롱이 선 전화·그림 화두 API
+  version: 0.1.0-draft
+  description: |-
+    선 전화(마롱이가 약속 없이 먼저 거는 전화)와 그림 화두 설계(CTX-020, 2026-11-16)가 더하거나 바꾸는 계약이에요. 원본은 이 파일이고 코드는 이 파일을 따라가요(06단계).
+
+    - 새 HTTP 경로는 그림 파일 하나예요(API-140). 글 대화 서버(봇, 127.0.0.1:8796)가 `/chat/` 아래에서 줘요. 터널이 `/chat/` 아래만 봇으로 보내고, 그 앞에서 Cloudflare Access가 로그인을 확인해요(SPEC-110).
+    - 글 대화 메시지에 더하는 칸(`picture`, 종류 `hello`)은 `api/app-chat.openapi.yaml`의 `Message`(API-102, API-104)에 적었어요.
+    - 앱 벨 FCM 메시지와 통화 웹소켓 `ready`는 HTTP 응답이 아니라서 바뀌는 모양을 `components.schemas`의 `RingPushData`, `LiveReady`로 적었어요.
+    - 관리 도구 `topics` 명령(SPEC-279)과 끄기·켜기 말(SPEC-277)은 HTTP 계약이 아니에요. 말은 지금처럼 메시지 보내기(API-103)로 오고, 답은 보통 마롱이 말(`chat`)이에요.
+
+    바꾸는 것(Claude 제안, 2026-11-16, 검토 대상).
+    1. `GET /chat/topics/{set}/{name}.webp`를 새로 더해요(API-140, SPEC-274). 그림 목록(`marong/topics/v1/topics.json`)에 있는 이름만 주고, 상태가 `removed`인 그림도 줘요(지난 대화에 남아 있어서). 그림은 버전 폴더 안에서 바꾸지 않아서 `Cache-Control: public, max-age=31536000, immutable`이에요. 그림을 고치면 새 버전 폴더(v2)에 넣어요.
+    2. 글 대화 메시지(API-102, API-104)에 `picture: {src, alt}`를 더하고(그림이 있는 마롱이 말만), `kind`에 `hello`(못 받은 선 전화 뒤의 말)를 더해요.
+    3. 앱 벨 FCM 메시지 `data`에 `reason`(`promise` 또는 `hello`)과 `line`(선 전화만, 1~30자)을 더해요(SPEC-266, SPEC-267).
+    4. 통화 웹소켓 `/live`의 `ready`에, 그림이 있는 선 전화를 새로 받았을 때 한 번만 `topic: {picture, title}`을 더해요(SPEC-268, SPEC-269). 다시 연결한 `ready`에는 없어요.
+
+    계약에서 정한 것(Claude 제안, 2026-11-16, 검토 대상).
+    1. 그림 주소는 서버가 메시지의 `picture.src`와 `ready.topic.picture`로만 알려 주고 화면이 만들지 않아요. 그래서 형식이 틀린 이름도 400이 아니라 404 `no_picture`예요.
+    2. 그림 경로는 봇이 Access 증명을 다시 확인하지 않아요. 같은 봇이 주는 `chat.js`·`chat.css`와 같은 규칙이고(Access는 터널 앞에서 확인), 그림은 친구마다 같은 마롱이 그림이라 개인 정보가 없어요.
+    3. 이 경로의 404는 다른 글 대화 오류처럼 Problem Details예요(aiohttp 기본 글이 아님).
+
+    깨지는 변경: 없음. 모두 새 경로, 새 칸, 새 값이에요. 지금 글 대화 화면(`chat.js`)은 모르는 칸을 읽지 않고 모르는 종류에 태그를 달지 않아서 그림 없이 글만 보여요. 화면 파일은 같은 봇이 주니 서버와 함께 바뀌어요. 0.2.1 앱은 FCM의 모르는 칸을 무시해서 깨지지 않지만 선 전화를 '약속한 전화예요'로 보여서, 선 전화는 0.2.2 이상 기기에만 보내요(SPEC-265 ③).
+
+    Open: 통화 웹소켓 `/live`의 원본 계약은 일기·통화 비용 설계(PR #25)의 `api/call-live.openapi.yaml`이에요. 두 설계가 main에 합쳐지면 그 파일의 `ready` 설명에 `topic`을 더하고, 이 파일의 `LiveReady`는 그쪽을 가리키게 바꿔요.
+servers:
+- url: https://marong.corthex-hq.com
+  description: Cloudflare Access 뒤. 터널이 /chat/ 아래만 봇으로 보내요
+- url: http://127.0.0.1:8796
+  description: 서버 안에서 직접(배포 확인용)
+security:
+- cfAccess: []
+paths:
+  /chat/topics/{set}/{name}.webp:
+    get:
+      operationId: getTopicPicture
+      summary: 그림 화두의 그림 파일
+      description: 글 대화 화면이 그림 화두 글의 그림(메시지 `picture.src`)을, 통화 화면이 선 전화 그림 카드(`ready.topic.picture`)를 불러요. 512×512 WebP, 120KB 이하예요(SPEC-260). 봇이 시작할 때 읽은 그림 목록에 있는 이름만 줘요.
+      x-corthex:
+        id: API-140
+        spec:
+        - SPEC-274
+        - SPEC-269
+        - SPEC-260
+        omit:
+          '400': 형식이 틀린 이름도 없는 그림이라 404(계약에서 정한 것 1)
+          '401': 봇이 다시 확인하지 않음(계약에서 정한 것 2). 로그인은 터널 앞의 Access가 막음
+          '403': 모든 친구에게 같은 그림
+          '409': 읽기만 함
+          '429': 읽기만 하고, 한 번 받은 그림은 브라우저가 1년 동안 다시 묻지 않음
+      security: []
+      parameters:
+      - name: set
+        in: path
+        required: true
+        description: 그림 세트 버전 폴더
+        schema:
+          type: string
+          pattern: ^v[0-9]{1,3}$
+          maxLength: 4
+        examples:
+          v1:
+            value: v1
+      - name: name
+        in: path
+        required: true
+        description: 그림 목록의 이름(TERM-084 그림 세트, 3.1 `name`)
+        schema:
+          type: string
+          pattern: ^[a-z0-9-]{1,40}$
+          maxLength: 40
+        examples:
+          hat:
+            value: winter-hat
+      responses:
+        '200':
+          description: 그림 파일
+          headers:
+            Cache-Control:
+              description: 버전 폴더 안의 그림은 바뀌지 않아요
+              schema:
+                type: string
+                const: public, max-age=31536000, immutable
+          content:
+            image/webp:
+              schema:
+                type: string
+                contentMediaType: image/webp
+                maxLength: 122880
+              examples:
+                winter-hat:
+                  summary: 털모자를 쓴 마롱이(512×512 WebP)
+                  externalValue: ../marong/topics/v1/winter-hat.webp
+        '404':
+          $ref: '#/components/responses/NoPicture'
+        default:
+          $ref: '#/components/responses/Internal'
+components:
+  x-corthex:
+    errors:
+      no_picture:
+        status: 404
+        meaning: 그림 목록에 없는 이름이거나 형식이 틀림, 또는 그림 목록을 읽지 못해 화두가 꺼짐
+        message: (보이지 않음) 그림 자리를 비우고 글은 그대로
+        client: 글 대화는 그림 자리를 비우고 글만 보여요. 통화 화면은 그림 카드를 띄우지 않아요(SPEC-269). 다시 부르지 않음
+      internal:
+        status: 500
+        meaning: 예상하지 못한 서버 오류
+        message: (보이지 않음) 그림 자리를 비우고 글은 그대로
+        client: 404와 같이 그림 없이 보여요. 화면을 새로 불러오면 다시 시도
+  securitySchemes:
+    cfAccess:
+      type: apiKey
+      in: header
+      name: Cf-Access-Jwt-Assertion
+      description: Cloudflare Access가 붙이는 JWT(RS256). 이 파일의 그림 경로는 봇이 다시 확인하지 않아요(계약에서 정한 것 2).
+  responses:
+    NoPicture:
+      description: 그 이름의 그림이 없음
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unknown-name:
+              value:
+                type: https://marong.corthex-hq.com/problems/no-picture
+                title: 그 이름의 그림이 없음
+                status: 404
+                code: no_picture
+                traceId: 7d3c9a1e5b2f4c08
+    Internal:
+      description: 예상하지 못한 서버 오류
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            internal:
+              value:
+                type: https://marong.corthex-hq.com/problems/internal
+                title: 예상하지 못한 서버 오류
+                status: 500
+                code: internal
+                traceId: 4bf92f3577b34da6
+  schemas:
+    Problem:
+      type: object
+      required:
+      - title
+      - status
+      - code
+      - traceId
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+          maxLength: 200
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          maxLength: 300
+        instance:
+          type: string
+          format: uri-reference
+        code:
+          type: string
+          enum:
+          - no_picture
+          - internal
+        traceId:
+          type: string
+          pattern: ^[0-9a-f]{16}$
+      additionalProperties: false
+    PicturePath:
+      type: string
+      description: 그림 파일 주소(API-140). 서버가 그림 이름으로 만들어 줘요
+      pattern: ^/chat/topics/v[0-9]{1,3}/[a-z0-9-]{1,40}\.webp$
+      maxLength: 64
+    RingPushData:
+      type: object
+      description: |-
+        앱 벨 FCM 메시지의 `data`(앱 벨 설계의 벨 메시지). 이 설계가 `reason`과 `line`을 더해요. FCM `data`의 값은 모두 글이에요. 알림 미리보기 한 줄 말고는 개인적인 말을 담지 않아요(SPEC-281).
+        - 0.2.2 앱: `reason`이 `hello`면 알림 글과 벨 화면 둘째 줄이 '마롱이가 먼저 걸었어요'이고, `line`이 규칙에 맞으면 그 아래(알림은 ' · ' 뒤)에 붙여요. 모르는 `reason`은 `promise`로 봐요(SPEC-267).
+        - 0.2.1 앱: `reason`과 `line`을 읽지 않고 늘 '약속한 전화예요'를 보여요. 그래서 서버는 선 전화를 0.2.2 이상 기기에만 보내요(SPEC-265 ③).
+      required:
+      - kind
+      - ringId
+      - v
+      - reason
+      properties:
+        kind:
+          type: string
+          const: ring
+        ringId:
+          type: string
+          format: uuid
+          description: TBL-102 벨 줄 id
+        v:
+          type: string
+          const: '1'
+        reason:
+          type: string
+          enum:
+          - promise
+          - hello
+          description: promise 약속 전화 | hello 선 전화(TERM-080)
+        line:
+          type: string
+          minLength: 1
+          maxLength: 30
+          pattern: ^[^\r\n]+$
+          description: 선 전화만. 그림의 알림 미리보기 한 줄(3.1 `preview`)
+      additionalProperties: false
+      examples:
+      - kind: ring
+        ringId: 5b0e7c62-2f1d-4f7e-9a51-0c7d3a9e8b14
+        v: '1'
+        reason: hello
+        line: 새 모자 자랑하고 싶대
+      - kind: ring
+        ringId: 0f3a2b9c-6d4e-4a1b-8c7d-2e5f6a7b8c9d
+        v: '1'
+        reason: promise
+    LiveReady:
+      type: object
+      description: |-
+        통화 웹소켓 `/live`의 `ready` 메시지. 이 설계가 더하는 칸은 `topic`뿐이고 나머지는 지금 그대로예요.
+        `topic`은 벨 줄의 이유가 `hello`이고 그림 이름(TBL-102 `topic`)이 있는 벨로 새로 시작한 통화의 첫 `ready`에만 있어요(마롱이가 먼저 말하는 그 한 번, SPEC-268). 다시 연결(`resumed: true`)에는 없어요.
+      required:
+      - type
+      - resumed
+      - callId
+      - memoryConnected
+      - ring
+      properties:
+        type:
+          type: string
+          const: ready
+        resumed:
+          type: boolean
+        callId:
+          type: string
+          format: uuid
+        memoryConnected:
+          type: boolean
+        ring:
+          type: boolean
+          description: 앱 벨로 받은 통화인지(약속 전화와 선 전화 모두)
+        topic:
+          $ref: '#/components/schemas/ReadyTopic'
+      additionalProperties: true
+      examples:
+      - type: ready
+        resumed: false
+        callId: 9c1d4e2a-7b3f-4a6e-8d15-3f2b7c9e0a41
+        memoryConnected: true
+        ring: true
+        topic:
+          picture: /chat/topics/v1/winter-hat.webp
+          title: 새 털모자
+    ReadyTopic:
+      type: object
+      description: 통화 화면 그림 카드(SPEC-269)의 그림과 제목
+      required:
+      - picture
+      - title
+      properties:
+        picture:
+          $ref: '#/components/schemas/PicturePath'
+        title:
+          type: string
+          minLength: 1
+          maxLength: 20
+          description: 그림 제목(3.1 `title`). 그림의 대체 글로도 써요
+      additionalProperties: false

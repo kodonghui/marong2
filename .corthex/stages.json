@@ -91,6 +91,29 @@
         }
       ],
       "updated": "2026-11-16T14:34:04+00:00"
+    },
+    "06-api": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트(계약 검토, 응답별): 선 전화·그림 화두 API-140, 글 대화 Message picture·hello, FCM 벨 reason·line, 통화 ready.topic 확인 대기. 그다음 07 사이트맵",
+      "checks": [
+        {
+          "level": "info",
+          "message": "선 전화·그림 화두(CTX-020) 계약: api/call-first.openapi.yaml(API-140)과 app-chat.openapi.yaml 0.3.0-draft. openapi-spec-validator 통과, 응답 예시 56개가 스키마에 맞음(2026-11-16)",
+          "at": "2026-11-16"
+        },
+        {
+          "level": "info",
+          "message": "06 source를 PR #25와 같게 api/로 바꿈. 두 PR이 합쳐지면 06 note에 call-first.openapi.yaml(API-140)을 더하고, /live ready.topic을 PR #25의 call-live.openapi.yaml(API-107)로 옮김",
+          "at": "2026-11-16"
+        },
+        {
+          "level": "info",
+          "message": "source를 api/로 넓히자 app-chat 계약·014·015의 옛 참조(docs/app-chat.md·app-ring.md의 SPEC-1xx·REQ-1xx) 27개가 unknown-ref로 보임. 이번 설계와 무관한 기존 경고",
+          "at": "2026-11-16"
+        }
+      ],
+      "updated": "2026-11-16T14:41:41+00:00"
     }
   }
 }
