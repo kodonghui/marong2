@@ -8,6 +8,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.Logger;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
@@ -17,7 +18,8 @@ import org.json.JSONObject;
 /**
  * The app side of notifications and rings for the page script (docs/app-chat.md SPEC-123,
  * docs/app-ring.md SPEC-139 and SPEC-140). Like MarongCall, only pages of the app's own address
- * reach it: Capacitor's bridge runs on that origin alone.
+ * reach it: Capacitor's bridge runs on that origin alone. Both app windows have one (D20,
+ * docs/app-chat.md SPEC-147).
  */
 @CapacitorPlugin(name = "MarongPush")
 public class MarongPushPlugin extends Plugin {
@@ -48,15 +50,22 @@ public class MarongPushPlugin extends Plugin {
         call.resolve(result);
     }
 
-    /** The chat page is on screen (true) or not (false). On screen, its notifications go away. */
+    /** The chat page is on screen in this window (true) or not (false). On screen, its notifications go away. */
     @PluginMethod
     public void chatVisible(PluginCall call) {
         boolean visible = Boolean.TRUE.equals(call.getBoolean("visible", false));
-        PushEvents.setChatVisible(visible);
+        showChat(visible);
         if (visible) {
             Talk.clear(getContext());
         }
         call.resolve();
+    }
+
+    /** This window's part of "the chat is on screen" (SPEC-147); the debug log says when the app-wide answer changes. */
+    private void showChat(boolean visible) {
+        if (PushEvents.setChatVisible(this, visible)) {
+            Logger.info("MarongPush", PushEvents.chatVisible() ? "chat_visible on" : "chat_visible off");
+        }
     }
 
     /** Android's notification settings for this app, or for the '마롱이 전화' channel. */
@@ -105,13 +114,13 @@ public class MarongPushPlugin extends Plugin {
 
     @Override
     protected void handleOnPause() {
-        PushEvents.setChatVisible(false);
+        showChat(false);
         super.handleOnPause();
     }
 
     @Override
     protected void handleOnDestroy() {
-        PushEvents.setChatVisible(false);
+        showChat(false);
         PushEvents.detach(this);
         super.handleOnDestroy();
     }

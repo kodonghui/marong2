@@ -1,5 +1,5 @@
 'use strict';
-// 마롱이 글 대화(docs/app-chat.md SCR-107·109, SPEC-124). Text goes in with textContent only.
+// 마롱이 글 대화(docs/app-chat.md SCR-107·109, SPEC-124, SPEC-148·149). Text goes in with textContent only.
 (() => {
   // The call page's rule: the cream day theme 08:00–20:00 Korean time, night otherwise.
   const hour = 3_600_000, day = 24 * hour, morning = 8 * hour, evening = 20 * hour;
@@ -48,6 +48,7 @@ const app = {
   ready: false, blocked: null, me: null, device: null,
   first: null, last: 0, hasMore: false, loadingMore: false,
   waiting: false, waitControl: null, backoff: 0, typing: false,
+  read: 0, answered: 0, // '읽음': my messages after `answered` up to `read` (SPEC-148)
   until: 0, countdown: null,
   shown: new Map(),   // message id -> li
   pending: new Map(), // clientId -> {text, li}
@@ -267,15 +268,43 @@ function add(messages) {
   }
   if (added) {
     refreshDays();
+    markRead();
     if (stick) toBottom();
   }
   return added;
 }
 
 function setTyping(on) {
+  const stick = nearBottom();
   app.typing = Boolean(on);
   ui.typing.hidden = !app.typing;
-  if (app.typing && nearBottom()) toBottom();
+  if (app.typing && stick) toBottom();
+}
+
+/** '읽음' under each of my messages Marong read and has not answered yet (SPEC-148). An older server sends neither. */
+function setRead(body) {
+  if (!body || !Number.isInteger(body.readUpTo) || !Number.isInteger(body.answeredUpTo)) return;
+  app.read = body.readUpTo;
+  app.answered = body.answeredUpTo;
+  markRead();
+}
+
+function markRead() {
+  const stick = nearBottom();
+  for (const [id, li] of app.shown) {
+    if (!li.classList.contains('me')) continue;
+    const on = id > app.answered && id <= app.read;
+    const label = li.querySelector('.read');
+    if (on && !label) {
+      const span = document.createElement('span');
+      span.className = 'read';
+      span.textContent = '읽음';
+      li.querySelector('.meta').insertBefore(span, li.querySelector('time'));
+    } else if (!on && label) {
+      label.remove();
+    }
+  }
+  if (stick) toBottom();
 }
 
 async function loadOlder() {
@@ -297,6 +326,7 @@ async function loadOlder() {
     app.first = Math.min(app.first, message.id);
   }
   refreshDays();
+  markRead();
   ui.log.scrollTop = top + (ui.log.scrollHeight - height);
 }
 
@@ -319,18 +349,20 @@ async function waitLoop() {
       app.waitControl = control;
       const guard = setTimeout(() => control.abort(), 40_000);
       const began = Date.now();
-      const r = await api(`/messages/wait?after=${app.last}&typing=${app.typing ? 1 : 0}`, {signal: control.signal});
+      const r = await api(`/messages/wait?after=${app.last}&typing=${app.typing ? 1 : 0}&read=${app.read}`,
+        {signal: control.signal});
       clearTimeout(guard);
       app.waitControl = null;
       if (r.status === -1) continue; // aborted: the loop condition decides
       if (r.status === 200) {
         setConnection(true);
         app.backoff = 0;
-        const typing = app.typing;
+        const typing = app.typing, read = app.read;
         const added = add(r.body.messages);
         setTyping(r.body.typing);
+        setRead(r.body);
         // Nothing new at once: another open screen took this wait over. Do not take it straight back.
-        if (!added && app.typing === typing && Date.now() - began < 1_000) await sleep(3_000);
+        if (!added && app.typing === typing && app.read === read && Date.now() - began < 1_000) await sleep(3_000);
         continue;
       }
       if (!handle(r)) break;
@@ -572,6 +604,7 @@ async function start() {
   try { sessionStorage.removeItem('marong.chat.relogin'); } catch { /* fine */ }
   unblock();
   app.hasMore = page.body.hasMore;
+  setRead(page.body);
   add(page.body.messages);
   refreshDays();
   toBottom();

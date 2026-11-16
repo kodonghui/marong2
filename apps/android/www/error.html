@@ -6,7 +6,8 @@
   <meta name="color-scheme" content="dark">
   <title>마롱이 · 연결 확인</title>
   <!-- SCR-102: shown by the app when the call site cannot be reached. Self-contained on purpose:
-       only this one file is served from the app (https://localhost/error.html). -->
+       only this one file is served from the app (https://localhost/error.html). The chat window
+       opens it as error.html?page=chat, and then it goes back to the chat (docs/app-chat.md SPEC-143). -->
   <style>
     :root {
       --page: #121729; --surface: #1c2340; --text: #f4f1ea; --muted: #b4b2c6;
@@ -43,12 +44,13 @@
   <script>
     'use strict';
     const callSite = 'https://marong.corthex-hq.com/';
+    const target = new URLSearchParams(location.search).get('page') === 'chat' ? callSite + 'chat/' : callSite;
     const retry = document.getElementById('retry');
     const note = document.getElementById('note');
     function go() {
       retry.disabled = true;
       note.textContent = '다시 연결하는 중이야…';
-      location.replace(callSite);
+      location.replace(target);
     }
     retry.addEventListener('click', go);
     window.addEventListener('online', go);

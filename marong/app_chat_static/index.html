@@ -4,8 +4,8 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
   <meta name="theme-color" content="#121729"><meta name="color-scheme" content="dark">
   <title>마롱이 · 글 대화</title>
-  <link rel="icon" href="/face/v1/01-neutral.webp"><link rel="stylesheet" href="/chat/chat.css?v=20261115-chat1">
-  <script src="/chat/chat.js?v=20261115-chat1" defer></script>
+  <link rel="icon" href="/face/v1/01-neutral.webp"><link rel="stylesheet" href="/chat/chat.css?v=20261116-chat2">
+  <script src="/chat/chat.js?v=20261116-chat2" defer></script>
 </head>
 <body>
   <main class="chat" id="chat">
@@ -29,7 +29,13 @@
     <section class="log" id="log" role="log" aria-live="polite" aria-label="마롱이와 나눈 글 대화" tabindex="0">
       <p class="more" id="more" hidden>앞의 이야기를 불러오는 중</p>
       <ol class="messages" id="messages"></ol>
-      <p class="typing" id="typing" hidden><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>마롱이가 쓰는 중…</p>
+      <div class="typing row" id="typing" hidden>
+        <span class="face"><img src="/face/v1/01-neutral.webp" width="30" height="30" alt=""></span>
+        <div class="body">
+          <p class="bubble" aria-hidden="true"><span class="dots"><i></i><i></i><i></i></span></p>
+          <p class="meta"><span class="sr-only">마롱이가 </span>대답 중…</p>
+        </div>
+      </div>
     </section>
     <section class="state" id="state" hidden role="status">
       <img src="/face/v1/01-neutral.webp" width="96" height="96" alt="">

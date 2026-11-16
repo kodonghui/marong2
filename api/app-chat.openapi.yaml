@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: 마롱이 글 대화 API
-  version: 0.2.0-draft
+  version: 0.2.1-draft
   description: |-
     마롱이 앱과 브라우저의 글 대화 화면(SCR-107)이 디스코드 DM 봇과 주고받는 계약이에요. 원본은 이 파일이고 코드는 이 파일을 따라가요(06단계). 통화 API(`api/openapi.yaml`)와는 따로예요.
 
@@ -103,6 +103,7 @@ paths:
         spec:
         - SPEC-111
         - SPEC-113
+        - SPEC-148
         omit:
           '404': 없는 before는 그 앞의 메시지를 줌(빈 목록일 수 있음)
           '429': 읽기만 함
@@ -139,10 +140,14 @@ paths:
                       via: app
                       kind: proactive
                     hasMore: true
+                    readUpTo: 48211
+                    answeredUpTo: 48211
                 first:
                   value:
                     messages: []
                     hasMore: false
+                    readUpTo: 0
+                    answeredUpTo: 0
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -226,18 +231,21 @@ paths:
     get:
       operationId: waitChatMessages
       summary: 새 메시지 기다리기(25초)
-      description: after 뒤의 메시지가 있거나 마롱이가 쓰는 중인지가 화면이 보낸 typing과 달라지면 바로, 아니면 25초까지 기다렸다가 빈 목록을 줘요. 최근 60초 안의 메시지도 함께 주니 화면은 id로 겹침을 지워요. typing은 그 방에서 마롱이가 답을 만드는 중인지예요. 한 친구의 기다리는 요청은 4개까지이고, 넘으면 가장 오래된 것을 빈 응답으로 끝내요(SPEC-114).
+      description: after 뒤의 메시지가 있거나, 마롱이가 대답 중인지가 화면이 보낸 typing과, 읽음이 화면이 보낸 read와 달라지면 바로, 아니면 25초까지 기다렸다가 빈 목록을 줘요. 최근 60초 안의 메시지도 함께 주니 화면은 id로 겹침을 지워요. typing은 그 방에서 마롱이가 답을 만드는 중인지예요(SPEC-149). 한 친구의 기다리는 요청은 4개까지이고, 넘으면 가장 오래된 것을 빈 응답으로 끝내요(SPEC-114, SPEC-148).
       x-corthex:
         id: API-104
         spec:
         - SPEC-111
         - SPEC-114
+        - SPEC-148
+        - SPEC-149
         omit:
           '404': 없는 after도 그 뒤의 메시지를 줌
           '429': 기다리는 요청 한도는 오류 대신 가장 오래된 요청을 빈 응답으로 끝냄
       parameters:
       - $ref: '#/components/parameters/After'
       - $ref: '#/components/parameters/Typing'
+      - $ref: '#/components/parameters/Read'
       responses:
         '200':
           description: 새 메시지(없으면 빈 목록)
@@ -256,14 +264,20 @@ paths:
                       via: app
                       kind: chat
                     typing: false
+                    readUpTo: 48214
+                    answeredUpTo: 48214
                 quiet:
                   value:
                     messages: []
                     typing: false
+                    readUpTo: 48214
+                    answeredUpTo: 48214
                 writing:
                   value:
                     messages: []
                     typing: true
+                    readUpTo: 48216
+                    answeredUpTo: 48214
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -491,13 +505,22 @@ components:
       name: typing
       in: query
       required: false
-      description: 화면이 지금 '마롱이가 쓰는 중'을 보이는지(1) 아닌지(0). 서버의 typing이 이 값과 달라지면 기다리기가 바로 끝나요
+      description: 화면이 지금 '대답 중'을 보이는지(1) 아닌지(0). 서버의 typing이 이 값과 달라지면 기다리기가 바로 끝나요
       schema:
         type: integer
         enum:
         - 0
         - 1
         default: 0
+    Read:
+      name: read
+      in: query
+      required: false
+      description: 화면이 가진 readUpTo(SPEC-148). 서버의 readUpTo가 이 값과 달라지면 기다리기가 바로 끝나요. 보내지 않으면(옛 화면) 읽음 때문에는 끝나지 않아요
+      schema:
+        type: integer
+        format: int64
+        minimum: 0
     Limit:
       name: limit
       in: query
@@ -838,6 +861,8 @@ components:
       required:
       - messages
       - hasMore
+      - readUpTo
+      - answeredUpTo
       properties:
         messages:
           type: array
@@ -847,12 +872,18 @@ components:
         hasMore:
           type: boolean
           description: 더 앞의 메시지가 있는지
+        readUpTo:
+          $ref: '#/components/schemas/ReadUpTo'
+        answeredUpTo:
+          $ref: '#/components/schemas/AnsweredUpTo'
       additionalProperties: false
     WaitResult:
       type: object
       required:
       - messages
       - typing
+      - readUpTo
+      - answeredUpTo
       properties:
         messages:
           type: array
@@ -861,7 +892,22 @@ components:
             $ref: '#/components/schemas/Message'
         typing:
           type: boolean
+          description: 마롱이가 대답 중(방 잠금이 잡혔고 answeredUpTo보다 새 친구 말이 있음, SPEC-149)
+        readUpTo:
+          $ref: '#/components/schemas/ReadUpTo'
+        answeredUpTo:
+          $ref: '#/components/schemas/AnsweredUpTo'
       additionalProperties: false
+    ReadUpTo:
+      type: integer
+      format: int64
+      minimum: 0
+      description: 친구 말 가운데 마롱이가 읽은 가장 새 말의 id(답했거나 답이 맡은 말). 그 앞의 말도 모두 읽음. 없으면 0(SPEC-148)
+    AnsweredUpTo:
+      type: integer
+      format: int64
+      minimum: 0
+      description: 친구 말 가운데 마롱이가 답한 가장 새 말의 id. 화면은 answeredUpTo < id ≤ readUpTo인 내 말에만 '읽음'을 보여요. 없으면 0(SPEC-148)
     SendRequest:
       type: object
       required:

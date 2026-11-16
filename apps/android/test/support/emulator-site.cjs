@@ -10,7 +10,9 @@
 //   adb reverse tcp:8787 tcp:8787   (the test build opens http://localhost:8787)
 //
 // Lines typed into it while it runs: `say <text>`, `remind <text>` and `missed <text>` add Marong's message to the
-// chat (as a 선톡, a reminder or the missed-call note), `state` prints what the site holds, `quit` stops it.
+// chat (as a 선톡, a reminder or the missed-call note), `answer <seconds>` makes Marong take up each message sent from
+// the app after a second (읽음, 대답 중) and answer it after that many seconds (`answer off` stops it, docs/app-chat.md
+// TC-158), `state` prints what the site holds, `quit` stops it.
 const fs = require('node:fs');
 const http = require('node:http');
 const net = require('node:net');
@@ -18,6 +20,7 @@ const readline = require('node:readline');
 const { startChatSite } = require('./chat-site.cjs');
 const { startCallSite } = require('./call-site.cjs');
 
+const ANSWER_TEXT = '응, 잘 받았어! 대역 서버 답이야.';
 const RING_IN_URL = /[?&]ring=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:&|$)/;
 const DEVICE_PATH = /^\/chat\/api\/devices\/[0-9a-f-]{36}$/;
 
@@ -120,7 +123,12 @@ async function startEmulatorSite({ port = 8787, fidFile = null, log = () => {} }
   };
 }
 
-module.exports = { startEmulatorSite, route };
+/** Marong takes up each message sent from the app after a second and answers after `seconds` (0: never). */
+function answerAfter(chat, seconds) {
+  chat.state.reply = seconds > 0 ? { pickupMs: 1000, afterMs: Math.max(1500, seconds * 1000), text: ANSWER_TEXT } : null;
+}
+
+module.exports = { startEmulatorSite, route, answerAfter, ANSWER_TEXT };
 
 if (require.main === module) {
   const log = (line) => console.log(`${new Date().toTimeString().slice(0, 8)} ${line}`);
@@ -141,6 +149,12 @@ if (require.main === module) {
       if (kinds[word] && rest.length) {
         const message = site.chat.add('marong', rest.join(' '), { kind: kinds[word] });
         log(`chat: Marong's ${kinds[word]} message ${message.id} added`);
+      } else if (word === 'answer' && rest.length) {
+        const seconds = rest[0] === 'off' ? 0 : Number(rest[0]);
+        if (Number.isFinite(seconds) && seconds >= 0) {
+          answerAfter(site.chat, seconds);
+          log(seconds ? `chat: Marong reads each sent message after 1 s and answers after ${seconds} s` : 'chat: no answers');
+        }
       } else if (word === 'state') {
         const { me, messages, devices, posted, openWaits } = site.chat.state;
         log(`state: messages ${JSON.stringify(me.body.delivery)}, calls ${JSON.stringify(me.body.ring)}, `
@@ -150,7 +164,7 @@ if (require.main === module) {
       } else if (word === 'quit') {
         site.close().then(() => process.exit(0));
       } else if (word) {
-        log('lines: say <text> | remind <text> | missed <text> | state | quit');
+        log('lines: say <text> | remind <text> | missed <text> | answer <seconds>|off | state | quit');
       }
     });
   });

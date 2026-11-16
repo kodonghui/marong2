@@ -1,6 +1,6 @@
 'use strict';
-// TC-132 (with the browser part of TC-123) in a browser: the real chat page (marong/app_chat_static) against
-// test/support/chat-site.cjs, a stand-in for the bot's API. Nothing leaves 127.0.0.1.
+// TC-132 (with the browser part of TC-123) and TC-157 in a browser: the real chat page (marong/app_chat_static)
+// against test/support/chat-site.cjs, a stand-in for the bot's API. Nothing leaves 127.0.0.1.
 const { describe, it, before, after, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -87,7 +87,7 @@ describe('chat page', { skip }, () => {
 
   function reset() {
     Object.assign(site.state, { me: { status: 200, body: ME }, sends: [], typing: false, reply: null, posted: [],
-      waits: [], postDelayMs: 0 });
+      waits: [], postDelayMs: 0, read: 0, answered: 0, marks: true });
     history(site);
   }
 
@@ -145,7 +145,7 @@ describe('chat page', { skip }, () => {
     assert.equal(site.state.posted.length, 1);
     assert.match(site.state.posted[0].clientId, /^[0-9a-f-]{36}$/);
     assert.equal(site.state.posted[0].origin, site.url, 'the browser sends this site as Origin (the cross-site check)');
-    assert.equal(site.state.waits.every((q) => /^\?after=\d+&typing=[01]$/.test(q)), true);
+    assert.equal(site.state.waits.every((q) => /^\?after=\d+&typing=[01]&read=\d+$/.test(q)), true);
 
     // A message saved another way (a reminder) appears within a second.
     const began = Date.now();
@@ -160,6 +160,93 @@ describe('chat page', { skip }, () => {
     await page.keyboard.type('둘째 줄');
     assert.equal(await page.inputValue('#text'), '첫 줄\n둘째 줄');
     assert.equal(site.state.posted.length, 1, 'Enter did not send');
+    await context.close();
+  });
+
+  const readOf = (page, id) => page.locator(`li[data-id="${id}"] .read`);
+  const bubbleShown = (page, words) => page.waitForFunction(
+    (w) => [...document.querySelectorAll('.bubble')].some((b) => b.textContent === w), words);
+
+  it('TC-157: 읽음 once Marong takes my message up, gone with her answer; 대답 중 with her face', async () => {
+    reset();
+    site.state.read = 34;
+    site.state.answered = 29;
+    site.state.reply = { pickupMs: 900, afterMs: 2800, text: '응, 다 읽었어!' };
+    const { context, page } = await openChat({ at: NIGHT });
+    await ready(page);
+    assert.equal(await readOf(page, 34).textContent(), '읽음', 'on opening: read and not answered yet');
+    assert.equal(await page.locator('.read').count(), 1, 'only messages after the last answer');
+    assert.deepEqual(await page.$$eval('li[data-id="34"] .meta > *', (els) => els.map((e) => e.className || e.tagName)),
+      ['tag', 'read', 'TIME'], 'tag, 읽음, time');
+    site.state.answered = 34; // as if her answer came meanwhile
+
+    await page.fill('#text', '마롱아 오늘 뭐 했어?');
+    await page.click('#send');
+    await page.waitForSelector('li[data-id="36"]');
+    assert.equal(await readOf(page, 36).count(), 0, 'sent, not read yet');
+    assert.equal(await page.isHidden('#typing'), true);
+    const began = Date.now();
+    await readOf(page, 36).waitFor();
+    assert.ok(Date.now() - began < 1500, `읽음 after ${Date.now() - began} ms`);
+    assert.equal(await page.isVisible('#typing'), true, '대답 중 with it');
+    assert.equal(await page.locator('#typing .face img').getAttribute('src'), '/face/v1/01-neutral.webp');
+    assert.equal(await page.textContent('#typing .meta'), '마롱이가 대답 중…', 'read out as 마롱이가 대답 중');
+    const hidden = await page.locator('#typing .meta .sr-only').boundingBox();
+    assert.ok(hidden.width <= 1 && hidden.height <= 1, 'seen as 대답 중…: the name is for screen readers');
+    assert.equal(await page.locator('#typing .dots i').count(), 3);
+    assert.equal(await page.evaluate(() => {
+      const log = document.getElementById('log');
+      return log.scrollHeight - log.scrollTop - log.clientHeight < 2;
+    }), true, 'the end of the log stays in view');
+    await shot(page, 'chat-read-typing-night');
+    await bubbleShown(page, '응, 다 읽었어!');
+    assert.equal(await page.locator('.read').count(), 0, 'answered: no 읽음 left');
+    assert.equal(await page.isHidden('#typing'), true, '대답 중 ends with her answer');
+    assert.ok(site.state.waits.some((q) => q.endsWith('&read=36')), 'the screen says what it shows');
+    await context.close();
+  });
+
+  it('TC-157: two quick messages: 읽음 moves to the second, 대답 중 stays after the first answer', async () => {
+    reset();
+    const { context, page } = await openChat({ at: DAY });
+    await ready(page);
+    await page.fill('#text', '첫 번째 말');
+    await page.click('#send');
+    await page.waitForSelector('li[data-id="36"]');
+    site.takeUp(36);
+    await readOf(page, 36).waitFor();
+    await page.fill('#text', '두 번째 말');
+    await page.click('#send');
+    await page.waitForSelector('li[data-id="37"]');
+    assert.equal(await readOf(page, 37).count(), 0, 'waiting behind the answer in progress: not read');
+    site.answer(36, '첫 번째 답', { typing: true });
+    await bubbleShown(page, '첫 번째 답');
+    assert.equal(await readOf(page, 36).count(), 0, 'the first is answered');
+    assert.equal(await page.isVisible('#typing'), true, '대답 중 stays: the second is not answered yet');
+    site.takeUp(37);
+    await readOf(page, 37).waitFor();
+    assert.equal(await page.isVisible('#typing'), true);
+    await shot(page, 'chat-read-second-day');
+    site.answer(37, '두 번째 답');
+    await bubbleShown(page, '두 번째 답');
+    assert.equal(await page.locator('.read').count(), 0);
+    assert.equal(await page.isHidden('#typing'), true);
+    await context.close();
+  });
+
+  it('TC-157: a server from before 읽음 shows no 읽음, and 대답 중 still works', async () => {
+    reset();
+    site.state.marks = false;
+    site.state.reply = { pickupMs: 300, afterMs: 1500, text: '옛 서버 답' };
+    const { context, page } = await openChat();
+    await ready(page);
+    await page.fill('#text', '안녕');
+    await page.click('#send');
+    await page.waitForFunction(() => !document.getElementById('typing').hidden);
+    assert.equal(await page.locator('.read').count(), 0);
+    await bubbleShown(page, '옛 서버 답');
+    assert.equal(await page.locator('.read').count(), 0);
+    assert.equal(await page.isHidden('#typing'), true);
     await context.close();
   });
 

@@ -1,6 +1,7 @@
 'use strict';
 // TC-101 to TC-107 in a browser: the real call page (tools/vertex_live/static) with the app's page
 // script injected at document start, as the Android app does, and a stand-in for Capacitor's bridge.
+// From 0.2.1 also the hidden text panel and the chat window's offline page (docs/app-chat.md TC-151).
 // The call server is replaced by test/support/call-site.cjs; nothing leaves 127.0.0.1.
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
@@ -100,6 +101,39 @@ describe('call page inside the app', { skip }, () => {
     await context.close();
   });
 
+  it('TC-151: inside the app the call screen has no text panel from the first paint; a browser keeps it', async () => {
+    const context = await browser.newContext(PHONE);
+    await context.addInitScript(INIT_SCRIPT);
+    // Read the panel when the page's own markup is parsed, before its scripts and first paint.
+    await context.addInitScript(() => document.addEventListener('DOMContentLoaded', () => {
+      window.__panelAtParse = getComputedStyle(document.getElementById('conversation')).display;
+    }, { once: true }));
+    const page = await context.newPage();
+    await page.clock.setFixedTime(NIGHT);
+    await page.goto(`${site.url}/`);
+    await page.waitForFunction(() => !document.getElementById('start').disabled);
+    assert.equal(await page.evaluate(() => window.__panelAtParse), 'none');
+    assert.equal(await page.locator('#conversation').isVisible(), false);
+    assert.equal(await page.locator('#text-form').isVisible(), false);
+    assert.equal(await page.evaluate(() => document.adoptedStyleSheets.length), 1, 'hidden by the adopted sheet');
+    // The call itself is the same: it starts and tells the app.
+    await page.click('#start');
+    await page.waitForFunction(() => document.body.classList.contains('in-call') && document.getElementById('status').textContent === '듣고 있어. 편하게 말해 줘.');
+    assert.deepEqual((await page.evaluate(() => window.__nativeCalls)).filter((c) => c.plugin === 'MarongCall').map((c) => c.method), ['callStarted']);
+    await shot(page, 'call-active-no-text-panel');
+    await page.evaluate(() => window.__marongApp.endCall());
+    await page.waitForFunction(() => !document.body.classList.contains('in-call'));
+    await context.close();
+
+    const plain = await browser.newContext(PHONE);
+    const browserPage = await plain.newPage();
+    await browserPage.goto(`${site.url}/`);
+    await browserPage.waitForFunction(() => !document.getElementById('start').disabled);
+    assert.equal(await browserPage.locator('#conversation').isVisible(), true, 'the browser call screen is unchanged');
+    assert.equal(await browserPage.locator('#conversation summary').textContent(), '글로도 이야기하기 ＋');
+    await plain.close();
+  });
+
   it('TC-105: a refused microphone tells the app, and the page keeps its own explanation', async () => {
     const { context, page, calls } = await openCallPage(deniedBrowser);
     await page.click('#start');
@@ -130,6 +164,22 @@ describe('call page inside the app', { skip }, () => {
     await shot(offline, 'offline-network');
     await offline.evaluate(() => window.dispatchEvent(new Event('online')));
     await offline.waitForURL(CALL_SITE);
+    await context.close();
+  });
+
+  it('TC-151: the chat window\'s offline page goes back to the chat', async () => {
+    const context = await browser.newContext(PHONE);
+    await context.route(`${CALL_SITE}**`, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<title>chat</title>' }));
+    const page = await context.newPage();
+    await page.goto(`${site.url}/__app/error.html?page=chat`);
+    assert.equal(await page.textContent('h1'), '마롱이한테 연결하지 못했어');
+    await page.click('#retry');
+    await page.waitForURL(`${CALL_SITE}chat/`);
+
+    const other = await context.newPage();
+    await other.goto(`${site.url}/__app/error.html?page=other`);
+    await other.click('#retry');
+    await other.waitForURL(CALL_SITE);
     await context.close();
   });
 });

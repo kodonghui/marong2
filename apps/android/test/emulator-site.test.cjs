@@ -9,7 +9,7 @@ const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { startEmulatorSite, route } = require('./support/emulator-site.cjs');
+const { startEmulatorSite, route, answerAfter, ANSWER_TEXT } = require('./support/emulator-site.cjs');
 
 const INSTALL = '3f2c1b0a-9d8e-4f7a-8b6c-5d4e3f2a1b0c';
 const RING = '0f8fad5b-d9cb-469f-a165-70867728950e';
@@ -81,6 +81,26 @@ test('the stand-in site serves the call page and the chat on one origin, and fol
   assert.equal(plain.message.ring, false);
   assert.ok(lines.some((line) => line.includes('/live asked with ring')));
   assert.equal(site.call.upgrades.length, 2);
+});
+
+test('answer <seconds>: a message sent from the app is read, 대답 중, then answered (TC-158)', async (t) => {
+  const site = await startEmulatorSite({ port: 0 });
+  t.after(() => site.close());
+  answerAfter(site.chat, 2);
+  const sent = await fetch(`${site.url}/chat/api/messages`, { method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'http://localhost:8787' },
+    body: JSON.stringify({ clientId: crypto.randomUUID(), text: '안녕' }) });
+  assert.equal(sent.status, 202);
+  const { message } = await sent.json();
+  const began = Date.now();
+  const read = await (await fetch(`${site.url}/chat/api/messages/wait?after=${message.id}&typing=0&read=0`)).json();
+  assert.deepEqual([read.typing, read.readUpTo, read.answeredUpTo], [true, message.id, 0]);
+  assert.ok(Date.now() - began < 1800, `read after ${Date.now() - began} ms`);
+  const answered = await (await fetch(`${site.url}/chat/api/messages/wait?after=${message.id}&typing=1&read=${message.id}`)).json();
+  assert.deepEqual(answered.messages.map((m) => [m.from, m.text]), [['marong', ANSWER_TEXT]]);
+  assert.deepEqual([answered.typing, answered.readUpTo, answered.answeredUpTo], [false, message.id, message.id]);
+  answerAfter(site.chat, 0);
+  assert.equal(site.chat.state.reply, null);
 });
 
 test('where messages and calls go for each kind of report, as app_push.py with the ring on', () => {

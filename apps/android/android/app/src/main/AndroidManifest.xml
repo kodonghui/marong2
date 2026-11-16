@@ -43,6 +43,16 @@
 
         </activity>
 
+        <!-- The chat window (D20, docs/app-chat.md SPEC-143): the in-app chat above the call window,
+             in the same task, so a call goes on under it. Only the app itself opens it. -->
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:name=".ChatActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:launchMode="singleTop"
+            android:exported="false" />
+
         <!-- Keeps the call alive with the screen off or another app open (SPEC-103). -->
         <service
             android:name=".CallService"

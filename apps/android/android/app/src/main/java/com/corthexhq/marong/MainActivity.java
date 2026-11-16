@@ -14,6 +14,10 @@ import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.Logger;
 import com.google.firebase.messaging.FirebaseMessaging;
 
+/**
+ * The call window (SPEC-101 to SPEC-105). From 0.2.1 the chat opens in its own window above it
+ * (D20, docs/app-chat.md SPEC-143), so this window keeps the call page and a call going on in it.
+ */
 public class MainActivity extends BridgeActivity {
 
     private static final String PREFS = "marong_app";
@@ -22,7 +26,8 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        // Plugins load before the WebView opens the call page (SPEC-102).
+        // Plugins load before the WebView opens the call page (SPEC-102); the window's own handling first.
+        registerPlugin(MarongWindowPlugin.class);
         registerPlugin(MarongCallPlugin.class);
         registerPlugin(MarongPushPlugin.class);
         super.onCreate(savedInstanceState);
@@ -72,8 +77,9 @@ public class MainActivity extends BridgeActivity {
 
     /**
      * 받기 on a ring opens the call page with the ring (docs/app-ring.md SPEC-134); a notification
-     * opens the page its "open" value names (docs/app-chat.md SPEC-122). During a call nothing
-     * opens: leaving the call page would end the call.
+     * opens the page its "open" value names (docs/app-chat.md SPEC-122). The chat opens in the chat
+     * window, also during a call (SPEC-146). This window's page changes only when no call is going
+     * on: leaving the call page would end the call.
      */
     private void openFromIntent(Intent intent) {
         if (intent == null || (intent.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) {
@@ -97,7 +103,9 @@ public class MainActivity extends BridgeActivity {
             return;
         }
         String path = PushLinks.openPath(intent.getStringExtra(Talk.EXTRA_OPEN));
-        if (path != null && !CallControl.isActive()) {
+        if (AppWindows.CHAT_PATH.equals(path)) {
+            ChatActivity.open(this);
+        } else if (path != null && !CallControl.isActive()) {
             webView.loadUrl(PushLinks.pageUrl(appUrl, path));
         }
     }

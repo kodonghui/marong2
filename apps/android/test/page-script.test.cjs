@@ -1,7 +1,8 @@
 'use strict';
 // TC-101 to TC-105 and TC-107 at unit level: the injected page script against fake browser objects.
 // From 0.2.0 also the device report and chat visibility (docs/app-chat.md TC-123, TC-133) and the
-// app object's new calls (docs/app-ring.md TC-145, TC-146).
+// app object's new calls (docs/app-ring.md TC-145, TC-146); from 0.2.1 the hidden text panel
+// (docs/app-chat.md TC-151).
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -38,7 +39,8 @@ const PHONE = () => ({ installId: INSTALL, fid: 'fid_AAAAAAAAAAAAAAAAAAAA', noti
   ring: { channel: 'enabled', fullScreen: 'granted' }, fullScreenSettings: true, samsung: false });
 
 function setup({ capacitorAtStart = true, deny = false, theme = 'night', rootAtStart = true, path: pathname = '/',
-  phone = PHONE(), fetchStatus = 201, storage = new Map(), now = Date.parse('2026-11-15T12:00:00Z') } = {}) {
+  phone = PHONE(), fetchStatus = 201, storage = new Map(), now = Date.parse('2026-11-15T12:00:00Z'),
+  adoptedSheets = false, styleElements = false } = {}) {
   const calls = [];
   const docListeners = {};
   const winListeners = {};
@@ -52,6 +54,11 @@ function setup({ capacitorAtStart = true, deny = false, theme = 'night', rootAtS
   const root = { dataset: { theme }, style: { getPropertyValue: (name) => inline[name] || '', setProperty: (name, value) => { inline[name] = value; } } };
   let currentRoot = rootAtStart ? root : null;
   const stopButton = { clicks: 0, click() { this.clicks++; } };
+  // The two ways to add a style sheet (SPEC-145): adopted sheets, or a <style> element in <head>.
+  const sheets = [];
+  const appended = [];
+  const head = { appendChild: (child) => { appended.push(child); return child; } };
+  class CSSStyleSheet { replaceSync(text) { this.text = text; } }
   const window = {};
   // Copy options into this realm so deepStrictEqual compares plain objects.
   const capacitor = {
@@ -73,6 +80,11 @@ function setup({ capacitorAtStart = true, deny = false, theme = 'night', rootAtS
     getElementById: (id) => (id === 'stop' ? stopButton : null),
     addEventListener: (type, fn) => { (docListeners[type] ||= []).push(fn); },
   };
+  if (adoptedSheets) document.adoptedStyleSheets = sheets;
+  if (styleElements) {
+    Object.defineProperty(document, 'head', { get: () => (currentRoot ? head : null) });
+    document.createElement = (tag) => ({ tag, textContent: '' });
+  }
   const navigator = {
     mediaDevices: {
       async getUserMedia() {
@@ -94,13 +106,16 @@ function setup({ capacitorAtStart = true, deny = false, theme = 'night', rootAtS
   class Event { constructor(type) { this.type = type; } }
   class MutationObserver { constructor(fn) { this.fn = fn; observers.push(this); } observe(target, options) { this.options = options; } }
   const context = { window, document, navigator, MediaStreamTrack: FakeTrack, MutationObserver, Object, Set, Error,
-    localStorage, fetch, Event, location: { pathname }, Date: { now: () => clock.now }, JSON, Promise };
+    localStorage, fetch, Event, location: { pathname }, Date: { now: () => clock.now }, JSON, Promise, Array };
+  if (adoptedSheets) context.CSSStyleSheet = CSSStyleSheet;
   window.window = window;
   vm.createContext(context);
   const run = () => vm.runInContext(SCRIPT, context);
   run();
   return {
     calls, window, root, stopButton, run, requests, events, storage, clock, net, phone,
+    adopted: () => Array.from(document.adoptedStyleSheets, (sheet) => sheet.text), // copied into this realm
+    appended: () => appended.map((child) => [child.tag, child.textContent]),
     capacitor: () => { window.Capacitor = capacitor; },
     attachRoot: () => { currentRoot = root; },
     observerCount: () => observers.length,
@@ -382,4 +397,30 @@ test('TC-145, TC-146: version 2 answers rings by itself and opens the settings t
   const outside = setup({ capacitorAtStart: false });
   assert.equal(outside.window.__marongApp.openFullScreenSettings(), false, 'no bridge, nothing opens');
   assert.equal(await outside.window.__marongApp.deviceState(), null);
+});
+
+test('TC-151: at document start the call screen\'s text panel is hidden with an adopted style sheet, once', () => {
+  const t = setup({ adoptedSheets: true, styleElements: true });
+  assert.deepEqual(t.adopted(), ['#conversation{display:none!important}']);
+  t.fire('DOMContentLoaded');
+  t.run(); // a second run of the script adds nothing
+  assert.deepEqual(t.adopted(), ['#conversation{display:none!important}']);
+  assert.deepEqual(t.appended(), [], 'no <style> element as well');
+});
+
+test('TC-151: without adopted style sheets a <style> element hides it, from page load when <head> is not there yet', () => {
+  const t = setup({ styleElements: true, rootAtStart: false });
+  assert.deepEqual(t.appended(), []);
+  t.attachRoot();
+  t.fire('DOMContentLoaded');
+  assert.deepEqual(t.appended(), [['style', '#conversation{display:none!important}']]);
+  t.fire('DOMContentLoaded');
+  assert.equal(t.appended().length, 1);
+});
+
+test('TC-151: with neither way the page script still runs and reports the call', async () => {
+  const t = setup();
+  t.fire('DOMContentLoaded');
+  await t.getUserMedia();
+  assert.deepEqual(t.names().filter((n) => n.startsWith('MarongCall')), ['MarongCall.callStarted']);
 });

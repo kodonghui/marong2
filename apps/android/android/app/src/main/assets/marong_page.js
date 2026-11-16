@@ -1,7 +1,8 @@
 // Injected by the 마롱이 Android app into the call site only (SPEC-102 to SPEC-106).
 // It reads the page and reports to the app; it changes no call behaviour of the page.
 // From 0.2.0 it also reports this phone for messages and rings (docs/app-chat.md SPEC-123,
-// docs/app-ring.md SPEC-135, SPEC-139 and SPEC-140).
+// docs/app-ring.md SPEC-135, SPEC-139 and SPEC-140). From 0.2.1 it hides the call screen's own text
+// panel, because the app opens the chat in a window of its own (D20, docs/app-chat.md SPEC-145).
 (() => {
   'use strict';
   if (window.__marongApp) return;
@@ -151,6 +152,38 @@
   watchTheme();
   document.addEventListener('DOMContentLoaded', watchTheme, { once: true });
   window.addEventListener('pageshow', syncBars);
+
+  // The call screen's '글로도 이야기하기' (its captions and typing into the call) stays out of the app:
+  // the app's chat is a window of its own (D20, docs/app-chat.md SPEC-145). A style sheet adopted at
+  // document start hides it before the first paint; without that, a <style> element does it.
+  const HIDE_TEXT_PANEL = '#conversation{display:none!important}';
+  let textPanelHidden = false;
+  const hideTextPanel = () => {
+    if (textPanelHidden) return;
+    try {
+      if (typeof CSSStyleSheet === 'function' && Array.isArray(document.adoptedStyleSheets)) {
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(HIDE_TEXT_PANEL);
+        document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+        textPanelHidden = true;
+        return;
+      }
+    } catch {
+      // Fall back to a style element.
+    }
+    try {
+      const parent = document.head || document.documentElement;
+      if (!parent || typeof document.createElement !== 'function') return;
+      const style = document.createElement('style');
+      style.textContent = HIDE_TEXT_PANEL;
+      parent.appendChild(style);
+      textPanelHidden = true;
+    } catch {
+      // The panel stays visible; the call works the same.
+    }
+  };
+  hideTextPanel();
+  document.addEventListener('DOMContentLoaded', hideTextPanel, { once: true });
 
   // "끊기" on the call notification presses the page's own end button (SPEC-104).
   const endCall = () => {

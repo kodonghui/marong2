@@ -6,6 +6,7 @@
 - TC-123 기다리기(바로·신호·DB 확인·늦은 커밋·4개 한도·쓰는 중), TC-124 대화 읽기(뺄 것·페이지)
 - TC-125 알림 받을 기기, TC-126 FCM 응답별 처리(가짜 FCM 서버), TC-127 선톡, TC-128 일정 알림
 - TC-129 답 알림, TC-130 기기 등록, TC-131 로그에 글·FID·installId·이메일·토큰 없음
+- TC-155 읽음(답이 맡은 말까지, 답한 말은 빠짐, 옛 화면), TC-156 대답 중(연달아 보낸 두 번째 말에도, BUG-106)
 실행: .venv/bin/python tests/test_app_chat.py"""
 import asyncio
 from collections import deque
@@ -290,6 +291,7 @@ async def main(db):
             await sign_in_checks(db, http, chat, client, certs, access)
             await send_checks(db, http, chat, client, llm, store)
             await wait_checks(db, http, chat, client)
+            await read_checks(db, http, chat, client, llm)
             await device_checks(db, http, chat, client, push, store)
             await reply_notice_checks(db, http, chat, client, sender)
             await delivery_checks(db, settings, store, agent, client, push, sender)
@@ -520,6 +522,131 @@ async def wait_checks(db, http, chat, client):
                       field, reason)
     print("PASS TC-123 waits: at once, empty after the wait, woken by a save, DB check, late commits, four per friend, "
           "typing")
+
+
+async def read_checks(db, http, chat, client, llm):
+    """'읽음' and '대답 중' (docs/app-chat.md SPEC-148, SPEC-149): an answer that takes up the friend's message reads
+    it and everything before it, an answered message is no longer only read, and '대답 중' lasts while any message of
+    the friend's is not answered yet, also when Marong's answer to an earlier one came after it (BUG-106)."""
+    url = "/chat/api/messages"
+
+    def wait(after, typing=0, read=None):
+        query = f"?after={after}&typing={typing}" + ("" if read is None else f"&read={read}")
+        return http.get(f"/chat/api/messages/wait{query}", headers=auth())
+
+    async def send(words):
+        r = await http.post(url, json={"clientId": str(uuid.uuid4()), "text": words}, headers=auth(write=True))
+        return (await r.json())["message"]
+
+    async def marks():
+        return await (await http.get(f"{url}?limit=1", headers=auth())).json()
+
+    async def taken_up(message_id):
+        for _ in range(100):
+            if chat.read.get(HK_ROOM) == message_id:
+                return
+            await asyncio.sleep(0.02)
+        ok(False, f"an answer took up {message_id}: {chat.read.get(HK_ROOM)}")
+
+    def newest_answer():
+        return rows(db, "SELECT max(reply_to) FROM marong.messages WHERE room_key = %s AND role = 'assistant'",
+                    (HK_ROOM,))[0][0]
+
+    gates = deque()
+    real = llm.create
+
+    async def gated(body, timeout):
+        if gates:
+            await gates.popleft().wait()
+        return await real(body, timeout)
+
+    llm.create = gated
+    try:
+        page = await marks()
+        answered = newest_answer()
+        other = rows(db, "SELECT id FROM marong.messages WHERE kakao_id = 'other:1'")[0][0]
+        ok(page["answeredUpTo"] == answered and page["readUpTo"] == answered and other > answered,
+           f"history: read up to the last answered message, a message no answer took up is not read: {page}")
+
+        lock = client.room_lock(HK_ROOM)
+        await lock.acquire()
+        began = time.monotonic()
+        r = await (await wait(page["messages"][-1]["id"], typing=0, read=page["readUpTo"])).json()
+        ok(r["typing"] is True and r["readUpTo"] == answered and time.monotonic() - began < 1,
+           f"a held room with a message no answer took up: writing, still not read: {r}")
+        lock.release()
+
+        first, second = asyncio.Event(), asyncio.Event()
+        gates.extend([first, second])
+        began = time.monotonic()
+        a = await send("READ_FIRST")
+        r = await (await wait(a["id"], typing=0, read=page["readUpTo"])).json()
+        ok(r["readUpTo"] == a["id"] and r["answeredUpTo"] == answered and r["typing"] is True
+           and time.monotonic() - began < 1, f"taken up at once: read with what came before, writing: {r}")
+        b = await send("READ_SECOND")
+        page = await marks()
+        ok(page["readUpTo"] == a["id"] and page["answeredUpTo"] == answered,
+           f"a message waiting behind the answer in progress is not read yet: {page}")
+
+        first.set()
+        await taken_up(b["id"])
+        reply_a = rows(db, "SELECT id FROM marong.messages WHERE reply_to = %s", (a["id"],))[0][0]
+        last = rows(db, "SELECT role FROM marong.messages WHERE room_key = %s ORDER BY id DESC LIMIT 1",
+                    (HK_ROOM,))[0][0]
+        began = time.monotonic()
+        r = await (await wait(reply_a, typing=0, read=a["id"])).json()
+        ok(reply_a > b["id"] and last == "assistant" and r["typing"] is True and r["readUpTo"] == b["id"]
+           and r["answeredUpTo"] == a["id"] and time.monotonic() - began < 1,
+           f"the second message: read and '대답 중' though the answer to the first came after it: {r}")
+
+        began = time.monotonic()
+        pending = asyncio.ensure_future(wait(reply_a, typing=1, read=b["id"]))
+        await asyncio.sleep(0.2)
+        second.set()
+        r = await (await pending).json()
+        ok([m["from"] for m in r["messages"] if m["id"] > reply_a] == ["marong"] and r["typing"] is False
+           and r["readUpTo"] == r["answeredUpTo"] == b["id"] and time.monotonic() - began < 1,
+           f"answered: no longer only read, not writing: {r}")
+        await settle(chat)
+
+        third = asyncio.Event()
+        gates.append(third)
+        await lock.acquire()
+        c = await send("READ_OLD_SCREEN")
+        pending = asyncio.ensure_future(wait(c["id"], typing=1))
+        await asyncio.sleep(0.2)
+        lock.release()
+        await taken_up(c["id"])
+        r = await (await pending).json()
+        ok(not [m for m in r["messages"] if m["id"] > c["id"]] and r["typing"] is True and r["readUpTo"] == c["id"],
+           f"a screen from before '읽음' (no read) gets no early end for it, the answer still says so: {r}")
+        third.set()
+        await settle(chat)
+        ok(newest_answer() == c["id"], "then it is answered")
+        await lock.acquire()
+        top = rows(db, "SELECT max(id) FROM marong.messages WHERE room_key = %s", (HK_ROOM,))[0][0]
+        began = time.monotonic()
+        r = await (await wait(top, typing=1, read=c["id"])).json()
+        ok(r["typing"] is False and time.monotonic() - began < 1,
+           f"a held room with everything answered is not writing (a 선톡 being written): {r}")
+        lock.release()
+
+        for query in ("?after=1&read=x", "?after=1&read=-1"):
+            await problem(await http.get(f"/chat/api/messages/wait{query}", headers=auth()), 400, "invalid_request",
+                          "read", "bad_format")
+        kept = dict(chat.read)
+        for n in range(chat_module.READ_ROOMS_MAX + 5):
+            chat._took_up(f"discord-dm:test-{n}", 1)
+        ok(len(chat.read) == chat_module.READ_ROOMS_MAX and HK_ROOM not in chat.read, "only the newest rooms are kept")
+        page = await marks()
+        ok(page["readUpTo"] == page["answeredUpTo"] == c["id"], f"a room no longer kept reads what was answered: {page}")
+        chat.read.clear()
+        chat.read.update(kept)
+    finally:
+        llm.create = real
+        gates.clear()
+    print("PASS TC-155 읽음: up to the message an answer took up, gone once answered, old screens; "
+          "TC-156 대답 중 also for the second of two messages (BUG-106)")
 
 
 async def device_checks(db, http, chat, client, push, store):

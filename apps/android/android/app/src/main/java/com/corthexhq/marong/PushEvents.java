@@ -2,49 +2,54 @@ package com.corthexhq.marong;
 
 import android.os.Handler;
 import android.os.Looper;
-import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Set;
+import java.util.WeakHashMap;
 
 /**
- * Lets the FCM service reach the page that is open in the app (docs/app-chat.md SPEC-121 and
- * SPEC-123): a new Firebase installation id, and whether the chat is on screen right now.
+ * Lets the FCM service reach the pages that are open in the app (docs/app-chat.md SPEC-121,
+ * SPEC-123 and SPEC-147): a new Firebase installation id, and whether the chat is on screen right
+ * now. From 0.2.1 the app has two windows (D20), each with its own MarongPush.
  */
 final class PushEvents {
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
-    private static WeakReference<MarongPushPlugin> current = new WeakReference<>(null);
-    private static volatile boolean chatVisible;
+    private static final Set<MarongPushPlugin> ATTACHED = Collections.newSetFromMap(new WeakHashMap<>());
+    private static final ChatShown<MarongPushPlugin> CHAT = new ChatShown<>();
 
     private PushEvents() {}
 
     static synchronized void attach(MarongPushPlugin plugin) {
-        current = new WeakReference<>(plugin);
+        ATTACHED.add(plugin);
     }
 
     static synchronized void detach(MarongPushPlugin plugin) {
-        if (current.get() == plugin) {
-            current = new WeakReference<>(null);
-        }
+        ATTACHED.remove(plugin);
+        CHAT.set(plugin, false);
     }
 
-    /** FCM registered or dropped this installation: the page reports the device again. */
+    /** FCM registered or dropped this installation: the page in every open window reports again. */
     static void registered() {
         MAIN.post(() -> {
-            MarongPushPlugin plugin;
+            List<MarongPushPlugin> plugins;
             synchronized (PushEvents.class) {
-                plugin = current.get();
+                plugins = new ArrayList<>(ATTACHED);
             }
-            if (plugin != null) {
+            for (MarongPushPlugin plugin : plugins) {
                 plugin.notifyRegistered();
             }
         });
     }
 
-    /** True while the chat page is on screen; a message then shows there, not as a notification. */
+    /** True while a window shows the chat page; a message then shows there, not as a notification. */
     static boolean chatVisible() {
-        return chatVisible;
+        return CHAT.any();
     }
 
-    static void setChatVisible(boolean visible) {
-        chatVisible = visible;
+    /** One window's page shows the chat (true) or not (false). True when {@link #chatVisible()} changed. */
+    static boolean setChatVisible(MarongPushPlugin window, boolean visible) {
+        return CHAT.set(window, visible);
     }
 }

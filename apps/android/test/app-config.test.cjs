@@ -1,6 +1,6 @@
 'use strict';
-// TC-118 and TC-133 (docs/app-chat.md): app settings that the device tests depend on, read from the source
-// files, and from the merged manifest when a build is there.
+// TC-118, TC-133 and TC-149 (docs/app-chat.md): app settings that the device tests depend on, read from the
+// source files, and from the merged manifest when a build is there.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -84,13 +84,39 @@ test('TC-118: no plain HTTP, mixed content or backup (SPEC-101, SPEC-109)', () =
   assert.equal(config.android.allowMixedContent, false);
 });
 
-test('TC-118, TC-133: build.gradle, the user agent and package.json name the same version, 0.2.0 or later', () => {
+test('TC-118, TC-133, TC-149: build.gradle, the user agent and package.json name the same version, 0.2.1 or later', () => {
   const gradle = read('android', 'app', 'build.gradle');
   const versionName = gradle.match(/versionName "([^"]+)"/)[1];
   assert.match(gradle, /versionCode [1-9]\d*\n/);
   assert.equal(config.android.appendUserAgent, `MarongApp/${versionName}`);
   assert.equal(JSON.parse(read('package.json')).version, versionName);
-  // The server rings only phones whose app reports the ring state, from 0.2.0 (app-ring SPEC-139).
-  const [major, minor] = versionName.split('.').map(Number);
-  assert.ok(major > 0 || minor >= 2, `${versionName} is 0.2.0 or later`);
+  const lock = JSON.parse(read('package-lock.json'));
+  assert.equal(lock.version, versionName);
+  assert.equal(lock.packages[''].version, versionName);
+  // The server rings only phones whose app reports the ring state, from 0.2.0 (app-ring SPEC-139);
+  // the chat window is 0.2.1 (D20).
+  const [major, minor, patch] = versionName.split('.').map(Number);
+  assert.ok(major > 0 || minor > 2 || (minor === 2 && patch >= 1), `${versionName} is 0.2.1 or later`);
+});
+
+test('TC-149: the chat window is the app\'s own, above the call window, with no call plugin (D20, SPEC-143, SPEC-147)', () => {
+  const activity = (name) => {
+    const m = manifest.match(new RegExp(`<activity\\b(?:(?!<activity\\b)[\\s\\S])*?android:name="\\.${name}"[^>]*>`));
+    assert.ok(m, `${name} is declared`);
+    return m[0];
+  };
+  const chat = activity('ChatActivity');
+  assert.match(chat, /android:exported="false"/);
+  assert.match(chat, /android:launchMode="singleTop"/);
+  assert.doesNotMatch(chat, /taskAffinity/, 'same task as the call window');
+  assert.match(activity('MainActivity'), /android:launchMode="singleTask"/);
+
+  const source = (name) => read('android', 'app', 'src', 'main', 'java', 'com', 'corthexhq', 'marong', `${name}.java`);
+  const plugins = (name) => [...source(name).matchAll(/registerPlugin\((\w+)\.class\)/g)].map((m) => m[1]);
+  assert.deepEqual(plugins('MainActivity'), ['MarongWindowPlugin', 'MarongCallPlugin', 'MarongPushPlugin']);
+  assert.deepEqual(plugins('ChatActivity'), ['MarongWindowPlugin', 'MarongPushPlugin']);
+  // Only the shared window plugin sets the web view client, chrome client and page script.
+  for (const name of ['MarongCallPlugin', 'MarongPushPlugin', 'MainActivity', 'ChatActivity']) {
+    assert.doesNotMatch(source(name), /setWebViewClient|setWebChromeClient|addDocumentStartJavaScript/, name);
+  }
 });

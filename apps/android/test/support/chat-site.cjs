@@ -2,8 +2,8 @@
 // A stand-in for the bot's in-app chat (marong/app_chat.py), for browser tests of the chat page only
 // (docs/app-chat.md TC-132). It serves the real page files (marong/app_chat_static) and answers API-101 to
 // API-105 from a script the test controls: who signs in, the stored messages, what a send gets back, when Marong
-// is "writing" and what she says, and what a device report gets back. No model, no database, nothing beyond
-// 127.0.0.1.
+// reads a message, is "writing" and what she says, and what a device report gets back. No model, no database,
+// nothing beyond 127.0.0.1.
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
@@ -28,7 +28,10 @@ async function startChatSite({ waitMs = 1500 } = {}) {
     messages: [],                           // the room, oldest first
     sends: [],                              // what POST /chat/api/messages answers next: 'ok' | 429 | 500
     typing: false,                          // Marong writing (the wait's typing)
-    reply: null,                            // after an accepted send: {afterMs, text} or null
+    read: 0,                                // readUpTo: my newest message Marong read (SPEC-148)
+    answered: 0,                            // answeredUpTo: my newest message Marong answered
+    marks: true,                            // false: a server from before '읽음', with no readUpTo/answeredUpTo
+    reply: null,                            // after an accepted send: {afterMs, text, pickupMs?} or null
     postDelayMs: 0,                         // how long a send takes to answer
     posted: [],                             // every POST body, in order
     waits: [],                              // every wait query string, in order
@@ -54,6 +57,25 @@ async function startChatSite({ waitMs = 1500 } = {}) {
   function setTyping(on) {
     state.typing = on;
     wake();
+  }
+
+  /** Like an answer taking my message up: read up to it, and writing. */
+  function takeUp(id) {
+    state.read = Math.max(state.read, id);
+    state.typing = true;
+    wake();
+  }
+
+  /** Marong's answer to my message `id`: answered up to it; writing goes on while a later message waits. */
+  function answer(id, text, { typing = false } = {}) {
+    state.answered = Math.max(state.answered, id);
+    state.read = Math.max(state.read, id);
+    state.typing = typing;
+    return add('marong', text);
+  }
+
+  function marks() {
+    return state.marks ? { readUpTo: state.read, answeredUpTo: state.answered } : {};
   }
 
   function json(res, status, body, headers = {}) {
@@ -95,7 +117,7 @@ async function startChatSite({ waitMs = 1500 } = {}) {
       const limit = Number(url.searchParams.get('limit')) || 30;
       const before = Number(url.searchParams.get('before')) || Infinity;
       const older = state.messages.filter((m) => m.id < before);
-      json(res, 200, { messages: older.slice(-limit), hasMore: older.length > limit });
+      json(res, 200, { messages: older.slice(-limit), hasMore: older.length > limit, ...marks() });
       return;
     }
     if (pathname === '/chat/api/messages' && req.method === 'POST') {
@@ -113,9 +135,9 @@ async function startChatSite({ waitMs = 1500 } = {}) {
         json(res, 202, { message });
         const reply = state.reply;
         if (reply) {
-          // Like the server: 'writing' while the answer holds the room, off once her reply is the last message.
-          setTimeout(() => setTyping(true), 100);
-          setTimeout(() => { state.typing = false; add('marong', reply.text); }, reply.afterMs);
+          // Like the server: read and 'writing' once the answer holds the room, answered with her reply.
+          setTimeout(() => takeUp(message.id), reply.pickupMs ?? 100);
+          setTimeout(() => answer(message.id, reply.text), reply.afterMs);
         }
       }, state.postDelayMs));
       return;
@@ -135,6 +157,7 @@ async function startChatSite({ waitMs = 1500 } = {}) {
     if (pathname === '/chat/api/messages/wait' && req.method === 'GET') {
       const after = Number(url.searchParams.get('after'));
       const shown = url.searchParams.get('typing') === '1';
+      const shownRead = url.searchParams.has('read') ? Number(url.searchParams.get('read')) : null;
       state.waits.push(url.search);
       state.openWaits++;
       let done = false;
@@ -145,11 +168,12 @@ async function startChatSite({ waitMs = 1500 } = {}) {
         clearTimeout(timer);
         state.openWaits--;
         if (!res.writableEnded && !res.destroyed) {
-          json(res, 200, { messages: state.messages.filter((m) => m.id > after), typing: state.typing });
+          json(res, 200, { messages: state.messages.filter((m) => m.id > after), typing: state.typing, ...marks() });
         }
       };
       const check = () => {
-        if (state.messages.some((m) => m.id > after) || state.typing !== shown) finish();
+        if (state.messages.some((m) => m.id > after) || state.typing !== shown
+          || (state.marks && shownRead !== null && state.read !== shownRead)) finish();
       };
       const timer = setTimeout(finish, waitMs);
       req.on('close', () => { if (!done) { done = true; waiters.delete(check); clearTimeout(timer); state.openWaits--; } });
@@ -166,6 +190,8 @@ async function startChatSite({ waitMs = 1500 } = {}) {
     state,
     add,
     setTyping,
+    takeUp,
+    answer,
     async close() {
       server.closeAllConnections?.();
       await new Promise((resolve) => server.close(resolve));

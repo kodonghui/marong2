@@ -1,4 +1,5 @@
-"""In-app chat for the Marong app and browsers (docs/app-chat.md SPEC-110~124, api/app-chat.openapi.yaml API-101~106).
+"""In-app chat for the Marong app and browsers (docs/app-chat.md SPEC-110~124, SPEC-148~149,
+api/app-chat.openapi.yaml API-101~106).
 
 A small aiohttp server inside the Discord DM bot, on 127.0.0.1 only. The tunnel sends `/chat/` of the call address
 here; Cloudflare Access stands in front and every API request's Access token is checked again (access.py). A friend
@@ -34,6 +35,7 @@ RATE, RATE_WINDOW_S = 20, 60   # messages a friend may send per minute (REQ-121)
 PAGE_DEFAULT, PAGE_MAX = 30, 50
 BODY_MAX = 16 * 1024
 REPLY_TTL_S = 3600
+READ_ROOMS_MAX = 256     # rooms whose '읽음' this process keeps (one per call friend)
 STATIC = Path(__file__).with_name("app_chat_static")
 FILES = {"": ("index.html", "text/html"), "chat.js": ("chat.js", "text/javascript"),
          "chat.css": ("chat.css", "text/css")}
@@ -85,6 +87,7 @@ class AppChat:
         self.tick = asyncio.Event()          # set and replaced whenever a message is saved in this process
         self.waiters = defaultdict(list)     # friend id -> events of their waits, oldest first
         self.sent = defaultdict(deque)       # friend id -> when their last messages came (rate limit)
+        self.read = {}                       # DM room -> the friend's newest message an answer here took up (SPEC-148)
         self.tasks = set()
         self.files = {k: ((STATIC / name).read_bytes(), kind) for k, (name, kind) in FILES.items()}
         self.runner = None
@@ -182,6 +185,24 @@ class AppChat:
             raise Problem("too_many_messages", headers={"Retry-After": str(wait)})
         sent.append(now)
 
+    def _took_up(self, room: str, message_id: int) -> None:
+        """An answer in this process took up the friend's message: it and everything before it are read."""
+        if message_id > self.read.get(room, 0):
+            self.read.pop(room, None)
+            self.read[room] = message_id
+            while len(self.read) > READ_ROOMS_MAX:
+                self.read.pop(next(iter(self.read)))
+
+    async def _marks(self, room: str) -> dict:
+        """What the screen shows under the list (SPEC-114, SPEC-148, SPEC-149). answeredUpTo: the newest of the
+        friend's messages Marong answered. readUpTo: the newest one she read, that is answered or taken up by an
+        answer here. typing: an answer holds the room and some message of the friend's is not answered yet."""
+        state = await self.store.app_answered(room)
+        answered = state["answered"]
+        read = max(answered, min(self.read.get(room, 0), state["newest"]))
+        typing = self.client.room_lock(room).locked() and state["newest"] > answered
+        return {"typing": typing, "readUpTo": read, "answeredUpTo": answered}
+
     def message(self, row: dict) -> dict:
         """A messages row as the API's Message (SPEC-113)."""
         meta = row["meta"] or {}
@@ -232,8 +253,10 @@ class AppChat:
         before = self._number(req.query.get("before"), "before", minimum=1)
         limit = self._number(req.query.get("limit"), "limit", minimum=1, maximum=PAGE_MAX) or PAGE_DEFAULT
         rows = await self.store.app_messages(who["room_key"], before, limit)
+        marks = await self._marks(who["room_key"])
         return self._json(200, {"messages": [self.message(r) for r in rows[:limit][::-1]],
-                                "hasMore": len(rows) > limit})
+                                "hasMore": len(rows) > limit, "readUpTo": marks["readUpTo"],
+                                "answeredUpTo": marks["answeredUpTo"]})
 
     async def send(self, req):
         """API-103: store at once (202), answer in the background under the room lock (SPEC-112)."""
@@ -286,7 +309,8 @@ class AppChat:
                                   google_command=google_command(text), friend_id=who["friend_id"], dm_link=link,
                                   via="app", presaved_id=saved_id)
             async with self.client.room_lock(room):
-                self.pulse()  # 'Marong is writing' once this answer holds the room
+                self._took_up(room, saved_id)
+                self.pulse()  # '읽음' and '대답 중' once this answer holds the room (SPEC-148, SPEC-149)
                 reply = await self.agent.handle(msg, self._delivered)
         except Exception as e:
             log.error("app_chat_reply_failed %s", type(e).__name__)
@@ -303,13 +327,15 @@ class AppChat:
                 log.warning("app_reply_notify_failed %s", type(e).__name__)
 
     async def wait(self, req):
-        """API-104: new messages at once, else after up to 25 s an empty list (SPEC-114). `typing` is what the screen
-        shows now: the wait also ends when Marong starts or stops writing."""
+        """API-104: new messages at once, else after up to 25 s an empty list (SPEC-114). `typing` and `read` are what
+        the screen shows now: the wait also ends when Marong starts or stops writing or reads a message (SPEC-148).
+        A screen from before '읽음' sends no `read` and gets no early end for it."""
         who = await self._who(req)
         after = self._number(req.query.get("after"), "after", minimum=0, required=True)
         shown = req.query.get("typing", "0")
         if shown not in ("0", "1"):
             raise bad(("typing", "bad_format"))
+        shown_read = self._number(req.query.get("read"), "read", minimum=0)
         friend, room = who["friend_id"], who["room_key"]
         mine = asyncio.Event()
         queue = self.waiters[friend]
@@ -318,14 +344,16 @@ class AppChat:
             queue.pop(0).set()  # the oldest wait ends empty
         loop = asyncio.get_running_loop()
         end = loop.time() + WAIT_S
-        rows, fresh, typing = [], False, shown == "1"
+        rows, fresh, marks = [], False, None
         try:
             while True:
                 tick = self.tick
                 rows = await self.store.app_messages_after(room, after)
                 fresh = any(r["id"] > after for r in rows)
-                typing = await self._typing(room)
-                if fresh or typing != (shown == "1") or mine.is_set() or loop.time() >= end:
+                marks = await self._marks(room)
+                read_moved = shown_read is not None and marks["readUpTo"] != shown_read
+                if (fresh or marks["typing"] != (shown == "1") or read_moved or mine.is_set()
+                        or loop.time() >= end):
                     break
                 woke = [asyncio.ensure_future(tick.wait()), asyncio.ensure_future(mine.wait())]
                 try:
@@ -341,13 +369,7 @@ class AppChat:
                 self.waiters.pop(friend, None)
         if mine.is_set() and not fresh:
             rows = []
-        return self._json(200, {"messages": [self.message(r) for r in rows], "typing": typing})
-
-    async def _typing(self, room: str) -> bool:
-        """Marong is writing: an answer holds the room and the friend's message is still the last one."""
-        if not self.client.room_lock(room).locked():
-            return False
-        return await self.store.app_last_role(room) == "user"
+        return self._json(200, {"messages": [self.message(r) for r in rows], **marks})
 
     async def device(self, req):
         """API-105: this phone's notification state (SPEC-115, SPEC-139)."""

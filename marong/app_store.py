@@ -86,10 +86,17 @@ class AppStore:
             "AND (m.id > %(after)s OR m.created_at > now() - %(recent)s) " + self._shown()
             + "ORDER BY m.id LIMIT 100", {"room": room_key, "after": after, "recent": RECENT})
 
-    async def app_last_role(self, room_key: str) -> str | None:
-        row = await self._one("SELECT role FROM marong.messages WHERE room_key = %s ORDER BY id DESC LIMIT 1",
-                              (room_key,))
-        return row["role"] if row else None
+    async def app_answered(self, room_key: str) -> dict:
+        """The friend's newest message in the DM room and the newest of their messages Marong answered: the largest
+        reply_to of her last answers (an answer to a quick burst answers its last message, docs/app-chat.md
+        SPEC-148). 0 when there is none."""
+        row = await self._one(
+            "SELECT (SELECT id FROM marong.messages WHERE room_key = %(room)s AND role = 'user' "
+            "        ORDER BY id DESC LIMIT 1) AS newest, "
+            "       (SELECT max(reply_to) FROM (SELECT reply_to FROM marong.messages WHERE room_key = %(room)s "
+            "        AND role = 'assistant' AND reply_to IS NOT NULL ORDER BY id DESC LIMIT 20) a) AS answered",
+            {"room": room_key})
+        return {"newest": row["newest"] or 0, "answered": row["answered"] or 0}
 
     # ── calls Marong places (TBL-102) ──────────────────────────
 
