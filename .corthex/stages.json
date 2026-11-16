@@ -190,15 +190,25 @@
     "11-development": {
       "state": "in_progress",
       "checkpoints": [],
-      "next": "TASK-170 call server hello guide, TASK-171 call page picture, TASK-172 admin, TASK-174/175 picture set, TASK-176 app 0.2.2, TASK-177 deploy",
+      "next": "CTX-020 calls first and picture topics: deployed 2026-11-17 01:24 KST (release 20261117-topics). Next: signed app 0.2.2 on the laptop, install on the friend's phone, review of PR #27, stage 12 phone checks.",
       "checks": [
         {
           "level": "info",
           "message": "CTX-020 bot part committed e0b7f4f: test_topics 124 checks, existing suites pass",
           "at": "2026-11-16"
+        },
+        {
+          "level": "info",
+          "message": "CTX-020 TASK-160~175 and 177 done with tests; TASK-176 JVM/emulator checks running on the academy computer; signing pending the laptop.",
+          "at": "2026-11-16"
+        },
+        {
+          "level": "info",
+          "message": "CTX-020 TASK-176: JVM tests 21 pass, lint 0 errors, debug APK 0.2.2 (versionCode 5), emulator showed the promise ring and the hello ring with its topic line; only the signed APK remains (laptop).",
+          "at": "2026-11-16"
         }
       ],
-      "updated": "2026-11-16T15:37:25+00:00"
+      "updated": "2026-11-16T16:50:57+00:00"
     }
   }
 }
