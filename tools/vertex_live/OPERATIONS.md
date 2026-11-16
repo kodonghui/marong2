@@ -82,6 +82,22 @@ WebRTC 때문에 새로 연 외부 포트는 **7882/UDP와 7881/TCP 두 개**다
 
 배포 전 백업은 서버의 `latest-failover-backup` 포인터가 가리키는 디렉터리에 있다. 음성 앱 롤백은 통화가 없을 때 이전 `app`을 복구하고 음성 서비스만 재시작한다. 보고서/타이머 롤백은 같은 백업의 `report.py`, `marong-sheet.timer`, `marong-sheet.service`를 복구하고 daemon-reload 한다. 추가 DB 테이블·뷰는 그대로 남겨도 이전 코드와 호환되며 삭제하지 않는다. 인증 파일과 DB 백업은 다른 기기로 옮기지 않는다.
 
+## 자동 정리기와 DB 재시작
+
+확인일: **2026-11-15, 한국 시간**.
+
+2026-11-14 15:36:52 KST에 서버의 무인 업데이트(`apt-daily-upgrade`)가 PostgreSQL을 다시 시작했다. 통화 서비스, Discord 봇, 시트 보고는 연결 풀이나 매번 새 연결을 써서 스스로 회복했다. 자동 정리기(`marong-voice-memory.service`)는 LangGraph 체크포인트에 프로세스 내내 연결 하나를 썼고, 이 연결은 끊긴 뒤 다시 열리지 않았다. 그 뒤 끝난 통화 2건의 정리가 처음에는 `AdminShutdown`, 이어서 `OperationalError`로 세 번 모두 실패했다(`organize_status='failed'`, `organize_attempts=3`). 통화 전사와 시트 기록에는 영향이 없었고, 통화 카드와 기억만 만들어지지 않았다.
+
+- 복구: 2026-11-15 09:19 KST에 진행 중인 통화와 정리가 없는 것을 확인하고 정리기만 다시 시작한 뒤 두 통화를 다시 대기열에 넣었다. 두 통화 모두 첫 시도에 `done`이 됐고 카드와 기억이 생겼다.
+- 수정: 정리기는 체크포인트에도 연결 풀(`checkpoint_pool`)을 쓴다. 풀은 연결을 쓰기 전에 확인하고, 서버가 닫은 연결은 새 연결로 바꾼다. `test_organizer_reconnect.py`는 같은 사건(서버가 세션을 끝냄)에서 이전 방식은 다음 작업마다 실패하고 새 방식은 바로 회복하는 것을 함께 확인한다. 버려도 되는 로컬 PostgreSQL 16에서 실제 `pg_ctl restart -m fast` 뒤 정리기 `main()` 루프도 확인했다. 이전 코드는 재시작 뒤 통화의 정리가 실패했고, 새 코드는 첫 시도에 정리했다.
+- 같은 일이 다시 생기면: 세 번 실패한 통화는 자동으로 다시 시도하지 않는다. 정리기 로그(`journalctl _SYSTEMD_USER_UNIT=marong-voice-memory.service`)에서 실패 원인이 연결 문제였는지 보고, 정리기가 정상인지 확인한 뒤 해당 통화만 다시 넣는다. 다시 정리하면 Gemini 요청이 통화마다 한 번 더 나간다.
+
+```sql
+-- marong_call 역할로, 다시 정리할 통화 ID만 넣는다
+UPDATE call.calls SET organize_status='pending', organize_attempts=0, organize_next_at=now(), organize_lease_until=NULL
+WHERE deleted_at IS NULL AND status='ended' AND organize_status='failed' AND id IN ('<통화 ID>');
+```
+
 ## 서버 변경 파일과 재현 자료
 
 `deploy/`에는 실제 운영 설정을 바탕으로 비밀값을 제외한 템플릿을 두었다. 그대로 설치하는 자동 배포 스크립트는 아니며, 기존 Cloudflare Access 설정은 유지해야 한다.
