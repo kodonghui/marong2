@@ -103,19 +103,19 @@ D19와의 관계: 2026-11-15의 D19는 '전화 시간은 현경님이 말로 정
 
 ```mermaid
 flowchart LR
-  talk["CTX-001 대화와 선톡"]
-  call["CTX-002 통화 연결"]
-  topic["CTX-020 선 전화·그림 화두"]
+  ctx1["CTX-001 대화와 선톡"]
+  ctx2["CTX-002 통화 연결"]
+  ctx20["CTX-020 선 전화·그림 화두"]
   fcm["FCM (바깥)"]
   discord["디스코드 (바깥)"]
   maker["그림 세트 만들기 (서버 밖)"]
   openai["OpenAI 그림 API (바깥)"]
-  talk -->|"친구, 칸 시작 시각"| topic
-  topic -->|"글, 그림 이름 (D18 경로)"| talk
-  talk -.->|"화두 답, 끄기·켜기"| topic
-  topic -->|"벨 id, 벨 이유 (순응자)"| fcm
-  topic -->|"글, 그림 파일 (순응자)"| discord
-  call -->|"벨 id → 화두 (읽기만)"| topic
+  ctx1 -->|"친구, 칸 시작 시각"| ctx20
+  ctx20 -->|"글, 그림 이름 (D18 경로)"| ctx1
+  ctx1 -.->|"화두 답, 끄기·켜기"| ctx20
+  ctx20 -->|"벨 id, 벨 이유 (순응자)"| fcm
+  ctx20 -->|"글, 그림 파일 (순응자)"| discord
+  ctx2 -->|"벨 id → 화두 (읽기만)"| ctx20
   maker -->|"장면 글, 참고 그림 (반부패 계층)"| openai
 ```
 
