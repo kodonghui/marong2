@@ -16,7 +16,7 @@
 
 ## 마롱이의 일기와 듣기 시험(2026-11-16 설계, 아직 만들지 않음)
 
-원본: 이 폴더의 `SCR-113.md`\~`SCR-119.md`와 `SCR-001.md`의 예산 상태(FL-121). 회색 와이어프레임(상태 68개, 폭 360px·430px)은 [마롱이의 일기 와이어프레임](https://claude.ai/artifact/SnzgPx64NHhxgcxpa3HRho)이고, 그 원본은 이 폴더의 [`wireframes-diary.html`](wireframes-diary.html)이에요. 09단계 목업 후보는 Claude 디자인 캔버스 [마롱이의 일기 화면 설계](https://claude.ai/artifact/CC154gunovJS3tqa8XkpZ9)에 그려요. 두 후보의 차이, 후보 토큰과 대비는 [`design/diary-candidates.md`](../../design/diary-candidates.md)에 적었어요. 둘 다 비공개라 공유받은 사람만 열 수 있고, 다르면 이 폴더의 정의가 맞아요.
+원본: 이 폴더의 `SCR-113.md`\~`SCR-119.md`와 `SCR-001.md`의 예산 상태(FL-121). 회색 와이어프레임(상태 68개, 폭 360px·430px)은 [마롱이의 일기 와이어프레임](https://claude.ai/artifact/SnzgPx64NHhxgcxpa3HRho)이고, 그 원본은 이 폴더의 [`wireframes-diary.html`](wireframes-diary.html)이에요. 09단계 목업은 Claude 디자인 캔버스 [마롱이의 일기 화면 설계](https://claude.ai/artifact/CC154gunovJS3tqa8XkpZ9)에 있어요. 두 후보 중 A 그림일기장으로 정했고(2026-11-16 21:44 KST), 화면 정의의 상태를 A로 그렸어요(대지 72장). 화면마다 어느 대지인지, 따로 그리지 않은 상태와 그 이유는 각 정의의 '목업' 줄에 있어요. 고르지 않은 B 후보 4장은 비교 기록으로 캔버스 맨 아래에 남겼어요. 후보의 차이, 결정, 더한 토큰과 대비는 [`design/diary-candidates.md`](../../design/diary-candidates.md)에 적었어요. 둘 다 비공개라 공유받은 사람만 열 수 있고, 다르면 이 폴더의 정의가 맞아요.
 
 `/chat/` 아래 화면의 공통 규칙(위 공통 규칙에 더해):
 
