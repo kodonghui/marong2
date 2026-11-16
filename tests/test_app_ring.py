@@ -66,6 +66,10 @@ async def tool_checks(db, store, settings):
     at = (now + timedelta(hours=2)).replace(microsecond=0).isoformat()
     ok("언제 전화할지 시각이 필요해" in check_add({"title": "면접 전화", "event_at": at, "call": True}, TZ, now, True),
        "a call needs remind_at")
+    soon = check_add({"title": "전화", "remind_at": now.replace(microsecond=0).isoformat(), "call": True}, TZ,
+                     now + timedelta(seconds=40), True)
+    ok(soon.action == "call" and soon.remind_at == now + timedelta(seconds=40) and "지금 시각" in CALL_GUIDE,
+       "'call me now' rings at once")
     ok(check_add({"title": "면접", "remind_at": at, "call": True}, TZ, now).action == "remind",
        "without the ring setting call is ignored")
     out, action = await run_tool(store, "schedule_add", {"title": "밤 전화", "remind_at": at, "call": True,
