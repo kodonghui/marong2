@@ -16,12 +16,14 @@
 말 내용은 지어낸 이름(지우, 도윤)의 시험 대본뿐이에요.
 """
 import argparse
+import array
 import asyncio
 import base64
 import concurrent.futures
 import hashlib
 import http.client
 import json
+import math
 import os
 import platform
 import re
@@ -56,6 +58,7 @@ VERTEX_LOCATION = 'us-central1'
 
 VAD_MS = 700           # production silenceDurationMs
 GAP_AFTER_REPLY = 0.6  # the friend answers 0.6 s after the reply finished playing
+VOICED_RMS = 250.0      # 16-bit RMS (about -42 dBFS) above which an output chunk counts as speech
 MAX_USD = float(os.environ.get('VB_MAX_USD', '1.5'))
 
 # USD, official price pages read 2026-11-16 (per 1M tokens unless noted)
@@ -443,6 +446,18 @@ class Mic:
 
 # ------------------------------------------------------------------ speech-to-speech engines
 
+def rms16(b):
+    """RMS of 16-bit little-endian PCM, every 4th sample (enough to tell speech from silence)."""
+    a = array.array('h')
+    a.frombytes(bytes(b[:len(b) // 2 * 2]))
+    if sys.byteorder == 'big':
+        a.byteswap()
+    vals = a[::4]
+    if not vals:
+        return 0.0
+    return math.sqrt(sum(v * v for v in vals) / len(vals))
+
+
 class Turn:
     def __init__(self):
         self.t_end = None
@@ -462,6 +477,8 @@ class Turn:
 class Engine:
     in_sr = 24000
     out_sr = 24000
+    voiced_only = False  # True when the engine streams output audio continuously, silence included
+
 
     def __init__(self, model, voice, prompt):
         self.model, self.voice, self.prompt = model, voice, prompt
@@ -474,17 +491,23 @@ class Engine:
         self.t_any_audio = None
 
     def on_audio(self, b):
-        self.t_any_audio = mono()
+        voiced = (not self.voiced_only) or rms16(b) >= VOICED_RMS
+        if voiced:
+            self.t_any_audio = mono()
         t = self.turn
         if t is None:
             return
         if t.t_end is None:
-            t.pre_audio += len(b)
+            if voiced:
+                t.pre_audio += len(b)
             return
         now = mono()
         if t.t_first_audio is None:
+            if not voiced:
+                return
             t.t_first_audio = now
-        t.t_last_audio = now
+        if voiced:
+            t.t_last_audio = now
         t.audio += b
 
     async def recv_loop(self):
@@ -580,7 +603,10 @@ class OpenAIRealtime(Engine):
 
 
 class GPTLive(Engine):
+    """GPT-Live is full duplex: its WebSocket can keep sending output audio, silence included, so a reply is the
+    voiced audio (RMS >= VOICED_RMS) after the friend stops, ending after 1.5 s without voiced audio."""
     name = 'live'
+    voiced_only = True
 
     async def connect(self):
         self.ws = await WS.connect('%s/v1/live/sessions' % OPENAI_WS, {'Authorization': 'Bearer ' + key('openai.key')})
@@ -1228,10 +1254,9 @@ def main():
     meta['finished'] = now_iso()
     with open(os.path.join(RESULTS, 'run-meta.json'), 'w', encoding='utf-8') as f:
         json.dump(meta, f, ensure_ascii=False, indent=1)
-    if a.what == 'all':
-        print(pack())
-        with open(os.path.join(RESULTS, 'DONE'), 'w') as f:
-            f.write(now_iso() + '\n')
+    print(pack())
+    with open(os.path.join(RESULTS, 'DONE'), 'w') as f:
+        f.write(now_iso() + '\n')
     print(json.dumps(meta, ensure_ascii=False))
 
 

@@ -4,6 +4,7 @@
 #
 #   git fetch origin claude/project-thread-p4wjk1
 #   git show origin/claude/project-thread-p4wjk1:tools/voice_bench/run_from_laptop.sh | bash -s -- start
+#   ... | bash -s -- start live # 한 엔진만 다시(gemini|openai|live|cascade), 결과 묶음과 DONE은 같아요
 #   ... | bash -s -- status     # 진행 중이면 RUNNING과 마지막 줄들, 끝나면 DONE
 #   ... | bash -s -- collect    # 끝난 결과(results.tar.gz)를 받아 브랜치의 tools/voice_bench/server-results/ 에 커밋·푸시
 #
@@ -14,6 +15,8 @@ BR=${VOICE_BENCH_BRANCH:-claude/project-thread-p4wjk1}
 HOST=${MARONG_HOST:-ko-family}
 SSH=(ssh -o ServerAliveInterval=30)
 cmd=${1:-status}
+what=${2:-all}
+case "$what" in all|gemini|openai|live|cascade) ;; *) echo "unknown engine: $what" >&2; exit 2 ;; esac
 
 latest() { "${SSH[@]}" "$HOST" 'cat ~/marong-voice-bench/LATEST'; }
 
@@ -25,7 +28,7 @@ case "$cmd" in
     dir="marong-voice-bench/$stamp"
     git archive "$ref" tools/voice_bench/bench_server.py tools/voice_bench/inputs |
       "${SSH[@]}" "$HOST" "mkdir -p ~/$dir && tar -x -C ~/$dir && echo $ref > ~/$dir/COMMIT && echo $dir > ~/marong-voice-bench/LATEST"
-    "${SSH[@]}" "$HOST" "cd ~/$dir/tools/voice_bench && PY=\$HOME/marong-vertex-test/venv-memory2/bin/python && { [ -x \"\$PY\" ] || PY=python3; } && \"\$PY\" -I -c 'import sys; print(\"python\", sys.version.split()[0])' && (nohup \"\$PY\" -I bench_server.py all > run.log 2>&1 < /dev/null &) && echo started ~/$dir"
+    "${SSH[@]}" "$HOST" "cd ~/$dir/tools/voice_bench && PY=\$HOME/marong-vertex-test/venv-memory2/bin/python && { [ -x \"\$PY\" ] || PY=python3; } && \"\$PY\" -I -c 'import sys; print(\"python\", sys.version.split()[0])' && (nohup \"\$PY\" -I bench_server.py $what > run.log 2>&1 < /dev/null &) && echo started ~/$dir"
     ;;
   status)
     dir=$(latest)
