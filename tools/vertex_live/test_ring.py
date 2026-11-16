@@ -233,7 +233,9 @@ async def check_http(server):
                         break
                     await asyncio.sleep(.01)
             page = await (await client.get('/')).text()
-            assert '/app.js?v=20261115-ring1' in page
+            assert '/app.js?v=20261116-face1' in page
+            script = await (await client.get('/app.js')).text()
+            assert '03-listening' not in script and "faceNames={1:'01-neutral',15:" in script  # 삐뚤어진 '듣는 얼굴'을 다시 쓰지 않음
     assert seen == [RING_ID, None, None], seen
 
 

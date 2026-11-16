@@ -32,9 +32,9 @@
 })();
 
 const $=id=>document.getElementById(id);
-const CLIENT_VERSION='20261115-ring1';
+const CLIENT_VERSION='20261116-face1';
 const clientId=crypto.randomUUID();
-const faceNames={1:'01-neutral',3:'03-listening',15:'15-mouth-slightly-open',16:'16-mouth-wide-open',18:'18-eyes-half-closed',19:'19-eyes-closed',20:'20-mouth-slightly-open-eyes-half-closed',21:'21-mouth-slightly-open-eyes-closed',22:'22-mouth-wide-open-eyes-half-closed',23:'23-mouth-wide-open-eyes-closed'};
+const faceNames={1:'01-neutral',15:'15-mouth-slightly-open',16:'16-mouth-wide-open',18:'18-eyes-half-closed',19:'19-eyes-closed',20:'20-mouth-slightly-open-eyes-half-closed',21:'21-mouth-slightly-open-eyes-closed',22:'22-mouth-wide-open-eyes-half-closed',23:'23-mouth-wide-open-eyes-closed'};
 const faceURL=n=>`/face/v1/${faceNames[n]}.webp`;
 for(const n of Object.keys(faceNames)){const image=new Image();image.src=faceURL(n);}
 const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
@@ -43,7 +43,7 @@ let socket=null,stream=null,audioContext=null,worklet=null,player=null,micSource
 let playbackStats={},outputTurnOpen=false,lastAudioAt=0,maxArrivalGapMs=0,contextInterruptions=0,speaking=false;
 let retryTimer=null,starting=false,ready=false,intended=false,hangingUp=false,hangupTimer=null;
 let lastSpeaker=null,lastText=null,retryDelay=1000,firstReady=null,micMode=false,muted=false,hasConnected=false;
-let speakingSince=0,lastFace=0,listenUntil=0,blinkAt=performance.now()+3500,blinkStarted=0;
+let speakingSince=0,lastFace=0,blinkAt=performance.now()+3500,blinkStarted=0;
 let generation=0,epoch=0,callId=null,memoryConnected=false;
 let rtcClient=null,rtcEnabled=false;
 // A call Marong placed at a time the friend set (docs/app-ring.md SPEC-135): the app opens /?ring=<id>.
@@ -257,7 +257,6 @@ async function begin(microphone){
       if(run!==generation)return false;
       micSource=audioContext.createMediaStreamSource(stream);worklet=new AudioWorkletNode(audioContext,'capture-pcm');micSource.connect(worklet);worklet.connect(audioContext.destination);
       worklet.port.onmessage=event=>{
-        if(!muted&&event.data.rms>.018)listenUntil=performance.now()+800;
         if(event.data.pcm&&intended&&ready&&socket?.readyState===WebSocket.OPEN&&socket.bufferedAmount<64000)socket.send(event.data.pcm);
       };
     }
@@ -317,7 +316,7 @@ window.addEventListener('pagehide',()=>{intended=false;clearTimeout(retryTimer);
 setInterval(()=>{
   const now=performance.now();
   document.body.classList.toggle('speaking',intended&&speaking);
-  let frame=intended&&now<listenUntil&&!muted?3:1;
+  let frame=1;  // 친구가 말하는 동안도 기본 얼굴(03 '듣는 얼굴'은 두 눈 높이가 달라 삐뚤어져 보여서 뺌, 2026-11-16)
   if(speaking){
     if(!speakingSince)speakingSince=now;
     let phase=(now-speakingSince+210)%1980;
