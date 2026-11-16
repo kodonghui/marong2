@@ -1,0 +1,271 @@
+# 마롱이 디스코드 음성 중계 API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/call-cost.md(SPEC-174~176). 코드: tools/vertex_live/discord_relay.py, 부르는 쪽: tools/discord_voice/index.mjs
+openapi: 3.1.0
+info:
+  title: 마롱이 디스코드 음성 중계 API
+  version: 0.1.0-draft
+  description: |-
+    디스코드 음성 봇(`tools/discord_voice/index.mjs`, Node)이 같은 서버의 음성 중계(`tools/vertex_live/discord_relay.py`)에 묻는 계약 가운데 통화 비용 설계(2026-11-16)가 바꾸는 곳만 적었어요. 원본은 이 파일이고 코드는 이 파일을 따라가요(06단계).
+
+    - 바깥에서는 닿지 않아요. 유닉스 소켓 `/run/marong-discord-voice/live.sock`으로만 받고, 소켓 상대 uid(SO_PEERCRED)가 음성 봇 계정이고 사용자·서버·채널 세 머리글이 정해 둔 방일 때만 답해요.
+    - 웹 통화 서버와 같은 `LiveSession`이라 예산 확인은 두 입구가 같은 코드예요(04 call-cost 1절).
+    - 바꾸지 않는 `POST /end`(통화 끝내기)는 아직 이 계약에 없어요.
+
+    바꾸는 것(Claude 제안, 2026-11-16, 검토 대상).
+    1. `/available`과 `/live`가 새 통화면(같은 client id로 이어 갈 통화가 없으면) 예산을 보고, 이번 달 상태가 exhausted나 hard_stop이면 429 `budget_exhausted`예요(SPEC-174). 음성 봇은 웹소켓을 열기 전 HTTP 상태를 읽을 수 있어서 웹 통화와 달리 오류 응답이에요.
+    2. 음성 봇은 `/available`의 429를 받으면 음성방에 들어가 미리 만든 안내 말을 한 번 틀고 나가요. 그 뒤는 끊기와 같아서 친구가 나갔다 다시 들어오기 전에는 다시 들어가지 않아요(SPEC-175).
+    3. 120%에서는 지금 끊기와 같은 `hangup` 메시지로 끝내요(SPEC-176).
+    4. 오류 본문을 aiohttp 기본 글에서 Problem Details로 바꿔요. 지금 음성 봇은 상태 번호만 읽어서 깨지지 않아요(index.mjs의 available).
+
+    깨지는 변경: 없음. 옛 음성 봇은 429를 '걸 수 없음'으로 보고 들어가지 않아요(안내 말 없이 조용히 막힘).
+servers:
+- url: http://localhost
+  description: 유닉스 소켓 /run/marong-discord-voice/live.sock(같은 서버의 디스코드 음성 봇만)
+security:
+- voiceBot: []
+paths:
+  /available:
+    get:
+      operationId: relayAvailable
+      summary: 지금 이 방에서 통화를 시작할 수 있는지
+      description: 음성 봇이 친구가 음성방에 들어온 것을 보고 들어가기 전에 물어요. 204면 들어가 `/live`를 열어요.
+      x-corthex:
+        id: API-125
+        spec:
+        - SPEC-174
+        - SPEC-175
+        omit:
+          '401': 로그인 대신 소켓 상대 uid를 봄. 아니면 403
+          '404': 경로가 id를 담지 않음
+      parameters:
+      - $ref: '#/components/parameters/DiscordUser'
+      - $ref: '#/components/parameters/DiscordGuild'
+      - $ref: '#/components/parameters/DiscordChannel'
+      - $ref: '#/components/parameters/ClientId'
+      responses:
+        '204':
+          description: 시작하거나 이어 갈 수 있어요
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/CallActive'
+        '429':
+          $ref: '#/components/responses/BudgetExhausted'
+        default:
+          $ref: '#/components/responses/Internal'
+  /live:
+    get:
+      operationId: relayLive
+      summary: 디스코드 통화 웹소켓
+      description: 음성 봇이 여는 웹소켓이에요. 방마다 하나만 열리고, 같은 친구의 다른 통화가 살아 있으면 409예요. 새 통화인데 예산이 막혔으면 웹소켓으로 바꾸기 전에 429예요. 그 뒤 메시지는 웹 통화와 같은 `LiveSession`의 것이고, 120%에서는 `hangup`으로 끝내요.
+      x-corthex:
+        id: API-126
+        spec:
+        - SPEC-174
+        - SPEC-176
+        omit:
+          '401': 로그인 대신 소켓 상대 uid를 봄. 아니면 403
+          '404': 경로가 id를 담지 않음
+      parameters:
+      - $ref: '#/components/parameters/DiscordUser'
+      - $ref: '#/components/parameters/DiscordGuild'
+      - $ref: '#/components/parameters/DiscordChannel'
+      - $ref: '#/components/parameters/ClientId'
+      - name: X-Marong-Hangup
+        in: header
+        required: false
+        description: 1이면 이 봇이 hangup에 음성방을 나갈 수 있어요
+        schema:
+          type: string
+          enum:
+          - '1'
+      responses:
+        '101':
+          description: 웹소켓으로 바꿈
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/CallActive'
+        '429':
+          $ref: '#/components/responses/BudgetExhausted'
+        default:
+          $ref: '#/components/responses/Internal'
+components:
+  x-corthex:
+    errors:
+      invalid_request:
+        status: 400
+        meaning: X-Marong-Client-Id가 UUID가 아님
+        message: (친구에게 보이지 않음)
+        client: 로그 relay_bad_request. 들어가지 않음
+      not_allowed:
+        status: 403
+        meaning: 소켓 상대가 음성 봇 계정이 아니거나, 정해 둔 방이 아니거나, 디스코드 사용자에 묶인 통화 친구가 없음
+        message: (친구에게 보이지 않음)
+        client: 들어가지 않음
+      call_active:
+        status: 409
+        meaning: 이 방의 통화가 이미 열려 있거나 같은 친구의 다른 통화(웹 포함)가 살아 있음
+        message: (친구에게 보이지 않음)
+        client: 들어가지 않고 지금처럼 2~5초 뒤 다시 봄
+      budget_exhausted:
+        status: 429
+        meaning: 새 통화인데 이번 달 통화 예산 상태가 exhausted나 hard_stop
+        message: 안내 말 '미안, 이번 달 통화는 여기까지야. 다음 달에 또 걸어 줘! 글로는 계속 얘기할 수 있어.'
+        client: /available이면 음성방에 들어가 안내 말을 한 번 틀고 나가고 room.hungUp(SPEC-175). 파일이 없거나 틀 수 없으면 들어가지 않고 로그만. /live면 들어가지 않음
+      internal:
+        status: 500
+        meaning: 예상하지 못한 중계 오류
+        message: (친구에게 보이지 않음)
+        client: 들어가지 않고 지금처럼 다시 봄
+  securitySchemes:
+    voiceBot:
+      type: apiKey
+      in: header
+      name: X-Marong-Discord-User
+      description: 실제 확인은 유닉스 소켓 상대 uid(SO_PEERCRED)가 음성 봇 계정인지와, 사용자·서버·채널 세 머리글이 중계를 켤 때 정해 둔 방인지예요. 비밀값은 없어요
+  parameters:
+    DiscordUser:
+      name: X-Marong-Discord-User
+      in: header
+      required: true
+      description: 디스코드 사용자 id
+      schema:
+        type: string
+        pattern: ^[0-9]{17,20}$
+    DiscordGuild:
+      name: X-Marong-Discord-Guild
+      in: header
+      required: true
+      description: 디스코드 서버 id
+      schema:
+        type: string
+        pattern: ^[0-9]{17,20}$
+    DiscordChannel:
+      name: X-Marong-Discord-Channel
+      in: header
+      required: true
+      description: 디스코드 음성 채널 id
+      schema:
+        type: string
+        pattern: ^[0-9]{17,20}$
+    ClientId:
+      name: X-Marong-Client-Id
+      in: header
+      required: true
+      description: 음성 봇이 통화마다 만든 UUID. 다시 잇기에 같은 값을 써요
+      schema:
+        type: string
+        format: uuid
+        maxLength: 36
+  responses:
+    BadRequest:
+      description: client id가 틀림
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            bad-client:
+              value:
+                type: https://marong.corthex-hq.com/problems/invalid-request
+                title: X-Marong-Client-Id가 UUID가 아님
+                status: 400
+                code: invalid_request
+                traceId: 0af7651916cd43dd
+    Forbidden:
+      description: 음성 봇이 아니거나 정해 둔 방이 아님
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            not-allowed:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-allowed
+                title: 음성 봇이 아니거나 정해 둔 방이 아님
+                status: 403
+                code: not_allowed
+                traceId: 00f067aa0ba902b7
+    CallActive:
+      description: 이미 통화가 있음
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            call-active:
+              value:
+                type: https://marong.corthex-hq.com/problems/call-active
+                title: 이 방이나 같은 친구의 통화가 이미 있음
+                status: 409
+                code: call_active
+                traceId: 7c3e1f2a9b8d4c60
+    BudgetExhausted:
+      description: 이번 달 통화 예산을 다 씀(새 통화일 때만)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            budget:
+              value:
+                type: https://marong.corthex-hq.com/problems/budget-exhausted
+                title: 이번 달 통화 예산을 다 씀
+                status: 429
+                code: budget_exhausted
+                traceId: 4bf92f3577b34da6
+    Internal:
+      description: 예상하지 못한 중계 오류
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            internal:
+              value:
+                type: https://marong.corthex-hq.com/problems/internal
+                title: 예상하지 못한 중계 오류
+                status: 500
+                code: internal
+                traceId: 4bf92f3577b34da6
+  schemas:
+    Problem:
+      type: object
+      required:
+      - title
+      - status
+      - code
+      - traceId
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+          maxLength: 200
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          maxLength: 300
+        instance:
+          type: string
+          format: uri-reference
+        code:
+          type: string
+          enum:
+          - invalid_request
+          - not_allowed
+          - call_active
+          - budget_exhausted
+          - internal
+        traceId:
+          type: string
+          pattern: ^[0-9a-f]{16}$
+      additionalProperties: false

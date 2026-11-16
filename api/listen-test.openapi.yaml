@@ -1,0 +1,531 @@
+# 마롱이 목소리 듣기 시험 API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/call-cost.md(SPEC-183), DB: marong/migrations/017_listen_test.sql(TBL-114)
+openapi: 3.1.0
+info:
+  title: 마롱이 목소리 듣기 시험 API
+  version: 0.1.0-draft
+  description: |-
+    목소리 후보를 귀로 비교하는 듣기 시험 화면(`/chat/listen/`)이 디스코드 DM 봇의 글 대화 서버와 주고받는 계약이에요(SPEC-183). 원본은 이 파일이고 코드는 이 파일을 따라가요(06단계). 글 대화와 같은 서버(127.0.0.1:8796)·같은 로그인이고, 새 모듈 `marong/app_listen.py`가 `/chat/listen/` 아래를 맡아요.
+
+    - 시험 묶음은 `tools/listen_test.py make`가 서버 파일로 만들어요. 문장 10개(저장소의 고정 파일, 실제 대화 아님), 문장마다 후보 소리 파일, 소리 id는 임의 값이에요. 어느 후보가 어느 소리를 만들었는지(정답표)는 봇이 읽지 않는 다른 파일에만 있고, `tools/listen_test.py result`만 읽어요.
+    - 후보 이름은 화면, 응답, 파일 이름 어디에도 없어요. 형식으로도 알 수 없게 `make`가 모든 소리를 같은 형식(AAC, m4a, 48kHz 모노, 같은 비트레이트)과 같은 소리 크기로 바꿔요.
+    - 지금 시험 묶음은 하나예요. 묶음이 없으면 화면은 '지금은 시험이 없어'예요.
+    - 쓰기 요청(PUT)은 `Origin`이 `https://marong.corthex-hq.com`이어야 해요. 오류는 글 대화와 같은 Problem Details에 `code`와 `traceId`를 더한 모양이에요.
+    - 로그에는 시험 id, 결과 코드만 남겨요. 점수, 소리 id, 후보 이름은 남기지 않아요.
+
+    계약에서 정한 것(Claude 제안, 2026-11-16, 검토 대상).
+    1. 검증 오류는 400이에요(글 대화와 같음).
+    2. 시험 묶음이 없으면 404가 아니라 200의 `test` null이에요.
+    3. 소리 순서는 친구와 문장마다 섞되 다시 열어도 같아요(시험 id, 친구 id, 소리 id로 만든 해시 순서).
+    4. 답은 소리마다 하나이고 다시 보내면 마지막 값이에요. '마롱이 같다'를 다른 소리로 옮기면 같은 문장의 다른 소리에서 그 표시를 한 트랜잭션에서 빼요. 점수도 표시도 없는 줄은 '답 없음'이에요(그래서 05 TBL-114의 '점수나 표시 하나는 있어야 함' 검사를 뺐어요).
+    5. 화면이 연 시험과 지금 시험이 다르면 409 `stale_test`이고 화면은 새로 불러요.
+servers:
+- url: https://marong.corthex-hq.com
+  description: Cloudflare Access 뒤. 터널이 /chat/ 아래만 봇으로 보내요
+- url: http://127.0.0.1:8796
+  description: 서버 안에서 직접(배포 확인용). Access 증명이 없어 API는 401이에요
+security:
+- cfAccess: []
+paths:
+  /chat/listen/api/test:
+    get:
+      operationId: getListenTest
+      summary: 지금 듣기 시험과 내 답
+      description: 지금 시험 묶음의 문장과, 문장마다 이 친구에게 섞은 순서의 소리 id와 이 친구가 이미 한 답을 줘요. 묶음이 없으면 test가 null이에요.
+      x-corthex:
+        id: API-121
+        spec:
+        - SPEC-183
+        omit:
+          '400': 입력이 없음
+          '404': 시험 묶음이 없으면 test null(200)
+          '409': 읽기만 함
+          '429': 읽기만 함
+      responses:
+        '200':
+          description: 지금 시험(없으면 null)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestResult'
+              examples:
+                test:
+                  value:
+                    test:
+                      testId: listen-20261120
+                      sentences:
+                      - 'no': 1
+                        text: 오늘 진짜 수고 많았어! 푹 쉬어.
+                        clips:
+                        - id: k3j9x2m8q1w5
+                          score: 4
+                          marongLike: true
+                        - id: p7r2t5v8y1b4
+                          score: 3
+                          marongLike: false
+                        - id: c6e9g2j5m8q1
+                          score: null
+                          marongLike: false
+                no-test:
+                  value:
+                    test: null
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/listen/api/clips/{clipId}:
+    get:
+      operationId: getListenClip
+      summary: 소리 파일
+      description: 지금 시험 묶음의 소리 하나를 줘요. 소리 id는 묶음마다 새로 만들어 바뀌지 않아서 기기에 남겨요. 없는 id, 다른 묶음의 id, 형식이 틀린 id는 모두 404예요.
+      x-corthex:
+        id: API-122
+        spec:
+        - SPEC-183
+        omit:
+          '400': 형식이 틀린 id도 404
+          '409': 읽기만 함
+          '429': 읽기만 함. 기기에 남겨서 다시 받지 않음
+      parameters:
+      - $ref: '#/components/parameters/ClipId'
+      responses:
+        '200':
+          description: 소리(AAC m4a)
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheImmutable'
+          content:
+            audio/mp4:
+              schema:
+                type: string
+                contentMediaType: audio/mp4
+                maxLength: 2097152
+              examples:
+                clip:
+                  summary: 문장 하나를 읽은 1~15초 소리의 바이트
+                  externalValue: https://marong.corthex-hq.com/chat/listen/api/clips/k3j9x2m8q1w5
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/listen/api/answers/{clipId}:
+    put:
+      operationId: putListenAnswer
+      summary: 소리 하나에 답하기
+      description: 자연스러움 점수(1~5, 없으면 null)와 '마롱이 같다'를 저장해요(TBL-114). 다시 보내면 마지막 값이에요. marongLike가 true면 같은 문장의 다른 소리에서 그 표시를 한 트랜잭션에서 빼요. 응답은 그 문장 전체예요(옮겨진 표시를 화면이 바로 보이게).
+      x-corthex:
+        id: API-123
+        spec:
+        - SPEC-183
+        omit:
+          '429': 친구 둘이 한 번씩 하는 시험이라 한도를 두지 않음
+      parameters:
+      - $ref: '#/components/parameters/ClipId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnswerRequest'
+            examples:
+              score:
+                value:
+                  testId: listen-20261120
+                  score: 4
+                  marongLike: false
+              pick:
+                value:
+                  testId: listen-20261120
+                  score: 5
+                  marongLike: true
+              clear:
+                value:
+                  testId: listen-20261120
+                  score: null
+                  marongLike: false
+      responses:
+        '200':
+          description: 저장한 뒤의 그 문장
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sentence'
+              examples:
+                picked:
+                  value:
+                    'no': 1
+                    text: 오늘 진짜 수고 많았어! 푹 쉬어.
+                    clips:
+                    - id: k3j9x2m8q1w5
+                      score: 4
+                      marongLike: false
+                    - id: p7r2t5v8y1b4
+                      score: 5
+                      marongLike: true
+                    - id: c6e9g2j5m8q1
+                      score: null
+                      marongLike: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/StaleTest'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+components:
+  x-corthex:
+    errors:
+      invalid_request:
+        status: 400
+        meaning: 요청 모양이 틀림(빠진 칸, 형식·범위 밖)
+        message: 뭔가 잘못 보냈나 봐. 다시 해 볼게
+        client: 한 번 다시 보내고, 또 오면 오류 상태와 추적 id
+      unauthenticated:
+        status: 401
+        meaning: Access 로그인 증명이 없거나 맞지 않음
+        message: 다시 들어와 줘
+        client: 페이지를 새로 불러 Access 로그인으로
+      not_allowed:
+        status: 403
+        meaning: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+        message: 이 계정으로는 시험을 볼 수 없어
+        client: 쓸 수 없는 계정 상태. 다시 시도하지 않음
+      cross_site:
+        status: 403
+        meaning: 다른 사이트에서 온 쓰기 요청
+        message: 이 화면에서 다시 해 줘
+        client: 오류 상태. 자동으로 다시 보내지 않음
+      no_dm:
+        status: 403
+        meaning: 이 친구의 디스코드 DM 연결이 없거나 아직 DM을 한 번도 보내지 않음(글 대화와 같은 로그인 확인)
+        message: 디스코드 DM에서 마롱이한테 먼저 말 걸어 줘
+        client: 디스코드 DM 먼저 상태. 다시 시도하지 않음
+      not_found:
+        status: 404
+        meaning: 지금 시험 묶음에 없는 소리 id(형식이 틀린 id 포함)
+        message: 그 소리를 찾지 못했어
+        client: 시험을 다시 불러옴
+      stale_test:
+        status: 409
+        meaning: 화면이 연 시험과 지금 시험 묶음이 다름
+        message: 시험이 바뀌었어. 새로 보여 줄게
+        client: 시험을 다시 불러옴(전 답은 전 시험에 남아 있음)
+      db_unavailable:
+        status: 503
+        meaning: DB나 Access 공개키에 닿지 않음
+        message: 잠깐 문제가 생겼어. 조금 있다가 다시 해 줘
+        client: 다시 연결하는 중 상태. 5초 뒤부터 늘려 가며 다시
+      internal:
+        status: 500
+        meaning: 예상하지 못한 서버 오류
+        message: 잠깐 문제가 생겼어. 다시 해 볼래?
+        client: 오류 상태, 다시 시도, 추적 id 보여 줌
+  securitySchemes:
+    cfAccess:
+      type: apiKey
+      in: header
+      name: Cf-Access-Jwt-Assertion
+      description: Cloudflare Access가 붙이는 JWT(RS256). 봇이 Access 공개키로 서명·aud·iss·exp를 확인하고 email을 허용 목록과 맞춘 뒤 sha256으로 통화 친구를 찾아요. 브라우저가 직접 넣지 않아요.
+  headers:
+    CacheImmutable:
+      description: 소리 id는 바뀌지 않아서 그 기기에만 1년 남겨요
+      schema:
+        type: string
+        const: private, max-age=31536000, immutable
+  parameters:
+    ClipId:
+      name: clipId
+      in: path
+      required: true
+      description: 소리 id(TBL-114 clip_id). 후보 이름이 없는 임의 값. 형식이 틀려도 404
+      schema:
+        type: string
+        maxLength: 32
+        pattern: ^[a-z0-9]{8,32}$
+  responses:
+    BadRequest:
+      description: 요청이 틀림
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            bad-score:
+              value:
+                type: https://marong.corthex-hq.com/problems/invalid-request
+                title: 요청 모양이 틀림(빠진 칸, 형식·범위 밖)
+                status: 400
+                code: invalid_request
+                traceId: 0af7651916cd43dd
+                errors:
+                - field: score
+                  reason: out_of_range
+    Unauthenticated:
+      description: 로그인 증명이 없거나 맞지 않음
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            no-proof:
+              value:
+                type: https://marong.corthex-hq.com/problems/unauthenticated
+                title: Access 로그인 증명이 없거나 맞지 않음
+                status: 401
+                code: unauthenticated
+                traceId: 0af7651916cd43dd
+    Forbidden:
+      description: 허용되지 않음(cross_site는 쓰기 요청에서만 나와요)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            not-allowed:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-allowed
+                title: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+                status: 403
+                code: not_allowed
+                traceId: 00f067aa0ba902b7
+            no-dm:
+              value:
+                type: https://marong.corthex-hq.com/problems/no-dm
+                title: 이 친구의 디스코드 DM 연결이 없거나 아직 DM을 한 번도 보내지 않음
+                status: 403
+                code: no_dm
+                traceId: 00f067aa0ba902b7
+            cross-site:
+              value:
+                type: https://marong.corthex-hq.com/problems/cross-site
+                title: 다른 사이트에서 온 쓰기 요청
+                status: 403
+                code: cross_site
+                traceId: 00f067aa0ba902b7
+    NotFound:
+      description: 지금 시험에 없는 소리
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            no-clip:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-found
+                title: 지금 시험 묶음에 없는 소리 id
+                status: 404
+                code: not_found
+                traceId: 4bf92f3577b34da6
+    StaleTest:
+      description: 화면이 연 시험과 지금 시험이 다름
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            stale-test:
+              value:
+                type: https://marong.corthex-hq.com/problems/stale-test
+                title: 화면이 연 시험과 지금 시험 묶음이 다름
+                status: 409
+                code: stale_test
+                traceId: 7c3e1f2a9b8d4c60
+    DbUnavailable:
+      description: DB나 Access 공개키에 닿지 않음
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            db:
+              value:
+                type: https://marong.corthex-hq.com/problems/db-unavailable
+                title: DB에 닿지 않음
+                status: 503
+                code: db_unavailable
+                traceId: 4bf92f3577b34da6
+    Internal:
+      description: 예상하지 못한 서버 오류
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            internal:
+              value:
+                type: https://marong.corthex-hq.com/problems/internal
+                title: 예상하지 못한 서버 오류
+                status: 500
+                code: internal
+                traceId: 4bf92f3577b34da6
+  schemas:
+    Problem:
+      type: object
+      required:
+      - title
+      - status
+      - code
+      - traceId
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+          maxLength: 200
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          maxLength: 300
+        instance:
+          type: string
+          format: uri-reference
+        code:
+          type: string
+          enum:
+          - invalid_request
+          - unauthenticated
+          - not_allowed
+          - cross_site
+          - no_dm
+          - not_found
+          - stale_test
+          - db_unavailable
+          - internal
+        traceId:
+          type: string
+          pattern: ^[0-9a-f]{16}$
+        errors:
+          type: array
+          maxItems: 10
+          description: 검증 오류 위치. 보낸 값은 담지 않음
+          items:
+            type: object
+            required:
+            - field
+            - reason
+            properties:
+              field:
+                type: string
+                enum:
+                - body
+                - testId
+                - score
+                - marongLike
+              reason:
+                type: string
+                enum:
+                - required
+                - bad_format
+                - out_of_range
+            additionalProperties: false
+      additionalProperties: false
+    TestId:
+      type: string
+      pattern: ^[a-z0-9-]{3,40}$
+      description: 시험 묶음 id(TBL-114 test_id)
+    Score:
+      type:
+      - integer
+      - 'null'
+      minimum: 1
+      maximum: 5
+      description: 자연스러움 1(어색함)~5(사람 같음). 아직 안 매겼으면 null
+    Clip:
+      type: object
+      required:
+      - id
+      - score
+      - marongLike
+      properties:
+        id:
+          type: string
+          pattern: ^[a-z0-9]{8,32}$
+        score:
+          $ref: '#/components/schemas/Score'
+        marongLike:
+          type: boolean
+          description: 이 문장에서 '마롱이 같다'로 고른 소리인지(문장마다 하나)
+      additionalProperties: false
+    Sentence:
+      type: object
+      required:
+      - 'no'
+      - text
+      - clips
+      properties:
+        'no':
+          type: integer
+          minimum: 1
+          maximum: 10
+        text:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: 후보들이 읽은 문장(저장소의 고정 파일). 화면에는 textContent로만 넣어요
+        clips:
+          type: array
+          minItems: 1
+          maxItems: 8
+          description: 이 친구에게 섞은 순서의 소리들
+          items:
+            $ref: '#/components/schemas/Clip'
+      additionalProperties: false
+    Test:
+      type: object
+      required:
+      - testId
+      - sentences
+      properties:
+        testId:
+          $ref: '#/components/schemas/TestId'
+        sentences:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/Sentence'
+      additionalProperties: false
+    TestResult:
+      type: object
+      required:
+      - test
+      properties:
+        test:
+          oneOf:
+          - $ref: '#/components/schemas/Test'
+          - type: 'null'
+      additionalProperties: false
+    AnswerRequest:
+      type: object
+      required:
+      - testId
+      - score
+      - marongLike
+      properties:
+        testId:
+          $ref: '#/components/schemas/TestId'
+        score:
+          $ref: '#/components/schemas/Score'
+        marongLike:
+          type: boolean
+      additionalProperties: false

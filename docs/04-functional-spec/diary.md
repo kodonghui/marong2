@@ -32,7 +32,7 @@
 | SPEC-159 | 넘기기와 달력 | REQ-148, REQ-149, FL-117 | SPEC-158과 같음 | 앞·뒤 날은 그 날보다 이르거나 늦은 날 가운데 `ready`이고 숨기지 않은 가장 가까운 날이에요(SPEC-158 응답에 같이). 달력 `GET /chat/diary/api/days?month=YYYY-MM`은 그 달(일기 날짜 기준)의 `ready`이고 숨기지 않은 일기마다 날짜·마음 날씨(지금 판)·도장을 돌려줘요. 건너뛴 날·못 쓴 날·숨긴 날은 빈 칸이에요 | `month` 형식 틀림 → 400<br>일기 없는 달 → 빈 목록<br>앞이나 뒤가 없음 → 그 칸 `null`(화면은 버튼을 막음) | Given 11/14 `ready`, 11/15 `skipped`, 11/16 숨김, 11/17 `ready`, when 11/14의 뒤, then 11/17<br>Given 11월 달력, then 11/14·11/17 두 날과 그날 마음 날씨 | active |
 | SPEC-160 | 말로 고치기 | REQ-150, REQ-151, REQ-164, FL-116 | 로그인, 일기 `ready`, 쓰기 요청 규칙(1절) | `POST /chat/diary/api/days/{date}/fixes` {`revision`, `text` 1\~200자}. ① 짧은 트랜잭션에서 일기 줄을 잠그고 판 번호, 성공한 고치기 5번 미만(REQ-151), 친구의 분당 5번(고치기와 다시 그리기를 합쳐), 다른 고치기·다시 그리기가 없는지 확인하고 90초 '고치는 중'을 걸어요. ② 하루 모음을 지금 다시 만들어요(SPEC-152 규칙이라 그 사이 잊은 얘기는 빠짐). ③ 고치기(AI-7 `fix`, 5.2). ④ SPEC-153과 같은 확인, 장면이 바뀌었으면 SPEC-154. ⑤ 새 판을 저장하고(지난 판 남김) 200과 새 판을 돌려줘요. 장면이 바뀌었으면 `sceneChanged=true`이고 화면은 다시 그리기를 권해요(그림은 그대로) | 판 다름 → 409 `stale_revision`(화면은 새로 불러 보여 줌)<br>5번 다 씀 → 409 `fix_limit`<br>분당 5번 넘음 → 429 `too_many_requests`(`Retry-After`)<br>`ready` 아님 → 409 `not_ready`<br>고치는 중·그리는 중 → 409 `busy`<br>모델 실패·시간 넘김·거절·길이 다시 틀림 → 503 `fix_failed`, 지금 판 그대로, 횟수 안 셈<br>다른 사이트 → 403 `cross_site`<br>`text` 빈칸·201자·형식 틀림 → 400<br>같은 `Idempotency-Key` → 처음 결과 | Given 판 1, when "떡볶이가 아니라 라면이었어", then 판 2가 지금 판이고 판 1도 남음, 고친 횟수 1<br>Given 5번 고침, when 6번째, then 409 `fix_limit`<br>Given 모델 시간 넘김, then 503, 판 그대로, 남은 횟수 그대로<br>Given 다른 출처의 `Origin`, then 403 | active |
 | SPEC-161 | 다시 그리기 | REQ-152, REQ-153, REQ-165, REQ-167, FL-116 | 로그인, 일기 `ready`, 쓰기 요청 규칙 | `POST /chat/diary/api/days/{date}/drawings` {`revision`, `change` 0\~200자}. 잠금·판·성공한 다시 그리기 2번 미만(REQ-153)·그림 월 예산(SPEC-156)·분당 5번을 확인하고 202와 '그리는 중'을 돌려줘요. 뒤에서: `change`가 있거나 장면이 없는 일기면 장면 다시 쓰기(AI-7 `scene`) → SPEC-154 → 그림(AI-8). 성공하면 새 그림이 지금 그림이고 지난 그림은 남아요. 화면은 2초마다 `GET days/{date}`로 그림 상태를 봐요(2분까지). `change`가 없으면 같은 장면으로 새로 그려요 | 2번 다 씀 → 409 `redraw_limit`<br>예산 없음 → 429 `drawing_budget`(화면은 버튼을 막고 '이번 달 그림을 다 그렸어')<br>고치는 중·그리는 중 → 409 `busy`<br>장면 검사 실패 → 그림 결과 `scene_rejected`, 화면 '그 말로는 그릴 수 없어. 이름이나 숫자는 빼고 적어 줘', 횟수 안 셈<br>그림 실패·거절 → 전 그림 그대로, '지금은 못 그렸어'(REQ-167), 횟수 안 셈. 다시 그리기는 자동으로 다시 하지 않음<br>`change` 201자 → 400 | Given 다시 그리기 0번·예산 남음, when 누름, then 202, 새 그림, 다시 그린 횟수 1<br>Given 그림 API 실패, then 전 그림, 횟수 0<br>Given 예산 다 씀, then 429 `drawing_budget` | active |
-| SPEC-162 | 마음 날씨 바꾸기 | REQ-158, FL-116 | 로그인, 일기 `ready`, 쓰기 요청 규칙 | `PUT /chat/diary/api/days/{date}/weather` {`revision`, `weather`}. 값은 `sunny`(맑음)·`cloudy`(구름)·`rain`(비)·`snow`(눈)·`rainbow`(무지개). 날씨만 바꾼 새 판을 더하고(고치기 횟수에 안 셈) 일기장과 달력에 보여요 | 지금 값과 같음 → 200, 판 그대로<br>목록 밖 → 400<br>판 다름 → 409 `stale_revision`<br>`ready` 아님 → 409 `not_ready` | Given 맑음, when 비, then 판 하나 늘고 11월 달력의 그 날이 비 | active |
+| SPEC-162 | 마음 날씨 바꾸기 | REQ-158, FL-116 | 로그인, 일기 `ready`, 쓰기 요청 규칙 | `PUT /chat/diary/api/days/{date}/weather` {`revision`, `weather`}. 값은 `sunny`(맑음)·`cloudy`(구름)·`rain`(비)·`snow`(눈)·`rainbow`(무지개). 날씨만 바꾼 새 판을 더하고(고치기 횟수에 안 셈) 일기장과 달력에 보여요 | 지금 값과 같음 → 200, 판 그대로<br>목록 밖 → 400<br>판 다름 → 409 `stale_revision`<br>`ready` 아님 → 409 `not_ready`<br>고치는 중·그리는 중 → 409 `busy`(06에서 더함: 그 사이 판이 바뀌지 않게) | Given 맑음, when 비, then 판 하나 늘고 11월 달력의 그 날이 비 | active |
 | SPEC-163 | 숨기기와 다시 보이기 | REQ-156, REQ-157, FL-117 | 로그인, 일기 `ready`, 쓰기 요청 규칙 | `PUT /chat/diary/api/days/{date}/hidden` {`hidden`}. 숨기면 넘기기·달력에서 빠지고 지우지 않아요. 아침 알림 전이면 알림도 보내지 않아요. 숨긴 일기 목록 `GET /chat/diary/api/hidden`은 날짜와 제목(지금 판)을 날짜가 늦은 것부터 100개씩(커서) 돌려줘요. 다시 보이게 하면 넘기기·달력에 다시 넣어요 | 지금 값과 같음 → 200 그대로<br>`ready` 아님 → 409 `not_ready`<br>날짜 형식 틀림 → 400 | Given 숨긴 11/16, then 앞·뒤 넘기기와 달력에 없고 숨긴 일기 목록에 있고 DB에 그대로<br>Given 다시 보이게 함, then 넘기기·달력에 다시 있음 | active |
 | SPEC-164 | 도장 | REQ-154, FL-118 | 로그인, 일기 `ready`, 쓰기 요청 규칙 | `PUT /chat/diary/api/days/{date}/stamp` {`stamped`}. 찍으면 찍은 시각을 남기고, 빼면 비워요. 일기장과 달력에 보여요 | 지금 값과 같음 → 200 그대로(찍은 시각을 바꾸지 않음)<br>`ready` 아님 → 409 `not_ready` | Given 도장 없음, when 찍음, then 찍은 시각이 남고 화면에 도장<br>Given 찍힌 도장, when 다시 누름, then 빠짐 | active |
 | SPEC-165 | 마롱이가 도장 알기 | REQ-155, FL-118 | 그 친구 일기가 켜짐 | 카톡 1:1 방과 디스코드 DM(앱 글 대화) 답을 만들 때 `marong/agent.py`의 '# 지금 상황'에, 그 친구가 지난 24시간 안에 찍은 도장이 있으면 한 줄을 넣어요: "- {친구}가 {M월 D일} 마롱이 일기에 도장을 찍어 줬어(일기 내용은 여기 없어. 자연스러울 때만 고마워해도 돼)". 가장 최근 하나, 날짜만이에요. 단체방·통화에는 넣지 않아요 | 읽기가 0.5초 넘음·DB 오류 → 줄 없이 답(답을 막지 않음)<br>숨긴 일기·뺀 도장 → 넣지 않음 | Given 11/17 09:00에 11/16 일기에 도장, when 11/17 20:00 DM, then 지금 상황에 도장 한 줄(11월 16일), 일기 글 없음<br>Given 11/18 09:01, then 줄 없음 | active(확인 질문 3 대기) |
@@ -129,18 +129,19 @@ No text, no letters, no numbers, no speech bubbles, no signs, no watermark.
 
 ### 3.8 일기장 주소와 오류 코드
 
-| 길 | 하는 일 | SPEC |
-| --- | --- | --- |
-| `GET /chat/diary/`, `GET /chat/diary/{YYYY-MM-DD}` | 일기장 페이지(같은 HTML) | 158 |
-| `GET /chat/diary/{diary.js·diary.css}` | 페이지 파일 | 158 |
-| `GET /chat/diary/api/days/{date}` | 한 날 | 158, 159 |
-| `GET /chat/diary/api/days?month=YYYY-MM` | 달력 | 159 |
-| `GET /chat/diary/api/drawings/{id}` | 그림 파일 | 158 |
-| `POST /chat/diary/api/days/{date}/fixes` | 말로 고치기 | 160 |
-| `POST /chat/diary/api/days/{date}/drawings` | 다시 그리기 | 161 |
-| `PUT /chat/diary/api/days/{date}/weather`·`hidden`·`stamp` | 마음 날씨·숨기기·도장 | 162\~164 |
-| `GET /chat/diary/api/hidden` | 숨긴 일기 목록 | 163 |
-| `GET`·`PUT`·`DELETE /chat/diary/api/look` | 내 모습 카드 | 166 |
+| 길 | 하는 일 | SPEC | API(06) |
+| --- | --- | --- | --- |
+| `GET /chat/diary/`, `GET /chat/diary/{YYYY-MM-DD}` | 일기장 페이지(같은 HTML) | 158 | 페이지라 계약 밖 |
+| `GET /chat/diary/{diary.js·diary.css}` | 페이지 파일 | 158 | 페이지라 계약 밖 |
+| `GET /chat/diary/api/latest` | 가장 최근 일기 날짜와 일기 켜짐(06에서 더함) | 150, 158 | API-108 |
+| `GET /chat/diary/api/days/{date}` | 한 날 | 158, 159 | API-110 |
+| `GET /chat/diary/api/days?month=YYYY-MM` | 달력 | 159 | API-109 |
+| `GET /chat/diary/api/drawings/{id}` | 그림 파일 | 158 | API-117 |
+| `POST /chat/diary/api/days/{date}/fixes` | 말로 고치기 | 160 | API-111 |
+| `POST /chat/diary/api/days/{date}/drawings` | 다시 그리기 | 161 | API-112 |
+| `PUT /chat/diary/api/days/{date}/weather`·`hidden`·`stamp` | 마음 날씨·숨기기·도장 | 162\~164 | API-113\~115 |
+| `GET /chat/diary/api/hidden` | 숨긴 일기 목록 | 163 | API-116 |
+| `GET`·`PUT`·`DELETE /chat/diary/api/look` | 내 모습 카드 | 166 | API-118\~120 |
 
 오류 코드: 글 대화의 `invalid_request`(400)·`unauthenticated`(401)·`not_allowed`·`cross_site`·`no_dm`(403)·`db_unavailable`(503)·`internal`(500)을 그대로 쓰고, `not_found`(404), `stale_revision`·`busy`·`not_ready`·`fix_limit`·`redraw_limit`(409), `too_many_requests`·`drawing_budget`(429), `fix_failed`(503)을 더해요. 그림 결과 이유는 `scene_rejected`, `draw_failed`, `draw_refused`, `drawing_budget`이에요(응답 코드가 아니라 한 날 응답의 그림 상태).
 

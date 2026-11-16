@@ -41,8 +41,9 @@
     },
     "06-api": {
       "human": "swagger-ui",
-      "source": "api/openapi.yaml",
-      "truth": "source"
+      "source": "api/",
+      "truth": "source",
+      "note": "2026-11-16 source를 파일 하나(api/openapi.yaml)에서 `api/` 폴더로 바꿈: 서버마다 계약 파일이 따로라서. openapi.yaml(처음 통화 설계, OpenAI 길, API-001~012), app-chat.openapi.yaml(글 대화, API-101~106), diary.openapi.yaml(일기, API-108~120), listen-test.openapi.yaml(듣기 시험, API-121~123), call-live.openapi.yaml(지금 통화 서버 Gemini 길, API-124·API-107), discord-relay.openapi.yaml(디스코드 음성 중계, API-125~126). 사람이 보는 곳은 Swagger UI 그대로이고 파일마다 열어요."
     },
     "07-sitemap": {
       "human": "github",

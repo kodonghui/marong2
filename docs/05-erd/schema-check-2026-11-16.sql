@@ -134,6 +134,12 @@ INSERT INTO marong.listen_scores (test_id, friend_id, clip_id, sentence_no, scor
   ON CONFLICT (test_id, friend_id, clip_id) DO UPDATE SET score = EXCLUDED.score, updated_at = now();
 \echo -- expect error 29: scores are 1 to 5
 UPDATE marong.listen_scores SET score = 6 WHERE clip_id = 'a1b2c3d4';
+\echo == moving the pick off a clip with no score leaves a no-answer row (06 API-123)
+INSERT INTO marong.listen_scores (test_id, friend_id, clip_id, sentence_no, marong_like)
+  VALUES ('listen-1', :f_id, 'c9d0e1f2', 2, true);
+UPDATE marong.listen_scores SET marong_like = false, updated_at = now() WHERE clip_id = 'c9d0e1f2';
+INSERT INTO marong.listen_scores (test_id, friend_id, clip_id, sentence_no, score, marong_like)
+  VALUES ('listen-1', :f_id, 'a9b8c7d6', 2, 4, true);
 RESET ROLE;
 
 \echo == call cost as marong_call

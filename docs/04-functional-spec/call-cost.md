@@ -2,7 +2,7 @@
 
 상태: 초안(2026-11-16, Claude). 명세 동결 전이에요. 지금 통화(Gemini 길: 웹 통화 서버와 디스코드 음성 중계)에 사용량 기록과 월 예산을 다시 걸고, 설정 실험·시험 도구를 더해요. 엔진과 목소리는 바꾸지 않아요.
 입력: [통화 비용 요구사항](../02-prd/call-cost.md) REQ-179\~201과 [통화 요구사항](../02-prd/requirements.md)의 예산 규칙 REQ-048\~052, [사용자 흐름](../03-user-flow/) FL-120\~123, [도메인](../01-domain/domain.md)의 CTX-002·CTX-006(2026-11-16 Gemini 길)과 TERM-034\~039, 처음 통화 명세 [spec.md](spec.md)의 SPEC-023(예산 세기와 막기)·SPEC-025(관리 명령)·SPEC-026(시트), Notion 연구 행(2026-11-16) 2·3·7·11절.
-뒤 단계: 05 ERD는 `marong/call/migrations/007_call_cost.sql`, 06 API는 통화 서버 `GET /api/me`의 바뀐 칸과 듣기 시험 API, 07 사이트맵은 통화 홈의 예산 상태와 듣기 시험 화면이 이 SPEC 번호를 따라가요. 함께 설계한 일기는 [diary.md](diary.md)예요.
+뒤 단계: 05 ERD는 `marong/call/migrations/007_call_cost.sql`, 06 API는 지금 통화 서버의 `GET /api/me`·`/live`([api/call-live.openapi.yaml](../../api/call-live.openapi.yaml), API-124·API-107), 디스코드 음성 중계([api/discord-relay.openapi.yaml](../../api/discord-relay.openapi.yaml), API-125\~126), 듣기 시험([api/listen-test.openapi.yaml](../../api/listen-test.openapi.yaml), API-121\~123), 07 사이트맵은 통화 홈의 예산 상태와 듣기 시험 화면이 이 SPEC 번호를 따라가요. 함께 설계한 일기는 [diary.md](diary.md)예요.
 
 ## 1. 모든 행에 공통인 규칙
 
