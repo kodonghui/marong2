@@ -57,14 +57,14 @@
       "link": "https://claude.ai/artifact/FDFCuk2xc8JE8SCUuh7hL2",
       "source": "docs/08-screens/",
       "truth": "source",
-      "note": "와이어프레임은 기본 경로(docs/08-screens/wireframes.html) 대신 Claude 디자인 캔버스 '마롱이 통화 화면 설계'의 '와이어프레임' 페이지에 그림(상태 38개, 폭 360px·430px). 09 목업 후보와 한 링크로 봄. 캔버스 파일은 Git에 넣지 않으며, 화면과 상태의 원본은 docs/08-screens/의 정의(2026-11-12)."
+      "note": "와이어프레임은 기본 경로(docs/08-screens/wireframes.html) 대신 Claude 디자인 캔버스 '마롱이 통화 화면 설계'의 '와이어프레임' 페이지에 그림(상태 38개, 폭 360px·430px). 09 목업 후보와 한 링크로 봄. 캔버스 파일은 Git에 넣지 않으며, 화면과 상태의 원본은 docs/08-screens/의 정의(2026-11-12). 마롱이의 일기·듣기 시험(SCR-113~119)과 통화 홈 예산 상태의 와이어프레임은 저장소 docs/08-screens/wireframes-diary.html을 올린 아티팩트 '마롱이의 일기 와이어프레임'(https://claude.ai/artifact/SnzgPx64NHhxgcxpa3HRho, 상태 68개, 360px·430px)에 그림(2026-11-16)."
     },
     "09-mockup": {
       "human": "artifact",
       "link": "https://claude.ai/artifact/FDFCuk2xc8JE8SCUuh7hL2",
       "source": "design/base.tokens.json",
       "truth": "source",
-      "note": "같은 캔버스의 '목업 후보' 페이지. 통화 홈·통화 중 화면만 두 안(A 밤하늘, B 군밤 크림). 방향은 현경님이 첫 시험 전에 고르고, 고른 쪽만 토큰에 남김(2026-11-12)."
+      "note": "같은 캔버스의 '목업 후보' 페이지. 통화 홈·통화 중 화면만 두 안(A 밤하늘, B 군밤 크림). 방향은 현경님이 첫 시험 전에 고르고, 고른 쪽만 토큰에 남김(2026-11-12). 마롱이의 일기 화면의 목업 후보는 새 디자인 캔버스 '마롱이의 일기 화면 설계'(https://claude.ai/artifact/CC154gunovJS3tqa8XkpZ9)에 그림(2026-11-16)."
     },
     "13-presentation": {
       "skip": true,
