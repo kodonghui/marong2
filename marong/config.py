@@ -67,6 +67,10 @@ class Settings:
     # 성격(prompt.md+knowledge) 앞부분 캐시 수명. 1h 는 쓰기가 입력의 2배(5m 은 1.25배)지만 친구 말 사이가 5분~1시간인 때가
     # 많아서 5m 이면 거의 매번 새로 씀. 읽기(0.1배)는 수명을 처음부터 다시 셈
     cache_ttl: str = "1h"
+    # 답할 때 원문 그대로 넣는 최근 대화: 친구 말 이만큼(필받음 15턴)이 들어가게 거슬러 올라감. 답 없는 선톡은 최근 3개만
+    # 넣고(선톡이 몰리면 최근 대화가 다 선톡이 됨), 모두 합쳐 reply_max_rows 줄까지. 선톡을 만들 때는 recent_turns 를 씀
+    reply_turns: int = 15
+    reply_max_rows: int = 60
 
     def problems(self) -> list[str]:
         """실행 전에 비어 있거나 잘못된 값을 알려 준다(값 자체는 출력하지 않음)."""
@@ -83,6 +87,8 @@ class Settings:
             out.append("DATABASE_URL 이 비어 있음")
         if self.recent_turns < 1 or self.summary_turns < 2:
             out.append("RECENT_TURNS 는 1 이상, SUMMARY_TURNS 는 2 이상")
+        if self.reply_turns < 1 or self.reply_max_rows < 2:
+            out.append("REPLY_TURNS 는 1 이상, REPLY_MAX_ROWS 는 2 이상")
         start, end = self.proactive_hours
         if not 0 <= start < end <= 24:
             out.append("PROACTIVE_HOURS 는 '12-21' 처럼 시작-끝 시(0~24, 시작이 끝보다 앞)")
@@ -129,4 +135,6 @@ def load_settings() -> Settings:
         proactive_hours=_hours(_env("PROACTIVE_HOURS", "12-21")),
         proactive_daily_max=int(_env("PROACTIVE_DAILY_MAX", "60")),
         cache_ttl=_env("ANTHROPIC_CACHE_TTL", "1h").lower(),
+        reply_turns=int(_env("REPLY_TURNS", "15")),
+        reply_max_rows=int(_env("REPLY_MAX_ROWS", "60")),
     )
