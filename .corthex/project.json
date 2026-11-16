@@ -12,13 +12,13 @@
       "human": "github",
       "source": "docs/01-domain/domain.md",
       "truth": "source",
-      "note": "2026-11-12 통화 기능을 기존 제품에 더하는 일이라 이벤트 스토밍 보드 없이 한 번에 초안으로 씀. 사람 보기는 Miro 보드 대신 GitHub PR(Claude 선택, 동희님 기본 규칙 '제품 명세는 제품 Git, Notion은 의도·결정과 링크'에 맞춤)."
+      "note": "2026-11-12 통화 기능을 기존 제품에 더하는 일이라 이벤트 스토밍 보드 없이 한 번에 초안으로 씀. 사람 보기는 Miro 보드 대신 GitHub PR(Claude 선택, 동희님 기본 규칙 '제품 명세는 제품 Git, Notion은 의도·결정과 링크'에 맞춤). 2026-11-16 마롱이의 일기(CTX-007)와 Gemini 길 통화 비용(CTX-002·006 변경)을 같은 방식으로 더함: 한 번에 초안, 바뀌는 맥락만 새로 그림, 체크포인트는 9단계 뒤 한 번(사용자님이 매번 묻지 말라고 해서 추천안으로 이어 가고 확인 질문은 한 번에 모아 드림)."
     },
     "02-prd": {
       "human": "github",
-      "source": "docs/02-prd/requirements.md",
+      "source": "docs/02-prd/",
       "truth": "source",
-      "note": "기본 사람 보기는 Notion DB 행이지만 같은 명세를 Notion에 한 번 더 만들지 않으려고 GitHub PR에서 봄. Notion 설계 문서 행은 요약·결정·링크만 가짐(2026-11-12, Claude 선택, 동희님이 바꿀 수 있음)."
+      "note": "기본 사람 보기는 Notion DB 행이지만 같은 명세를 Notion에 한 번 더 만들지 않으려고 GitHub PR에서 봄. Notion 설계 문서 행은 요약·결정·링크만 가짐(2026-11-12, Claude 선택, 동희님이 바꿀 수 있음). 2026-11-16 기능마다 파일을 나누려고 source를 폴더로 바꿈(requirements.md 통화, diary.md 마롱이의 일기, call-cost.md 통화 비용)."
     },
     "03-user-flow": {
       "human": "github",
