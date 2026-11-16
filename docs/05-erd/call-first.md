@@ -56,7 +56,7 @@ erDiagram
 
 | 규칙 | 어떻게 |
 | --- | --- |
-| 친구에게 화두는 하루 하나(REQ-260) | `topic_sends_one_a_day` 유니크 색인. 보내기 전에 줄을 먼저 만들어요 |
+| 친구에게 화두는 하루 하나(REQ-260) | `topic_sends_one_a_day` 유니크 색인. 보내기 전에 줄을 먼저 만들어요. 이틀 간격·7일에 세 번은 봇이 같은 표를 읽어 지켜요(SPEC-263 ①, `(friend_id, day)` 색인을 씀) |
 | 약속 전화는 일정이 있고 선 전화는 없음 | `app_rings_reason_schedule` |
 | 그림 이름은 약속 전화에 붙지 않음 | `app_rings_topic_hello` |
 | 전화 화두는 벨이 있음 | `topic_sends` CHECK(`kind = 'text' OR ring_id IS NOT NULL`) |
