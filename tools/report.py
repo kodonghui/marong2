@@ -45,7 +45,8 @@ HEADER_FILL = PatternFill("solid", fgColor="E8E3F3")
 FRIEND_COLOR, MARONG_COLOR = "#fce8e6", "#e8f0fe"
 DONGHUI_COLOR, HYUNGKYUNG_COLOR = "#d9ead3", "#fff2cc"
 TOP, TOP_WRAP = Alignment(vertical="top"), Alignment(vertical="top", wrap_text=True)
-RECALL = {"short": "안 함(말이 짧아서)", "off": "안 함(임베딩 준비 안 됨)", "error": "오류(검색 실패)"}
+RECALL = {"short": "안 함(말이 짧아서)", "off": "안 함(임베딩 준비 안 됨)", "slow": "안 함(임베딩이 1.5초 넘음)",
+          "error": "오류(검색 실패)"}
 UNRECORDED = "모름(기록 시작 전)"  # 답마다 넣은 기억을 적기 시작한 2026-10-26 밤 전의 답
 
 
@@ -289,7 +290,7 @@ def request_text(q: dict, f: dict | None, friend_name: dict[int, str], pairs: di
 
 
 def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, threshold: float = 0.4,
-          recent_turns: int = 10, vectors: bool = True) -> tuple[list[dict], dict]:
+          recent_turns: int = 15, vectors: bool = True) -> tuple[list[dict], dict]:
     """기간 [start, until) 의 탭들(엑셀·시트 공용)과 개수. 탭마다 최신이 위. threshold·recent_turns 는 봇 설정(읽는 법 설명용).
     vectors 가 False 면 임베딩 벡터 전체 칸을 뺌(시트는 30일치를 5분마다 통째로 보내서 무거움)."""
     now = now or datetime.now(tz)
@@ -448,10 +449,13 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
                 verdict = "안 넣음(빈 글)"
             elif sim is not None and sim < threshold:
                 verdict = f"안 넣음({threshold:g} 미만)"
+            elif sim is None:  # 낱말 검색으로만 찾은 것(2026-11-16부터)
+                verdict = "안 넣음(흔한 낱말이거나 개수 초과)"
             else:
                 verdict = "안 넣음(개수 초과)"
             who = "요약" if t == "summary" else (speaker(src) if src else "-")
-            rows.append(base + ["함", also(memory), rank, "요약" if t == "summary" else "메시지", i, who,
+            rows.append(base + ["함" if status == "ok" else RECALL.get(status, "함"), also(memory), rank,
+                                "요약" if t == "summary" else "메시지", i, who,
                                 None if sim is None else round(sim, 3), verdict, (src or {}).get("content")])
     tabs.append(tab("들어간 기억", ["답 번호", "답 시각", "방", "친구가 한 말", f"마롱이 답(앞 {REPLY_CHARS}자)",
                                 "임베딩 검색", "같이 넣은 기억", "순위", "찾은 것 종류", "찾은 것 번호", "누구 말",
@@ -569,10 +573,14 @@ def build(c, start: datetime, until: datetime, tz, now: datetime | None = None, 
         "대화로 한 요청과 정할 일(노트북에서 bash deploy/ovh.sh admin …)은 '대화로 한 요청' 칸에 있어요.",
         "",
         "■ 마롱이가 답할 때 넣는 기억",
-        f"- 최근 대화 원문(같은 방 최근 {recent_turns}턴)",
-        "- 그 방의 최근 요약 3개와 친구별 기억 메모",
-        f"- 지금 말과 비슷한 예전 대화: 지금 말을 임베딩해서 같은 방의 예전 메시지·요약과 비교해요. 비슷한 순으로 12개를 찾고, "
-        f"비슷함 {threshold:g} 이상인 것 중 요약 3개·메시지 4개까지 넣어요. 최근 대화와 이미 넣은 요약 3개는 빼고 찾아요.",
+        f"- 최근 대화 원문(같은 방에서 친구 말 {recent_turns}번이 들어가게 거슬러 올라감. 답 없는 선톡은 최근 3개만, "
+        "많아야 60줄)",
+        "- 그 방의 최근 요약 10개와 친구별 기억 메모",
+        "- 지금 말과 비슷한 예전 대화: 지금 말을 임베딩한 검색과 두 글자 낱말 검색으로 같은 방의 예전 메시지·요약을 "
+        "각각 12개까지 찾아 순위를 합쳐요(RRF). '뭔코트?'처럼 짧은 말은 바로 앞 두 마디를 붙여 찾아요. "
+        f"비슷함 {threshold:g} 이상이거나 드문 낱말이 맞은 것 중 요약 3개·메시지 5개까지 넣고, 찾은 말은 그때 마롱이 답과 "
+        "한 쌍으로 넣어요. 최근 대화와 이미 넣은 요약은 빼고 찾고, 임베딩이 준비 안 됐거나 1.5초를 넘기면 낱말 검색만 "
+        "써요(2026-11-16부터. 그 전에는 임베딩 검색만, 요약 3개·메시지 4개).",
         "- 지금 친구와 아는 친구들의 가벼운 얘기(공유 메모). 연인·가족 같은 가까운 사이면 그 친구의 요즘 근황까지",
         "- 선톡은 그 방의 최근 대화·요약·메모만 보고 임베딩 검색은 하지 않아요.",
         "",
@@ -710,7 +718,7 @@ def main(argv: list[str] | None = None, transport=None) -> int:
     if args.if_asked and not asked(url, transport):
         return 0
     threshold = float(os.getenv("RECALL_MIN_SIMILARITY") or 0.4)
-    recent_turns = int(os.getenv("RECENT_TURNS") or 10)
+    recent_turns = int(os.getenv("REPLY_TURNS") or 15)  # 답할 때 넣는 최근 대화(봇의 REPLY_TURNS)
     with psycopg.connect(os.getenv("DATABASE_URL") or "postgresql:///marong", row_factory=dict_row) as c:
         c.read_only = True
         tabs, n = build(c, start, until, tz, now, threshold, recent_turns, vectors=not args.sheet)

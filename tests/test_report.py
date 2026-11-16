@@ -205,7 +205,8 @@ def check_tabs(report, db, i):
     readme = [r[0] for r in by["읽는 법"]["rows"]]
     ok(readme[:2] == ["기간: 2026-10-26 19:00:00 ~ 2026-10-27 19:00:00 (한국 시각, 끝 시각은 빼고)",
                       "마지막 갱신: 2026-10-27 19:30:00"], f"읽는 법 기간·갱신 시각: {readme[:2]}")
-    ok(any("12개" in x and "0.4 이상" in x and "요약 3개·메시지 4개" in x for x in readme), "읽는 법에 기억 넣는 순서")
+    ok(any("12개" in x and "0.4 이상" in x and "요약 3개·메시지 5개" in x and "낱말" in x for x in readme),
+       "읽는 법에 기억 넣는 순서")
     ok(not any("지금 새로고침" in x or "필터" in x for x in readme), "엑셀 읽는 법에는 시트 메뉴·필터 얘기가 없음")
     ok("- 탭마다 최신이 맨 위예요." in readme
        and any(x.startswith("- '모름(기록 시작 전)'은") and "2026-10-26" in x for x in readme), "읽는 법: 최신이 위, '모름' 뜻")
@@ -530,7 +531,7 @@ def check_moved(report, db):
 def main():
     db = TestDB()
     os.environ.update({"DATABASE_URL": db.app_url, "TIMEZONE": "Asia/Seoul"})  # 봇과 같은 marong 계정(읽기)
-    for name in ("RECALL_MIN_SIMILARITY", "RECENT_TURNS", "SHEET_URL", "SHEET_DAYS"):
+    for name in ("RECALL_MIN_SIMILARITY", "RECENT_TURNS", "REPLY_TURNS", "SHEET_URL", "SHEET_DAYS"):
         os.environ.pop(name, None)
     report = load_report()
     i = seed(db)
