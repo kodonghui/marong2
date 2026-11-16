@@ -1,6 +1,7 @@
 # FL-141 그림 화두 글을 받고 답하기
 
 Serves: REQ-283, REQ-284, REQ-285, REQ-286, REQ-287, REQ-288, REQ-290, REQ-291, REQ-293, REQ-305
+Screens: 앱 알림 SCR-108, 글 대화 SCR-107·글 대화 창 SCR-112([app-chat.md](../app-chat.md)), 디스코드 DM(바깥)
 Context: CTX-020, CTX-001
 
 ```mermaid

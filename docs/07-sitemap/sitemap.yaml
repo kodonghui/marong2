@@ -15,8 +15,15 @@
       path: /call
       access: 허용된 Google 계정(통화하는 친구)
       status: active
-      flows: [FL-002, FL-003, FL-004, FL-005, FL-006, FL-007, FL-009]
-      terms: [CTX-002, CTX-003, TERM-001, TERM-002, TERM-009, TERM-010, TERM-011, TERM-012, TERM-017, TERM-018, TERM-019]
+      flows: [FL-002, FL-003, FL-004, FL-005, FL-006, FL-007, FL-009, FL-142]
+      terms: [CTX-002, CTX-003, CTX-020, TERM-001, TERM-002, TERM-009, TERM-010, TERM-011, TERM-012, TERM-017, TERM-018, TERM-019, TERM-080, TERM-083]
+      # 선 전화·그림 화두(CTX-020, 2026-11-16): 새 화면은 없고 있는 화면의 상태만 늘어요(08단계 docs/08-screens/call-first.md).
+      # 통화 중(SCR-002)에 선 전화 그림 카드가 떠요(FL-142). 앱 화면은 그 문서에 있어요: 벨 화면 SCR-110과 전화 알림 SCR-111(docs/app-ring.md)은
+      # '마롱이가 먼저 걸었어요'(FL-142·143), 앱 알림 SCR-108과 글 대화 SCR-107·글 대화 창 SCR-112(docs/app-chat.md)는 그림 말풍선과 '먼저 건 전화' 태그(FL-141·143·144).
+      # 디스코드 DM의 그림 첨부는 디스코드 화면이에요. FL-140(화두 고르기)은 서버 판단, FL-145(그림 세트)는 관리 도구라 화면이 없어요.
+      # without a screen: TERM-081(약속 전화, 앱 벨 화면들에 이미 있음), TERM-082(화두, 그림 화두 글과 선 전화 통화로만 보임), TERM-084(그림 세트, 저장소 폴더),
+      # TERM-085(검수, 서버 밖), TERM-086(화두 시각, 서버가 셈), TERM-087(선 전화 시간대)·TERM-090(선 전화 설정, 말과 관리 도구로만 바꿈),
+      # TERM-088(화두 답)·TERM-089(간격 늘리기, 서버 기록과 계산), TERM-091(알림 미리보기 한 줄, 앱 알림 SCR-108·전화 알림 SCR-111의 글)
     - id: SCR-003
       name: 지난 통화
       path: /calls

@@ -1,6 +1,7 @@
 # FL-140 마롱이가 오늘의 화두를 고르기
 
 Serves: REQ-260, REQ-261, REQ-262, REQ-263, REQ-264, REQ-265, REQ-266, REQ-272, REQ-273, REQ-274, REQ-275, REQ-276, REQ-277, REQ-289, REQ-292, REQ-294, REQ-295, REQ-303
+Screens: 없음(서버가 선톡 차례에서 판단). 결과는 FL-141·FL-142의 화면에 보여요
 Context: CTX-020(바뀌는 기존 맥락 CTX-001의 선톡 칸)
 
 ```mermaid

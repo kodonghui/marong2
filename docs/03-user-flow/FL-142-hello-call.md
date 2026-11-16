@@ -1,6 +1,7 @@
 # FL-142 마롱이의 선 전화를 받기
 
 Serves: REQ-272, REQ-277, REQ-278, REQ-279, REQ-280, REQ-291, REQ-293
+Screens: 벨 화면 SCR-110·전화 알림 SCR-111([app-ring.md](../app-ring.md)), 통화 중 SCR-002(앱에서는 통화 창 SCR-101 안)
 Context: CTX-020, CTX-002
 
 ```mermaid

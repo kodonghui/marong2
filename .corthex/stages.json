@@ -114,6 +114,29 @@
         }
       ],
       "updated": "2026-11-16T14:41:41+00:00"
+    },
+    "07-sitemap": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트(화면 구조 합의): 선 전화·그림 화두는 새 화면 없이 SCR-002 통화 중과 앱 화면(SCR-107·108·110·111·112)의 상태만 늘림. 확인 대기. 그다음 08 화면 상태",
+      "checks": [
+        {
+          "level": "info",
+          "message": "CTX-020(2026-11-16): 새 화면 없음. sitemap.yaml SCR-002에 FL-142, CTX-020·TERM-080·TERM-083을 더하고, 화면 없는 용어·흐름을 적음. sitemap.md 목록·슬라이드 1을 다시 그림(보드는 그대로)",
+          "at": "2026-11-16"
+        },
+        {
+          "level": "info",
+          "message": "앱 화면 SCR-101~112는 docs/android-app.md·app-chat.md·app-ring.md에 있어 07 source 밖(PR #25와 같은 결정). FL-141~144의 Screens 줄이 이 ID를 가리켜 unknown-ref 경고 6개(SCR-101·107·108·110·111·112)",
+          "at": "2026-11-16"
+        },
+        {
+          "level": "info",
+          "message": "PR #25도 sitemap.md 머리·목록·슬라이드 1을 고쳐서 합칠 때 같은 줄이 겹침. 두 쪽 내용을 다 남기면 됨",
+          "at": "2026-11-16"
+        }
+      ],
+      "updated": "2026-11-16T14:48:15+00:00"
     }
   }
 }

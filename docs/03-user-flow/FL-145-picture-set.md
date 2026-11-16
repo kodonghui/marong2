@@ -1,6 +1,7 @@
 # FL-145 그림 세트에 그림을 더하기(관리자)
 
 Serves: REQ-263, REQ-267, REQ-268, REQ-269, REQ-270, REQ-271
+Screens: 없음(서버 밖 관리 도구, 검수용 한 장은 Git 밖 파일)
 Context: CTX-020
 
 ```mermaid

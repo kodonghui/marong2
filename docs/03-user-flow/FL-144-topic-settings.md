@@ -1,6 +1,7 @@
 # FL-144 선 전화와 그림 화두를 끄고 켜기
 
 Serves: REQ-294, REQ-295, REQ-296, REQ-297, REQ-298, REQ-299, REQ-300, REQ-301, REQ-302
+Screens: 글 대화 SCR-107·SCR-112([app-chat.md](../app-chat.md)), 디스코드 DM(바깥). 관리 도구는 동희님 터미널
 Context: CTX-020, CTX-001
 
 ```mermaid

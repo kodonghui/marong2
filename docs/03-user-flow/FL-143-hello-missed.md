@@ -1,6 +1,7 @@
 # FL-143 선 전화를 못 받았을 때
 
 Serves: REQ-275, REQ-281, REQ-282
+Screens: 전화 알림 SCR-111(닫힘), 앱 알림 SCR-108, 글 대화 SCR-107·SCR-112([app-chat.md](../app-chat.md)), 디스코드 DM(바깥)
 Context: CTX-020
 
 ```mermaid
