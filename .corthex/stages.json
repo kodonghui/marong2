@@ -173,6 +173,19 @@
         }
       ],
       "updated": "2026-11-16T15:06:46+00:00"
+    },
+    "10-wbs": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트: 이번 반복 계획 합의(동희님). 그동안 TASK-160부터 구현",
+      "checks": [
+        {
+          "level": "info",
+          "message": "CTX-020 작업 TASK-160~178(docs/10-wbs/call-first.md), Must SPEC 행마다 작업, 의존 고리 없음. TASK-137~159는 일기 설계용으로 비움",
+          "at": "2026-11-16"
+        }
+      ],
+      "updated": "2026-11-16T15:10:35+00:00"
     }
   }
 }
