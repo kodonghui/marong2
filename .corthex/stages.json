@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "project": "marong",
+  "stages": {
+    "01-domain": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 1~3(선 전화·그림 화두): 동희님이 docs/01-domain/call-first.md의 CTX-020 시간 줄, 4절 규칙, 8절 질문 1~4를 확인. 답 전에는 추천안으로 02~10을 이어 가고 확인 질문은 한 번에 모아 드림",
+      "checks": [
+        {
+          "level": "info",
+          "message": "REQ-129·REQ-130(앱 벨 요구)은 docs/app-ring.md에, TBL-102(app_rings)는 마이그레이션 015에 정의돼 있어 단계 원본 밖이라 경고로 잡힘. TBL-102는 05 원본을 marong/ 폴더로 바꾸면 풀림(PR #25와 같은 바꿈)",
+          "at": "2026-11-16"
+        },
+        {
+          "level": "info",
+          "message": "PR #25도 .corthex/stages.json을 새로 만듦. 두 PR 중 나중에 합치는 쪽에서 단계마다 next와 checks를 둘 다 남기도록 합침",
+          "at": "2026-11-16"
+        }
+      ],
+      "updated": "2026-11-16T14:14:09+00:00"
+    }
+  }
+}

@@ -10,7 +10,7 @@
   "stages": {
     "01-domain": {
       "human": "github",
-      "source": "docs/01-domain/domain.md",
+      "source": "docs/01-domain/",
       "truth": "source",
       "note": "2026-11-12 통화 기능을 기존 제품에 더하는 일이라 이벤트 스토밍 보드 없이 한 번에 초안으로 씀. 사람 보기는 Miro 보드 대신 GitHub PR(Claude 선택, 동희님 기본 규칙 '제품 명세는 제품 Git, Notion은 의도·결정과 링크'에 맞춤)."
     },
