@@ -183,6 +183,7 @@ flowchart LR
 - 릴리스 APK `0.1.0`(versionCode 1): 3,703,888바이트, APK 서명 v2 확인, 서명자 1명(RSA 4096). 인증서 SHA-256 `b42ce187 0fe2c90e 88d850db bd571896 9b0d1e1c 07f1a6d2 13247cc8 657c45f9`.
 - 릴리스 APK `0.1.1`(versionCode 2, BUG-101~103 고침): 3,704,668바이트, 파일 SHA-256 `a43053b2 b7a9789b 02c76d02 031800a6 7fa2b422 eed945fb afd3f14d 49fcb572`, APK 서명 v2 확인, 0.1.0과 같은 인증서. 권한은 명세의 7개와 AndroidX가 넣는 앱 안 전용 권한 1개(`DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`)예요.
 - 릴리스 APK `0.2.0`(versionCode 3, 2·3단계, 에뮬레이터에서 찾은 BUG-104·105 고침): 5,033,800바이트, 파일 SHA-256 `af6aa114 1366627e c9102d64 cf747c57 489b2440 bebaa05d dba770d1 36a0e349`, APK 서명 v2 확인, 0.1.0과 같은 인증서, 합친 권한 11개([app-chat.md](app-chat.md) TC-133). 같은 날 `npm test` 25개, `npm run test:browser` 20개, JVM 11개 통과, lint 오류 0개와 경고 11개(쓰지 않는 템플릿 리소스 4, 더 새 의존성 4, 테마 아이콘용 단색 레이어 없음 2, 더 새 Gradle 1).
+- 릴리스 APK `0.2.1`(versionCode 4, D20·D21, 에뮬레이터에서 찾은 BUG-107 고침, 커밋 `c75f563`, 2026-11-16 동희님 노트북에서 빌드): 5,034,436바이트, 파일 SHA-256 `77e711db 513ec58c 1f040447 a0525436 7efda0c2 1ac72a32 aed27a6b 1a049532`, APK 서명 v2 확인, 0.1.0과 같은 인증서, minSdk 24, target 36, 합친 권한 11개. 같은 날 `npm test` 30개, JVM 19개 통과, lint 오류 0개와 경고 11개. 에뮬레이터 시험은 노트북의 Android 16 API 36 `google_apis` x86_64(WHPX, 웹뷰 133)에서 했어요([app-chat.md](app-chat.md) TC-152~154·158). BUG-107 전 판으로 서명한 APK(앞 세션, SHA-256 `01490bec…`)는 아무에게도 주지 않았고 쓰지 않아요.
 
 ## 8. 위험과 남은 확인
 
