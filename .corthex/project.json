@@ -35,7 +35,7 @@
     "05-erd": {
       "human": "github",
       "link": "docs/05-erd/erd.md",
-      "source": "marong/call/schema.sql",
+      "source": "marong/",
       "truth": "source",
       "note": "카톡 마롱이 표(marong/schema.sql)는 그대로 두고 통화 표는 같은 DB의 call 스키마에 둠. ERD Editor는 이 작업 환경에서 쓸 수 없어 Mermaid erDiagram(docs/05-erd/erd.md)으로 봄(2026-11-12)."
     },
