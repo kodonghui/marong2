@@ -11,13 +11,17 @@ No network, no real key. The picture set is a fixture made here (tiny WebP files
 - TASK-166 the daily maximum counts hello calls; the slot that holds the topic time waits for it
 - TASK-167 on/off phrases in the DM and the in-app chat
 - TASK-168 API-140 picture route, Message.picture and kind hello
+- TASK-172 the admin tool's topics command (SPEC-279): status, call, pictures, window, wrong input changes nothing
 Run: .venv/bin/python tests/test_topics.py"""
 import asyncio
 from datetime import date, datetime, time as clock_time, timedelta
 import io
 import json
 import logging
+import os
 from pathlib import Path
+import re
+import subprocess
 import sys
 import tempfile
 import uuid
@@ -701,6 +705,65 @@ async def chat_checks(db, store, settings, agent, client, folder):
     print("PASS TASK-168 API-140 200/404/500 with immutable caching only for pictures, Message.picture and kind hello")
 
 
+def admin_checks(db):
+    """tools/admin.py topics, as 동희님 runs it (bash deploy/ovh.sh admin topics …), against the bot's own account."""
+    def admin(*args):
+        env = {**os.environ, "DATABASE_URL": db.app_url, "PYTHONIOENCODING": "utf-8"}
+        p = subprocess.run([sys.executable, str(ROOT / "tools" / "admin.py"), "topics", *args],
+                           capture_output=True, text=True, encoding="utf-8", env=env, timeout=60)
+        return p.returncode, p.stdout + p.stderr
+
+    def prefs():
+        return db.admin("SELECT hello_call, pictures, call_from, call_until, updated_by FROM marong.topic_prefs "
+                        "WHERE friend_id = 2")
+
+    db.admin("DELETE FROM marong.topic_prefs")
+    db.admin("DELETE FROM marong.topic_sends WHERE friend_id = 2")
+    db.admin("INSERT INTO marong.topic_sends (friend_id, day, picture, kind, status, via, sent_at, answer, answered_at) "
+             "VALUES (2, current_date - 2, 'v1/winter-hat', 'text', 'sent', 'app', now() - interval '2 days', "
+             "'answered', now() - interval '2 days'), (2, current_date, 'v1/chicken-skewer', 'text', 'failed', NULL, "
+             "now(), NULL, NULL)")
+    code, out = admin("status")
+    ok(code == 0 and "현경  선 전화 켬 · 그림 화두 켬 · 선 전화 시간대 19:00-21:30 (기본값)" in out, out)
+    lines = [line for line in out.splitlines() if line.startswith("  ") and "v1/" in line]
+    ok(len(lines) == 2 and re.fullmatch(r"  \d\d/\d\d  v1/chicken-skewer  그림 글 → 실패 · 답 기다림", lines[0])
+       and re.fullmatch(r"  \d\d/\d\d  v1/winter-hat  그림 글 → 보냄\(앱\) · 답 있음", lines[1]), out)
+    ok(not re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-", out), "no ring id in the status")
+    ok(prefs() == [], "status changes nothing")
+    code, out = admin("현경", "window", "20:00-22:00")
+    ok(code == 0 and "현경: 선 전화 시간대 20:00-22:00" in out, out)
+    ok(prefs() == [(True, True, 1200, 1320, "admin")], prefs())
+    code, out = admin("현경", "call", "off")
+    ok(code == 0 and "현경: 선 전화 끔" in out and prefs() == [(False, True, 1200, 1320, "admin")], (out, prefs()))
+    code, out = admin("현경", "pictures", "off")
+    ok(code == 0 and "현경: 그림 화두 끔" in out and prefs() == [(False, False, 1200, 1320, "admin")], (out, prefs()))
+    code, out = admin("status")
+    ok("현경  선 전화 끔 · 그림 화두 끔 · 선 전화 시간대 20:00-22:00 (바꾼 때 " in out and "관리자)" in out, out)
+    for args, why in ((("없는친구", "call", "on"), "없음"), (("현경", "window", "22:00-20:00"), "HH:MM-HH:MM"),
+                      (("현경", "window", "7-9"), "HH:MM-HH:MM"), (("현경", "window", "19:00-24:30"), "HH:MM-HH:MM"),
+                      (("현경", "call", "maybe"), "사용:"), (("현경", "ring", "on"), "사용:"), ((), "사용:")):
+        code, out = admin(*args)
+        ok(code != 0 and why in out, (args, out))
+    ok(prefs() == [(False, False, 1200, 1320, "admin")], "wrong input changed nothing")
+    code, out = admin("현경", "call", "on")
+    code, out = admin("현경", "pictures", "on")
+    code, out = admin("현경", "window", "19:00-21:30")
+    ok(prefs() == [(True, True, 1140, 1290, "admin")], prefs())
+    print("PASS TASK-172 admin topics: status (defaults, recent topics, no ring id), call/pictures on|off and window by "
+          "admin, unknown friend and wrong times change nothing")
+
+
+def log_checks(logs):
+    """TASK-173, SPEC-281: every log line of topics, hello calls and pictures is result names, counts and picture names:
+    plain ASCII, so no topic text, friend's words or name, and no ring id, FID or Discord id."""
+    lines = [line for line in logs.getvalue().splitlines()
+             if re.search(r"topic|hello|picture|ring_missed|ring_answered", line)]
+    ok(len(lines) > 20, f"{len(lines)} lines read")
+    bad = [line for line in lines if not line.isascii() or re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-|ringfid|fidA|fidB|\d{15,}", line)]
+    ok(not bad, bad[:5])
+    print(f"PASS TASK-173 {len(lines)} log lines of topics, hello calls and pictures: names and counts only")
+
+
 async def main(db, folder, logs):
     settings = load_settings()
     store = DiscordStore(db.app_url, call_bridge=True)
@@ -713,6 +776,8 @@ async def main(db, folder, logs):
         agent, client, llm = await proactive_checks(db, store, settings, folder, logs)
         await phrase_checks(db, store, agent, client, llm)
         await chat_checks(db, store, settings, agent, client, folder)
+        admin_checks(db)
+        log_checks(logs)
     finally:
         await store.close()
 

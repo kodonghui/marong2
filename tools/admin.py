@@ -18,8 +18,13 @@
   merge <단체방 #방키> <친구 이름·#키 또는 1:1 #방키>  그 단체방을 그 친구 1:1 방과 묶음: 두 방이 기억(최근 대화·요약·메모·
                                비슷한 예전 대화)을 같이 쓰고, 그 단체방 선톡은 그 친구에게 1:1 처럼 감(친구와 마롱이만 있는
                                단체방을 1:1 대신 쓸 때). 기록은 옮기지 않음. merge <단체방 #방키> off 면 묶음을 풂
-기록을 지우는 명령은 없다(봇 계정에는 그 권한도 없다). link·unlink·share·friendship·schedule·merge 는 키가 어느 친구인지,
-공유, 아는 사이, 선톡, 기억 묶음만 바꾼다. 이 설정들은 관리자만 바꾸고 친구 말로는 안 바뀐다. 친구가 대화로 한 요청은 시트 '친구·공유' 탭과
+  topics status                선 전화·그림 화두: 친구마다 켜짐·꺼짐, 선 전화 시간대, 최근 화두 7개와 답
+  topics <친구 이름 또는 #키> call on|off       그 친구에게 선 전화(약속 없이 마롱이가 먼저 거는 전화)를 걸지
+  topics <친구 이름 또는 #키> pictures on|off   그 친구에게 그림 화두(마롱이 그림과 함께 꺼내는 이야깃거리)를 보낼지
+  topics <친구 이름 또는 #키> window 19:00-21:30  선 전화를 걸어도 되는 시간대(한국 시각, 기본 19:00-21:30)
+기록을 지우는 명령은 없다(봇 계정에는 그 권한도 없다). link·unlink·share·friendship·schedule·merge·topics 는 키가 어느
+친구인지, 공유, 아는 사이, 선톡, 기억 묶음, 선 전화·그림 화두 설정만 바꾼다(topics 로 바꾸면 바꾼 사람이 admin 으로 남음).
+선 전화·그림 화두 끄기·켜기는 친구가 대화로 정한 말로도 바뀐다(docs/04-functional-spec/call-first.md 3.7). 이 설정들은 관리자만 바꾸고 친구 말로는 안 바뀐다. 친구가 대화로 한 요청은 시트 '친구·공유' 탭과
 friends 에 보인다.
 카카오 키 원문 대신 #짧은키 로 보여 준다(# 은 빼고 써도 된다)."""
 import hashlib
@@ -36,6 +41,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from marong.config import PER_DAY_MAX, load_dotenv  # noqa: E402
+from marong.topics import parse_window, prefs_of, window_text  # noqa: E402
 
 # Haiku 5.5 가격(1M 토큰당 달러, 프롬프트 10만 토큰 이하). 캐시 읽기는 입력의 0.1배, 캐시 쓰기는 5분 1.25배·1시간 2배
 PRICE_IN, PRICE_OUT, PRICE_CACHE_READ, PRICE_CACHE_WRITE = 0.10, 0.50, 0.01, 0.125
@@ -421,10 +427,69 @@ def merge(c, _tz, args):
           "써요. 이 단체방 선톡은 그 친구에게 1:1 처럼 가요(켜기·일정은 schedule <#방키>). 기록은 옮기지 않아요")
 
 
+TOPIC_KIND = {"text": "그림 글", "call": "선 전화"}
+TOPIC_STATUS = {"sending": "보내는 중", "sent": "보냄", "failed": "실패"}
+TOPIC_ANSWER = {"answered": "답 있음", "none": "답 없음", None: "답 기다림"}
+TOPIC_FIELDS = {"call": "hello_call", "pictures": "pictures"}
+
+
+def topics(c, tz, args):
+    """선 전화·그림 화두 설정 보기와 바꾸기(docs/04-functional-spec/call-first.md SPEC-279, TBL-125·126)."""
+    usage = ("사용: topics status | topics <친구 이름 또는 #키> call on|off | topics <친구> pictures on|off"
+             " | topics <친구> window 19:00-21:30")
+    if args == ["status"]:
+        rows = c.execute(
+            "SELECT f.id, f.name, t.hello_call, t.pictures, t.call_from, t.call_until, t.updated_at, t.updated_by "
+            "FROM marong.friends f LEFT JOIN marong.topic_prefs t ON t.friend_id = f.id "
+            "WHERE EXISTS (SELECT 1 FROM marong.discord_dm_links d WHERE d.friend_id = f.id) "
+            "   OR EXISTS (SELECT 1 FROM call.callers k WHERE k.friend_id = f.id) ORDER BY f.id").fetchall()
+        if not rows:
+            print("디스코드 DM이나 통화가 연결된 친구가 없어요")
+        for r in rows:
+            prefs = prefs_of(r if r["hello_call"] is not None else None)
+            changed = (f" (바꾼 때 {when(r['updated_at'], tz)} {'관리자' if r['updated_by'] == 'admin' else '친구 말'})"
+                       if r["updated_at"] else " (기본값)")
+            print(f"{r['name']}  선 전화 {'켬' if prefs['hello_call'] else '끔'} · 그림 화두 "
+                  f"{'켬' if prefs['pictures'] else '끔'} · 선 전화 시간대 {window_text(prefs['window'])}{changed}")
+            sent = c.execute("SELECT day, picture, kind, status, via, answer FROM marong.topic_sends "
+                             "WHERE friend_id = %s ORDER BY day DESC LIMIT 7", (r["id"],)).fetchall()
+            if not sent:
+                print("  (아직 보낸 화두 없음)")
+            for t in sent:
+                via = f"({'앱' if t['via'] == 'app' else '디스코드'})" if t["via"] else ""
+                print(f"  {t['day']:%m/%d}  {t['picture']}  {TOPIC_KIND[t['kind']]} → "
+                      f"{TOPIC_STATUS[t['status']]}{via} · {TOPIC_ANSWER.get(t['answer'], t['answer'])}")
+        return
+    if len(args) != 3 or args[1] not in (*TOPIC_FIELDS, "window"):
+        sys.exit(usage)
+    friend = find_friend(c, args[0])
+    name = c.execute("SELECT name FROM marong.friends WHERE id = %s", (friend,)).fetchone()["name"]
+    if args[1] == "window":
+        window = parse_window(args[2])
+        if window is None:
+            sys.exit("시간대는 19:00-21:30 처럼 HH:MM-HH:MM, 시작이 끝보다 앞이어야 해요. " + usage)
+        c.execute("INSERT INTO marong.topic_prefs (friend_id, call_from, call_until, updated_by) "
+                  "VALUES (%s, %s, %s, 'admin') ON CONFLICT (friend_id) DO UPDATE SET call_from = EXCLUDED.call_from, "
+                  "call_until = EXCLUDED.call_until, updated_at = now(), updated_by = 'admin'", (friend, *window))
+        print(f"{name}: 선 전화 시간대 {window_text(window)}(한국 시각)")
+        return
+    if args[2] not in ("on", "off"):
+        sys.exit(usage)
+    field, on = TOPIC_FIELDS[args[1]], args[2] == "on"
+    c.execute(f"INSERT INTO marong.topic_prefs (friend_id, {field}, updated_by) VALUES (%s, %s, 'admin') "
+              f"ON CONFLICT (friend_id) DO UPDATE SET {field} = EXCLUDED.{field}, updated_at = now(), "
+              "updated_by = 'admin'", (friend, on))
+    print(f"{name}: {'선 전화' if field == 'hello_call' else '그림 화두'} {'켬' if on else '끔'}")
+
+
 COMMANDS = {"friends": friends, "people": people, "rooms": rooms, "show": show, "stats": stats,
             "link": link, "unlink": unlink, "share": share, "friendship": friendship, "schedule": schedule,
-            "merge": merge}
+            "merge": merge, "topics": topics}
 WRITES = {"link", "unlink", "share", "friendship", "schedule", "merge"}
+
+
+def writes(args: list[str]) -> bool:
+    return args[0] in WRITES or (args[0] == "topics" and args[1:] != ["status"])
 
 
 def main() -> None:
@@ -435,7 +500,7 @@ def main() -> None:
     load_dotenv(str(ROOT / ".env"))
     tz = ZoneInfo(os.getenv("TIMEZONE") or "Asia/Seoul")
     with psycopg.connect(os.getenv("DATABASE_URL") or "postgresql:///marong", row_factory=dict_row) as c:
-        c.read_only = args[0] not in WRITES
+        c.read_only = not writes(args)
         COMMANDS[args[0]](c, tz, args[1:])
 
 
