@@ -16,7 +16,7 @@
 
 ## 마롱이의 일기와 듣기 시험(2026-11-16 설계, 아직 만들지 않음)
 
-원본: 이 폴더의 `SCR-113.md`\~`SCR-119.md`와 `SCR-001.md`의 예산 상태(FL-121). 회색 와이어프레임(상태 68개, 폭 360px·430px)은 [마롱이의 일기 와이어프레임](https://claude.ai/artifact/SnzgPx64NHhxgcxpa3HRho)이고, 그 원본은 이 폴더의 [`wireframes-diary.html`](wireframes-diary.html)이에요. 09단계 목업 후보는 Claude 디자인 캔버스 [마롱이의 일기 화면 설계](https://claude.ai/artifact/CC154gunovJS3tqa8XkpZ9)에 그려요. 둘 다 비공개라 공유받은 사람만 열 수 있고, 다르면 이 폴더의 정의가 맞아요.
+원본: 이 폴더의 `SCR-113.md`\~`SCR-119.md`와 `SCR-001.md`의 예산 상태(FL-121). 회색 와이어프레임(상태 68개, 폭 360px·430px)은 [마롱이의 일기 와이어프레임](https://claude.ai/artifact/SnzgPx64NHhxgcxpa3HRho)이고, 그 원본은 이 폴더의 [`wireframes-diary.html`](wireframes-diary.html)이에요. 09단계 목업 후보는 Claude 디자인 캔버스 [마롱이의 일기 화면 설계](https://claude.ai/artifact/CC154gunovJS3tqa8XkpZ9)에 그려요. 두 후보의 차이, 후보 토큰과 대비는 [`design/diary-candidates.md`](../../design/diary-candidates.md)에 적었어요. 둘 다 비공개라 공유받은 사람만 열 수 있고, 다르면 이 폴더의 정의가 맞아요.
 
 `/chat/` 아래 화면의 공통 규칙(위 공통 규칙에 더해):
 

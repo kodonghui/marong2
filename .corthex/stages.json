@@ -143,6 +143,29 @@
         }
       ],
       "updated": "2026-11-16T11:18:49+00:00"
+    },
+    "09-mockup": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트(방향 하나 고르기, 더 그리기 전): A 그림일기장(종이·손글씨 Gaegu·초록 원고지·빨간 도장) 또는 B 글 대화와 같은 결(시스템 글꼴·테마 색). 캔버스 https://claude.ai/artifact/CC154gunovJS3tqa8XkpZ9, 기록 design/diary-candidates.md. 고른 뒤 고른 토큰만 base.tokens.json에 넣고 SCR-113·SCR-114·SCR-116에서 링크, 나머지 상태와 SCR-115·SCR-117·SCR-118·SCR-119를 같은 방향으로 그림",
+      "checks": [
+        {
+          "level": "info",
+          "message": "후보 두 안 x 4장면(SCR-113#normal 430px, SCR-113#stamped·SCR-114#normal·SCR-116#normal 360px), 테마 두 개(Tweaks). 대비는 토큰 값으로 계산: 글씨 최저 A 4.76·B 6.03, 글씨 아닌 것 최저 A 3.70·B 3.06. 캔버스는 렌더해 보지 않음(디자인 캔버스 규칙)",
+          "at": "2026-11-16"
+        },
+        {
+          "level": "warn",
+          "message": "목업의 간격·모서리·글자 크기 일부가 토큰 이름이 아닌 값(44px 누르는 곳, 12px 모서리, 12~27px 글자). size.touch-min 48px(통화)와 글 대화 44px가 다름. 방향을 고른 뒤 쓰는 값만 토큰으로 맞춤",
+          "at": "2026-11-16"
+        },
+        {
+          "level": "info",
+          "message": "토큰 모드: base.tokens.json이 두 테마를 color.a·color.b로 한 파일에 둠(09 규칙은 모드별 파일과 design/tokens.resolver.json). 일기 토큰도 지금 방식을 따르고 파일 나누기는 통화·글 대화까지 바뀌는 일이라 따로 정함",
+          "at": "2026-11-16"
+        }
+      ],
+      "updated": "2026-11-16T11:41:09+00:00"
     }
   }
 }
