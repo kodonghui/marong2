@@ -24,13 +24,25 @@ public class MainActivity extends BridgeActivity {
     private static final String ASKED_NOTIFICATIONS = "asked_notifications";
     private static final int NOTIFICATION_REQUEST = 101;
 
+    /**
+     * True while super.onCreate runs. Capacitor's BridgeActivity.load() hands the launch intent to
+     * onNewIntent from inside onCreate; onCreate below opens it once itself, after the restore
+     * check. Without this a cold start from a chat notification opened two chat windows (BUG-107).
+     */
+    private boolean creating;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         // Plugins load before the WebView opens the call page (SPEC-102); the window's own handling first.
         registerPlugin(MarongWindowPlugin.class);
         registerPlugin(MarongCallPlugin.class);
         registerPlugin(MarongPushPlugin.class);
-        super.onCreate(savedInstanceState);
+        creating = true;
+        try {
+            super.onCreate(savedInstanceState);
+        } finally {
+            creating = false;
+        }
 
         // Back never closes the page: closing it would end a call and lose the screen (SPEC-105).
         getOnBackPressedDispatcher()
@@ -56,6 +68,9 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        if (creating) {
+            return; // The launch intent: onCreate opens it once (BUG-107).
+        }
         setIntent(intent);
         openFromIntent(intent);
     }
