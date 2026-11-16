@@ -9,16 +9,16 @@
       "checks": [
         {
           "level": "info",
-          "message": "REQ-129·REQ-130(앱 벨 요구)은 docs/app-ring.md에, TBL-102(app_rings)는 마이그레이션 015에 정의돼 있어 단계 원본 밖이라 경고로 잡힘. TBL-102는 05 원본을 marong/ 폴더로 바꾸면 풀림(PR #25와 같은 바꿈)",
+          "message": "PR #25도 .corthex/stages.json을 새로 만듦. 두 PR 중 나중에 합치는 쪽에서 단계마다 next와 checks를 둘 다 남기도록 합침",
           "at": "2026-11-16"
         },
         {
           "level": "info",
-          "message": "PR #25도 .corthex/stages.json을 새로 만듦. 두 PR 중 나중에 합치는 쪽에서 단계마다 next와 checks를 둘 다 남기도록 합침",
+          "message": "TBL-102(app_rings)는 마이그레이션 015에 정의돼 있어 05 원본을 marong/ 폴더로 바꾸면 풀림. 앱 벨 요구·명세는 docs/app-ring.md(단계 원본 밖)라 ID 대신 '앱 벨 요구 129번'처럼 적음",
           "at": "2026-11-16"
         }
       ],
-      "updated": "2026-11-16T14:14:09+00:00"
+      "updated": "2026-11-16T14:30:54+00:00"
     },
     "02-prd": {
       "state": "in_progress",
@@ -55,6 +55,24 @@
         }
       ],
       "updated": "2026-11-16T14:23:43+00:00"
+    },
+    "04-functional-spec": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트(명세 동결, 선 전화·그림 화두): 동희님이 SPEC-260~283과 AI-20~22를 확인. 이어서 05 ERD(018_call_first.sql)",
+      "checks": [
+        {
+          "level": "info",
+          "message": "확인 질문 답 대기로 추천안을 쓴 행: SPEC-263(하루 한 번), SPEC-265(선 전화 3일·7일, 19:00~21:30), SPEC-278(둘 다 켜짐이 기본)",
+          "at": "2026-11-16"
+        },
+        {
+          "level": "info",
+          "message": "요구사항 없이 생긴 동작 3개(6절): 통화 화면의 벨 시간 지남 문장, 하루 최대에 hello 벨을 더함, 앱 전화 채널 설명",
+          "at": "2026-11-16"
+        }
+      ],
+      "updated": "2026-11-16T14:30:54+00:00"
     }
   }
 }
