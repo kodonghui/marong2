@@ -1,11 +1,11 @@
 # 선 전화·그림 화두가 바꾸는 화면 상태(CTX-020)
 
-08단계 정의예요(2026-11-16, Claude 제안, 검토 대상). 새 화면은 없고 있는 화면에 상태가 늘어요([07 사이트맵](../07-sitemap/sitemap.md)). 통화 중 화면의 그림 카드는 [SCR-002](SCR-002.md)의 `SCR-002#topic-card`에 있고, 이 문서는 앱 화면(바탕 정의는 [app-chat.md](../app-chat.md), [app-ring.md](../app-ring.md))과 디스코드 DM에서 바뀌는 것을 적어요. 와이어프레임은 [wireframes-call-first.html](wireframes-call-first.html)이에요. 입력: 기능 명세 [call-first.md](../04-functional-spec/call-first.md)(SPEC-260\~283), 계약 [call-first.openapi.yaml](../../api/call-first.openapi.yaml)(API-140)과 [app-chat.openapi.yaml](../../api/app-chat.openapi.yaml) 0.3.0-draft.
+08단계 정의예요(2026-11-16, Claude 제안, 검토 대상). 새 화면은 없고 있는 화면에 상태가 늘어요([07 사이트맵](../07-sitemap/sitemap.md)). 통화 중 화면의 그림 카드는 [SCR-002](SCR-002.md)의 `SCR-002#topic-card`에 있고, 이 문서는 앱 화면(바탕 정의는 [app-chat.md](../app-chat.md), [app-ring.md](../app-ring.md))과 디스코드 DM에서 바뀌는 것을 적어요. 와이어프레임은 [wireframes-call-first.html](wireframes-call-first.html), 09단계 목업 후보와 추천은 [call-first-candidates.md](../../design/call-first-candidates.md)(목업 페이지 [선 전화·그림 화두 목업](https://claude.ai/artifact/UQYxaGXQ72wGRSWv5YuU8x))이에요. 입력: 기능 명세 [call-first.md](../04-functional-spec/call-first.md)(SPEC-260\~283), 계약 [call-first.openapi.yaml](../../api/call-first.openapi.yaml)(API-140)과 [app-chat.openapi.yaml](../../api/app-chat.openapi.yaml) 0.3.0-draft.
 
 공통 규칙:
 
 - 잠금 화면에 보일 수 있는 글(앱 알림, 전화 알림, 벨 화면)에는 그림의 알림 미리보기 한 줄(TERM-091)과 정해진 말('마롱이가 먼저 걸었어요', '전화했는데 바빴나 봐! 📞')만 써요. 화두 글 전체와 그림은 글 대화를 열어야 보여요(SPEC-272, SPEC-281). 알림 미리보기 한 줄은 마롱이 말투(반말, 1인칭)예요. 예: "나 털모자 샀다!"
-- 그림은 512×512 WebP를 정사각형으로 보여요. 모서리는 둥글게, 그림 안에는 글자가 없어서 대체 글이 그림 설명을 맡아요: 글 대화는 `picture.alt`, 통화 카드는 그림 제목(SPEC-269, SPEC-274).
+- 그림은 512×512 WebP예요. 글 대화에서는 정사각형(240px, 모서리 둥글게), 통화 화면에서는 얼굴 원 안(원으로 잘림)에 보여요(09 추천 A). 그림 안에는 글자가 없어서 대체 글이 그림 설명을 맡아요: 글 대화는 `picture.alt`, 통화 화면은 그림 제목(SPEC-269, SPEC-274).
 - 그림을 기다리는 동안 같은 크기의 빈 칸을 먼저 두어 글이 밀리지 않아요. 못 받으면(API-140#404, API-140#default, 네트워크) 그 칸을 지우고 글은 그대로예요. 다시 시도하지 않아요.
 - 폭은 세로 휴대폰 360\~430px, 테마는 낮(군밤 크림)·밤(밤하늘) 둘 다예요([README](README.md) 공통 규칙). 움직임 줄이기를 켜면 카드가 움직임 없이 나타나고 사라져요.
 

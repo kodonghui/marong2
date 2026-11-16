@@ -37,6 +37,9 @@
   .controls { margin-top: auto; display: flex; gap: 40px; }
   .controls i { width: 64px; height: 64px; border-radius: 50%; border: 1px solid var(--soft); display: grid; place-items: center; font-style: normal; font-size: 12px; color: var(--mid); }
   .controls i.end { width: 88px; height: 88px; background: var(--fill); }
+  .face.pic-in { position: relative; background: repeating-linear-gradient(45deg, #f5f5f5 0 8px, #ececec 8px 16px); border: 1px solid var(--soft); }
+  .face .chip { position: absolute; left: 50%; bottom: 0; transform: translate(-50%, 50%); border: 1px solid var(--soft); background: var(--paper); border-radius: 999px; padding: 2px 14px; color: var(--ink); font-weight: 600; }
+  .face .x { position: absolute; right: 0; top: 0; width: 48px; height: 48px; border-radius: 50%; border: 1px solid var(--soft); background: var(--paper); display: grid; place-items: center; color: var(--mid); }
   .card { position: absolute; left: 50%; top: 210px; transform: translateX(-50%); width: 232px; border: 1px solid var(--soft); border-radius: 24px; background: var(--paper); padding: 16px; box-shadow: 0 6px 18px rgba(0,0,0,.12); }
   .card .pic { width: 200px; height: 200px; }
   .card .title { margin-top: 8px; text-align: center; font-weight: 600; }
@@ -60,7 +63,7 @@
 </head>
 <body>
 <h1>선 전화·그림 화두 와이어프레임 (08단계)</h1>
-<p class="note">정의: <code>docs/08-screens/call-first.md</code>, <code>SCR-002.md</code>(#topic-card). 각 상태를 360px과 430px 두 폭으로 그려요. 회색과 시스템 글꼴로 구조만 보이고, 색·글꼴·크기 값은 09단계 목업과 토큰에서 정해요. 그린 때: 2026-11-16 23:52(한국 시각).</p>
+<p class="note">정의: <code>docs/08-screens/call-first.md</code>, <code>SCR-002.md</code>(#topic-card). 각 상태를 360px과 430px 두 폭으로 그려요. 회색과 시스템 글꼴로 구조만 보이고, 색·글꼴·크기 값은 09단계 목업과 토큰에서 정해요. 그린 때: 2026-11-16 23:52(한국 시각), SCR-002#topic-card는 09단계 추천 A에 맞춰 2026-11-17 00:06에 고침.</p>
 <div id="out"></div>
 <script>
   const chatTop = '<div class="top"><span class="dot"></span>마롱이</div>';
@@ -68,7 +71,7 @@
   const msg = (inner, text, tag, time) => `<div class="row"><span class="dot"></span><div class="body">${inner}<p class="bubble" style="margin:0">${text}</p><p class="meta" style="margin:0"><span class="tag">${tag}</span><time>${time}</time></p></div></div>`;
   const pic = '<div class="pic" role="img" aria-label="그림: picture.alt">그림 240×240</div>';
   const frames = [
-    ['SCR-002#topic-card', '통화 중 위에 선 전화 그림 카드(15초, 누르면 닫힘)', w => `<div class="call"><div class="face">마롱이 얼굴 248</div><p class="status">(마롱이가 화두로 먼저 말하는 중)</p><div class="controls"><i>음소거</i><i class="end">끊기</i></div></div><div class="card"><div class="pic">그림 200×200</div><p class="title" style="margin:8px 0 0">털모자</p><span class="close" aria-label="그림 닫기">✕</span></div>`],
+    ['SCR-002#topic-card', '통화 중 얼굴 원이 그림으로(15초, 누르면 얼굴로). 09 추천 A', w => `<div class="call"><div class="face pic-in">그림 248(원으로 잘림)<span class="chip">털모자</span><span class="x" aria-label="그림 닫기">✕</span></div><p class="status" style="margin-top:28px">(마롱이가 화두로 먼저 말하는 중)</p><div class="controls"><i>음소거</i><i class="end">끊기</i></div></div>`],
     ['SCR-107#picture', '그림 화두 글: 그림 위, 글 아래, 태그 먼저 톡', w => chatTop + `<div class="list">${msg(pic, '나 닭꼬치 먹고 있어 🍢\n\n넌 뭐 먹었어?', '먼저 톡', '19:42')}</div>` + chatInput],
     ['SCR-107#picture-loading', '그림 자리에 같은 크기 빈 칸, 글은 먼저 보임', w => chatTop + `<div class="list">${msg('<div class="pic wait" aria-hidden="true"></div>', '나 닭꼬치 먹고 있어 🍢\n\n넌 뭐 먹었어?', '먼저 톡', '19:42')}</div>` + chatInput],
     ['SCR-107#picture-missing', '그림을 못 받음(404·오류): 칸이 사라지고 글만', w => chatTop + `<div class="list">${msg('', '나 닭꼬치 먹고 있어 🍢\n\n넌 뭐 먹었어?', '먼저 톡', '19:42')}</div>` + chatInput],

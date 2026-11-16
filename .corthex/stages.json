@@ -160,6 +160,19 @@
         }
       ],
       "updated": "2026-11-16T14:52:28+00:00"
+    },
+    "09-mockup": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 1(방향): 동희님 선택 대기, 추천 통화 A·글 대화 A로 진행 중. 체크포인트 2: 개발 전 토큰 얼리기",
+      "checks": [
+        {
+          "level": "info",
+          "message": "CTX-020 목업 27장(360·430, 밤하늘·군밤 크림), 페이지 오류 0, 가로 넘침 0, 대비 11.7~12.75:1. 후보·추천: design/call-first-candidates.md, 목업 페이지 https://claude.ai/artifact/UQYxaGXQ72wGRSWv5YuU8x. 토큰 size.topic-picture 240px 추가",
+          "at": "2026-11-16"
+        }
+      ],
+      "updated": "2026-11-16T15:06:46+00:00"
     }
   }
 }
