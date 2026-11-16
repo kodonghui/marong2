@@ -1,0 +1,606 @@
+{
+ "set": "v1",
+ "pictures": [
+  {
+   "name": "winter-hat",
+   "title": "털모자",
+   "scene": "Marong wearing a new knitted winter hat with a pom-pom, waving hello",
+   "line": "나 털모자 샀다! 🧶",
+   "ask": "어때, 잘 어울려?",
+   "preview": "나 털모자 샀다!",
+   "alt": "방울 털모자를 쓰고 손 흔드는 마롱이",
+   "months": [
+    11,
+    12,
+    1,
+    2
+   ],
+   "hours": [
+    9,
+    22
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "chicken-skewer",
+   "title": "닭꼬치",
+   "scene": "Marong happily eating a grilled chicken skewer at a cozy little street food stall",
+   "line": "나 지금 닭꼬치 먹는 중이야 😋",
+   "ask": "넌 오늘 뭐 먹었어?",
+   "preview": "닭꼬치 먹는 중!",
+   "alt": "포장마차에서 닭꼬치를 먹는 마롱이",
+   "months": [],
+   "hours": [
+    12,
+    23
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "roasted-chestnuts",
+   "title": "군밤",
+   "scene": "Marong holding a paper bag of warm roasted chestnuts with a little steam rising",
+   "line": "군밤 한 봉지 샀어! 따끈따끈해 🌰",
+   "ask": "너도 군밤 좋아해?",
+   "preview": "군밤 샀어! 따끈해",
+   "alt": "따끈한 군밤 봉지를 든 마롱이",
+   "months": [
+    10,
+    11,
+    12,
+    1,
+    2
+   ],
+   "hours": [
+    12,
+    22
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "fish-bread",
+   "title": "붕어빵",
+   "scene": "Marong blowing on a hot fish-shaped bungeoppang pastry before taking a bite",
+   "line": "붕어빵 샀는데 팥이 꽉 찼어!",
+   "ask": "넌 팥붕이야, 슈붕이야?",
+   "preview": "붕어빵 샀다!",
+   "alt": "뜨거운 붕어빵을 호호 부는 마롱이",
+   "months": [
+    11,
+    12,
+    1,
+    2
+   ],
+   "hours": [
+    12,
+    22
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "first-snow",
+   "title": "첫눈",
+   "scene": "Marong looking up at falling snowflakes with both paws open, delighted",
+   "line": "나 첫눈 봤어! ❄️",
+   "ask": "너 있는 데도 눈 와?",
+   "preview": "첫눈 봤어!",
+   "alt": "내리는 눈송이를 올려다보는 마롱이",
+   "months": [
+    11,
+    12,
+    1
+   ],
+   "hours": [
+    9,
+    23
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "snowman",
+   "title": "눈사람",
+   "scene": "Marong standing proudly next to a small snowman it just built",
+   "line": "눈사람 만들었어! 나 닮았지? ⛄",
+   "ask": "너도 눈사람 만들어 본 적 있어?",
+   "preview": "눈사람 만들었어!",
+   "alt": "작은 눈사람 옆에서 뿌듯해하는 마롱이",
+   "months": [
+    12,
+    1,
+    2
+   ],
+   "hours": [
+    9,
+    22
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "hot-cocoa",
+   "title": "코코아",
+   "scene": "Marong wrapped in a scarf, holding a big mug of hot cocoa topped with marshmallows",
+   "line": "따뜻한 코코아 마시는 중 ☕",
+   "ask": "넌 요즘 뭐 마셔?",
+   "preview": "코코아 마시는 중",
+   "alt": "마시멜로 코코아를 두 손으로 든 마롱이",
+   "months": [
+    10,
+    11,
+    12,
+    1,
+    2,
+    3
+   ],
+   "hours": [
+    9,
+    23
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "blanket-movie",
+   "title": "영화",
+   "scene": "Marong wrapped in a blanket on a sofa with a bowl of popcorn, watching a movie",
+   "line": "이불 덮고 영화 보는 중 🍿",
+   "ask": "요즘 재밌게 본 거 있어?",
+   "preview": "영화 보는 중!",
+   "alt": "이불을 덮고 팝콘 그릇을 든 마롱이",
+   "months": [],
+   "hours": [
+    17,
+    24
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "tangerines",
+   "title": "귤",
+   "scene": "Marong peeling a tangerine with a small pile of tangerines beside it",
+   "line": "귤 까먹는 중인데 손이 노래졌어 🍊",
+   "ask": "넌 귤 몇 개까지 먹어 봤어?",
+   "preview": "귤 까먹는 중!",
+   "alt": "귤 껍질을 까는 마롱이",
+   "months": [
+    11,
+    12,
+    1,
+    2
+   ],
+   "hours": [
+    10,
+    23
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "ramen-night",
+   "title": "라면",
+   "scene": "Marong eating a steaming bowl of ramen with chopsticks",
+   "line": "야식으로 라면 끓였어 🍜",
+   "ask": "넌 라면에 뭐 넣어 먹어?",
+   "preview": "라면 끓였어!",
+   "alt": "김이 나는 라면을 먹는 마롱이",
+   "months": [],
+   "hours": [
+    19,
+    24
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "reading-book",
+   "title": "책",
+   "scene": "Marong reading a picture book under a warm desk lamp",
+   "line": "요즘 그림책 읽는 중이야 📖",
+   "ask": "넌 요즘 뭐 읽어?",
+   "preview": "책 읽는 중이야",
+   "alt": "스탠드 불빛 아래 책을 읽는 마롱이",
+   "months": [],
+   "hours": [
+    12,
+    24
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "crayon-drawing",
+   "title": "그림 그리기",
+   "scene": "Marong drawing with crayons in a sketchbook, a little crayon mark on its cheek",
+   "line": "크레파스로 그림 그렸어! 🖍️",
+   "ask": "너도 그림 그리는 거 좋아해?",
+   "preview": "그림 그렸어!",
+   "alt": "크레파스로 스케치북에 그림 그리는 마롱이",
+   "months": [],
+   "hours": [
+    12,
+    22
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "baked-cookies",
+   "title": "쿠키",
+   "scene": "Marong wearing a small apron, holding a tray of freshly baked cookies",
+   "line": "쿠키 구웠어! 좀 탔지만 맛있어 🍪",
+   "ask": "넌 빵이나 과자 만들어 본 적 있어?",
+   "preview": "쿠키 구웠어!",
+   "alt": "앞치마를 두르고 쿠키 쟁반을 든 마롱이",
+   "months": [],
+   "hours": [
+    12,
+    22
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "potted-sprout",
+   "title": "새싹",
+   "scene": "Marong watering a small potted plant with a new sprout, using a tiny watering can",
+   "line": "화분에 새싹이 났어! 🌱",
+   "ask": "너도 키우는 거 있어?",
+   "preview": "새싹이 났어!",
+   "alt": "작은 물뿌리개로 화분에 물 주는 마롱이",
+   "months": [
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10
+   ],
+   "hours": [
+    9,
+    20
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "rain-boots",
+   "title": "비 오는 날",
+   "scene": "Marong in rain boots holding a yellow umbrella, splashing in a small puddle",
+   "line": "비 와서 장화 신고 나왔어 ☔",
+   "ask": "너 있는 데도 비 와?",
+   "preview": "비 와서 장화 신었어",
+   "alt": "노란 우산을 쓰고 물웅덩이에서 노는 마롱이",
+   "months": [
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+   ],
+   "hours": [
+    9,
+    21
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "ice-cream",
+   "title": "아이스크림",
+   "scene": "Marong licking a tall ice cream cone on a sunny day",
+   "line": "아이스크림 녹기 전에 먹는 중 🍦",
+   "ask": "넌 무슨 맛 좋아해?",
+   "preview": "아이스크림 먹는 중",
+   "alt": "아이스크림콘을 먹는 마롱이",
+   "months": [
+    5,
+    6,
+    7,
+    8,
+    9
+   ],
+   "hours": [
+    12,
+    22
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "watermelon",
+   "title": "수박",
+   "scene": "Marong holding a big slice of watermelon, with a few seeds on its cheek",
+   "line": "수박 엄청 큰 거 잘랐어 🍉",
+   "ask": "여름 과일 중에 뭐가 제일 좋아?",
+   "preview": "수박 잘랐어!",
+   "alt": "커다란 수박 조각을 든 마롱이",
+   "months": [
+    6,
+    7,
+    8
+   ],
+   "hours": [
+    12,
+    22
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "cherry-blossom",
+   "title": "벚꽃",
+   "scene": "Marong under a cherry blossom tree with pink petals falling around it",
+   "line": "벚꽃 보러 나왔어 🌸",
+   "ask": "올해 꽃구경 했어?",
+   "preview": "벚꽃 보러 나왔어",
+   "alt": "벚꽃잎이 날리는 나무 아래의 마롱이",
+   "months": [
+    3,
+    4
+   ],
+   "hours": [
+    9,
+    21
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "autumn-leaves",
+   "title": "단풍",
+   "scene": "Marong holding a bunch of red and yellow autumn leaves",
+   "line": "단풍잎 주웠어! 색이 진짜 예뻐 🍁",
+   "ask": "요즘 산책 자주 해?",
+   "preview": "단풍잎 주웠어!",
+   "alt": "빨갛고 노란 단풍잎을 든 마롱이",
+   "months": [
+    9,
+    10,
+    11
+   ],
+   "hours": [
+    9,
+    21
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "stargazing",
+   "title": "별",
+   "scene": "Marong sitting on a small hill at night next to a little telescope, looking at the stars",
+   "line": "오늘 밤에 별이 진짜 많아 ✨",
+   "ask": "마지막으로 별 본 게 언제야?",
+   "preview": "별 보는 중이야",
+   "alt": "밤에 작은 망원경 옆에서 별을 보는 마롱이",
+   "months": [],
+   "hours": [
+    19,
+    24
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "striped-scarf",
+   "title": "목도리",
+   "scene": "Marong wrapped in a long striped scarf, cheeks pink from the cold",
+   "line": "목도리 했더니 하나도 안 추워 🧣",
+   "ask": "너도 따뜻하게 하고 다녀?",
+   "preview": "목도리 했어!",
+   "alt": "긴 줄무늬 목도리를 두른 마롱이",
+   "months": [
+    10,
+    11,
+    12,
+    1,
+    2,
+    3
+   ],
+   "hours": [
+    9,
+    23
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "bubble-bath",
+   "title": "거품 목욕",
+   "scene": "Marong relaxing in a small bathtub full of bubbles with a rubber duck",
+   "line": "거품 목욕하는 중 🛁 오리도 같이",
+   "ask": "넌 하루 끝나면 뭐 하면서 쉬어?",
+   "preview": "거품 목욕 중이야",
+   "alt": "거품 욕조에서 고무 오리와 쉬는 마롱이",
+   "months": [],
+   "hours": [
+    18,
+    24
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "new-pajamas",
+   "title": "잠옷",
+   "scene": "Marong in cozy pajamas and a nightcap, hugging a pillow",
+   "line": "새 잠옷 입었어! 폭신해 🌙",
+   "ask": "넌 요즘 몇 시에 자?",
+   "preview": "새 잠옷 입었어!",
+   "alt": "잠옷과 수면 모자를 쓰고 베개를 안은 마롱이",
+   "months": [],
+   "hours": [
+    20,
+    24
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "tteokbokki",
+   "title": "떡볶이",
+   "scene": "Marong eating red tteokbokki rice cakes with a fork, cheeks flushed from the spice",
+   "line": "떡볶이 먹는데 좀 맵다 🔥",
+   "ask": "넌 매운 거 잘 먹어?",
+   "preview": "떡볶이 먹는 중!",
+   "alt": "빨간 떡볶이를 먹는 마롱이",
+   "months": [],
+   "hours": [
+    12,
+    23
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "kimbap-picnic",
+   "title": "김밥 소풍",
+   "scene": "Marong having a picnic on a checkered blanket with a lunchbox of kimbap",
+   "line": "김밥 싸서 소풍 왔어 🍙",
+   "ask": "소풍 가면 뭐 싸 가?",
+   "preview": "김밥 싸서 소풍 왔어",
+   "alt": "체크무늬 돗자리에서 김밥 도시락을 연 마롱이",
+   "months": [
+    4,
+    5,
+    6,
+    9,
+    10
+   ],
+   "hours": [
+    10,
+    18
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "knitting",
+   "title": "뜨개질",
+   "scene": "Marong knitting with yarn and needles while a ball of yarn rolls away",
+   "line": "뜨개질 배우는데 실이 자꾸 엉켜 🧶",
+   "ask": "요즘 새로 배우는 거 있어?",
+   "preview": "뜨개질 배우는 중!",
+   "alt": "실타래와 바늘로 뜨개질하는 마롱이",
+   "months": [
+    10,
+    11,
+    12,
+    1,
+    2
+   ],
+   "hours": [
+    12,
+    23
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "headphones",
+   "title": "노래",
+   "scene": "Marong wearing big headphones with eyes happily closed, swaying to music",
+   "line": "좋은 노래 찾았어 🎧 계속 듣는 중",
+   "ask": "요즘 자주 듣는 노래 있어?",
+   "preview": "노래 듣는 중이야",
+   "alt": "큰 헤드폰을 쓰고 노래를 듣는 마롱이",
+   "months": [],
+   "hours": [
+    9,
+    24
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "strawberry-cake",
+   "title": "케이크",
+   "scene": "Marong holding a small strawberry shortcake on a plate",
+   "line": "딸기 케이크 사 왔어 🍰",
+   "ask": "넌 케이크 중에 뭐가 제일 좋아?",
+   "preview": "케이크 사 왔어!",
+   "alt": "작은 딸기 케이크를 든 마롱이",
+   "months": [],
+   "hours": [
+    12,
+    22
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "sledding",
+   "title": "썰매",
+   "scene": "Marong riding a small wooden sled down a gentle snowy slope, laughing",
+   "line": "썰매 탔는데 너무 빨라 🛷",
+   "ask": "겨울에 제일 좋아하는 게 뭐야?",
+   "preview": "썰매 탔어!",
+   "alt": "눈 비탈에서 나무 썰매를 타는 마롱이",
+   "months": [
+    12,
+    1,
+    2
+   ],
+   "hours": [
+    9,
+    20
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "hand-warmer",
+   "title": "핫팩",
+   "scene": "Marong holding a warm hand warmer pack against its cheek on a cold day",
+   "line": "핫팩 손에 쥐고 다니는 중",
+   "ask": "요즘 많이 춥지 않아?",
+   "preview": "핫팩 쥐고 다녀!",
+   "alt": "핫팩을 볼에 대고 있는 마롱이",
+   "months": [
+    11,
+    12,
+    1,
+    2
+   ],
+   "hours": [
+    9,
+    23
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  },
+  {
+   "name": "hotteok",
+   "title": "호떡",
+   "scene": "Marong eating a sweet hotteok pancake with a little syrup dripping",
+   "line": "호떡 먹다가 꿀이 흘렀어 🥞",
+   "ask": "겨울 간식 중에 뭐가 제일 좋아?",
+   "preview": "호떡 먹는 중!",
+   "alt": "꿀이 흐르는 호떡을 먹는 마롱이",
+   "months": [
+    11,
+    12,
+    1,
+    2
+   ],
+   "hours": [
+    12,
+    23
+   ],
+   "status": "reviewed",
+   "added": "2026-11-17"
+  }
+ ]
+}
