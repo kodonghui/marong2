@@ -35,9 +35,9 @@
     "05-erd": {
       "human": "github",
       "link": "docs/05-erd/erd.md",
-      "source": "marong/call/schema.sql",
+      "source": "marong/",
       "truth": "source",
-      "note": "카톡 마롱이 표(marong/schema.sql)는 그대로 두고 통화 표는 같은 DB의 call 스키마에 둠. ERD Editor는 이 작업 환경에서 쓸 수 없어 Mermaid erDiagram(docs/05-erd/erd.md)으로 봄(2026-11-12)."
+      "note": "카톡 마롱이 표(marong/schema.sql)는 그대로 두고 통화 표는 같은 DB의 call 스키마에 둠. ERD Editor는 이 작업 환경에서 쓸 수 없어 Mermaid erDiagram(docs/05-erd/erd.md)으로 봄(2026-11-12). 2026-11-16 source를 파일 하나에서 `marong/` 폴더로 바꿈: 카톡 표(marong/schema.sql), 통화 표(marong/call/schema.sql)와 두 곳의 마이그레이션을 함께 읽어야 일기 표(016·017)와 통화 비용 표(통화 007)의 TBL이 hub에 잡혀서. 그 폴더에서 hub가 읽는 파일은 SQL뿐임."
     },
     "06-api": {
       "human": "swagger-ui",
