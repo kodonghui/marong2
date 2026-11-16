@@ -38,6 +38,24 @@
         }
       ],
       "updated": "2026-11-16T09:10:27+00:00"
+    },
+    "04-functional-spec": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트(명세 동결): 사용자님이 일기 SPEC-150~168·AI-6~8과 통화 비용 SPEC-169~183·AI-9~10을 확인. 이어서 05 ERD(016_diary.sql, 007_call_cost.sql)",
+      "checks": [
+        {
+          "level": "info",
+          "message": "확인 질문 답 대기로 추천안을 쓴 행: SPEC-151(REQ-139 일기 하루 04:00), SPEC-153 AI-6(일기 글 모델 회사, 통화 자막 원문이 Anthropic으로 가는 새 길), SPEC-165(REQ-155 도장 날짜만 읽기)",
+          "at": "2026-11-16"
+        },
+        {
+          "level": "info",
+          "message": "REQ-190은 04단계에서 주어를 '통화 화면'에서 '시스템'으로 고침(서버가 PCM·WebRTC 소리를 거름, SPEC-178). FL-115의 '남의 일기' 갈래는 SPEC-158에 맞춰 '로그인한 친구 자신의 그 날만'으로 고침",
+          "at": "2026-11-16"
+        }
+      ],
+      "updated": "2026-11-16T09:52:40+00:00"
     }
   }
 }

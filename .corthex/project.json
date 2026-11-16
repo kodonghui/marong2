@@ -28,9 +28,9 @@
     },
     "04-functional-spec": {
       "human": "github",
-      "source": "docs/04-functional-spec/spec.md",
+      "source": "docs/04-functional-spec/",
       "truth": "source",
-      "note": "02-prd와 같은 이유(2026-11-12)."
+      "note": "02-prd와 같은 이유(2026-11-12). 2026-11-16 기능마다 파일을 나누려고 source를 폴더로 바꿈(spec.md 통화, diary.md 마롱이의 일기, call-cost.md 통화 비용)."
     },
     "05-erd": {
       "human": "github",
