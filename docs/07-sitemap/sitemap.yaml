@@ -1,13 +1,15 @@
-# 마롱이 통화 웹앱 화면 목록(07단계 원본). 보기는 sitemap.md 에 이 파일에서 그려요.
+# 마롱이 웹 화면 목록(07단계 원본). 보기는 sitemap.md 에 이 파일에서 그려요.
+# 통화 웹앱(SCR-001~005)과, 봇의 글 대화 서버가 /chat/ 아래로 내보내는 일기장(SCR-113~118)·듣기 시험(SCR-119)이 있어요.
+# SCR-113~119는 2026-11-16 설계예요(아직 만들지 않음). 앱 창과 글 대화 화면(SCR-101~112)은 docs/android-app.md, docs/app-chat.md, docs/app-ring.md 에 있어서 여기 다시 적지 않아요.
 # 모든 화면은 Cloudflare Access 뒤에 있어서, 허용된 Google 계정으로 로그인한 통화하는 친구(지금은 현경님)만 봐요(REQ-001).
 # FL-010(카톡 마롱이가 통화를 이어 알기)은 카톡에서 일어나서 화면이 없어요.
-# without a screen: TERM-004(로그인 이메일, Access 로그인 화면은 Cloudflare가 그림), TERM-008(위임, 목소리로만 답함), TERM-013(신호), TERM-016(sideband)
+# without a screen: TERM-004(로그인 이메일, Access 로그인 화면은 Cloudflare가 그림), TERM-008(위임, 목소리로만 답함), TERM-013(신호), TERM-016(sideband), TERM-020(미리 넘기기, 친구에게 보이지 않음)
 - id: SCR-001
   name: 통화 홈
   path: /
   access: 허용된 Google 계정(통화하는 친구)
   status: active
-  flows: [FL-001, FL-002, FL-006, FL-007, FL-008, FL-009]
+  flows: [FL-001, FL-002, FL-006, FL-007, FL-008, FL-009, FL-121]
   terms: [CTX-002, CTX-006, TERM-001, TERM-003, TERM-014, TERM-018]
   children:
     - id: SCR-002
@@ -39,3 +41,62 @@
       status: active
       flows: [FL-008]
       terms: [CTX-004, TERM-007]
+
+# 일기장(CTX-007, 2026-11-16). /chat/diary/ 아래 페이지 하나(같은 HTML)예요. :date 는 YYYY-MM-DD 이고, 비우면(/chat/diary/) 가장 최근 일기 날이에요(SPEC-158, API-108).
+# '#' 뒤 이름은 같은 페이지 위에 뜨는 칸이에요. 서버로 가지 않아서 04·06 의 주소가 바뀌지 않고, 브라우저의 뒤로 가기는 칸만 닫아요.
+# 들어오는 곳: 글 대화(SCR-107) 머리의 '일기장' 버튼, 글 대화와 디스코드 DM의 아침 알림 말에 붙은 주소(FL-115). 글 대화는 통화 홈 머리의 '글 대화'에서 열려요.
+# 앱에서는 글 대화 창 안에서 열리고, 그 창의 뒤로 가기는 창을 닫아요(docs/app-chat.md SPEC-143). 그래서 일기장 머리에 '글 대화로' 버튼을 둬요(앱은 바꾸지 않음).
+# without a screen: TERM-023(하루 모음, 밤 작업 안에서만), TERM-025(장면, 친구에게 보이지 않음), TERM-033(아침 알림, 앱 알림과 디스코드 DM의 말 한 줄)
+- id: SCR-113
+  name: 일기장 한 날
+  path: /chat/diary/:date
+  access: 허용된 Google 계정(통화하는 친구, 디스코드 DM 연결 있음, 자기 일기만)
+  status: active
+  flows: [FL-115, FL-116, FL-117, FL-118, FL-119]
+  terms: [CTX-007, TERM-021, TERM-022, TERM-024, TERM-026, TERM-027, TERM-028, TERM-029]
+  children:
+    - id: SCR-114
+      name: 말로 고치기
+      path: '/chat/diary/:date#fix'
+      access: 허용된 Google 계정(통화하는 친구, 자기 일기만)
+      status: active
+      flows: [FL-116]
+      terms: [CTX-007, TERM-021]
+    - id: SCR-115
+      name: 다시 그리기
+      path: '/chat/diary/:date#redraw'
+      access: 허용된 Google 계정(통화하는 친구, 자기 일기만)
+      status: active
+      flows: [FL-116]
+      terms: [CTX-007, TERM-024, TERM-028, TERM-032]
+    - id: SCR-116
+      name: 한 달 달력
+      path: '/chat/diary/:date#calendar'
+      access: 허용된 Google 계정(통화하는 친구, 자기 일기만)
+      status: active
+      flows: [FL-117]
+      terms: [CTX-007, TERM-022, TERM-026, TERM-027, TERM-029]
+    - id: SCR-117
+      name: 숨긴 일기
+      path: '/chat/diary/:date#hidden'
+      access: 허용된 Google 계정(통화하는 친구, 자기 일기만)
+      status: active
+      flows: [FL-117]
+      terms: [CTX-007, TERM-021, TERM-029]
+    - id: SCR-118
+      name: 내 모습 카드
+      path: '/chat/diary/:date#look'
+      access: 허용된 Google 계정(통화하는 친구, 자기 카드만)
+      status: active
+      flows: [FL-119]
+      terms: [CTX-007, TERM-030, TERM-031]
+
+# 듣기 시험(CTX-002, 2026-11-16). 동희님이 보내 준 주소로만 들어와요. 다른 화면에서 가는 길은 두지 않아요(시험이 끝나면 묶음을 치움).
+# without a screen: TERM-034(통화 사용량), TERM-035(단가표), TERM-036(지출 상한 예산, Google Cloud 콘솔), TERM-037(설정 실험), TERM-038(글로 갈아타기). 동희님 관리 명령·시트만이거나 친구에게 보이지 않아요
+- id: SCR-119
+  name: 듣기 시험
+  path: /chat/listen/
+  access: 허용된 Google 계정(통화하는 친구, 디스코드 DM 연결 있음)
+  status: active
+  flows: [FL-123]
+  terms: [CTX-002, TERM-039]

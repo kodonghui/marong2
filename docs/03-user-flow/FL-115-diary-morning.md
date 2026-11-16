@@ -1,6 +1,7 @@
 # FL-115 아침에 받아 보기
 
 Serves: REQ-145, REQ-146, REQ-147, REQ-163, REQ-170, REQ-176
+Screens: SCR-113, 앱 알림 SCR-108과 글 대화 SCR-107([app-chat.md](../app-chat.md)), 디스코드 DM과 Cloudflare Access 로그인 화면(바깥)
 
 알림은 D18 길(앱 알림이 켜져 있으면 앱으로, 아니면 디스코드 DM)을 그대로 따라요. 알림에는 일기 글이 없어서 잠금 화면에 보여도 괜찮아요.
 
