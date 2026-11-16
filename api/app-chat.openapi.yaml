@@ -166,15 +166,15 @@ paths:
                       text: |-
                         전화했는데 바빴나 봐!
 
-                        나 새 모자 샀다? 어때?
+                        나 털모자 샀다! 🧶
 
-                        넌 요즘 사고 싶은 거 있어?
+                        어때, 잘 어울려?
                       at: '2026-11-17T20:17:31+09:00'
                       via: app
                       kind: hello
                       picture:
                         src: /chat/topics/v1/winter-hat.webp
-                        alt: 털모자를 쓰고 손을 흔드는 마롱이
+                        alt: 털모자를 쓰고 웃는 마롱이
                     hasMore: true
                     readUpTo: 48389
                     answeredUpTo: 48389

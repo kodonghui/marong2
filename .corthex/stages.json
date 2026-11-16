@@ -137,6 +137,29 @@
         }
       ],
       "updated": "2026-11-16T14:48:15+00:00"
+    },
+    "08-screen-states": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트(화면 정의 승인): docs/08-screens/call-first.md와 SCR-002#topic-card, 와이어프레임 wireframes-call-first.html(11상태×360·430px). 확인 대기. 그다음 09 목업",
+      "checks": [
+        {
+          "level": "info",
+          "message": "CTX-020 화면 상태(2026-11-16): SCR-002#topic-card, SCR-107#picture·#picture-loading·#picture-missing·#hello, SCR-108#picture-topic·#hello-missed, SCR-110#hello·#hello-no-line, SCR-111#hello, SCR-101 벨 시간 지남 문구. 새 응답 코드는 API-140#404·#default만(그림 칸 없앰·카드 안 띄움)",
+          "at": "2026-11-16"
+        },
+        {
+          "level": "info",
+          "message": "와이어프레임을 Playwright로 그려 22개 틀(11상태×2폭)을 눈으로 봄, 페이지 오류 없음. 디스코드 DM은 디스코드 화면이라 그리지 않음",
+          "at": "2026-11-16"
+        },
+        {
+          "level": "info",
+          "message": "docs/app-ring.md의 SPEC-135 문장과 SCR-101·110·111 줄을 고침(벨 시간 지남 문구, 선 전화 상태 링크). app-chat.md는 PR #25가 같은 줄을 고쳐서 건드리지 않음",
+          "at": "2026-11-16"
+        }
+      ],
+      "updated": "2026-11-16T14:52:28+00:00"
     }
   }
 }

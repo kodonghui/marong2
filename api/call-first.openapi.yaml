@@ -224,7 +224,7 @@ components:
         ringId: 5b0e7c62-2f1d-4f7e-9a51-0c7d3a9e8b14
         v: '1'
         reason: hello
-        line: 새 모자 자랑하고 싶대
+        line: 나 털모자 샀다!
       - kind: ring
         ringId: 0f3a2b9c-6d4e-4a1b-8c7d-2e5f6a7b8c9d
         v: '1'
@@ -265,7 +265,7 @@ components:
         ring: true
         topic:
           picture: /chat/topics/v1/winter-hat.webp
-          title: 새 털모자
+          title: 털모자
     ReadyTopic:
       type: object
       description: 통화 화면 그림 카드(SPEC-269)의 그림과 제목
