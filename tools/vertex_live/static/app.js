@@ -62,7 +62,7 @@ let ringId=null,ringShown=false;
 // The picture of a hello call (docs/04-functional-spec/call-first.md SPEC-269): the first 'ready' of the call that
 // answered it carries {picture, title}; the face circle shows the picture for 15 seconds, once per picture.
 const TOPIC_RE=/^\/chat\/topics\/v[0-9]{1,3}\/[a-z0-9-]{1,40}\.webp$/,TOPIC_MS=15000;
-const topicSeen=new Set();let topicTimer=null;
+const topicSeen=new Set();let topicTimer=null,topicOn=false;
 function topicCard(topic){
   const picture=topic?.picture,title=typeof topic?.title==='string'?topic.title.trim():'';
   if(typeof picture!=='string'||!TOPIC_RE.test(picture)||!title||title.length>20||topicSeen.has(picture))return;
@@ -73,14 +73,15 @@ function topicCard(topic){
     if(!intended||generation!==run)return;
     const shown=$('topic-picture');shown.src=picture;shown.alt=title;shown.hidden=false;
     $('topic-title').textContent=title;$('topic-title').hidden=false;$('topic-close').hidden=false;
-    document.body.classList.add('topic-on');
+    document.body.classList.add('topic-on');topicOn=true;
     clearTimeout(topicTimer);topicTimer=setTimeout(closeTopic,TOPIC_MS);
   };
   image.src=picture;
 }
 function closeTopic(){
   clearTimeout(topicTimer);topicTimer=null;
-  if(!document.body.classList.contains('topic-on'))return;
+  if(!topicOn)return;
+  topicOn=false;
   const focused=document.activeElement===$('topic-close');
   document.body.classList.remove('topic-on');
   $('topic-picture').hidden=true;$('topic-picture').removeAttribute('src');$('topic-picture').alt='';
