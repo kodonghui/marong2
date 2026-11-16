@@ -16,7 +16,7 @@
     },
     "02-prd": {
       "human": "github",
-      "source": "docs/02-prd/requirements.md",
+      "source": "docs/02-prd/",
       "truth": "source",
       "note": "기본 사람 보기는 Notion DB 행이지만 같은 명세를 Notion에 한 번 더 만들지 않으려고 GitHub PR에서 봄. Notion 설계 문서 행은 요약·결정·링크만 가짐(2026-11-12, Claude 선택, 동희님이 바꿀 수 있음)."
     },
@@ -28,7 +28,7 @@
     },
     "04-functional-spec": {
       "human": "github",
-      "source": "docs/04-functional-spec/spec.md",
+      "source": "docs/04-functional-spec/",
       "truth": "source",
       "note": "02-prd와 같은 이유(2026-11-12)."
     },
