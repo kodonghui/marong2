@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ko" data-theme="night">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
+  <meta name="theme-color" content="#121729"><meta name="color-scheme" content="dark">
+  <title>마롱이 · 글 대화</title>
+  <link rel="icon" href="/face/v1/01-neutral.webp"><link rel="stylesheet" href="/chat/chat.css?v=20261116-chat2">
+  <script src="/chat/chat.js?v=20261116-chat2" defer></script>
+</head>
+<body>
+  <main class="chat" id="chat">
+    <header class="bar">
+      <a class="brand" href="/" aria-label="마롱이 통화 화면으로">마롱이<span class="brand-star" aria-hidden="true">✦</span></a>
+      <span class="connection" id="connection" hidden><i></i><span>다시 연결하는 중</span></span>
+      <div class="actions">
+        <a class="icon-button" href="/" aria-label="마롱이한테 전화하기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.7 3.5 9 7.8l-2.1 2.1c1.3 3 3.2 4.9 6.2 6.2l2.1-2.1 4.3 2.3c.7.4 1 1.2.7 1.9-.7 1.8-2.1 2.8-4.2 2.3C9.4 19 5 14.6 3.5 8c-.5-2.1.5-3.5 2.3-4.2.2-.1.6-.2.9-.3Z"/></svg></a>
+        <button class="icon-button" id="menu-button" type="button" aria-label="알림 받는 곳" aria-expanded="false" aria-controls="menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0-6 6v4l-2 3h16l-2-3V9a6 6 0 0 0-6-6Zm-2 15a2 2 0 0 0 4 0"/></svg></button>
+      </div>
+    </header>
+    <section class="menu" id="menu" hidden aria-label="알림 받는 곳">
+      <p class="menu-title">선톡·일정 알림이 가는 곳</p>
+      <p id="menu-delivery">확인하는 중</p>
+      <button id="menu-settings" class="text-button" type="button" hidden>알림 설정 열기</button>
+      <p id="menu-ring" hidden></p>
+      <button id="menu-ring-settings" class="text-button" type="button" hidden>알림 설정 열기</button>
+      <button id="menu-full-screen" class="text-button" type="button" hidden>전체 화면 알림 켜기</button>
+      <p id="menu-samsung" class="menu-note" hidden>벨이 늦게 울리면 배터리 설정에서 마롱이를 '절전 예외 앱'에 넣어 줘.</p>
+    </section>
+    <section class="log" id="log" role="log" aria-live="polite" aria-label="마롱이와 나눈 글 대화" tabindex="0">
+      <p class="more" id="more" hidden>앞의 이야기를 불러오는 중</p>
+      <ol class="messages" id="messages"></ol>
+      <div class="typing row" id="typing" hidden>
+        <span class="face"><img src="/face/v1/01-neutral.webp" width="30" height="30" alt=""></span>
+        <div class="body">
+          <p class="bubble" aria-hidden="true"><span class="dots"><i></i><i></i><i></i></span></p>
+          <p class="meta"><span class="sr-only">마롱이가 </span>대답 중…</p>
+        </div>
+      </div>
+    </section>
+    <section class="state" id="state" hidden role="status">
+      <img src="/face/v1/01-neutral.webp" width="96" height="96" alt="">
+      <p class="state-title" id="state-title"></p>
+      <p class="state-text" id="state-text"></p>
+      <a class="state-action" id="state-link" hidden></a>
+      <button class="state-action" id="state-retry" type="button" hidden>다시 해 보기</button>
+    </section>
+    <p class="notice" id="notice" role="status" hidden></p>
+    <form class="composer" id="composer">
+      <label for="text" class="sr-only">마롱이에게 할 말</label>
+      <textarea id="text" rows="1" maxlength="2000" placeholder="마롱이한테 하고 싶은 말" autocomplete="off" enterkeyhint="enter"></textarea>
+      <button id="send" type="submit" disabled>보내기</button>
+    </form>
+  </main>
+</body>
+</html>

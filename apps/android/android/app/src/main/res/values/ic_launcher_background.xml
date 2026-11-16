@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- design/base.tokens.json color.a page (밤하늘), the call page's night background. -->
+    <color name="ic_launcher_background">#121729</color>
+    <color name="marong_night">#121729</color>
+</resources>

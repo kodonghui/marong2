@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- design/base.tokens.json color.a (night): the ring screen (SCR-110) and notification accents. -->
+    <color name="marong_accent">#E8A35C</color>
+    <color name="ring_text">#F4F1EA</color>
+    <color name="ring_text_soft">#B4B2C6</color>
+    <color name="ring_answer">#E8A35C</color>
+    <color name="ring_answer_text">#1A1208</color>
+    <color name="ring_decline">#E5484D</color>
+    <color name="ring_decline_text">#FFFFFF</color>
+</resources>

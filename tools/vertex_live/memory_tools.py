@@ -1,5 +1,6 @@
 """Typed Gemini tools and independent input/output transcript assembly."""
 import asyncio
+import re
 import time
 import uuid
 from datetime import datetime
@@ -10,6 +11,16 @@ DECLARATIONS=[
   'parameters':{'type':'OBJECT','properties':{'query':{'type':'STRING','description':'찾을 짧은 한국어 주제'}},'required':['query']}},
  {'name':'current_time','description':'현재 한국 날짜·요일·시간을 확인한다.','parameters':{'type':'OBJECT','properties':{}}}
 ]
+# Only offered to clients that can end the call (live_session.LiveSession.hangup).
+END_CALL={'name':'end_call','description':'친구가 지금 이 통화를 끊어 달라거나 꺼 달라고 분명히 말했을 때만 부른다. 짧은 작별 인사를 한 문장 한 다음 부른다. 조용하거나 피곤해 보이거나 얘기가 끝난 것 같다는 이유로는 절대 부르지 않는다.',
+  'parameters':{'type':'OBJECT','properties':{}}}
+
+
+# Live can transcribe a reply with no words as markers such as '<no speech>{pause}'
+# (seen right after end_call on 2026-11-15), split across deltas. Captions, saved
+# turns and the hang-up check use the words only.
+MARKER=re.compile(r'<[^<>]*>|\{[^{}]*\}|<[^<>]*$|\{[^{}]*$')
+def spoken(text):return re.sub(r'\s{2,}',' ',MARKER.sub('',text)).strip()
 
 
 class TranscriptRecorder:
@@ -25,10 +36,11 @@ class TranscriptRecorder:
             part={'key':str(uuid.uuid4()),'text':'','saved':0};self.parts[role]=part
         part['updated']=time.monotonic()
         if text and not (finished and text==part['text']):part['text']=(part['text']+text)[:4000]
-        self.emit(role,part['text'],part['key'])
-        if finished or time.monotonic()-part['saved']>5:
+        words=spoken(part['text'])
+        if words:self.emit(role,words,part['key'])
+        if words and (finished or time.monotonic()-part['saved']>5):
             if not self.queue.full():
-                self.queue.put_nowait((part['key'],role,part['text'],finished,interrupted));part['saved']=time.monotonic()
+                self.queue.put_nowait((part['key'],role,words,finished,interrupted));part['saved']=time.monotonic()
             else:self.failed+=1
         if finished:self.parts.pop(role,None)
         elif role in self.boundaries:self.boundary(role)
@@ -67,7 +79,8 @@ class TranscriptRecorder:
         for task in self.settlers.values():task.cancel()
         await asyncio.gather(*self.settlers.values(),return_exceptions=True)
         for role,part in list(self.parts.items()):
-            if not self.queue.full():self.queue.put_nowait((part['key'],role,part['text'],False,True))
+            words=spoken(part['text'])
+            if words and not self.queue.full():self.queue.put_nowait((part['key'],role,words,False,True))
         try:await self.flush()
         except TimeoutError:pass
         self.task.cancel();await asyncio.gather(self.task,return_exceptions=True)

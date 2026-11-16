@@ -202,8 +202,9 @@ class Agent:
         person, user_id, db_ok = None, None, True
         try:
             person = await self.store.touch(msg.room_key, msg.is_channel, msg.user_key)
-            user_id = await self.store.add_message(msg.room_key, "user", text, user_key=msg.user_key,
-                                                   kakao_id=msg.kakao_id, meta=saved_meta)
+            # The in-app chat stores the text first so it can answer the request at once (docs/app-chat.md SPEC-112).
+            user_id = getattr(msg, "presaved_id", None) or await self.store.add_message(
+                msg.room_key, "user", text, user_key=msg.user_key, kakao_id=msg.kakao_id, meta=saved_meta)
             if user_id is None:
                 log.info("이미 저장된 메시지라 답하지 않음 kakao_id=%s", msg.kakao_id)
                 return None

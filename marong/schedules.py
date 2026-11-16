@@ -92,6 +92,32 @@ SCHEDULE_LIST_TOOL = {
 }
 SCHEDULE_TOOLS = (SCHEDULE_ADD_TOOL, SCHEDULE_CANCEL_TOOL, SCHEDULE_LIST_TOOL)
 SCHEDULE_TOOL_NAMES = frozenset(t["name"] for t in SCHEDULE_TOOLS)
+# 마롱이가 먼저 거는 전화(docs/app-ring.md SPEC-128). 서버 설정 MARONG_APP_RING=1 일 때만 call 칸과 안내가 보인다.
+CALL_PROPERTY = {
+    "type": "boolean",
+    "description": "친구가 정한 때 '전화해 줘', '전화로 깨워 줘'처럼 전화를 부탁했으면 true. 그때(remind_at) 마롱이 앱이 전화처럼 "
+                   "울리고 받으면 바로 통화돼(앱이 없으면 디스코드 DM으로 통화하자고 보내). say 는 전화를 걸어 처음 할 말의 뜻. "
+                   "글로 알려 달라는 부탁이면 빼.",
+}
+SCHEDULE_ADD_CALL_TOOL = {
+    **SCHEDULE_ADD_TOOL,
+    "input_schema": {**SCHEDULE_ADD_TOOL["input_schema"],
+                     "properties": {**SCHEDULE_ADD_TOOL["input_schema"]["properties"], "call": CALL_PROPERTY}},
+}
+CALL_GUIDE = """
+- 친구가 정한 때 전화해 달라고 하거나 전화로 깨워 달라고 하면 schedule_add 에 call: true 로 저장해. 그때 마롱이 앱이 전화처럼 울리고, 앱이 없으면 디스코드 DM으로 통화하자고 보내.
+- call 로 저장했다고 돌려줬을 때만 '응 10시에 전화할게!'처럼 짧게 확인해. 저장이 안 됐으면 전화하겠다고 하지 마."""
+CALL_UNAVAILABLE = ("이 친구는 아직 마롱이랑 통화할 수 없어서 전화 약속은 저장하지 않았어. 전화하겠다고 하지 말고, 그때 톡으로 "
+                    "알려 줄지 물어봐.")
+
+
+def schedule_tools(ring: bool = False) -> tuple:
+    """일정 도구들. ring 이면 schedule_add 에 call 칸이 있다."""
+    return (SCHEDULE_ADD_CALL_TOOL, SCHEDULE_CANCEL_TOOL, SCHEDULE_LIST_TOOL) if ring else SCHEDULE_TOOLS
+
+
+def schedule_guide(ring: bool = False) -> str:
+    return GUIDE + CALL_GUIDE if ring else GUIDE
 
 # 답할 때 '지금 상황'에 붙이는 안내(목록은 schedule_lines)
 GUIDE = """# 일정과 알림
@@ -110,6 +136,7 @@ class NewSchedule:
     repeat: str
     anchor: datetime | None  # 반복 알림의 첫 때(다음 때를 이것에서 셈)
     say: str | None
+    action: str = "remind"   # call: 그때 마롱이가 전화를 건다(015_app_ring.sql)
 
 
 def parse_when(raw, tz: ZoneInfo) -> tuple[datetime, bool]:
@@ -148,8 +175,8 @@ def occurrence(anchor: datetime, repeat: str, after: datetime, tz: ZoneInfo) -> 
     return t.replace(tzinfo=tz)
 
 
-def check_add(inp: dict, tz: ZoneInfo, now: datetime) -> NewSchedule | str:
-    """schedule_add 입력을 검사해 저장할 일정을 만든다. 잘못이면 마롱이에게 돌려줄 설명(글)."""
+def check_add(inp: dict, tz: ZoneInfo, now: datetime, ring: bool = False) -> NewSchedule | str:
+    """schedule_add 입력을 검사해 저장할 일정을 만든다. 잘못이면 마롱이에게 돌려줄 설명(글). ring 이 아니면 call 은 무시."""
     title = " ".join(str(inp.get("title") or "").split())
     if not 1 <= len(title) <= TITLE_MAX:
         return f"title 은 1~{TITLE_MAX}자여야 해."
@@ -177,6 +204,9 @@ def check_add(inp: dict, tz: ZoneInfo, now: datetime) -> NewSchedule | str:
         if remind_at is None:
             return "반복 알림은 remind_at(첫 알림 때)이 있어야 해."
         event_at, all_day = None, False  # 반복은 알림만
+    call = ring and inp.get("call") is True
+    if call and remind_at is None:
+        return "언제 전화할지 시각이 필요해. remind_at 에 전화할 때를 시각까지 써. 친구가 시각을 안 정했으면 몇 시에 전화할지 물어봐."
     if event_at is None and remind_at is None:
         return "event_at 이나 remind_at 중 하나는 있어야 해. 날짜·시각을 모르면 친구에게 물어봐."
     today = now.astimezone(tz).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -196,7 +226,7 @@ def check_add(inp: dict, tz: ZoneInfo, now: datetime) -> NewSchedule | str:
             return "remind_at 이 이미 지난 때야. 지금 시각을 보고 다시 계산해."
         elif remind_at < now:
             remind_at = now  # 답을 쓰는 사이 지나감: 곧바로 보냄
-    return NewSchedule(title, event_at, all_day, remind_at, repeat, anchor, say)
+    return NewSchedule(title, event_at, all_day, remind_at, repeat, anchor, say, "call" if call else "remind")
 
 
 def _day(dt: datetime, tz: ZoneInfo, now: datetime) -> str:
@@ -226,6 +256,8 @@ def describe(row: dict, tz: ZoneInfo, now: datetime) -> str:
             text += f" · 알림 {_at(row['remind_at'], tz, now)}"
     else:
         text = f"알림 {_at(row['remind_at'], tz, now)}: {title}"
+    if row.get("action") == "call":
+        text += " · 📞 전화"
     return f"#{row['id']} {text}"
 
 
@@ -254,13 +286,17 @@ def reminder_text(row: dict, tz: ZoneInfo, late: timedelta) -> str:
 
 
 async def run_tool(store, name: str, inp: dict, *, friend_id: int, room_key: str | None, source: str,
-                   source_message_id: int | None, tz: ZoneInfo, now: datetime | None = None) -> tuple[str, dict]:
-    """일정 도구 하나를 실행해 (마롱이에게 돌려줄 글, 기록용 결과) 를 돌려준다. 결과의 result 가 error 면 잘못된 부탁."""
+                   source_message_id: int | None, tz: ZoneInfo, now: datetime | None = None,
+                   ring: bool = False) -> tuple[str, dict]:
+    """일정 도구 하나를 실행해 (마롱이에게 돌려줄 글, 기록용 결과) 를 돌려준다. 결과의 result 가 error 면 잘못된 부탁.
+    ring: 전화 약속(call)을 받는다(MARONG_APP_RING=1)."""
     now = now or datetime.now(tz)
     if name == "schedule_add":
-        item = check_add(inp, tz, now)
+        item = check_add(inp, tz, now, ring)
         if isinstance(item, str):
             return item, {"tool": name, "result": "error"}
+        if item.action == "call" and await store.call_friend(friend_id) is None:
+            return CALL_UNAVAILABLE, {"tool": name, "result": "error", "why": "call_unavailable"}
         outcome, row = await store.add_schedule(friend_id, room_key, source, source_message_id, item)
         if outcome == "full":
             return (f"일정이 이미 {ACTIVE_MAX}개라 더 저장하지 못했어. 맞춰 뒀다고 하지 말고, 지난 일정이나 안 쓰는 알림을 "
@@ -269,7 +305,10 @@ async def run_tool(store, name: str, inp: dict, *, friend_id: int, room_key: str
             return (f"이미 저장돼 있어: {describe(row, tz, now)}. 또 저장하지 않았어. 이미 맞춰 뒀다고 말해."), \
                 {"tool": name, "result": "already", "id": row["id"]}
         done = f"저장했어: {describe(row, tz, now)}."
-        done += (" 그때 이 DM으로 먼저 말할게." if row["remind_at"] is not None else " 알림 없이 기억만 해.")
+        if item.action == "call":
+            done += " 그때 마롱이가 전화를 걸어(앱이 없으면 디스코드 DM으로 통화하자고 보내)."
+        else:
+            done += (" 그때 이 DM으로 먼저 말할게." if row["remind_at"] is not None else " 알림 없이 기억만 해.")
         return done + " 친구에게 짧게 확인해 줘.", {"tool": name, "result": "ok", "id": row["id"]}
     if name == "schedule_cancel":
         schedule_id = inp.get("id")
@@ -319,9 +358,12 @@ class ScheduleStore:
                                       "AND status = 'active'", (friend_id,))
                 if (await cur.fetchone())["n"] >= ACTIVE_MAX:
                     return "full", None
+                # action 칸은 015_app_ring.sql 이 더한다: 전화 약속일 때만 넣는다(015 전에도 보통 일정은 그대로).
+                call = item.action == "call"
                 cur = await c.execute(
                     "INSERT INTO marong.schedules (friend_id, room_key, source, source_message_id, title, event_at, "
-                    "all_day, remind_at, repeat, repeat_anchor, say) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                    "all_day, remind_at, repeat, repeat_anchor, say" + (", action" if call else "") + ") "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s" + (", 'call'" if call else "") + ") "
                     "RETURNING *",
                     (friend_id, room_key, source, source_message_id, item.title, item.event_at, item.all_day,
                      item.remind_at, item.repeat, item.anchor, item.say))
@@ -371,6 +413,13 @@ class ScheduleStore:
             "  (SELECT d.channel_id FROM marong.discord_dm_links d WHERE d.friend_id = s.friend_id) AS channel_id, "
             "  (SELECT d.room_key FROM marong.discord_dm_links d WHERE d.friend_id = s.friend_id) AS dm_room",
             {"n": limit, "lease": LEASE})
+
+    async def release_reminder(self, row: dict) -> None:
+        """집은 알림을 실패로 세지 않고 1분 뒤로 돌려놓는다: 보낼 길이 하나도 없었음(디스코드가 끊겼고 앱 알림 받을 기기도 없음)."""
+        await self._one(
+            "UPDATE marong.schedules SET claimed_until = now() + %(retry)s, updated_at = now() "
+            "WHERE id = %(id)s AND status = 'active' AND claimed_until = %(lease)s RETURNING id",
+            {"id": row["id"], "lease": row["claimed_until"], "retry": RETRY})
 
     async def finish_reminder(self, row: dict, outcome: str, next_at: datetime | None = None) -> str | None:
         """집은 알림을 마친다. outcome: sent 보냄 | failed 전달 실패 | missed 늦어서·DM 이 없어 안 보냄.

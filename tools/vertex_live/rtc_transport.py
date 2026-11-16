@@ -47,6 +47,10 @@ class Bridge:
     def finish(self,epoch,turn):
         if epoch==self.epoch and self.turns and self.turns[-1]['id']==turn:self.turns[-1]['end']=True
 
+    def queued_ms(self):
+        """Audio fed to the bridge but not yet sent to the browser (24 kHz, 16-bit)."""
+        return sum(len(t['pcm']) for t in self.turns)/48
+
     def take_pending(self):
         """Freeze the producer and hand unplayed samples to the ordered WS writer."""
         if self.task:self.task.cancel()
