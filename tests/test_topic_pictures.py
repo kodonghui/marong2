@@ -153,7 +153,7 @@ def main():
            "the two faces go with every request")
         ok(b"gpt-image-2.5-flare" in first and b"medium" in first and b"1024x1024" in first, "model, quality, size")
         ok(b"Marong wearing a new knitted winter hat" in first and b"No text, letters" in first
-           and b"central circle" in first and b"same height" in first, "the scene and the style (AI-22)")
+           and b"circular" in first and b"same height" in first, "the scene and the style (AI-22)")
         ok("털모자".encode() not in first and "어울려".encode() not in first, "only the scene goes, not the words")
         records = [json.loads(line) for line in (out / "draw-log.jsonl").read_text(encoding="utf-8").splitlines()]
         errors = {r["name"]: r.get("error") for r in records if not r["ok"]}

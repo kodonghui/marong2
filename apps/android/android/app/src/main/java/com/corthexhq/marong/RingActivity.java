@@ -5,7 +5,9 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.View;
 import android.view.WindowManager;
+import android.widget.TextView;
 import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
 import java.lang.ref.WeakReference;
@@ -13,6 +15,7 @@ import java.lang.ref.WeakReference;
 /**
  * The full-screen ring (SCR-110, docs/app-ring.md SPEC-133): over the lock screen, it turns the
  * screen on and offers 받기 and 거절. 받기 asks Android to unlock first when the phone is locked.
+ * A hello call (SCR-110#hello, 0.2.2) says '마롱이가 먼저 걸었어요' and its preview line below.
  */
 public class RingActivity extends AppCompatActivity {
 
@@ -34,6 +37,14 @@ public class RingActivity extends AppCompatActivity {
         }
         showOverLockScreen();
         setContentView(R.layout.activity_ring);
+        String reason = getIntent().getStringExtra(Ring.EXTRA_REASON);
+        String line = PushLinks.ringLine(reason, getIntent().getStringExtra(Ring.EXTRA_LINE));
+        if (PushLinks.isHello(reason)) {
+            ((TextView) findViewById(R.id.ring_kind)).setText(R.string.ring_hello_text);
+        }
+        TextView lineView = findViewById(R.id.ring_line);
+        lineView.setText(line == null ? "" : line);
+        lineView.setVisibility(line == null ? View.GONE : View.VISIBLE);
         findViewById(R.id.ring_answer).setOnClickListener(v -> answer());
         findViewById(R.id.ring_decline).setOnClickListener(v -> {
             Ring.cancel(this);

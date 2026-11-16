@@ -49,9 +49,10 @@ STYLE = (
     "patch on the right ear only; pink oval blush on both cheeks with three short lines; small dot eyes; a simple "
     "dark-brown hand-drawn outline; chibi sticker style.\n"
     "Both eyes level at the same height and the face symmetric, with a gentle happy expression.\n"
-    "Keep Marong and the main object inside the central circle of the square (about 80% of its width), so a circular "
-    "crop still shows everything that matters.\n"
-    "A plain single soft pastel background, nothing busy at the edges.\n"
+    "Keep Marong and the main object within the middle of the square (about 80% of its width), so that a circular "
+    "crop of the picture still shows everything that matters.\n"
+    "One soft pastel background color filling the whole square edge to edge: do not draw a circle, badge, frame or "
+    "border, and keep the edges calm.\n"
     "No text, letters, numbers or logos anywhere in the image.")
 FIELDS = ("name", "title", "scene", "line", "ask", "preview", "alt", "months", "hours")
 
