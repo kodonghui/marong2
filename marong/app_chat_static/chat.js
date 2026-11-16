@@ -31,7 +31,7 @@ const API = '/chat/api';
 const PAGE = 30;
 const FACE = '/face/v1/01-neutral.webp';
 const URL_RE = /https?:\/\/[^\s<>"'()]+/g;
-const TAGS = {proactive: '먼저 톡', reminder: '일정 알림', ring: '약속 전화'};
+const TAGS = {proactive: '먼저 톡', reminder: '일정 알림', ring: '약속 전화', hello: '먼저 건 전화'};
 const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
 const PROBLEM_TEXT = {
   cross_site: '이 화면에서 다시 해 줘.',
@@ -183,6 +183,7 @@ function item(message) {
   face.append(img);
   const body = document.createElement('div');
   body.className = 'body';
+  const picture = !me && message.picture ? topicPicture(message.picture) : null;
   const bubble = document.createElement('p');
   bubble.className = 'bubble';
   linkify(bubble, message.text);
@@ -199,10 +200,27 @@ function item(message) {
   time.dateTime = message.at;
   time.textContent = message.at.slice(11, 16);
   meta.append(time);
+  if (picture) body.append(picture);
   body.append(bubble, meta);
   row.append(face, body);
   li.append(dayLine, row);
   return li;
+}
+
+// A picture topic's picture above Marong's words (SCR-107#picture): an empty box while it loads, gone if it cannot.
+function topicPicture(picture) {
+  if (typeof picture.src !== 'string' || !/^\/chat\/topics\/v[0-9]{1,3}\/[a-z0-9-]{1,40}\.webp$/.test(picture.src)) {
+    return null;
+  }
+  const img = document.createElement('img');
+  img.className = 'picture waiting';
+  img.alt = typeof picture.alt === 'string' ? picture.alt : '';
+  img.width = 240; img.height = 240;
+  img.decoding = 'async';
+  img.addEventListener('load', () => img.classList.remove('waiting'), {once: true});
+  img.addEventListener('error', () => img.remove(), {once: true});
+  img.src = picture.src;
+  return img;
 }
 
 function refreshDays() {

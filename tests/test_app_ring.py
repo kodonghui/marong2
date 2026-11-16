@@ -172,7 +172,8 @@ async def ring_checks(db, store, settings, logs):
     ring = rings(db, sid)
     ok(len(ring) == 1 and ring[0][1:] == ("app", "ringing", 1, 300), ring)
     bell = sender.sent[before:]
-    ok(len(bell) == 1 and bell[0] == {"fid": FID, "data": {"kind": "ring", "ringId": ring[0][0], "v": "1"},
+    ok(len(bell) == 1 and bell[0] == {"fid": FID, "data": {"kind": "ring", "ringId": ring[0][0], "v": "1",
+                                                           "reason": "promise"},
                                       "android": {"priority": "HIGH", "ttl": "45s"}}, bell)
     ok("벨 약속" not in json.dumps(bell, ensure_ascii=False) and "면접" not in json.dumps(bell, ensure_ascii=False),
        "TC-139 the ring carries no title, words or time")

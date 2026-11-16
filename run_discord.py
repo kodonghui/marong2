@@ -25,6 +25,7 @@ from marong.llm import LLM
 from marong.memory import MemoryWorker
 from marong.shopping import FETCH_DAILY, ShopFetch
 from marong.store import Store
+from marong.topics import Topics
 from marong.web_search import DAILY as WEB_DAILY, PER_REPLY as WEB_PER_REPLY, WebSearch
 
 
@@ -65,6 +66,17 @@ async def app_tables(store) -> bool:
         return True
     except psycopg.Error as e:
         app_log.warning("app off: tables unavailable %s", type(e).__name__)
+        return False
+
+
+async def topic_tables(store) -> bool:
+    """018_call_first.sql with its grants (picture topics and hello calls). Without them topics stay off."""
+    try:
+        await store.topic_prefs(0)
+        await store.hello_last(0)
+        return True
+    except psycopg.Error as e:
+        logging.getLogger("marong.topics").warning("topics off: tables unavailable %s", type(e).__name__)
         return False
 
 
@@ -164,8 +176,17 @@ async def main():
 
             agent.on_saved = on_saved
             await chat.serve()
+        # Picture topics and hello calls (docs/04-functional-spec/call-first.md): MARONG_TOPICS=1 and table 018.
+        topics = None
+        if os.environ.get("MARONG_TOPICS", "0").strip() == "1" and await topic_tables(store):
+            topics = Topics(settings, store, push)
+            agent.topics = topics.on
+            if not topics.on:
+                topics = None
+        logging.getLogger("marong.topics").info("topics %s", "on" if topics else "off")
         async with client:
-            tasks.append(asyncio.create_task(DiscordProactive(settings, store, agent, client, app=push).run()))
+            tasks.append(asyncio.create_task(
+                DiscordProactive(settings, store, agent, client, app=push, topics=topics).run()))
             tasks.append(asyncio.create_task(
                 DiscordReminders(settings, store, agent, client, app=push, origin=origin).run()))
             if google:

@@ -23,6 +23,7 @@ import psycopg
 from .app_store import APP_KEY
 from .discord_dm import DEFAULT_ORIGIN, DiscordIncoming, proactive_preference
 from .google_calendar import LINK_MARK, command as google_command
+from .topics import KEY as TOPIC_KEY, NAME as PICTURE_NAME, SET_NAME, phrase as topic_phrase, picture_set
 
 log = logging.getLogger("marong.app")
 DEFAULT_PORT = 8796
@@ -50,6 +51,7 @@ PROBLEMS = {
     "cross_site": (403, "다른 사이트에서 온 쓰기 요청"),
     "no_dm": (403, "이 친구의 디스코드 DM 연결이 없거나 아직 DM을 한 번도 보내지 않음"),
     "too_many_messages": (429, "1분에 20번 넘게 보냄"),
+    "no_picture": (404, "그 이름의 그림이 없음"),
     "db_unavailable": (503, "DB에 닿지 않음"),
     "internal": (500, "예상하지 못한 서버 오류"),
 }
@@ -134,6 +136,8 @@ class AppChat:
             log.error("app_chat_error %s trace=%s", type(e).__name__, trace)
             res = self._problem(Problem("internal"), trace)
         res.headers.update(HEADERS)
+        if req.get("cache") and res.status == 200:  # a picture of a picture set never changes (API-140)
+            res.headers["Cache-Control"] = req["cache"]
         return res
 
     async def _who(self, req, write: bool = False) -> dict:
@@ -210,11 +214,23 @@ class AppChat:
             via, kind = self._via(row["kakao_id"]), "chat"
         else:
             via = meta.get("transport") if meta.get("transport") in ("app", "discord") else self._via(row["reply_key"])
-            kind = ("ring" if meta.get("ring") else "proactive" if meta.get("proactive")
-                    else "reminder" if meta.get("reminder") else "note" if row["reply_to"] is None else "chat")
-        return {"id": row["id"], "from": "me" if row["role"] == "user" else "marong",
-                "text": (row["content"] or "").replace(LINK_MARK, "(일회용 링크)")[:20_000],
-                "at": row["created_at"].astimezone(self.tz).isoformat(timespec="seconds"), "via": via, "kind": kind}
+            kind = ("hello" if meta.get("hello") else "ring" if meta.get("ring") else "proactive"
+                    if meta.get("proactive") else "reminder" if meta.get("reminder")
+                    else "note" if row["reply_to"] is None else "chat")
+        out = {"id": row["id"], "from": "me" if row["role"] == "user" else "marong",
+               "text": (row["content"] or "").replace(LINK_MARK, "(일회용 링크)")[:20_000],
+               "at": row["created_at"].astimezone(self.tz).isoformat(timespec="seconds"), "via": via, "kind": kind}
+        picture = self._picture(meta.get("topic")) if row["role"] == "assistant" else None
+        if picture:
+            out["picture"] = picture
+        return out
+
+    @staticmethod
+    def _picture(key) -> dict | None:
+        """A picture topic's picture (SPEC-274): only one the picture list knows, removed ones too."""
+        found = picture_set() if isinstance(key, str) and TOPIC_KEY.fullmatch(key) else None
+        picture = found.get(key) if found else None
+        return {"src": picture.src, "alt": picture.alt} if picture else None
 
     @staticmethod
     def _via(key: str | None) -> str | None:
@@ -229,6 +245,20 @@ class AppChat:
 
     async def home(self, req):
         raise web.HTTPFound("/chat/")
+
+    async def picture(self, req):
+        """API-140: a picture topic's picture (SPEC-274, SPEC-269), for the chat page and the call page. Only names in
+        the picture list, removed ones too; anything else is no_picture. Not checked against Access again: the same
+        rule as chat.js (Access stands in front), and every friend sees the same pictures of Marong."""
+        set_name, file = req.match_info["set"], req.match_info["file"]
+        name = file[:-len(".webp")] if file.endswith(".webp") else ""
+        found = picture_set() if SET_NAME.fullmatch(set_name) and PICTURE_NAME.fullmatch(name) else None
+        picture = found.get(f"{set_name}/{name}") if found else None
+        if picture is None:
+            raise Problem("no_picture")
+        body = await asyncio.to_thread(picture.path.read_bytes)
+        req["cache"] = "public, max-age=31536000, immutable"
+        return web.Response(body=body, content_type="image/webp")
 
     async def page(self, req):
         found = self.files.get(req.match_info.get("name", ""))
@@ -306,8 +336,8 @@ class AppChat:
         try:
             link = await self.store.link(who["discord_user_id"])
             msg = DiscordIncoming(room, who["user_key"], text, kakao_id=key, proactive_preference=preference,
-                                  google_command=google_command(text), friend_id=who["friend_id"], dm_link=link,
-                                  via="app", presaved_id=saved_id)
+                                  google_command=google_command(text), topic_command=topic_phrase(text),
+                                  friend_id=who["friend_id"], dm_link=link, via="app", presaved_id=saved_id)
             async with self.client.room_lock(room):
                 self._took_up(room, saved_id)
                 self.pulse()  # '읽음' and '대답 중' once this answer holds the room (SPEC-148, SPEC-149)
@@ -422,6 +452,7 @@ class AppChat:
         app.router.add_post("/chat/api/messages", self.send)
         app.router.add_get("/chat/api/messages/wait", self.wait)
         app.router.add_put("/chat/api/devices/{installId}", self.device)
+        app.router.add_get("/chat/topics/{set}/{file}", self.picture)
         return app
 
     async def serve(self, host: str = "127.0.0.1") -> web.AppRunner:
