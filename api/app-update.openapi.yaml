@@ -1,0 +1,317 @@
+# 마롱이 앱 자동 업데이트 API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/app-update.md(SPEC-284~302), 도메인: docs/01-domain/app-update.md(CTX-021). DB 표 없음(릴리스 폴더, SPEC 3.1). 코드(구현은 GPT): marong/app_chat.py, marong/app_release.py, tools/app_release.py, apps/android/.../AppUpdate.java
+openapi: 3.1.0
+info:
+  title: 마롱이 앱 자동 업데이트 API
+  version: 0.1.0-draft
+  description: |-
+    앱 자동 업데이트 설계(CTX-021, 2026-11-17)가 더하는 계약이에요. 원본은 이 파일이고 코드는 이 파일을 따라가요(06단계). 구현은 GPT가 해요(동희님 2026-11-17 12:38 "설계만 여기서 하고, 구현은 지피티 시킬거임").
+
+    - 새 HTTP 경로는 두 개예요. 최신 릴리스 정보(API-141)와 그 APK 파일(API-142). 글 대화 서버(봇, 127.0.0.1:8796)가 `/chat/` 아래에서 줘요. 터널이 `/chat/` 아래만 봇으로 보내고, 그 앞에서 Cloudflare Access가 로그인을 확인해요.
+    - 부르는 쪽은 안드로이드 앱의 자바 코드예요(SPEC-290, SPEC-291). 웹뷰가 가진 그 주소의 쿠키를 `Cookie`로 보내고, 사용자 에이전트는 `MarongApp/<버전 이름>`이에요. 그 밖의 기기 정보는 보내지 않아요(REQ-316).
+    - 올리기·멈추기·상태(SPEC-287, SPEC-288)는 서버 안의 명령(`tools/app_release.py`)이라 HTTP 계약이 아니에요.
+
+    계약에서 정한 것(Claude 제안, 2026-11-17, 검토 대상).
+    1. 릴리스가 없거나 멈춤이면 API-141은 204예요(오류가 아님). 앱은 '새 버전 없음'으로 보고 다음 확인까지 기다려요.
+    2. API-142의 파일 이름이 형식에 맞지 않거나 최신이 아니면 400이 아니라 404 `no_release`예요. 앱은 API-141이 준 `url`만 부르니, 다른 이름은 옛 릴리스이거나 잘못 만든 요청이에요.
+    3. 두 경로 모두 글 대화와 같은 Access·허용 목록 확인을 하되, 디스코드 DM 연결 확인(`no_dm`)은 하지 않아요. 업데이트는 DM과 상관없어요.
+    4. Access 쿠키가 없거나 끝났을 때 Access가 터널 앞에서 돌려주는 로그인 넘겨주기(302)는 봇에 닿지 않아 이 계약 밖이에요. 앱은 넘겨주기를 따라가지 않고 '로그인이 끝남'으로 봐요(SPEC-290).
+    5. 두 응답 모두 `Cache-Control: no-store`예요. 릴리스는 바뀌고, APK는 친구만 받아야 해서 중간 캐시에 남기지 않아요.
+
+    깨지는 변경: 없음. 모두 새 경로예요. 0.2.1 앱은 이 경로를 부르지 않아요.
+
+    Open: 다운로드 이어받기(`Range`)는 넣지 않았어요(APK가 5MB 안팎). 실제 기기에서 받기가 자주 끊기면 다시 봐요.
+servers:
+- url: https://marong.corthex-hq.com
+  description: Cloudflare Access 뒤. 터널이 /chat/ 아래만 봇으로 보내요
+- url: http://127.0.0.1:8796
+  description: 서버 안에서 직접(배포 확인용)
+security:
+- cfAccess: []
+paths:
+  /chat/api/app/release:
+    get:
+      operationId: getAppRelease
+      summary: 최신 앱 릴리스
+      description: 앱이 창이 열릴 때, 푸시를 받았을 때, 하루 한 번 불러요. 단, 마지막 확인에서 6시간이 지났을 때만(SPEC-289). 서버는 요청마다 릴리스 폴더를 읽어요(SPEC-284).
+      x-corthex:
+        id: API-141
+        spec:
+        - SPEC-285
+        - SPEC-284
+        omit:
+          '400': 입력이 없음(쿼리·본문 없음)
+          '404': 경로가 이름으로 가리키는 것이 없음. 릴리스가 없으면 204
+          '409': 읽기만 함
+          '429': 앱이 6시간에 한 번만 물어요(SPEC-289). 봇에 따로 횟수 제한을 두지 않음
+      responses:
+        '200':
+          description: 최신 릴리스가 있어요
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppRelease'
+              examples:
+                release:
+                  value:
+                    versionCode: 6
+                    versionName: 0.2.3
+                    size: 5040000
+                    sha256: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+                    url: /chat/app/marong-0.2.3-6.apk
+        '204':
+          description: 올린 릴리스가 없거나, 멈춤이거나, 폴더의 릴리스가 틀림(SPEC-284). 본문 없음
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/NotAllowed'
+        '500':
+          $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/app/{file}:
+    get:
+      operationId: getAppApk
+      summary: 최신 릴리스의 APK 파일
+      description: 앱이 API-141의 `url`로 불러요(SPEC-291). 그 이름이 지금 최신 릴리스의 파일 이름과 같을 때만 줘요. 파일을 나눠 읽어 보내고 `Content-Length`를 붙여요. 로그는 `app_release apk sent code=<버전 코드>` 한 줄이고 친구 이름·이메일·기기 정보는 남기지 않아요(REQ-312).
+      x-corthex:
+        id: API-142
+        spec:
+        - SPEC-286
+        - SPEC-284
+        omit:
+          '400': 형식이 틀린 이름도 404(계약에서 정한 것 2)
+          '409': 읽기만 함
+          '429': 앱은 버전마다 받기를 세 번까지만 해요(SPEC-293). 봇에 따로 횟수 제한을 두지 않음
+      parameters:
+      - name: file
+        in: path
+        required: true
+        description: 'APK 파일 이름. 형식 `marong-<버전 이름>-<버전 코드>.apk`(SPEC 3.1 `file`)'
+        schema:
+          type: string
+          maxLength: 40
+          pattern: ^marong-[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}-[0-9]{1,10}\.apk$
+        examples:
+          latest:
+            value: marong-0.2.3-6.apk
+      responses:
+        '200':
+          description: APK 파일
+          headers:
+            Content-Length:
+              description: 파일 크기(바이트). API-141의 `size`와 같아요
+              schema:
+                type: integer
+                minimum: 1
+                maximum: 209715200
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/vnd.android.package-archive:
+              schema:
+                type: string
+                contentMediaType: application/vnd.android.package-archive
+              examples:
+                apk:
+                  summary: APK 바이트(zip). 예시는 앞부분만
+                  value: PK…
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/NotAllowed'
+        '404':
+          description: 지금 최신 릴리스의 파일이 아님(옛 버전, 다른 이름, 형식이 틀림, 멈춤, 릴리스 없음)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                old-version:
+                  value:
+                    type: https://marong.corthex-hq.com/problems/no-release
+                    title: 지금 받을 수 있는 앱 파일이 아님
+                    status: 404
+                    code: no_release
+                    traceId: 7c3e0d2a91b84f15
+        '500':
+          $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+components:
+  x-corthex:
+    errors:
+      unauthenticated:
+        status: 401
+        meaning: Access 로그인 증명이 없거나 맞지 않음
+        message: 없음(앱이 조용히 처리)
+        client: 이번 확인을 끝내고 실패로 세지 않음(SPEC-290). 앱 창을 열어 Access로 다시 들어오면 다음 확인에서 풀려요
+      not_allowed:
+        status: 403
+        meaning: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+        message: 없음(앱이 조용히 처리)
+        client: 401과 같음
+      no_release:
+        status: 404
+        meaning: 요청한 APK가 지금 최신 릴리스의 파일이 아님
+        message: 없음(앱이 조용히 처리)
+        client: 받던 파일을 지우고 실패 1번(SPEC-291, SPEC-293). 다음 확인에서 새 릴리스 정보를 다시 받아요
+      db_unavailable:
+        status: 503
+        meaning: Access 공개키나 DB에 닿지 않음
+        message: 없음(앱이 조용히 처리)
+        client: 이번 확인을 끝내고 확인 시각을 적지 않음. 다음 계기(창 열림·푸시·하루 한 번)에 다시
+      internal:
+        status: 500
+        meaning: 예상하지 못한 서버 오류
+        message: 없음(앱이 조용히 처리)
+        client: 503과 같음
+  securitySchemes:
+    cfAccess:
+      type: apiKey
+      in: header
+      name: Cf-Access-Jwt-Assertion
+      description: Cloudflare Access가 붙이는 JWT(RS256). 앱은 웹뷰가 가진 Access 쿠키를 보내고, Access가 이 헤더를 붙여 봇으로 보내요. 봇은 글 대화와 같이 서명·aud·iss·exp를 확인하고 email을 허용 목록과 맞춰요. DM 연결은 보지 않아요.
+  headers:
+    NoStore:
+      description: 캐시에 남기지 않음
+      schema:
+        type: string
+        const: no-store
+  responses:
+    Unauthenticated:
+      description: 로그인 증명이 없거나 맞지 않음
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            no-proof:
+              value:
+                type: https://marong.corthex-hq.com/problems/unauthenticated
+                title: Access 로그인 증명이 없거나 맞지 않음
+                status: 401
+                code: unauthenticated
+                traceId: 0af7651916cd43dd
+    NotAllowed:
+      description: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            not-allowed:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-allowed
+                title: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+                status: 403
+                code: not_allowed
+                traceId: 00f067aa0ba902b7
+    DbUnavailable:
+      description: Access 공개키나 DB에 닿지 않음
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            db:
+              value:
+                type: https://marong.corthex-hq.com/problems/db-unavailable
+                title: DB에 닿지 않음
+                status: 503
+                code: db_unavailable
+                traceId: 4bf92f3577b34da6
+    Internal:
+      description: 예상하지 못한 서버 오류
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            internal:
+              value:
+                type: https://marong.corthex-hq.com/problems/internal
+                title: 예상하지 못한 서버 오류
+                status: 500
+                code: internal
+                traceId: 4bf92f3577b34da6
+  schemas:
+    AppRelease:
+      type: object
+      description: 최신 릴리스(TERM-093). 릴리스 폴더의 `release.json`(SPEC 3.1)에서 앱이 쓰는 칸만 줘요. 패키지 이름과 올린 때는 주지 않아요
+      additionalProperties: false
+      required:
+      - versionCode
+      - versionName
+      - size
+      - sha256
+      - url
+      properties:
+        versionCode:
+          type: integer
+          description: 버전 코드(TERM-094). 앱은 지금 자기 것보다 클 때만 받아요
+          minimum: 1
+          maximum: 2100000000
+        versionName:
+          type: string
+          description: 버전 이름(TERM-095). 알림 글에만 써요
+          maxLength: 11
+          pattern: ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$
+        size:
+          type: integer
+          description: APK 크기(바이트), 200MB 이하
+          minimum: 1
+          maximum: 209715200
+        sha256:
+          type: string
+          description: APK의 SHA-256(16진수 소문자)
+          pattern: ^[0-9a-f]{64}$
+        url:
+          type: string
+          description: 같은 주소 안의 APK 경로(API-142). 앱은 `/chat/app/`로 시작하고 `..`·`//`·`?`가 없을 때만 써요(SPEC-290)
+          maxLength: 50
+          pattern: ^/chat/app/marong-[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}-[0-9]{1,10}\.apk$
+    Problem:
+      type: object
+      required:
+      - title
+      - status
+      - code
+      - traceId
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+          maxLength: 200
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          maxLength: 300
+        instance:
+          type: string
+          format: uri-reference
+        code:
+          type: string
+          enum:
+          - unauthenticated
+          - not_allowed
+          - no_release
+          - db_unavailable
+          - internal
+        traceId:
+          type: string
+          maxLength: 32

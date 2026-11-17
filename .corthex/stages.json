@@ -108,9 +108,14 @@
           "level": "info",
           "message": "05 원본을 marong/ 폴더로 바꿈(PR #25와 같은 바꿈). 018의 app_rings 주석은 TBL-102를 다시 정의하지 않게 '(defined as TBL-102 in 015)'로 씀",
           "at": "2026-11-16"
+        },
+        {
+          "level": "info",
+          "message": "CTX-021 앱 자동 업데이트는 DB 표가 없음(TBL 안 씀): 서버는 릴리스 폴더의 release.json·paused 파일(SPEC 3.1), 앱은 SharedPreferences marong_update(SPEC 3.4)",
+          "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-16T14:34:04+00:00"
+      "updated": "2026-11-17T03:42:26+00:00"
     },
     "06-api": {
       "state": "in_progress",
@@ -131,9 +136,14 @@
           "level": "info",
           "message": "source를 api/로 넓히자 app-chat 계약·014·015의 옛 참조(docs/app-chat.md·app-ring.md의 SPEC-1xx·REQ-1xx) 27개가 unknown-ref로 보임. 이번 설계와 무관한 기존 경고",
           "at": "2026-11-16"
+        },
+        {
+          "level": "info",
+          "message": "CTX-021 계약 api/app-update.openapi.yaml: API-141 GET /chat/api/app/release(200·204·401·403·500·503), API-142 GET /chat/app/{file}(200·401·403·404 no_release·500·503). openapi-spec-validator 통과, 예시 19개가 스키마에 맞음. 깨지는 변경 없음",
+          "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-16T14:41:41+00:00"
+      "updated": "2026-11-17T03:42:26+00:00"
     },
     "07-sitemap": {
       "state": "in_progress",
