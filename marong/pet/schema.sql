@@ -1,5 +1,5 @@
 -- Marong pet service: tables of the new database marong_pet (docs/04-functional-spec/pet.md SPEC-310~369,
--- CTX-022~025). Design draft from stage 05 (2026-11-17): the schema is not frozen.
+-- CTX-022~025). Stage 05 (2026-11-17); the table shapes were frozen by D72 (2026-11-17 16:33 KST).
 -- The friend Marong's database (marong) and its tables do not change (REQ-418). This file builds the pet
 -- database from empty; later changes go to marong/pet/migrations/NNN_<name>.sql and are never edited once applied.
 -- Rules kept here:
