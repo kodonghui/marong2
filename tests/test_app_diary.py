@@ -40,6 +40,48 @@ def fixtures(db):
     """, None)
 
 
+async def check_look(http, db, store):
+    card = {"hair": "long", "glasses": "round", "top": "navy"}
+    path = PREFIX + "/look"
+    h = auth(write=True)
+
+    async def request(method, headers):
+        return await http.request(method, path, headers=headers, **({"json": card} if method == "PUT" else {}))
+
+    db.admin("INSERT INTO marong.diary_looks(friend_id,hair,glasses,top) VALUES (1,'short','square','black')")
+    empty = await request("GET", h)
+    assert empty.status == 200 and empty.headers["Cache-Control"] == "no-store"
+    assert await empty.json() == {"look": None}
+    for method in ("GET", "PUT", "DELETE"):
+        await problem(await request(method, {"Origin": ORIGIN}), 401, "unauthenticated")
+        await problem(await request(method, auth(STRANGER, write=True)), 403, "not_allowed")
+    db.admin("UPDATE marong.discord_dm_links SET channel_id=NULL,last_incoming_at=NULL WHERE friend_id=2")
+    for method in ("GET", "PUT", "DELETE"):
+        await problem(await request(method, h), 403, "no_dm")
+    db.admin("UPDATE marong.discord_dm_links SET channel_id='200000000000000010',last_incoming_at=now() WHERE friend_id=2")
+    for method in ("PUT", "DELETE"):
+        await problem(await request(method, auth(write=True, origin="https://other.test")), 403, "cross_site")
+    for invalid in ({**card, "hair": "arbitrary"}, {"hair": "long"}, {**card, "top": ["navy"]},
+                    {**card, "friend_id": 1}):
+        await problem(await http.put(path, headers=h, json=invalid), 400, "invalid_request")
+    assert await (await request("GET", h)).json() == {"look": None}
+    saved = await request("PUT", h)
+    assert saved.status == 200 and await saved.json() == {"look": card}
+    assert await (await request("GET", h)).json() == {"look": card}
+    other, = db.admin("SELECT hair,glasses,top FROM marong.diary_looks WHERE friend_id=1")
+    assert other == ("short", "square", "black")
+    for _ in range(2):
+        cleared = await request("DELETE", h)
+        assert cleared.status == 204 and not await cleared.read()
+    assert await (await request("GET", h)).json() == {"look": None}
+    assert db.admin("SELECT hair,glasses,top FROM marong.diary_looks WHERE friend_id=2") == [(None, None, None)]
+    for error, status, code in ((psycopg.OperationalError("synthetic"), 503, "db_unavailable"),
+                                (RuntimeError("synthetic"), 500, "internal")):
+        with patch.object(store, "app_login", side_effect=error):
+            for method in ("GET", "PUT", "DELETE"):
+                await problem(await request(method, h), status, code)
+
+
 async def run(db):
     certs = Certs()
     client = httpx.AsyncClient(transport=httpx.MockTransport(certs))
@@ -95,6 +137,7 @@ async def run(db):
                 with patch.object(store, "app_login", side_effect=error):
                     for path in paths:
                         await problem(await get(path, h), status, code)
+            await check_look(http, db, store)
     finally:
         await client.aclose()
         await store.close()
@@ -108,4 +151,4 @@ if __name__ == "__main__":
         asyncio.run(run(db))
     finally:
         db.close()
-    print("TC-166: five diary read routes verified")
+    print("TC-166: five diary read routes verified; TC-170: look API contract verified")

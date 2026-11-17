@@ -15,6 +15,11 @@ _PREFIX = "/chat/diary/api"
 _DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _MONTH = re.compile(r"[0-9]{4}-[0-9]{2}")
 _VISIBLE = "state='ready' AND NOT hidden"
+_LOOK = {
+    "hair": frozenset({"long", "bob", "short", "ponytail", "curly"}),
+    "glasses": frozenset({"none", "round", "square"}),
+    "top": frozenset({"white", "black", "gray", "navy", "beige", "pink", "yellow", "green"}),
+}
 
 
 def _iso(value):
@@ -139,7 +144,40 @@ class AppDiary:
         req["cache"] = "private, max-age=31536000, immutable"
         return web.Response(body=row["image"], content_type=f"image/{row['format']}")
 
+    async def look(self, req):
+        friend = (await self.chat._who(req))["friend_id"]
+        row = await self.store._one(
+            "SELECT hair, glasses, top FROM marong.diary_looks WHERE friend_id=%s AND hair IS NOT NULL",
+            (friend,),
+        )
+        return self.chat._json(200, {"look": row})
+
+    async def put_look(self, req):
+        friend = (await self.chat._who(req, write=True))["friend_id"]
+        data = await self.chat._body(req)
+        if set(data) != set(_LOOK) or any(not isinstance(data[field], str) or data[field] not in values
+                                          for field, values in _LOOK.items()):
+            raise bad(("look", "bad_format"))
+        row = await self.store._one(
+            """INSERT INTO marong.diary_looks (friend_id, hair, glasses, top) VALUES (%s,%s,%s,%s)
+            ON CONFLICT (friend_id) DO UPDATE SET hair=EXCLUDED.hair, glasses=EXCLUDED.glasses,
+                top=EXCLUDED.top, updated_at=now()
+            RETURNING hair, glasses, top""", (friend, data["hair"], data["glasses"], data["top"]),
+        )
+        return self.chat._json(200, {"look": row})
+
+    async def clear_look(self, req):
+        friend = (await self.chat._who(req, write=True))["friend_id"]
+        await self.store._one(
+            """UPDATE marong.diary_looks SET hair=NULL, glasses=NULL, top=NULL, updated_at=now()
+            WHERE friend_id=%s AND hair IS NOT NULL RETURNING friend_id""", (friend,),
+        )
+        return web.Response(status=204)
+
     def register(self, app):
         for path, handler in (("/latest", self.latest), ("/days", self.month), ("/days/{date}", self.day),
                               ("/hidden", self.hidden), ("/drawings/{id}", self.drawing)):
             app.router.add_get(_PREFIX + path, handler, allow_head=False)
+        app.router.add_get(_PREFIX + "/look", self.look, allow_head=False)
+        app.router.add_put(_PREFIX + "/look", self.put_look)
+        app.router.add_delete(_PREFIX + "/look", self.clear_look)
