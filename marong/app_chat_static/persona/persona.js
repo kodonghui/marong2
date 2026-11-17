@@ -27,6 +27,7 @@ const ERRORS = {
 const FAILED = '잠깐 문제가 생겼어. 다시 해 볼래?';
 let card, chose, instruction, busy = false, limitedUntil = 0;
 let started = false;
+let retryTimer = null, retryDelay = 5000;
 
 function element(tag, text = '', className = '') {
   const node = document.createElement(tag);
@@ -79,15 +80,25 @@ function error(r) {
 function retryLoad(r) {
   error(r);
   $('reload').hidden = r.status === 401 || r.status === 403;
+    if (!retryTimer && (r.status === 0 || r.status >= 500)) {
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        retryDelay = Math.min(30_000, retryDelay * 2);
+        void load();
+      }, retryDelay);
+    }
 }
 function renderGroup(label, entries, selected, act, locked = () => false) {
   const section = element('section');
   if (label) section.append(element('h3', label));
   const group = element('div', '', 'persona-card-group');
+  group.setAttribute('role', 'radiogroup');
+  group.setAttribute('aria-label', label || '선톡');
   for (const [key, name] of entries) {
     const item = button(name, () => act(key));
     item.disabled = busy || locked(key);
-    item.setAttribute('aria-pressed', String(key === selected));
+    item.setAttribute('role', 'radio');
+    item.setAttribute('aria-checked', String(key === selected));
     group.append(item);
   }
   section.append(group);
@@ -230,6 +241,7 @@ async function load() {
   theme();
   const r = await request(page === 'card' ? '/card' : '/instructions');
   if (r.status !== 200) { retryLoad(r); return; }
+  clearTimeout(retryTimer); retryTimer = null; retryDelay = 5000;
   try { sessionStorage.removeItem('marong.persona.login'); } catch {}
   $('content').hidden = false;
   $('reload').hidden = true;

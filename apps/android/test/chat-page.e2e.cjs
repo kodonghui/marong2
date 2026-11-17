@@ -673,6 +673,73 @@ describe('chat page', { skip }, () => {
     }
   });
 
+  it('renders friend card states with both themes at 360 and 430 pixels', { timeout: 20_000 }, async () => {
+    for (const width of [360, 430]) {
+      for (const [at, theme] of [[DAY, 'chestnut'], [NIGHT, 'night']]) {
+        for (const state of ['none', 'asking', 'draft', 'set']) {
+          const context = await browser.newContext({...PHONE, viewport: {width, height: 800}});
+          contexts.push(context);
+          const page = await context.newPage();
+          await page.clock.setFixedTime(at);
+          const profile = {state, values: {support: state === 'none' ? null : 'listen', advice: 'asked',
+            honesty: 'gentle', lead: 'follow'}, proactive: 'normal', callFirst: true,
+            sentence: ['set', 'draft'].includes(state) ? '힘들다고 하면 일단 들을게.' : null,
+            setAt: null, source: null, want: null, rules: [], ruleMax: 20};
+          await page.route('**/chat/persona/api/card', route => route.fulfill({status: 200, json: profile}));
+          await page.route('**/chat/persona/api/instructions', route => route.fulfill({status: 200, json: {understood: null}}));
+          await page.goto(site.url + '/chat/persona/');
+          await page.getByRole('radiogroup', {name: '힘들 때 나한테 제일 바라는 건?'}).waitFor();
+          assert.equal(await page.getByRole('radiogroup').count(), 5);
+          assert.equal(await page.locator('html').getAttribute('data-theme'), theme);
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width);
+          assert.equal(await page.locator('#make').isVisible(), state !== 'set');
+          assert.ok(await page.locator('#content button:visible').evaluateAll(items =>
+            items.every(item => item.getBoundingClientRect().height >= 48)));
+          await context.close();
+        }
+      }
+    }
+  });
+
+  it('shows permission states on both friend pages', { timeout: 20_000 }, async () => {
+    for (const width of [360, 430]) {
+      const context = await browser.newContext({...PHONE, viewport: {width, height: 800}});
+      contexts.push(context);
+      const page = await context.newPage();
+      await page.route('**/chat/persona/api/**', route => route.fulfill({status: 403, json: {code: 'feature_off'}}));
+      for (const path of ['/chat/persona/', '/chat/persona/instructions']) {
+        await page.goto(site.url + path);
+        await page.getByText('이건 아직 준비 중이야', {exact: true}).waitFor();
+        assert.equal(await page.locator('#content').isVisible(), false);
+        assert.equal(await page.getByRole('button', {name: '다시 해 볼게', exact: true}).isVisible(), false);
+      }
+      await context.close();
+    }
+  });
+
+  it('recovers a failed friend card read after five seconds', { timeout: 20_000 }, async () => {
+    const context = await browser.newContext(PHONE);
+    contexts.push(context);
+    const page = await context.newPage();
+    await page.clock.install({time: DAY});
+    let reads = 0;
+    await page.route('**/chat/persona/api/card', route => {
+      reads++;
+      if (reads === 1) return route.fulfill({status: 503, json: {code: 'db_unavailable'}});
+      return route.fulfill({status: 200, json: {state: 'set', values: {support: 'listen', advice: 'asked',
+        honesty: 'gentle', lead: 'follow'}, proactive: 'normal', callFirst: true,
+        sentence: '힘들다고 하면 일단 들을게.', source: null, setAt: null, want: null, rules: [], ruleMax: 20}});
+    });
+    await page.route('**/chat/persona/api/instructions', route => route.fulfill({status: 200, json: {understood: null}}));
+    await page.goto(site.url + '/chat/persona/');
+    await page.getByText('잠깐 문제가 생겼어. 조금 있다가 다시 해 줘', {exact: true}).waitFor();
+    await page.clock.runFor(5100);
+    await page.getByRole('radio', {name: '그냥 들어주기', exact: true}).waitFor();
+    assert.equal(reads, 2);
+    assert.equal(await page.locator('#reload').isVisible(), false);
+    await context.close();
+  });
+
   it('changes friend choices and keeps a failed rule entry', { timeout: 20_000 }, async () => {
     for (const width of [360, 430]) {
       const context = await browser.newContext({...PHONE, viewport: {width, height: 800}});
@@ -692,11 +759,11 @@ describe('chat page', { skip }, () => {
       await page.route('**/chat/persona/api/instructions', route => route.fulfill({status: 200, json: {understood: null}}));
       await page.route('**/chat/persona/api/rules', route => route.fulfill({status: 503, json: {code: 'db_unavailable'}}));
       await page.goto(site.url + '/chat/persona/');
-      const choice = page.getByRole('button', {name: '솔직하게', exact: true});
+      const choice = page.getByRole('radio', {name: '솔직하게', exact: true});
       await choice.click();
       await page.getByText('바꿨어', {exact: true}).waitFor();
-      assert.equal(await choice.getAttribute('aria-pressed'), 'true');
-      assert.equal(await page.getByRole('button', {name: '보통', exact: true}).isDisabled(), true);
+      assert.equal(await choice.getAttribute('aria-checked'), 'true');
+      assert.equal(await page.getByRole('radio', {name: '보통', exact: true}).isDisabled(), true);
       await page.getByRole('button', {name: '더하기', exact: true}).first().click();
       const field = page.getByRole('textbox', {name: '이렇게 부르지 마', exact: true});
       await field.fill('야');
