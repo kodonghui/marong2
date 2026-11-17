@@ -162,9 +162,15 @@
       "updated": "2026-11-16T14:52:28+00:00"
     },
     "09-mockup": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "체크포인트 1(방향): 동희님 선택 대기, 추천 통화 A·글 대화 A로 진행 중. 체크포인트 2: 개발 전 토큰 얼리기",
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "CTX-020 목업: 통화 A·글 대화 A와 토큰 size.topic-picture 240px 승인(작업 스레드, '목업 A안 모두 승인' 12:19 KST)",
+          "by": "the maintainer",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "CTX-020 없음. 앱 스스로 업데이트(CTX-021)는 07~09에서 따로",
       "checks": [
         {
           "level": "info",
@@ -172,7 +178,7 @@
           "at": "2026-11-16"
         }
       ],
-      "updated": "2026-11-16T15:06:46+00:00"
+      "updated": "2026-11-17T03:25:10+00:00"
     },
     "10-wbs": {
       "state": "in_progress",
