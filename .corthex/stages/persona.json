@@ -1,0 +1,185 @@
+{
+  "format": 1,
+  "project": "marong",
+  "part": "persona",
+  "stages": {
+    "01-domain": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "구현 전 2차 논의: docs/01-domain/persona.md CTX-008~013·TERM-040~079와 8절 질문 1~4(추천안으로 씀). 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
+      "checks": [
+        {
+          "level": "info",
+          "message": "성향 1~4단계 도메인 CTX-008~013·TERM-040~079(docs/01-domain/persona.md, PR #30). 8절 질문 1~4는 추천안으로 썼고 구현 전 2차 논의에서 확인",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "02-prd": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "범위 동결: 0단계 REQ-202~212(D24로 바로 반영)와 1~4단계 REQ-213~259는 2차 논의에서. 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
+      "checks": [
+        {
+          "level": "info",
+          "message": "성향 0단계 고침 REQ-202~212(docs/02-prd/persona.md, PR #30). D24로 바로 반영이라 범위 동결은 1~4단계와 함께 2차 논의에서",
+          "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "성향 1~4단계 REQ-213~259(47개, 모두 proposed). REQ 범위 202~259를 다 씀",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "03-user-flow": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트: FL-124~139. 2차 논의에서",
+      "checks": [
+        {
+          "level": "info",
+          "message": "성향 1~4단계 FL-124~139. 기능 Must REQ 모두 흐름에 있음, Mermaid 16개 Chromium mermaid.parse 통과",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "04-functional-spec": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "명세 동결: 0단계 SPEC-184~191·AI-11·12, 1~4단계 SPEC-192~242·AI-13~19(숫자 출발값 [새 제안]). 2차 논의에서",
+      "checks": [
+        {
+          "level": "info",
+          "message": "성향 0단계 SPEC-184~191·AI-11·AI-12(docs/04-functional-spec/persona.md, PR #30). 새 FL 없음(나가는 경로는 그대로)",
+          "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "성향 1~4단계 SPEC-192~242(51개)와 AI-13~19. 기능 REQ-213~258 모두 SPEC 행에 연결, 표 칸 수·용어 검사·Mermaid 통과. 숫자 출발값은 [새 제안]으로 표시해 2차 논의에서 봄",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "05-erd": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "스키마 동결: 019_persona.sql TBL-115~124·127~134와 docs/05-erd/persona.md 8절 질문 3개. 2차 논의에서",
+      "checks": [
+        {
+          "level": "info",
+          "message": "persona 1~4단계 05 초안: 019_persona.sql TBL-115~124·127~133(17개 표, talk_graph 스키마), docs/05-erd/persona.md. 시험 DB 두 번 적용·제약 시험 76개 통과. 2차 논의 질문 3개",
+          "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "persona 05 고침: 06 계약이 도구 호출 기록을 요구해 TBL-134 persona_tool_calls를 더함(18개 표, TBL-115~124·127~134). 시험 DB 다시 두 번 적용, 제약·권한 시험 81개 통과",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "06-api": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "계약 검토: api/persona.openapi.yaml API-127~136과 app-chat 0.4.0 card. 2차 논의에서",
+      "checks": [
+        {
+          "level": "info",
+          "message": "persona 1~4단계 06 초안: api/persona.openapi.yaml API-127~136(친구 약속·친구 규칙·맞춤형 지침·기억 목록·잊기·카드 답), 오류 코드 13개, 계약 결정 10개. openapi-spec-validator 통과, 예시 116개가 스키마에 맞음, 응답 표 빠짐 없음, Prism mock이 10개 연산을 띄움, Schemathesis 10개 연산 실행(mock이 증명을 안 봐서 ST401만 실패: mock 한계)",
+          "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "app-chat.openapi.yaml 0.4.0-draft: Message.card(persona ChatCard 파일 간 참조)를 더함. 새 칸이라 깨지는 변경 아님. 예시 56개 통과, Prism에서 참조가 풀림. 같은 파일의 default 응답 없음·409 omit 없음은 전부터 있던 것",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "07-sitemap": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "화면 구조 합의: SCR-120~122(공통 sitemap.yaml에 합쳐짐), SCR-123 카드는 SCR-107 안 부품. 2차 논의에서",
+      "checks": [
+        {
+          "level": "info",
+          "message": "2026-11-17 성향 맞춤 SCR-120~122를 sitemap.yaml에 넣고(PR #30 docs/08-screens/persona.md 1절 그대로) 보드·목록·슬라이드를 다시 그림. 그 ID(FL-124~135, TERM-040~073, CTX-008·011)는 PR #30이 합쳐지기 전까지 이 브랜치에서 unknown-ref",
+          "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "성향 맞춤(CTX-008~012) 새 화면 SCR-120 /chat/persona/, SCR-121 /chat/persona/instructions, SCR-122 /chat/persona/memory(SCR-123 카드는 SCR-107 안 부품이라 사이트맵 밖). sitemap.yaml 조각은 docs/08-screens/persona.md §1, sitemap.yaml은 일기 스레드가 합침. SCR-124~129 비워 둠",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "08-screen-states": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "화면 정의 승인: docs/08-screens/persona.md SCR-120~123(상태 37개)와 wireframes-persona.html. 2차 논의에서",
+      "checks": [
+        {
+          "level": "info",
+          "message": "성향 맞춤 화면 정의 docs/08-screens/persona.md와 SCR-120~123(상태 37개). 회색 와이어프레임 wireframes-persona.html 74틀(37상태×360·430px), Playwright로 넘침 0·누르는 곳 44px 이상 확인. 오류 문구는 api/persona.openapi.yaml 13개 코드에서",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "09-mockup": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "방향 선택: 후보 A·B(추천 네 화면 모두 A, design/persona-candidates.md). 2차 논의에서. 고르면 고르지 않은 대지를 캔버스 아래 비교 칸으로",
+      "checks": [
+        {
+          "level": "info",
+          "message": "성향 맞춤 목업 후보 A(칩 한 장)·B(줄과 아래 칸) 대지 12개(360px, 밤하늘·군밤 크림), 넘침 0, 누르는 곳 44px 이상, 대비 5.27~15.77:1. 비교와 추천(네 화면 A): design/persona-candidates.md, 그림은 프로젝트 파일 persona-mockup-20261117/. 새 토큰 없음",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "10-wbs": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "0단계 TASK-200~210(docs/10-wbs/persona-stage0.md) 시작 가능. 1~4단계 TASK-211~259는 2차 논의 끝·0단계 합침·이 설계 PR 합친 뒤, 순서 1 → 3 → 2 → 4단계",
+      "checks": [
+        {
+          "level": "info",
+          "message": "성향 0단계 TASK-200~210(docs/10-wbs/persona-stage0.md, Owner GPT, 맨 위 GPT 인계). 시작 조건: PR #27을 main에 합친 뒤",
+          "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "성향 1~4단계 WBS docs/10-wbs/persona.md: TASK-211~259(49개, Owner GPT, 맨 위 GPT 인계), 순서 1 → 3 → 2 → 4단계. 검사: SPEC-192~242 51행 모두 작업 있음, 의존 고리 0, 작업마다 TC 끝 조건",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "12-qa": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "0단계 TC-230~255, 1~4단계 TC-256~289·330~378(docs/12-qa/persona.md). 돌리는 쪽 GPT, 진짜 모델 시험 비용 상한은 2차 논의에서",
+      "checks": [
+        {
+          "level": "info",
+          "message": "성향 0단계 TC-230~255(docs/12-qa/persona.md). 돌리는 쪽 GPT, 아직 안 돌림",
+          "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "성향 1~4단계 시험 계획 TC-256~289·330~378(83개): SPEC-192~242 받아들임 조건 51행, API-127~136 나열한 응답 모두, 화면 상태 34개, 레드팀 7개(진짜 모델·세 번, 비용은 2차 논의), 브라우저 걷기·실제 폰. 돌린 것 0",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T05:49:16+00:00"
+    }
+  }
+}

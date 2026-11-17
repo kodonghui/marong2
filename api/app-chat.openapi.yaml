@@ -1,8 +1,8 @@
-# 마롱이 글 대화 API 계약(OpenAPI 3.1). 설계: docs/app-chat.md(2단계), docs/app-ring.md(3단계), docs/04-functional-spec/call-first.md(선 전화·그림 화두), DB: marong/migrations/014_app_chat.sql(TBL-101), 015_app_ring.sql(TBL-102), 018_call_first.sql
+# 마롱이 글 대화 API 계약(OpenAPI 3.1). 설계: docs/app-chat.md(2단계), docs/app-ring.md(3단계), docs/04-functional-spec/call-first.md(선 전화·그림 화두), docs/04-functional-spec/persona.md(고르기 카드), DB: marong/migrations/014_app_chat.sql(TBL-101), 015_app_ring.sql(TBL-102), 018_call_first.sql
 openapi: 3.1.0
 info:
   title: 마롱이 글 대화 API
-  version: 0.3.0-draft
+  version: 0.4.0-draft
   description: |-
     마롱이 앱과 브라우저의 글 대화 화면(SCR-107)이 디스코드 DM 봇과 주고받는 계약이에요. 원본은 이 파일이고 코드는 이 파일을 따라가요(06단계). 통화 API(`api/openapi.yaml`)와는 따로예요.
 
@@ -20,6 +20,7 @@ info:
     5. 기기 등록은 없으면 201, 있으면 200이에요. 다른 친구가 쓰던 installId면 지금 로그인한 친구로 옮겨요(SPEC-115). 그래서 기기 경로에는 404가 없어요.
     6. (0.2.0, 3단계) 기기 등록의 `ring`은 선택이에요. 벨 상태를 보고하지 않은 앱은 약속 전화를 디스코드로 받아요(SPEC-129). 응답과 /me의 `ring`은 늘 있어요. 약속 전화의 받기는 통화 서버 웹소켓 `/live`의 `ring` 값(API-107)이라 이 파일에는 없어요.
     7. (0.3.0, 선 전화·그림 화두) 메시지에 `picture: {src, alt}`(그림이 있는 마롱이 말만, SPEC-274)와 종류 `hello`(못 받은 선 전화 뒤의 말, SPEC-270)를 더해요. 새 칸·새 값이라 깨지는 변경이 아니에요. 그림 파일 경로(API-140)는 `api/call-first.openapi.yaml`에 있어요.
+    8. (0.4.0, 성향 맞춤) 마롱이 말에 고르기 카드 `card`(SCR-123, SPEC-192·193·196·231·238)를 더해요. 모양은 `api/persona.openapi.yaml`의 ChatCard 하나이고 답은 API-136으로 해요. `status`·`answer`는 목록을 부른 때의 지금 값이라 같은 메시지를 다시 받으면 바뀌어 있을 수 있어요. 새 칸이라 깨지는 변경이 아니에요. 글 대화는 봇이 내보내는 페이지라 앱 버전과 상관없이 새 chat.js가 카드를 그려요. 카드를 못 그린 페이지에서도 친구는 칸 글을 글로 써서 답할 수 있어요(SCR-123).
 servers:
 - url: https://marong.corthex-hq.com
   description: Cloudflare Access 뒤. 터널이 /chat/ 아래만 봇으로 보내요
@@ -107,6 +108,7 @@ paths:
         - SPEC-148
         - SPEC-274
         - SPEC-270
+        - SPEC-192
         omit:
           '404': 없는 before는 그 앞의 메시지를 줌(빈 목록일 수 있음)
           '429': 읽기만 함
@@ -178,6 +180,48 @@ paths:
                     hasMore: true
                     readUpTo: 48389
                     answeredUpTo: 48389
+                card:
+                  summary: 첫 질문 카드가 붙은 마롱이 말(0.4.0)
+                  value:
+                    messages:
+                    - id: 48502
+                      from: me
+                      text: 안녕
+                      at: '2026-11-18T10:00:02+09:00'
+                      via: app
+                      kind: chat
+                    - id: 48503
+                      from: marong
+                      text: |-
+                        안녕! 반가워 😊
+
+                        힘들 때 나한테 제일 바라는 건?
+                      at: '2026-11-18T10:00:09+09:00'
+                      via: app
+                      kind: chat
+                      card:
+                        id: 901
+                        kind: card_question
+                        step: 1
+                        options:
+                        - value: listen
+                          label: 그냥 들어주기
+                        - value: side
+                          label: 내 편
+                        - value: solve
+                          label: 같이 방법 찾기
+                        - value: distract
+                          label: 기분 전환
+                        - value: chat
+                          label: 그냥 수다
+                        - value: ask
+                          label: 그때그때 물어봐
+                        status: open
+                        answer: null
+                        expiresAt: '2026-11-19T10:00:09+09:00'
+                    hasMore: false
+                    readUpTo: 48502
+                    answeredUpTo: 48502
                 first:
                   value:
                     messages: []
@@ -895,6 +939,8 @@ components:
           - hello
         picture:
           $ref: '#/components/schemas/Picture'
+        card:
+          $ref: './persona.openapi.yaml#/components/schemas/ChatCard'
       additionalProperties: false
     Picture:
       type: object

@@ -1,0 +1,124 @@
+{
+  "format": 1,
+  "project": "marong",
+  "part": "pet",
+  "stages": {
+    "01-domain": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 1~3(한 번에 초안): docs/01-domain/pet.md의 시간 줄, 4절 CTX-022·023 규칙, 8절 질문 1~3(서비스를 어디에 둘지, 캐릭터 만들기 결제 시점, 빠진 것). 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘. 답 전에는 추천안으로 02 진행",
+      "checks": [
+        {
+          "level": "info",
+          "message": "반려동물 서비스 01 한 번에 초안(docs/01-domain/pet.md): CTX-022~025, TERM-101~140, 시간 줄 13줄, 바뀌는 기존 맥락 8개. 결정 D70(Q1 '둘 다 같은 무게', 11/17 14:03 KST)과 Q2~Q7 추천안 기본값. Mermaid 1개 Chromium mermaid로 그려짐, 용어 검사 통과",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T05:56:53+00:00"
+    },
+    "02-prd": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "질문 A~D는 D72(2026-11-17 16:33 KST)로 추천안대로 정해짐. 범위 동결(REQ-330~429) 체크포인트를 NEXUS에서 요청",
+      "checks": [
+        {
+          "level": "info",
+          "message": "REQ-330~429 초안(2026-11-17), REQ-332·348·407·418은 질문 답 전 proposed",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T07:38:11+00:00"
+    },
+    "03-user-flow": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트: FL-150~168의 주 경로와 실패 경로. NEXUS에서 요청",
+      "checks": [
+        {
+          "level": "info",
+          "message": "FL-150~168 19개, Mermaid 그림 검사 통과, 기능 Must REQ 모두 흐름에 있음",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T07:38:12+00:00"
+    },
+    "04-functional-spec": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "명세 동결: SPEC-310~369·AI-30~36(질문 A~D는 D72로 정해짐). NEXUS에서 요청",
+      "checks": [
+        {
+          "level": "info",
+          "message": "SPEC-310~369, AI-30~36 초안. 기능 Must REQ 모두 SPEC 있음(REQ-391 통화 미룸 제외), SPEC-313·320·359·368 proposed",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T07:38:12+00:00"
+    },
+    "05-erd": {
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D72: 설계 스레드 결정 카드 \"반려동물 서비스 질문 7개를 추천대로 정할까요?\"에서 \"추천대로 모두 정하기\"(16:33:42 KST), 이어 프로젝트 채팅 \"추천 모두 승인\"(16:33:51 KST). 7번 '표 24개를 지금 모양으로 GPT 기준으로 삼아요' = 표 얼리기(marong/pet/schema.sql TBL-140~163, docs/05-erd/pet.md)",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ9Ji9GVtLfBUnp7e9euj7F8",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "없음. 01 질문 1~3 답이 추천안과 다르면 그 표만 다시 열고, 뒤 바뀜은 marong/pet/migrations/로 더함",
+      "checks": [
+        {
+          "level": "info",
+          "message": "새 DB marong_pet 표 24개(TBL-140~163) 초안, 빈 Postgres 16에서 두 번 만들기·한도 동시 잡기·메시지 301·회원 지우기 확인(2026-11-17)",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T07:38:11+00:00"
+    },
+    "06-api": {
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D72: 설계 스레드 결정 카드 \"반려동물 서비스 질문 7개를 추천대로 정할까요?\"에서 \"추천대로 모두 정하기\"(16:33:42 KST), 이어 프로젝트 채팅 \"추천 모두 승인\"(16:33:51 KST). 7번 'API 61개를 지금 모양으로 GPT 기준으로 삼아요' = 계약 얼리기(api/pet.openapi.yaml 0.1.0, API-150~210)",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ9Ji9GVtLfBUnp7e9euj7F8",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "없음. 결제 대행·본인인증 업체를 고른 뒤 그 이름이 들어가는 칸만 맞춤",
+      "checks": [
+        {
+          "level": "info",
+          "message": "API-150~210(61개) 초안, api/pet.openapi.yaml. 계약 결정 7가지는 info.description, 결제 대행·본인확인 기관(02 질문 A·B) 고른 뒤 Checkout.pg·웹훅 모양 맞춤",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T07:38:11+00:00"
+    },
+    "07-sitemap": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "아래 탭 셋(홈·상점·내 정보, 살아 있는 아이 없으면 상점 숨김)은 D72로 정해짐. 사이트맵 SCR-140~162 내비게이션 합의를 NEXUS에서 요청",
+      "updated": "2026-11-17T07:38:11+00:00"
+    },
+    "08-screen-states": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "화면 정의 승인: docs/08-screens/pet.md SCR-140~162(상태 220개)와 와이어프레임. NEXUS에서 요청",
+      "updated": "2026-11-17T07:38:11+00:00"
+    },
+    "09-mockup": {
+      "state": "in_progress",
+      "checkpoints": [
+        {
+          "approved": "D72: 설계 스레드 결정 카드 \"반려동물 서비스 질문 7개를 추천대로 정할까요?\"에서 \"추천대로 모두 정하기\"(16:33:42 KST), 이어 프로젝트 채팅 \"추천 모두 승인\"(16:33:51 KST). 1번 화면 방향 A(마롱이 앱 모양 그대로, 새 토큰 없음, design/pet-candidates.md)",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ9Ji9GVtLfBUnp7e9euj7F8",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "나머지 상태를 A로 그리고 B 대지는 캔버스 아래 '고르지 않음'으로 옮김. 그 뒤 공통 토큰 얼리기를 NEXUS에서 한 번 요청",
+      "updated": "2026-11-17T07:38:11+00:00"
+    }
+  }
+}

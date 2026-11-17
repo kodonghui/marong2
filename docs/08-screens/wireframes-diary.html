@@ -1,0 +1,615 @@
+<title>마롱이의 일기 와이어프레임</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: one column of screens; each state is a figure whose two phone frames (360px, 430px) sit in their own sideways scroller. */
+:root {
+  --bg: #f2f1ee;
+  --panel: #ffffff;
+  --ink: #1e1e1c;
+  --muted: #5c5b57;
+  --line: #c4c2bc;
+  --fill: #e6e4df;
+  --fill-2: #d2d0ca;
+  --shade: rgba(20, 20, 18, 0.38);
+  --on-ink: #ffffff;
+  --font: system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151514; --panel: #1f1f1d; --ink: #ecebe7; --muted: #a7a59f; --line: #4a4944;
+    --fill: #2b2a27; --fill-2: #3b3a36; --shade: rgba(0, 0, 0, 0.6); --on-ink: #151514; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #151514; --panel: #1f1f1d; --ink: #ecebe7; --muted: #a7a59f; --line: #4a4944;
+  --fill: #2b2a27; --fill-2: #3b3a36; --shade: rgba(0, 0, 0, 0.6); --on-ink: #151514; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font-family: var(--font); }
+.wrap { max-width: 1040px; margin: 0 auto; padding-block: 32px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 40px; }
+.intro { display: flex; flex-direction: column; gap: 12px; max-width: 68ch; word-break: keep-all; overflow-wrap: break-word; }
+.intro h1 { margin: 0; font-size: 26px; line-height: 1.25; text-wrap: balance; }
+.intro p { margin: 0; line-height: 1.6; color: var(--muted); }
+.intro ul { margin: 0; padding-left: 20px; line-height: 1.6; color: var(--muted); }
+.toc { display: flex; flex-wrap: wrap; gap: 8px; }
+.toc a { color: var(--ink); text-decoration: none; border: 1px solid var(--line); border-radius: 999px; padding: 8px 12px; min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+.toc a:hover, .toc a:focus-visible { background: var(--fill); outline: none; }
+.toc a span { color: var(--muted); font-variant-numeric: tabular-nums; }
+section.scr { display: flex; flex-direction: column; gap: 20px; border-top: 1px solid var(--line); padding-top: 24px; }
+section.scr > header { display: flex; flex-direction: column; gap: 6px; max-width: 72ch; word-break: keep-all; overflow-wrap: break-word; }
+section.scr h2 { margin: 0; font-size: 21px; }
+section.scr h2 code, .path { font-family: var(--mono); font-size: 13px; color: var(--muted); font-weight: 400; }
+section.scr header p { margin: 0; line-height: 1.6; color: var(--muted); }
+figure.st { margin: 0; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+figure.st figcaption { display: flex; flex-direction: column; gap: 2px; max-width: 80ch; word-break: keep-all; overflow-wrap: break-word; }
+figure.st figcaption b { font-family: var(--mono); font-size: 14px; }
+figure.st figcaption span { color: var(--muted); line-height: 1.5; font-size: 14px; }
+.pair { display: flex; gap: 28px; overflow-x: auto; padding-bottom: 8px; align-items: flex-start; }
+.col { display: flex; flex-direction: column; gap: 6px; flex: none; }
+.col > small { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* the phone frames: greys, system font, placeholder text only */
+.ph { position: relative; box-sizing: border-box; min-height: 740px; word-break: keep-all; overflow-wrap: break-word; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; font-size: 14px; line-height: 1.45; padding-bottom: 16px; display: flex; flex-direction: column; }
+.ph.fixed { height: 740px; }
+.fold { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--muted); pointer-events: none; }
+.fold span { position: absolute; right: 8px; top: 2px; font-size: 11px; color: var(--muted); background: var(--panel); padding: 0 4px; }
+.bar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 52px; border-bottom: 1px solid var(--line); padding: 0 8px; flex: none; }
+.bar .l { justify-self: start; min-height: 44px; display: flex; align-items: center; padding: 0 8px; font-size: 14px; }
+.bar .t { font-weight: 700; font-size: 15px; }
+.bar .r { justify-self: end; display: flex; gap: 6px; }
+.ib { min-width: 44px; height: 40px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 10px; display: grid; place-items: center; font-size: 12px; padding: 0 8px; }
+.pad { padding: 0 16px; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 12px 16px 0; }
+.wx { border: 1px solid var(--line); border-radius: 10px; min-height: 40px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; font-size: 13px; }
+.wx i, .pop i { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--muted); display: inline-block; }
+.ttl { margin: 6px 16px 0; font-size: 18px; font-weight: 700; }
+.pic { position: relative; aspect-ratio: 3 / 2; max-width: 100%; margin: 10px 16px 0; border: 1px solid var(--line); border-radius: 4px; display: grid; place-items: center; text-align: center;
+  background: linear-gradient(to top right, transparent calc(50% - 0.6px), var(--fill-2) 50%, transparent calc(50% + 0.6px)), linear-gradient(to top left, transparent calc(50% - 0.6px), var(--fill-2) 50%, transparent calc(50% + 0.6px)), var(--fill); }
+.pic.skel { background: var(--fill); }
+.pic span { background: var(--panel); padding: 4px 8px; border-radius: 6px; font-size: 13px; max-width: 80%; }
+.pic.dim::after { content: ""; position: absolute; inset: 0; background: var(--panel); opacity: 0.55; }
+.pic b { position: relative; z-index: 1; background: var(--ink); color: var(--on-ink); padding: 8px 12px; border-radius: 8px; font-weight: 600; font-size: 13px; }
+.cap { margin: 4px 16px 0; text-align: right; font-size: 12px; color: var(--muted); }
+.ms { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); margin: 14px 16px 0; border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
+.ms span { aspect-ratio: 1; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); display: grid; place-items: center; font-size: 17px; }
+.ms.dim span { color: var(--muted); }
+.stamp { display: flex; align-items: center; gap: 12px; margin: 14px 16px 0; }
+.stamp b { width: 72px; height: 72px; border-radius: 50%; border: 2px dashed var(--line); display: grid; place-items: center; text-align: center; font-size: 12px; font-weight: 500; padding: 4px; box-sizing: border-box; }
+.stamp b.on { border: 3px double var(--ink); font-weight: 700; }
+.stamp span { color: var(--muted); font-size: 13px; }
+.acts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 14px 16px 0; }
+.act { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.btn { min-height: 52px; box-sizing: border-box; border-radius: 12px; background: var(--ink); color: var(--on-ink); display: grid; place-items: center; text-align: center; padding: 6px 10px; font-weight: 600; font-size: 14px; }
+.btn small { display: block; font-size: 12px; font-weight: 500; }
+.btn.sec { background: transparent; color: var(--ink); border: 1px solid var(--ink); }
+.btn.off { background: var(--fill); color: var(--muted); border: 1px solid var(--line); }
+.btn.wide { margin: 14px 16px 0; }
+.why { font-size: 12px; color: var(--muted); line-height: 1.4; }
+.nav { display: flex; justify-content: space-between; margin: 14px 16px 0; }
+.lnk { min-height: 44px; display: inline-flex; align-items: center; padding: 0 4px; font-size: 14px; text-decoration: underline; text-underline-offset: 3px; }
+.lnk.off { color: var(--muted); text-decoration: none; opacity: 0.6; }
+.band { margin: 10px 16px 0; border: 1px solid var(--ink); border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+.band .lnk { min-height: 32px; font-weight: 600; flex: none; }
+.note { margin: 8px 16px 0; padding: 10px 12px; background: var(--fill); border-radius: 10px; font-size: 13px; display: flex; flex-direction: column; gap: 8px; }
+.note .btn { min-height: 44px; }
+.face { width: 128px; height: 128px; border-radius: 50%; margin: 72px auto 0; background: var(--fill); border: 1px solid var(--line); display: grid; place-items: center; text-align: center; font-size: 12px; color: var(--muted); flex: none; }
+.msg { margin: 16px 24px 0; text-align: center; display: flex; flex-direction: column; gap: 6px; }
+.msg p { margin: 0; font-size: 16px; line-height: 1.5; text-wrap: balance; }
+.msg small, .tiny { font-size: 12px; color: var(--muted); }
+.trace { font-family: var(--mono); font-size: 11px; color: var(--muted); text-align: center; margin-top: 8px; }
+.sk { background: var(--fill); border-radius: 6px; height: 16px; margin: 10px 16px 0; }
+.dimpage { opacity: 0.35; display: flex; flex-direction: column; }
+.shade { position: absolute; inset: 0; background: var(--shade); }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; background: var(--panel); border-radius: 18px 18px 0 0; border-top: 1px solid var(--line); padding: 8px 0 16px; display: flex; flex-direction: column; }
+.sheet .grab { width: 40px; height: 4px; border-radius: 2px; background: var(--fill-2); margin: 0 auto 4px; }
+.sh-h { display: flex; justify-content: space-between; align-items: center; margin: 0 8px 0 16px; }
+.sh-h b { font-size: 17px; }
+.p { margin: 8px 16px 0; font-size: 14px; line-height: 1.5; }
+.p.m { color: var(--muted); font-size: 13px; }
+.in { margin: 10px 16px 0; border: 1px solid var(--line); border-radius: 10px; min-height: 96px; padding: 10px 12px 26px; position: relative; font-size: 15px; box-sizing: border-box; }
+.in.ph-text { color: var(--muted); }
+.in.err { border: 2px solid var(--ink); }
+.in.off { background: var(--fill); }
+.in small { position: absolute; right: 10px; bottom: 6px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.err-t { margin: 6px 16px 0; font-size: 13px; font-weight: 600; }
+.chips { margin: 14px 16px 0; display: flex; flex-direction: column; gap: 8px; }
+.chips > span { font-size: 13px; color: var(--muted); }
+.chips div { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { min-height: 40px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 999px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.chip.on { border: 2px solid var(--ink); font-weight: 700; }
+.chip i { width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--muted); background: var(--sw, var(--fill)); }
+.chip.sk { background: var(--fill); border-color: var(--fill); width: 64px; }
+.pop { margin: 6px 16px 0; border: 1px solid var(--ink); border-radius: 12px; padding: 8px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.pop span { min-height: 56px; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 12px; }
+.pop span.on { background: var(--fill); font-weight: 700; }
+.month { display: flex; justify-content: space-between; align-items: center; margin: 12px 8px 0; }
+.month b { font-size: 16px; }
+.cal { margin: 8px 12px 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.cal .wd { text-align: center; font-size: 12px; color: var(--muted); padding: 4px 0; }
+.cal .d { position: relative; min-height: 58px; box-sizing: border-box; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding-top: 22px; gap: 2px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.cal .d.has { color: var(--ink); background: var(--fill); font-weight: 600; }
+.cal .d.sel { outline: 2px solid var(--ink); outline-offset: -2px; }
+.cal .d .n { position: absolute; top: 3px; left: 5px; }
+.cal .d em { font-style: normal; font-size: 10px; font-weight: 500; }
+.cal .d i { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--muted); }
+.cal .d u { position: absolute; top: 2px; right: 2px; text-decoration: none; font-size: 9px; border: 1px solid var(--ink); border-radius: 50%; width: 15px; height: 15px; display: grid; place-items: center; }
+.cal .d.sk { background: var(--fill); }
+.list { margin: 8px 0 0; display: flex; flex-direction: column; }
+.li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 56px; padding: 0 16px; border-bottom: 1px solid var(--line); }
+.li .a { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.li .b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.li .c { font-size: 13px; border: 1px solid var(--ink); border-radius: 10px; min-height: 40px; display: grid; place-items: center; padding: 0 10px; }
+.li .x { grid-column: 2 / 4; font-size: 12px; font-weight: 600; margin-top: -8px; padding-bottom: 8px; }
+.li.sk .b { background: var(--fill); height: 16px; border-radius: 6px; }
+.steps { margin: 12px 16px 0; display: flex; align-items: center; gap: 10px; }
+.steps b { font-variant-numeric: tabular-nums; font-size: 14px; }
+.steps div { display: flex; gap: 6px; }
+.steps i { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--muted); }
+.steps i.on { background: var(--ink); border-color: var(--ink); }
+.steps i.cur { outline: 2px solid var(--ink); outline-offset: 2px; }
+.sent { margin: 12px 16px 0; border: 1px solid var(--line); border-radius: 12px; padding: 14px; font-size: 17px; line-height: 1.5; }
+.clip { margin: 12px 16px 0; border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.clip .top { display: flex; align-items: center; gap: 10px; }
+.clip .play { min-width: 64px; min-height: 44px; border-radius: 10px; background: var(--ink); color: var(--on-ink); display: grid; place-items: center; font-size: 13px; font-weight: 600; }
+.clip .bar2 { flex: 1; height: 6px; border-radius: 3px; background: var(--fill); position: relative; overflow: hidden; }
+.clip .bar2 em { position: absolute; inset: 0 auto 0 0; width: 40%; background: var(--muted); }
+.clip .sc { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.clip .sc span { min-height: 48px; border: 1px solid var(--line); border-radius: 10px; display: grid; place-items: center; font-variant-numeric: tabular-nums; }
+.clip .sc span.on { border: 2px solid var(--ink); font-weight: 700; background: var(--fill); }
+.clip .ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+.clip .like { align-self: flex-start; }
+.toast { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--on-ink); border-radius: 999px; padding: 10px 16px; font-size: 13px; white-space: nowrap; }
+.access { margin: 60px 24px 0; border: 1px dashed var(--muted); border-radius: 12px; padding: 24px; text-align: center; color: var(--muted); line-height: 1.6; }
+.spacer { flex: 1; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+
+<main class="wrap">
+  <div class="intro">
+    <h1>마롱이의 일기 와이어프레임</h1>
+    <p>08단계 화면 상태를 그린 회색 틀이에요. 원본은 저장소의 <code>docs/08-screens/SCR-113.md</code>~<code>SCR-119.md</code>와 <code>SCR-001.md</code>이고, 이 쪽과 다르면 원본이 맞아요. 상태마다 360px와 430px 두 폭으로 그렸어요. 그린 때: 2026-11-16(한국 시각).</p>
+    <ul>
+      <li>회색, 시스템 글꼴, 자리 글만 써요. 색·글꼴·종이 느낌은 09단계 목업에서 정해요.</li>
+      <li>점선은 첫 화면이 끝나는 곳(높이 약 740px)이에요. 그 아래는 스크롤해야 보여요.</li>
+      <li>'얼굴 04' 같은 동그라미는 마롱이 얼굴 그림 자리예요(<code>/face/v1/</code>의 번호).</li>
+      <li>고치기·다시 그리기는 한 날 위에 올라오는 칸이고, 달력·숨긴 일기·내 모습 카드는 한 날 위에 화면 가득 열려요.</li>
+    </ul>
+    <nav class="toc" id="toc" aria-label="화면 목록"></nav>
+  </div>
+  <div id="screens"></div>
+  <noscript><p>이 쪽은 스크립트로 틀을 그려요. 스크립트를 켜 주세요.</p></noscript>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  var WIDTHS = [360, 430];
+  var FOLD = 740;
+  var BODY = '오늘은 시험이 끝났다는 얘기를 들었다. 저녁은 떡볶이가 아니라 라면이었다고 해서 같이 웃었다. 나는 군밤이 먹고 싶었지만 꾹 참았다. 내일도 재밌는 얘기를 많이 해야지.';
+  var BODY2 = '오늘은 시험이 끝났다는 얘기를 들었다. 저녁은 라면이었는데 계란을 두 개나 넣었다고 해서 부러웠다. 나는 군밤이 먹고 싶었지만 꾹 참았다. 내일도 재밌는 얘기를 많이 해야지.';
+  var TRACE = '추적 id 4bf92f3577b34da6';
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined && text !== null) e.textContent = text;
+    return e;
+  }
+  function cols(w) { return Math.floor((w - 32) / 32); }
+  function cells(text, n) {
+    var out = [''];
+    Array.from(text).forEach(function (ch) {
+      if (ch === ' ' && out.length % n === 0) return;
+      out.push(ch === ' ' ? '' : ch);
+    });
+    while (out.length % n !== 0) out.push('');
+    return out;
+  }
+
+  var R = {
+    bar: function (o) {
+      var e = el('div', 'bar');
+      e.append(el('span', 'l', o.back ? '‹ ' + o.back : (o.close ? '× ' + o.close : '')));
+      e.append(el('span', 't', o.title || ''));
+      var r = el('span', 'r');
+      (o.right || []).forEach(function (x) { r.append(el('span', 'ib', x)); });
+      e.append(r);
+      return e;
+    },
+    date: function (o) {
+      var e = el('div', 'row');
+      e.append(el('b', '', o.text));
+      if (o.weather) { var w = el('span', 'wx'); w.append(el('i')); w.append(document.createTextNode(o.weather)); e.append(w); }
+      return e;
+    },
+    pop: function (o) {
+      var e = el('div', 'pop');
+      ['맑음', '구름', '비', '눈', '무지개'].forEach(function (x) {
+        var s = el('span', x === o.sel ? 'on' : ''); s.append(el('i')); s.append(document.createTextNode(x)); e.append(s);
+      });
+      return e;
+    },
+    title: function (t) { return el('div', 'ttl', t); },
+    pic: function (o) {
+      var e = el('div', 'pic' + (o.dim ? ' dim' : '') + (o.skel ? ' skel' : ''));
+      if (o.label) e.append(el('span', '', o.label));
+      if (o.overlay) e.append(el('b', '', o.overlay));
+      return e;
+    },
+    cap: function (t) { return el('div', 'cap', t); },
+    grid: function (o, w) {
+      var n = cols(w);
+      var e = el('div', 'ms' + (o.dim ? ' dim' : ''));
+      e.style.setProperty('--n', n);
+      var list = o.rows ? new Array(o.rows * n).fill('') : cells(o.text, n);
+      list.forEach(function (c) { e.append(el('span', '', c)); });
+      return e;
+    },
+    stamp: function (o) {
+      var e = el('div', 'stamp');
+      e.append(el('b', o.on ? 'on' : '', o.on ? '참 잘 썼어' : '도장 찍어 주기'));
+      if (o.text) e.append(el('span', '', o.text));
+      return e;
+    },
+    actions: function (list) {
+      var e = el('div', 'acts');
+      list.forEach(function (a) {
+        var c = el('div', 'act');
+        var parts = a.label.split(' · ');
+        var bt = el('span', 'btn' + (a.off ? ' off' : ' sec'), parts[0]);
+        if (parts[1]) bt.append(el('small', '', parts[1]));
+        c.append(bt);
+        if (a.reason) c.append(el('span', 'why', a.reason));
+        e.append(c);
+      });
+      return e;
+    },
+    nav: function (o) {
+      var e = el('div', 'nav');
+      e.append(el('span', 'lnk' + (o.prev ? '' : ' off'), '‹ ' + (o.prev || o.prevLabel || '앞 날')));
+      e.append(el('span', 'lnk' + (o.next ? '' : ' off'), (o.next || o.nextLabel || '뒷 날') + ' ›'));
+      return e;
+    },
+    band: function (o) {
+      var e = el('div', 'band');
+      e.append(el('span', '', o.text));
+      if (o.btn) e.append(el('span', 'lnk', o.btn));
+      return e;
+    },
+    note: function (o) {
+      var e = el('div', 'note');
+      e.append(el('span', '', o.text));
+      if (o.btn) e.append(el('span', 'btn sec', o.btn));
+      return e;
+    },
+    face: function (t) {
+      var o = typeof t === 'string' ? { t: t } : t;
+      var e = el('div', 'face', o.t);
+      if (o.size) { e.style.width = o.size + 'px'; e.style.height = o.size + 'px'; e.style.marginTop = '40px'; }
+      return e;
+    },
+    msg: function (o) {
+      var e = el('div', 'msg');
+      e.append(el('p', '', o.text));
+      if (o.small) e.append(el('small', '', o.small));
+      var box = document.createDocumentFragment();
+      box.append(e);
+      if (o.btn) box.append(el('span', 'btn wide' + (o.sec ? ' sec' : ''), o.btn));
+      if (o.trace) box.append(el('div', 'trace', TRACE));
+      return box;
+    },
+    sk: function (list) {
+      var f = document.createDocumentFragment();
+      list.forEach(function (w) { var s = el('div', 'sk'); s.style.width = w; f.append(s); });
+      return f;
+    },
+    p: function (o) { return el('div', 'p' + (o.m ? ' m' : ''), o.t); },
+    input: function (o) {
+      var e = el('div', 'in' + (o.value ? '' : ' ph-text') + (o.err ? ' err' : '') + (o.off ? ' off' : ''), o.value || o.hint || '');
+      e.append(el('small', '', o.count || '0/200'));
+      var f = document.createDocumentFragment();
+      f.append(e);
+      if (o.err) f.append(el('div', 'err-t', o.err));
+      return f;
+    },
+    btn: function (o) { return el('span', 'btn wide' + (o.off ? ' off' : '') + (o.sec ? ' sec' : ''), o.label); },
+    tiny: function (t) { var e = el('div', 'p m', t); return e; },
+    trace: function () { return el('div', 'trace', TRACE); },
+    chips: function (o) {
+      var e = el('div', 'chips');
+      e.append(el('span', '', o.label));
+      var d = el('div');
+      o.items.forEach(function (x, i) {
+        var name = Array.isArray(x) ? x[0] : x;
+        var c = el('span', 'chip' + (o.sel === name ? ' on' : '') + (o.skel ? ' sk' : ''));
+        if (Array.isArray(x)) { var dot = el('i'); dot.style.setProperty('--sw', x[1]); c.append(dot); }
+        if (!o.skel) c.append(document.createTextNode(name));
+        d.append(c);
+      });
+      e.append(d);
+      return e;
+    },
+    month: function (o) {
+      var e = el('div', 'month');
+      e.append(el('span', 'lnk', '‹ 앞 달'));
+      e.append(el('b', '', o.text));
+      e.append(el('span', 'lnk' + (o.lastMonth ? ' off' : ''), '뒷 달 ›'));
+      return e;
+    },
+    cal: function (o) {
+      var e = el('div', 'cal');
+      ['일', '월', '화', '수', '목', '금', '토'].forEach(function (d) { e.append(el('span', 'wd', d)); });
+      for (var i = 0; i < (o.lead || 0); i++) e.append(el('span', 'd'));
+      for (var d = 1; d <= o.days; d++) {
+        var info = (o.marks || {})[d];
+        var c = el('span', 'd' + (o.skel ? ' sk' : '') + (info ? ' has' : '') + (o.sel === d ? ' sel' : ''));
+        if (!o.skel) c.append(el('span', 'n', String(d)));
+        if (info) { c.append(el('i')); c.append(el('em', '', info.w)); if (info.st) c.append(el('u', '', '도')); }
+        e.append(c);
+      }
+      return e;
+    },
+    list: function (rows) {
+      var e = el('div', 'list');
+      rows.forEach(function (r) {
+        var li = el('div', 'li' + (r.skel ? ' sk' : ''));
+        li.append(el('span', 'a', r.a || ''));
+        li.append(el('span', 'b', r.b || ''));
+        li.append(r.c ? el('span', 'c', r.c) : el('span', ''));
+        if (r.x) li.append(el('span', 'x', r.x));
+        e.append(li);
+      });
+      return e;
+    },
+    steps: function (o) {
+      var e = el('div', 'steps');
+      e.append(el('b', '', o.cur + ' / 10'));
+      var d = el('div');
+      for (var i = 1; i <= 10; i++) d.append(el('i', (o.done.indexOf(i) >= 0 ? 'on' : '') + (i === o.cur ? ' cur' : '')));
+      e.append(d);
+      return e;
+    },
+    sent: function (t) { return el('div', 'sent', t); },
+    clip: function (o) {
+      var e = el('div', 'clip');
+      var top = el('div', 'top');
+      top.append(el('span', 'play', o.playing ? '멈춤' : '듣기'));
+      top.append(el('b', '', o.label));
+      if (o.playing) { var b = el('span', 'bar2'); b.append(el('em')); top.append(b); }
+      e.append(top);
+      var sc = el('div', 'sc');
+      for (var i = 1; i <= 5; i++) sc.append(el('span', o.score === i ? 'on' : '', String(i)));
+      e.append(sc);
+      var ends = el('div', 'ends'); ends.append(el('span', '', '1 어색해')); ends.append(el('span', '', '5 자연스러워')); e.append(ends);
+      e.append(el('span', 'chip like' + (o.like ? ' on' : ''), '마롱이 같다'));
+      if (o.err) e.append(el('span', 'err-t', o.err));
+      return e;
+    },
+    access: function (t) { return el('div', 'access', t); },
+    spacer: function () { return el('div', 'spacer'); }
+  };
+
+  function block(b, w) { return R[b[0]](b[1], w); }
+
+  /* shared pieces of the one-day page (SCR-113) */
+  var BAR = ['bar', { back: '글 대화', title: '마롱이의 일기', right: ['달력', '⋯'] }];
+  function day(o) {
+    o = o || {};
+    var b = [BAR];
+    if (o.band) b.push(['band', o.band]);
+    b.push(['date', { text: '2026년 11월 16일 월요일', weather: o.weather || '맑음' }]);
+    if (o.pop) b.push(['pop', { sel: '맑음' }]);
+    b.push(['title', o.title || '라면 먹은 날']);
+    b.push(['pic', o.pic || { label: '그림(가로 3:2)' }]);
+    b.push(['cap', o.cap || 'AI가 그린 그림']);
+    if (o.note) b.push(['note', o.note]);
+    if (o.fixband) b.push(['band', { text: o.fixband }]);
+    b.push(['grid', { text: o.body || BODY, dim: !!o.fixband }]);
+    b.push(['stamp', o.stamp || { on: false }]);
+    b.push(['actions', o.acts || [{ label: '말로 고치기 · 4번 남음' }, { label: '다시 그리기 · 2번 남음' }]]);
+    b.push(['nav', o.nav || { prev: '11월 14일', next: null }]);
+    return b;
+  }
+  function plain(faceText, text, extra) {
+    var b = [BAR, ['date', { text: '2026년 11월 16일 월요일' }], ['face', faceText], ['msg', Object.assign({ text: text }, extra || {})]];
+    if (!extra || !extra.noNav) b.push(['spacer']), b.push(['nav', { prev: '11월 14일', next: '11월 17일' }]);
+    return b;
+  }
+  var UNDER = day();
+  function sheet(title, blocks) { return { under: UNDER, title: title, blocks: blocks }; }
+  var FIXHINT = ['p', { t: '고쳐 줄 말을 적어 줘. 예: 떡볶이가 아니라 라면이었어' }];
+  var FIXLEFT = ['tiny', '4번 더 고칠 수 있어'];
+  var DRAWHINT = ['p', { t: '바꿀 점을 적어 줘. 안 적으면 같은 장면으로 새로 그려' }];
+  var DRAWNOTE = ['tiny', '이름이나 숫자는 그림에 넣지 않아'];
+  var DRAWLEFT = ['tiny', '2번 더 그릴 수 있어'];
+  var PANEL = function (title) { return ['bar', { close: '닫기', title: title }]; };
+  var NOV = { text: '2026년 11월', lead: 0, days: 30, lastMonth: true, sel: 16, marks: { 3: { w: '비', st: true }, 14: { w: '구름', st: true }, 16: { w: '맑음' } } };
+  var HAIR = ['긴 머리', '단발', '짧은 머리', '묶은 머리', '곱슬머리'];
+  var GLASSES = ['안경 없음', '동그란 안경', '네모 안경'];
+  var TOPS = [['하양', '#ffffff'], ['검정', '#2a2a2a'], ['회색', '#8a8a8a'], ['남색', '#3a3f55'], ['베이지', '#d9cfbf'], ['분홍', '#e3c6cc'], ['노랑', '#e8dcae'], ['초록', '#a9bba4']];
+  function look(o) {
+    o = o || {};
+    var b = [PANEL('내 모습 카드')];
+    if (o.band) b.push(['band', o.band]);
+    b.push(['p', { t: o.intro || '그림에 네가 나올 때 이 모습으로 그려. 이미 그린 그림은 그대로야.' }]);
+    b.push(['chips', { label: '머리 모양', items: HAIR, sel: o.hair, skel: o.skel }]);
+    b.push(['chips', { label: '안경', items: GLASSES, sel: o.glasses, skel: o.skel }]);
+    b.push(['chips', { label: '윗옷 색', items: TOPS, sel: o.top, skel: o.skel }]);
+    if (o.preview) b.push(['p', { t: o.preview, m: true }]);
+    if (o.err) b.push(['msg', { text: o.err, trace: o.trace }]);
+    b.push(['btn', { label: o.save || '저장', off: o.saveOff }]);
+    if (o.clear) b.push(['btn', { label: '카드 비우기', sec: true }]);
+    return b;
+  }
+  function listen(o) {
+    o = o || {};
+    var b = [['bar', { title: '마롱이 목소리 듣기' }]];
+    if (o.band) b.push(['band', o.band]);
+    b.push(['steps', { cur: o.cur || 1, done: o.done || [] }]);
+    if ((o.cur || 1) === 1) b.push(['p', { t: '같은 문장을 여러 목소리로 읽었어. 듣고 골라 줘', m: true }]);
+    b.push(['sent', '오늘 진짜 수고 많았어! 푹 쉬어.']);
+    b.push(['clip', { label: '소리 1', score: 4, like: true }]);
+    b.push(['clip', { label: '소리 2', score: 3, playing: o.playing, err: o.clipErr }]);
+    b.push(['clip', { label: '소리 3' }]);
+    b.push(['nav', { prev: null, prevLabel: '앞 문장', next: '다음 문장' }]);
+    return b;
+  }
+
+  var SCREENS = [
+    { id: 'SCR-113', name: '일기장 한 날', path: '/chat/diary/:date', purpose: '마롱이가 쓴 하루 일기를 보고 넘기고, 고치기·다시 그리기·마음 날씨·도장·숨기기를 하는 곳이에요.', states: [
+      ['loading', '#normal과 같은 자리에 회색 모양. 버튼은 못 누름', [BAR, ['sk', ['60%', '40%']], ['pic', { skel: true }], ['grid', { rows: 6 }], ['actions', [{ label: '', off: true }, { label: '', off: true }]]]],
+      ['normal', '날짜·마음 날씨·제목·그림·원고지 글·도장 자리·고치기와 다시 그리기·앞뒤 날', day()],
+      ['placeholder', '기본 그림과 다시 그리기 권함', day({ title: '떡볶이 먹은 날', pic: { label: '기본 그림' }, cap: '기본 그림', note: { text: '이번엔 그림을 못 그렸어. 다시 그려 볼래?', btn: '다시 그리기' }, acts: [{ label: '말로 고치기 · 5번 남음' }, { label: '다시 그리기 · 2번 남음' }] })],
+      ['weather', '날씨를 누르면 다섯 개가 펼쳐짐', day({ pop: true })],
+      ['stamped', '도장과 찍은 날짜. 다시 누르면 빠짐', day({ stamp: { on: true, text: '11월 17일에 찍어 줬어' } })],
+      ['fixing', '고치는 중. 버튼이 꺼지고 2초마다 다시 봄', day({ fixband: '마롱이가 일기를 고치는 중이야', acts: [{ label: '말로 고치기', off: true }, { label: '다시 그리기', off: true }] })],
+      ['redrawing', '전 그림을 흐리게 두고 그리는 중', day({ pic: { label: '전 그림', dim: true, overlay: '마롱이가 다시 그리는 중이야' }, acts: [{ label: '말로 고치기', off: true }, { label: '다시 그리기', off: true }] })],
+      ['redrawn', '새 그림과 "새로 그렸어!" 한 번', day({ pic: { label: '새 그림' }, acts: [{ label: '말로 고치기 · 4번 남음' }, { label: '다시 그리기 · 1번 남음' }] }), '새로 그렸어!'],
+      ['redraw-failed', '전 그림 그대로, 못 그렸다는 말. 남은 수 그대로', day({ note: { text: '지금은 못 그렸어. 조금 있다가 다시 해 볼래?' } })],
+      ['scene-rejected', '그 말로는 그릴 수 없다는 말과 다시 적기', day({ note: { text: '그 말로는 그릴 수 없어. 이름이나 숫자는 빼고 적어 줘', btn: '다시 적기' } })],
+      ['scene-changed', '고친 뒤 다시 그리기 권함', day({ body: BODY2, note: { text: '글이 바뀌어서 그림이랑 조금 다를 수 있어. 다시 그려 볼래?', btn: '다시 그리기' }, acts: [{ label: '말로 고치기 · 3번 남음' }, { label: '다시 그리기 · 2번 남음' }] })],
+      ['limits', '막힌 버튼 아래 이유 한 줄', day({ acts: [{ label: '말로 고치기', off: true, reason: '이 일기는 다섯 번 다 고쳤어' }, { label: '다시 그리기', off: true, reason: '이번 달 그림을 다 그렸어. 다음 달에 또 그려 줄게' }] })],
+      ['hidden-day', '숨긴 날: 띠와 다시 보이게', day({ band: { text: '숨긴 일기야. 넘기기와 달력에는 안 보여', btn: '다시 보이게' } })],
+      ['writing', '아직 쓰는 중', plain('얼굴 04 생각', '마롱이가 아직 일기를 쓰는 중이야. 다 쓰면 알려 줄게')],
+      ['skipped', '얘기가 적어서 쉰 날', plain('얼굴 11 졸림', '그 날은 얘기가 적어서 일기를 쉬었어')],
+      ['failed', '쓰지 못한 날', plain('얼굴 06 슬픔', '그 날 일기를 못 썼어')],
+      ['none', '그 날 일기가 없음(남의 주소, 미래, 틀린 날짜)', plain('얼굴 01 기본', '그 날 내 일기가 없어', { btn: '가장 최근 일기 보기', sec: true })],
+      ['empty', '아직 일기가 하나도 없음(켜짐)', plain('얼굴 05 신남', '아직 일기가 없어. 오늘 마롱이랑 얘기하면 내일 아침에 첫 일기를 보여 줄게', { btn: '내 모습 카드 만들기', sec: true, noNav: true })],
+      ['off', '일기가 꺼져 있고 지난 일기도 없음', plain('얼굴 01 기본', '지금은 일기를 쓰지 않고 있어. 일기가 켜지면 아침마다 알려 줄게', { noNav: true })],
+      ['stale', '그 사이 바뀐 판을 다시 불러 보여 줌', day({ band: { text: '그 사이 일기가 바뀌었어. 새로 보여 줄게' } })],
+      ['permission', '403 not_allowed(no_dm은 같은 자리에 다른 말, 401은 Access 로그인)', plain('얼굴 13 걱정', '이 계정으로는 일기장을 열 수 없어', { btn: '다른 계정으로 들어가기', sec: true, small: 'no_dm이면 "디스코드 DM에서 마롱이한테 먼저 말 걸어 줘"', noNav: true })],
+      ['reconnecting', '503: 화면은 그대로, 위에 띠, 늘려 가며 다시', day({ band: { text: '잠깐 문제가 생겼어. 조금 있다가 다시 해 줘' } })],
+      ['error', '불러오기 실패: 다시 해 볼게와 추적 id', plain('얼굴 06 슬픔', '잠깐 문제가 생겼어. 다시 해 볼래?', { btn: '다시 해 볼게', trace: true, noNav: true })]
+    ] },
+    { id: 'SCR-114', name: '말로 고치기', path: '/chat/diary/:date#fix', purpose: '틀린 것을 말로 알려 주면 마롱이가 새 판을 써요. 한 날 위에 올라오는 칸이에요.', states: [
+      ['normal', '쓴 말, 남은 글자 수와 횟수, 고쳐 줘', sheet('어디가 달랐어?', [FIXHINT, ['input', { value: '떡볶이가 아니라 라면이었어', count: '14/200' }], FIXLEFT, ['btn', { label: '고쳐 줘' }]])],
+      ['sending', '보내는 중: 칸과 버튼이 꺼짐(90초까지)', sheet('어디가 달랐어?', [FIXHINT, ['input', { value: '떡볶이가 아니라 라면이었어', count: '14/200', off: true }], FIXLEFT, ['btn', { label: '마롱이가 고치는 중이야…', off: true }]])],
+      ['input-error', '칸 아래 오류, 쓴 말 그대로', sheet('어디가 달랐어?', [FIXHINT, ['input', { value: '(200자를 넘는 말)', count: '200/200', err: '200자까지 쓸 수 있어' }], FIXLEFT, ['btn', { label: '고쳐 줘' }]])],
+      ['failed', 'fix_failed: 쓴 말 그대로, 다시 보내기(새 키)', sheet('어디가 달랐어?', [FIXHINT, ['input', { value: '떡볶이가 아니라 라면이었어', count: '14/200', err: '지금은 못 고쳤어. 조금 있다가 다시 해 볼래?' }], FIXLEFT, ['btn', { label: '다시 보내기' }]])],
+      ['rate-limited', '너무 빠름: 남은 초 동안 꺼짐', sheet('어디가 달랐어?', [FIXHINT, ['input', { value: '떡볶이가 아니라 라면이었어', count: '14/200', err: '너무 빨라! 조금 있다가 해 줘 · 12초' }], FIXLEFT, ['btn', { label: '고쳐 줘', off: true }]])],
+      ['stale', '판이 바뀜: 다시 불러오고 칸은 열어 둠', sheet('어디가 달랐어?', [['band', { text: '그 사이 일기가 바뀌었어. 새로 보여 줄게' }], ['input', { value: '떡볶이가 아니라 라면이었어', count: '14/200' }], FIXLEFT, ['btn', { label: '고쳐 줘' }]])],
+      ['permission', 'cross_site(401은 새로 불러 로그인, 403은 한 날의 권한 상태)', sheet('어디가 달랐어?', [FIXHINT, ['input', { value: '떡볶이가 아니라 라면이었어', count: '14/200', err: '이 화면에서 다시 해 줘' }], FIXLEFT, ['btn', { label: '고쳐 줘' }]])],
+      ['error', 'db_unavailable·그 밖: 짧은 말, 추적 id, 다시 보내기', sheet('어디가 달랐어?', [FIXHINT, ['input', { value: '떡볶이가 아니라 라면이었어', count: '14/200', err: '잠깐 문제가 생겼어. 다시 해 볼래?' }], ['trace'], ['btn', { label: '다시 보내기' }]])]
+    ] },
+    { id: 'SCR-115', name: '다시 그리기', path: '/chat/diary/:date#redraw', purpose: '바꿀 점을 적어서, 또는 그대로 다시 그려 달라고 해요. 결과는 한 날에 보여요.', states: [
+      ['normal', '바꿀 점(안 써도 됨), 남은 횟수, 다시 그려 줘', sheet('어떻게 다시 그릴까?', [DRAWHINT, DRAWNOTE, ['input', { value: '마롱이가 목도리를 했으면 좋겠어', count: '17/200' }], DRAWLEFT, ['btn', { label: '다시 그려 줘' }]])],
+      ['sending', '보내는 중(202는 곧 옴)', sheet('어떻게 다시 그릴까?', [DRAWHINT, DRAWNOTE, ['input', { value: '마롱이가 목도리를 했으면 좋겠어', count: '17/200', off: true }], DRAWLEFT, ['btn', { label: '보내는 중…', off: true }]])],
+      ['input-error', '200자를 넘음', sheet('어떻게 다시 그릴까?', [DRAWHINT, DRAWNOTE, ['input', { value: '(200자를 넘는 말)', count: '200/200', err: '200자까지 쓸 수 있어' }], DRAWLEFT, ['btn', { label: '다시 그려 줘' }]])],
+      ['limited', '그림 월 예산·두 번 다 씀·너무 빠름', sheet('어떻게 다시 그릴까?', [DRAWHINT, DRAWNOTE, ['input', { hint: '예: 마롱이가 목도리를 했으면 좋겠어' }], ['btn', { label: '다시 그려 줘', off: true }], ['p', { t: '이번 달 그림을 다 그렸어. 다음 달에 또 그려 줄게', m: true }]])],
+      ['stale', '판이 바뀜: 다시 불러오고 칸은 열어 둠', sheet('어떻게 다시 그릴까?', [['band', { text: '그 사이 일기가 바뀌었어. 새로 보여 줄게' }], ['input', { value: '마롱이가 목도리를 했으면 좋겠어', count: '17/200' }], DRAWLEFT, ['btn', { label: '다시 그려 줘' }]])],
+      ['permission', 'cross_site(401은 새로 불러 로그인, 403은 한 날의 권한 상태)', sheet('어떻게 다시 그릴까?', [DRAWHINT, ['input', { value: '마롱이가 목도리를 했으면 좋겠어', count: '17/200', err: '이 화면에서 다시 해 줘' }], DRAWLEFT, ['btn', { label: '다시 그려 줘' }]])],
+      ['error', '짧은 말, 추적 id, 다시 보내기', sheet('어떻게 다시 그릴까?', [DRAWHINT, ['input', { value: '마롱이가 목도리를 했으면 좋겠어', count: '17/200', err: '잠깐 문제가 생겼어. 다시 해 볼래?' }], ['trace'], ['btn', { label: '다시 보내기' }]])]
+    ] },
+    { id: 'SCR-116', name: '한 달 달력', path: '/chat/diary/:date#calendar', purpose: '한 달의 일기를 마음 날씨와 도장으로 보고 날을 골라 열어요.', states: [
+      ['loading', '달 이름과 칸 자리', [PANEL('달력'), ['month', NOV], ['cal', { lead: 0, days: 30, skel: true }]]],
+      ['normal', '일기가 있는 날에 날씨와 도장, 열었던 날 테두리, 새벽 4시 설명', [PANEL('달력'), ['month', NOV], ['cal', NOV], ['tiny', '새벽 4시 전에 한 얘기는 전날 일기에 들어가']]],
+      ['empty', '그 달에 일기가 없음', [PANEL('달력'), ['month', { text: '2026년 10월' }], ['cal', { lead: 4, days: 31 }], ['msg', { text: '이 달에는 일기가 없어' }]]],
+      ['permission', '401은 Access 로그인으로(403은 한 날의 권한 상태로 닫힘)', [['access', 'Cloudflare Access 로그인 화면\n(새로 불러 로그인한 뒤 같은 주소로)']]],
+      ['reconnecting', '503: 띠와 늘려 가며 다시', [PANEL('달력'), ['band', { text: '잠깐 문제가 생겼어. 조금 있다가 다시 해 줘' }], ['month', NOV], ['cal', { lead: 0, days: 30, skel: true }]]],
+      ['error', '칸 자리에 짧은 말, 다시 해 볼게, 추적 id', [PANEL('달력'), ['month', NOV], ['msg', { text: '잠깐 문제가 생겼어. 다시 해 볼래?', btn: '다시 해 볼게', trace: true }]]]
+    ] },
+    { id: 'SCR-117', name: '숨긴 일기', path: '/chat/diary/:date#hidden', purpose: '숨긴 일기를 날짜와 제목으로 보고 열거나 다시 보이게 해요.', states: [
+      ['loading', '회색 줄 네 개', [PANEL('숨긴 일기'), ['list', [{ skel: true }, { skel: true }, { skel: true }, { skel: true }]]]],
+      ['normal', '늦은 날부터, 긴 제목은 말줄임', [PANEL('숨긴 일기'), ['list', [{ a: '11월 16일', b: '라면 먹은 날', c: '다시 보이게' }, { a: '11월 9일', b: '은행나무 길을 끝까지 걸어 간 날의 군밤', c: '다시 보이게' }, { a: '10월 30일', b: '비 오는 날', c: '다시 보이게' }]]]],
+      ['empty', '숨긴 일기가 없음', [PANEL('숨긴 일기'), ['msg', { text: '숨긴 일기가 없어. 일기장 ⋯에서 날마다 숨길 수 있어' }]]],
+      ['permission', 'cross_site는 그 줄 옆(401·403은 위와 같은 길)', [PANEL('숨긴 일기'), ['list', [{ a: '11월 16일', b: '라면 먹은 날', c: '다시 보이게', x: '이 화면에서 다시 해 줘' }, { a: '10월 30일', b: '비 오는 날', c: '다시 보이게' }]]]],
+      ['reconnecting', '503: 띠와 늘려 가며 다시', [PANEL('숨긴 일기'), ['band', { text: '잠깐 문제가 생겼어. 조금 있다가 다시 해 줘' }], ['list', [{ skel: true }, { skel: true }, { skel: true }]]]],
+      ['error', '목록 실패: 짧은 말, 다시 해 볼게, 추적 id', [PANEL('숨긴 일기'), ['msg', { text: '잠깐 문제가 생겼어. 다시 해 볼래?', btn: '다시 해 볼게', trace: true }]]]
+    ] },
+    { id: 'SCR-118', name: '내 모습 카드', path: '/chat/diary/:date#look', purpose: '그림에 친구가 나올 때 쓸 머리 모양·안경·윗옷 색을 고르거나 비워요.', states: [
+      ['loading', '칩 자리에 회색 모양', look({ skel: true, saveOff: true })],
+      ['empty', '카드가 없음: 안내, 아무것도 안 골라짐, 저장 꺼짐', look({ intro: '카드가 없으면 그림에 너는 안 나와. 고르면 다음 그림부터 너도 그려 줄게', saveOff: true })],
+      ['normal', '고른 칩, 미리 보기 글, 저장, 카드 비우기', look({ hair: '단발', glasses: '동그란 안경', top: '남색', preview: '그림에서 너는 단발, 동그란 안경, 남색 윗옷이야', clear: true })],
+      ['saving', '저장하는 중', look({ hair: '단발', glasses: '동그란 안경', top: '남색', preview: '그림에서 너는 단발, 동그란 안경, 남색 윗옷이야', save: '저장하는 중…', saveOff: true })],
+      ['saved', '저장됨(3초)', look({ hair: '단발', glasses: '동그란 안경', top: '남색', preview: '그림에서 너는 단발, 동그란 안경, 남색 윗옷이야', saveOff: true, clear: true }), '다음 그림부터 이 모습으로 그릴게'],
+      ['permission', 'cross_site(401은 새로 불러 로그인, 403은 한 날의 권한 상태)', look({ hair: '단발', glasses: '동그란 안경', top: '남색', err: '이 화면에서 다시 해 줘' })],
+      ['reconnecting', '503: 고른 것 그대로, 다시 해 볼게', look({ band: { text: '잠깐 문제가 생겼어. 조금 있다가 다시 해 줘' }, hair: '단발', glasses: '동그란 안경', top: '남색', save: '다시 해 볼게' })],
+      ['error', '짧은 말, 추적 id, 고른 것 그대로', look({ hair: '단발', glasses: '동그란 안경', top: '남색', err: '잠깐 문제가 생겼어. 다시 해 볼래?', trace: true, save: '다시 해 볼게' })]
+    ] },
+    { id: 'SCR-119', name: '듣기 시험', path: '/chat/listen/', purpose: '후보 목소리가 읽은 같은 문장을 이름을 모른 채 듣고, 점수와 \'마롱이 같다\'를 골라요.', states: [
+      ['loading', '회색 자리', [['bar', { title: '마롱이 목소리 듣기' }], ['sk', ['30%', '90%', '70%']], ['pic', { skel: true }]]],
+      ['normal', '한 화면에 한 문장, 소리마다 듣기·점수·마롱이 같다', listen()],
+      ['playing', '트는 소리는 멈춤 버튼과 시간 막대', listen({ playing: true })],
+      ['done', '열 문장 모두 답함', [['bar', { title: '마롱이 목소리 듣기' }], ['steps', { cur: 10, done: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] }], ['face', '얼굴 02 웃음'], ['msg', { text: '다 들었어! 고마워. 바꾸고 싶으면 언제든 다시 골라도 돼' }], ['nav', { prev: '앞 문장', next: null, nextLabel: '다음 문장' }]]],
+      ['empty', '지금 시험 묶음이 없음', [['bar', { title: '마롱이 목소리 듣기' }], ['face', '얼굴 01 기본'], ['msg', { text: '지금은 들을 시험이 없어' }]]],
+      ['stale', '시험이 바뀜: 다시 불러 처음 문장', listen({ band: { text: '시험이 바뀌었어. 새로 보여 줄게' } })],
+      ['permission', '403 not_allowed(no_dm은 다른 말, 401은 Access 로그인)', [['bar', { title: '마롱이 목소리 듣기' }], ['face', '얼굴 13 걱정'], ['msg', { text: '이 계정으로는 시험을 볼 수 없어', small: 'no_dm이면 "디스코드 DM에서 마롱이한테 먼저 말 걸어 줘"' }]]],
+      ['reconnecting', '503: 띠, 못 보낸 점수는 되돌림', listen({ band: { text: '잠깐 문제가 생겼어. 조금 있다가 다시 해 줘' } })],
+      ['error', '불러오기 실패. 소리 실패는 그 줄 옆', listen({ clipErr: '그 소리를 찾지 못했어. 시험을 다시 불러올게' })]
+    ] },
+    { id: 'SCR-001', name: '통화 홈(바뀐 상태만)', path: '/', purpose: '지금 통화(Gemini 길)에서도 이번 달 예산을 다 쓰면 홈이 예산 상태가 돼요. 다른 상태는 처음 설계 캔버스에 있어요.', states: [
+      ['budget', '새 통화 막힘, 금액 없음, 글 대화로 가는 버튼', [['bar', { title: '마롱이' }], ['face', { t: '얼굴 06 슬픔(홈 200px)', size: 200 }], ['msg', { text: '이번 달 통화는 여기까지야. 다음 달에 또 걸어 줘. 글로는 계속 얘기할 수 있어' }], ['btn', { label: '전화 걸기', off: true }], ['btn', { label: '글 대화', sec: true }]]]
+    ] }
+  ];
+
+  var OUTSIDE = { id: 'SCR-107', name: '글 대화 머리(바뀌는 곳)', note: 'app-chat.md의 화면이에요. 일기가 켜져 있거나 지난 일기가 있으면(API-108) 머리에 \'일기장\' 버튼이 생기고 /chat/diary/로 가요. 없으면 지금 그대로예요.' };
+
+  function frame(state, w, scr) {
+    var blocks = state[2], toast = state[3];
+    var ph = el('div', 'ph');
+    ph.style.width = w + 'px';
+    if (blocks && blocks.under) {
+      ph.classList.add('fixed');
+      var dim = el('div', 'dimpage');
+      blocks.under.forEach(function (b) { dim.append(block(b, w)); });
+      ph.append(dim);
+      ph.append(el('div', 'shade'));
+      var sh = el('div', 'sheet');
+      sh.append(el('div', 'grab'));
+      var hd = el('div', 'sh-h'); hd.append(el('b', '', blocks.title)); hd.append(el('span', 'ib', '닫기')); sh.append(hd);
+      blocks.blocks.forEach(function (b) { sh.append(block(b, w)); });
+      ph.append(sh);
+    } else {
+      blocks.forEach(function (b) { ph.append(block(b, w)); });
+    }
+    if (toast) ph.append(el('div', 'toast', toast));
+    return ph;
+  }
+
+  var toc = document.getElementById('toc');
+  var root = document.getElementById('screens');
+  var all = [];
+  SCREENS.forEach(function (s) {
+    var a = el('a'); a.href = '#' + s.id.toLowerCase(); a.append(document.createTextNode(s.id + ' ' + s.name + ' ')); a.append(el('span', '', s.states.length + '개')); toc.append(a);
+    var sec = el('section', 'scr'); sec.id = s.id.toLowerCase();
+    var hd = el('header');
+    var h2 = el('h2'); h2.append(document.createTextNode(s.id + ' ' + s.name + ' ')); h2.append(el('code', '', s.path)); hd.append(h2);
+    hd.append(el('p', '', s.purpose));
+    sec.append(hd);
+    s.states.forEach(function (st) {
+      var fig = el('figure', 'st'); fig.id = (s.id + '-' + st[0]).toLowerCase();
+      var cap = el('figcaption'); cap.append(el('b', '', s.id + '#' + st[0])); cap.append(el('span', '', st[1])); fig.append(cap);
+      var pair = el('div', 'pair');
+      WIDTHS.forEach(function (w) { var c = el('div', 'col'); c.append(el('small', '', w + 'px')); var f = frame(st, w, s); c.append(f); all.push(f); pair.append(c); });
+      fig.append(pair);
+      sec.append(fig);
+    });
+    root.append(sec);
+  });
+  var out = el('section', 'scr'); out.id = 'scr-107';
+  var oh = el('header'); var oh2 = el('h2'); oh2.append(document.createTextNode(OUTSIDE.id + ' ' + OUTSIDE.name + ' ')); oh2.append(el('code', '', '/chat/')); oh.append(oh2); oh.append(el('p', '', OUTSIDE.note)); out.append(oh);
+  var ofig = el('figure', 'st'); var ocap = el('figcaption'); ocap.append(el('b', '', 'SCR-107 머리')); ocap.append(el('span', '', '\'일기장\' 버튼이 생긴 모습')); ofig.append(ocap);
+  var opair = el('div', 'pair');
+  WIDTHS.forEach(function (w) {
+    var c = el('div', 'col'); c.append(el('small', '', w + 'px'));
+    var ph = el('div', 'ph'); ph.style.width = w + 'px'; ph.style.minHeight = '160px';
+    ph.append(R.bar({ title: '마롱이', right: ['일기장', '전화', '메뉴'] }));
+    ph.append(el('div', 'p m', '(글 대화 목록은 그대로)'));
+    c.append(ph); opair.append(c);
+  });
+  ofig.append(opair); out.append(ofig); root.append(out);
+  var tl = el('a'); tl.href = '#scr-107'; tl.append(document.createTextNode('SCR-107 글 대화 머리 ')); tl.append(el('span', '', '바뀜')); toc.append(tl);
+
+  function folds() {
+    all.forEach(function (f) {
+      var old = f.querySelector('.fold'); if (old) old.remove();
+      if (f.scrollHeight > FOLD + 24 && !f.classList.contains('fixed')) {
+        var line = el('div', 'fold'); line.style.top = FOLD + 'px'; line.append(el('span', '', '첫 화면 끝(약 740px)')); f.append(line);
+      }
+    });
+  }
+  if (document.fonts && document.fonts.ready) { document.fonts.ready.then(folds); } else { folds(); }
+  window.addEventListener('load', folds);
+})();
+</script>

@@ -1,0 +1,93 @@
+{
+  "format": 1,
+  "project": "marong",
+  "part": "diary",
+  "stages": {
+    "01-domain": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 3: CTX-007 마롱이의 일기 맥락 표·규칙·맥락 지도(docs/01-domain/domain.md). 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "02-prd": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "범위 동결: docs/02-prd/diary.md REQ-138~178과 확인 질문 1~3(REQ-139 일기 하루 04시, 일기 글 모델 회사, REQ-155 도장). 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "03-user-flow": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트: FL-114~119의 주 경로와 실패 경로. 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "04-functional-spec": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "명세 동결: SPEC-150~168·AI-6~8. 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "05-erd": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "스키마 동결: 016_diary.sql TBL-103~109. 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "06-api": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "계약 검토: api/diary.openapi.yaml API-108~120의 응답(깨지는 변경 없음). 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "07-sitemap": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "내비게이션 구조 합의: 일기장 한 페이지와 그 위 칸 다섯(SCR-114~118), 글 대화 머리 일기장 버튼. 공통 사이트맵(sitemap.yaml)은 이 기록이 맡음. 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
+      "checks": [
+        {
+          "level": "info",
+          "message": "main 합친 뒤 허브 경고 screen-not-in-sitemap 7건(SCR-101·107~111·130): 앱 화면은 docs/android-app.md·app-chat.md·app-ring.md 쪽 목록이고 sitemap.yaml은 웹 화면 목록이라 그대로 둠. 앱 화면까지 한 사이트맵에 넣을지는 공통 기준 체크포인트 때 함께 정함",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "08-screen-states": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "화면 정의 승인: SCR-113~118 상태와 와이어프레임 https://claude.ai/artifact/SnzgPx64NHhxgcxpa3HRho. 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "09-mockup": {
+      "state": "in_progress",
+      "checkpoints": [
+        {
+          "approved": "방향 A 그림일기장 선택(설계 스레드 결정 카드 '일기장 목업을 어느 방향으로 그릴까요?', 21:44 KST). 토큰 얼리기는 아직",
+          "by": "프로젝트 주인",
+          "date": "2026-11-16"
+        }
+      ],
+      "next": "[공통] 토큰 얼리기: 동희님 11/17 14:37 '앞으로 나올 화면설계 있으면 기다리고'에 따라 반려동물 서비스 화면(SCR-140~149)까지 공통 캔버스에 합친 뒤 한 번 여쭘. 공통 기준 design/README.md",
+      "checks": [
+        {
+          "level": "info",
+          "message": "2026-11-17 14:4x KST 성향 맞춤(PR #30 f6984de) 대지 12장(A·B, 방향 고르기 전, 추천 A)을 공통 캔버스 버전 16에 합침(대지 120장, C008-*). 말풍선 토큰 font-size.bubble 15px·radius.bubble 18px을 더해 103개(형식 오류 0). 성향 목업의 12px·17px은 토큰을 더하지 않고 radius.sm/radius.full·font-size.body 굵게로 맞춤(design/README.md 3절)",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "10-wbs": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "GPT 인계 docs/10-wbs/diary-call-cost.md(TASK-137~155). PR #25 합친 뒤 봇·서버·API는 바로, 화면 작업(TASK-152~155)은 토큰 얼리기 뒤",
+      "updated": "2026-11-17T05:49:16+00:00"
+    },
+    "12-qa": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "시험 계획 TC-159~172(docs/12-qa/diary-call-cost.md). 시험 코드·실행은 GPT",
+      "updated": "2026-11-17T05:49:16+00:00"
+    }
+  }
+}
