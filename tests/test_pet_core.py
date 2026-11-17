@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from base64 import urlsafe_b64encode
 from hashlib import sha256
@@ -33,8 +33,9 @@ from psycopg_pool import AsyncConnectionPool
 from pg import ROOT, TestDB
 from marong.pet.jobs import JobQueue
 from marong.pet.cost import Budget, KST, Run, microusd, timings
+from marong.pet.account import require_overseas
 from marong.pet.auth import AuthConfig, Provider, STATE_COOKIE, subject_hash
-from marong.pet.http import COOKIE, Problem, cookie_hash, require_member
+from marong.pet.http import COOKIE, POOL, Problem, cookie_hash, require_member
 from marong.pet.log import member_ref
 from marong.pet.settings import PRICE_FILE, Settings, SettingsError
 from run_pet import make_app
@@ -454,6 +455,110 @@ async def check_oidc(admin_dsn, dsn):
             destination(got, "/signup")
 
 
+async def check_signup(admin_dsn, dsn):
+    origin = "https://pet.example.test"
+    invite = "FIXTURE9"
+    settings = Settings.read({"PET_DATABASE_URL": dsn, "PET_MONTHLY_BUDGET_KRW": "50000", "PET_ORIGIN": origin})
+    store = make_app(settings, auth_config=AuthConfig({}, b""))
+    calls = 0
+
+    async def model_gate(req):
+        nonlocal calls
+        member = await require_member(req)
+        async with req.app[POOL].connection() as conn:
+            await require_overseas(conn, member["id"])
+        calls += 1
+        return web.json_response({"ok": True})
+
+    store.router.add_post("/test/model-gate", model_gate)
+
+    def pending():
+        raw = token_urlsafe(32)
+        with psycopg.connect(admin_dsn, autocommit=True) as conn:
+            conn.execute(
+                """INSERT INTO pet.sessions(token_hash,kind,provider,sub_hash,expires_at,absolute_expires_at)
+                VALUES (%s,'pending','google',%s,now()+interval '30 minutes',now()+interval '30 minutes')""",
+                (cookie_hash(raw), sha256(uuid4().bytes).digest()),
+            )
+        return {"Origin": origin, "Cookie": f"{COOKIE}={raw}"}, raw
+
+    with psycopg.connect(admin_dsn, autocommit=True) as conn:
+        conn.execute("INSERT INTO pet.invites(code_hash,uses_left) VALUES (%s,1)", (sha256(invite.encode()).digest(),))
+        for kind, count in (("font", 5), ("theme", 3), ("sticker_pack", 2), ("wear", 5)):
+            for sequence in range(count):
+                conn.execute(
+                    """INSERT INTO pet.items(kind,name,slot,is_default,license_key,assets)
+                    VALUES (%s,%s,%s,true,'fixture','{}')""",
+                    (kind, f"fixture-{kind}-{sequence}", "head" if kind == "wear" else None),
+                )
+
+    example = {"birthDate": "2007-11-17", "agreeTerms": True, "agreePrivacy": True, "aiNoticeConfirmed": True,
+               "overseasTransfer": False, "inviteCode": invite}
+    async with TestClient(TestServer(store)) as client:
+        async def failure(response, status, code):
+            assert response.status == status and (await response.json())["code"] == code
+
+        async def signup(body, credentials):
+            return await client.post("/api/signup", headers=credentials, json=body)
+
+        with patch("marong.pet.account.korea_today", return_value=date(2026, 11, 17)):
+            await failure(await signup(example, {"Origin": origin}), 401, "unauthenticated")
+            minor, expired_raw = pending()
+            await failure(await signup({**example, "birthDate": "2007-11-18"}, minor), 403, "underage")
+            pending_headers, pending_raw = pending()
+            await failure(await client.get("/api/me", headers=pending_headers), 401, "unauthenticated")
+            await failure(await signup({**example, "birthDate": "2026-11-18"}, pending_headers), 400, "invalid_input")
+            await failure(await signup({**example, "agreeTerms": False}, pending_headers), 400, "consents_missing")
+            await failure(await signup({**example, "inviteCode": "UNKNOWN1"}, pending_headers), 403, "invite_required")
+            await failure(await signup({k: v for k, v in example.items() if k != "inviteCode"}, pending_headers),
+                          403, "invite_required")
+            other, _ = pending()
+            success, failed = await asyncio.gather(signup(example, pending_headers), signup(example, other))
+            if failed.status == 201:
+                success, failed = failed, success
+            assert success.status == 201
+            await failure(failed, 403, "invite_required")
+            profile = await success.json()
+            assert profile["status"] == "active" and not profile["overseasTransfer"] and not profile["paymentsEnabled"]
+            assert "birthDate" not in profile
+            raw = success.cookies[COOKIE].value
+            assert raw != pending_raw and success.cookies[COOKIE]["max-age"] == str(30 * 86400)
+            member = {"Origin": origin, "Cookie": f"{COOKIE}={raw}"}
+            await failure(await signup(example, member), 409, "already_member")
+            assert await (await client.get("/api/me", headers=member)).json() == profile
+        with psycopg.connect(admin_dsn) as conn:
+            assert conn.execute("SELECT 1 FROM pet.sessions WHERE token_hash=%s", (cookie_hash(expired_raw),)).fetchone() is None
+            assert conn.execute(
+                """SELECT i.kind,count(*) FROM pet.inventory b JOIN pet.items i ON i.id=b.item_id
+                JOIN pet.members m ON m.id=b.member_id WHERE m.member_no=%s GROUP BY i.kind ORDER BY i.kind""",
+                (profile["memberNo"],),
+            ).fetchall() == [("font", 5), ("sticker_pack", 2), ("theme", 3), ("wear", 5)]
+            assert not conn.execute("""SELECT column_name FROM information_schema.columns
+                WHERE table_schema='pet' AND column_name ILIKE '%%birth%%'""").fetchall()
+
+        path = "/api/me/consents"
+        consent = await (await client.get(path, headers=member)).json()
+        assert len(consent["items"]) == 4 and all(item["docVersion"] == "2026-11" for item in consent["items"])
+        await failure(await client.post("/test/model-gate", headers=member), 409, "consent_required")
+        assert calls == 0
+        await failure(await client.put(path + "/terms", headers=member, json={"value": False}), 400, "use_delete_account")
+        foreign = {**member, "Origin": "https://other.test"}
+        await failure(await client.put(path + "/overseas_transfer", headers=foreign, json={"value": True}), 403, "cross_site")
+        for _ in range(2):
+            allowed = await client.put(path + "/overseas_transfer", headers=member, json={"value": True})
+            assert allowed.status == 200
+        assert (await client.post("/test/model-gate", headers=member)).status == 200 and calls == 1
+        changed = await client.put(path + "/overseas_transfer", headers=member, json={"value": False})
+        assert changed.status == 200
+        await failure(await client.post("/test/model-gate", headers=member), 409, "consent_required")
+        with psycopg.connect(admin_dsn) as conn:
+            values = conn.execute(
+                """SELECT c.value FROM pet.consents c JOIN pet.members m ON m.id=c.member_id
+                WHERE m.member_no=%s AND c.kind='overseas_transfer' ORDER BY c.id""", (profile["memberNo"],),
+            ).fetchall()
+        assert values == [(False,), (True,), (False,)] and calls == 1
+
+
 if __name__ == "__main__":
     db = TestDB()
     try:
@@ -464,6 +569,7 @@ if __name__ == "__main__":
             asyncio.run(check_http(admin, pet, Path(tmp)))
         asyncio.run(check_cost(admin, pet))
         asyncio.run(check_oidc(admin, pet))
+        asyncio.run(check_signup(admin, pet))
     finally:
         db.close()
-    print("TC-380–388: isolated database, startup, access, origin, timing, costs, and signed OIDC fixtures verified")
+    print("TC-380–390: isolated database, startup, access, costs, OIDC, signup, invitations and consent verified")

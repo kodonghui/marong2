@@ -10,6 +10,7 @@ from aiohttp import web
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
+from marong.pet.account import register as register_account
 from marong.pet.auth import AuthConfig, register as register_auth
 from marong.pet.cost import Budget
 from marong.pet.http import CONFIG, POOL, guard, read_media
@@ -49,6 +50,7 @@ def make_app(settings: Settings, *, auth_config=None) -> web.Application:
     app.router.add_get("/healthz", health, allow_head=False)
     app.router.add_get("/api/media/{id}", read_media, allow_head=False)
     register_auth(app, auth_config if auth_config is not None else AuthConfig.read(os.environ))
+    register_account(app)
     return app
 
 

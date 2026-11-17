@@ -94,6 +94,7 @@ class Settings:
     port: int
     origin: str
     media_dir: Path
+    consent_version: str
     signup: str
     budget_krw: int
     krw_per_usd: int
@@ -132,5 +133,9 @@ class Settings:
             raise SettingsError("PET_PORT is outside the allowed range")
         origin = _origin(env.get("PET_ORIGIN", f"http://127.0.0.1:{port}"))
         media_dir = Path(env.get("PET_MEDIA_DIR", "/var/lib/marong-pet/media"))
-        return cls(db, port, origin, media_dir, signup, budget, rate, models["PET_VISION_MODEL"], models["PET_IMAGE_MODEL"],
+        consent_version = env.get("PET_CONSENT_DOC_VERSION", "2026-11")
+        if not 1 <= len(consent_version) <= 20 or not consent_version.isascii() or not consent_version.isprintable():
+            raise SettingsError("PET_CONSENT_DOC_VERSION is invalid")
+        return cls(db, port, origin, media_dir, consent_version, signup, budget, rate,
+                   models["PET_VISION_MODEL"], models["PET_IMAGE_MODEL"],
                    models["PET_IMAGE_FALLBACK_MODEL"], models["PET_CHAT_MODEL"], models["PET_DIARY_MODEL"], prices)

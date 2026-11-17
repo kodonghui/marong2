@@ -16,6 +16,7 @@ from aiohttp import web
 import jwt
 
 from .http import CONFIG, COOKIE, POOL, Problem, cookie_hash, require_member, set_session_cookie
+from .inventory import sync_defaults
 from .settings import SettingsError
 
 STATE_COOKIE = "pet_oidc"
@@ -204,6 +205,7 @@ class Auth:
                  None if member else digest, life, MEMBER_MAX if member else PENDING),
             )
             if member:
+                await sync_defaults(conn, member["id"])
                 await conn.execute("UPDATE pet.members SET last_login_at=now() WHERE id=%s", (member["id"],))
         reply = _release_state(web.HTTPFound("/" if member else "/signup"))
         set_session_cookie(reply, raw, int(life.total_seconds()))

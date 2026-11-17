@@ -24,6 +24,15 @@ ERRORS = {
     "cross_site": (403, "쓰기 요청의 Origin이 서비스 주소가 아님", "요청을 처리할 수 없어요."),
     "not_found": (404, "없거나 남의 것이거나 지운 것(같은 본문)", "찾을 수 없어요."),
     "budget_paused": (409, "이번 달 운영 예산을 다 씀", "오늘은 새 그림과 통화가 쉬어요. 글로는 계속 이야기할 수 있어요."),
+    "consent_required": (409, "국외 이전 동의가 꺼져 있어 모델을 부르는 일을 막음",
+                         "사진과 대화를 해외 AI 회사로 보내는 데 동의해야 쓸 수 있어요. 설정에서 바꿀 수 있어요."),
+    "consents_missing": (400, "가입의 필수 동의(이용약관·개인정보·AI 고지)가 거짓",
+                         "필수 항목에 동의해야 가입할 수 있어요."),
+    "underage": (403, "만 19세 미만", "이 서비스는 만 19세 이상만 쓸 수 있어요."),
+    "invite_required": (403, "가입 방식이 invite인데 초대 코드가 없거나 틀림·다 씀",
+                        "지금은 초대받은 분만 가입할 수 있어요."),
+    "already_member": (409, "이미 가입한 회원", "이미 가입했어요."),
+    "use_delete_account": (400, "필수 동의는 끌 수 없음", "필수 동의를 거두려면 계정을 지워 주세요."),
     "server_error": (500, "예상하지 못한 오류", "잠시 뒤 다시 해 주세요."),
 }
 
@@ -97,6 +106,16 @@ def uuid_param(raw):
 
 def cookie_hash(raw):
     return sha256(raw.encode("ascii")).digest() if _TOKEN.fullmatch(raw or "") else None
+
+
+async def body_json(req):
+    try:
+        value = await req.json()
+    except (ValueError, UnicodeError):
+        raise Problem("invalid_input") from None
+    if not isinstance(value, dict):
+        raise Problem("invalid_input")
+    return value
 
 
 async def require_member(req):
