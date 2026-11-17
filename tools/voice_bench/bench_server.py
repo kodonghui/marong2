@@ -73,6 +73,16 @@ TTS_TIMEOUT = float(os.environ.get('VB_TTS_TIMEOUT', '10'))  # seconds without b
 # .../turn-detection.md, .../message-sequence.md, .../api-spec/streaming-websocket.md
 AAI_MODEL = os.environ.get('VB_AAI_MODEL', 'assemblyai-stt-3-7-realtime-agent')
 AAI_MODE = os.environ.get('VB_AAI_MODE', 'min_latency')
+ELEVEN_WS = os.environ.get('VB_ELEVEN_WS', 'wss://api.elevenlabs.io')
+# Eleven Realtime (speech to speech over the OpenAI Realtime wire protocol), docs read 2026-11-17:
+# elevenlabs.io/docs/eleven-agents/customization/realtime-models.md, .../guides/openai-realtime-compatibility.md,
+# .../api-reference/conversations/create-client-secret.md
+ELEVEN_RT_MODEL = os.environ.get('VB_ELEVEN_RT_MODEL', 'eleven_realtime_v1_mini')
+ELEVEN_RT_EAGERNESS = os.environ.get('VB_ELEVEN_RT_EAGERNESS', 'medium')
+# ElevenAgents in Custom mode (their ASR, turn-taking model, an LLM they host, their TTS), docs read 2026-11-17:
+# .../libraries/web-sockets.md, .../api-reference/eleven-agents/websocket.md, .../api-reference/agents/create.md
+ELEVEN_AGENT_LLM = os.environ.get('VB_ELEVEN_AGENT_LLM', 'gpt-6-luna')
+ELEVEN_AGENT_EAGERNESS = os.environ.get('VB_ELEVEN_AGENT_EAGERNESS', 'normal')
 
 VAD_MS = 700           # production silenceDurationMs
 GAP_AFTER_REPLY = 0.6  # the friend answers 0.6 s after the reply finished playing
@@ -95,6 +105,9 @@ PRICES = {
     'assemblyai-stt-3-7-realtime-agent': {'per_hour': 0.45},
     'universal-3-6-pro': {'per_hour': 0.45},
     'assemblyai-stt-3-7-realtime': {'per_hour': 0.30},
+    # elevenlabs.io/pricing/api and /pricing/agents read 2026-11-17: per call minute, LLM usage billed on top
+    'eleven_realtime_v1_mini': {'per_min': 0.08},
+    'elevenagents': {'per_min': 0.08},
 }
 
 mono = time.monotonic
@@ -387,6 +400,42 @@ def http_get_status(url, headers, timeout=20):
         return type(e).__name__
     finally:
         conn.close()
+
+
+def http_json(method, url, headers, body=None, timeout=30):
+    """Blocking JSON request. Returns (status, parsed body or text). Never raises for HTTP errors."""
+    u = urllib.parse.urlsplit(url)
+    ctx = ssl.create_default_context()
+    proxy = os.environ.get('HTTPS_PROXY') or os.environ.get('https_proxy')
+    if u.scheme != 'https':
+        conn = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=timeout)
+    elif proxy:
+        pu = urllib.parse.urlsplit(proxy)
+        conn = http.client.HTTPSConnection(pu.hostname, pu.port, timeout=timeout, context=ctx)
+        conn.set_tunnel(u.hostname, u.port or 443)
+    else:
+        conn = http.client.HTTPSConnection(u.hostname, u.port or 443, timeout=timeout, context=ctx)
+    try:
+        h = {'User-Agent': 'voice-bench'}
+        if body is not None:
+            h['Content-Type'] = 'application/json'
+        h.update(headers)
+        data = json.dumps(body, ensure_ascii=False).encode('utf-8') if body is not None else None
+        conn.request(method, (u.path or '/') + ('?' + u.query if u.query else ''), body=data, headers=h)
+        r = conn.getresponse()
+        raw = r.read()
+        try:
+            return r.status, json.loads(raw.decode('utf-8'))
+        except ValueError:
+            return r.status, raw[:1500].decode('utf-8', 'replace')
+    except Exception as e:
+        return type(e).__name__, repr(e)[:300]
+    finally:
+        conn.close()
+
+
+async def ahttp_json(*a, **kw):
+    return await asyncio.get_event_loop().run_in_executor(None, lambda: http_json(*a, **kw))
 
 
 class SSE:
@@ -760,9 +809,231 @@ class GeminiVertex(Engine):
                       'total': u.get('totalTokenCount')}
 
 
+def _dig(d, *path):
+    for p in path:
+        d = d.get(p) if isinstance(d, dict) else None
+    return d
+
+
+def _trim_conversation(c):
+    """Billing fields of an ElevenAgents conversation. The (synthetic) transcript is already in turns.jsonl."""
+    if not isinstance(c, dict):
+        return str(c)[:300]
+    m = c.get('metadata') or {}
+    ch = m.get('charging') or {}
+    keep = ('dev_discount', 'is_burst', 'tier', 'llm_price', 'llm_charge', 'call_charge', 'free_minutes_consumed',
+            'free_llm_dollars_consumed', 'voice_surcharge_charge', 'platform_usage', 'llm_usage')
+    return {'conversation_id': c.get('conversation_id'), 'agent_id': c.get('agent_id'), 'status': c.get('status'),
+            'start_time_unix_secs': m.get('start_time_unix_secs'), 'call_duration_secs': m.get('call_duration_secs'),
+            'cost_credits': m.get('cost'), 'cost_fiat_usd': m.get('cost_fiat', c.get('cost_fiat')),
+            'charging': {k: ch.get(k) for k in keep if k in ch}}
+
+
+async def eleven_billing(conv_id, t_start_unix, wait_s=120):
+    """The billed conversation: by id when the API knows it, otherwise the workspace's conversations started during
+    this run. Polls until ElevenLabs has processed it (status done), at most wait_s."""
+    h = {'xi-api-key': key('elevenlabs.key')}
+    out = {'looked_up_by': None, 'conversations': []}
+    ids = []
+    if conv_id:
+        st, c = await ahttp_json('GET', '%s/v1/convai/conversations/%s' % (ELEVEN_HTTP, conv_id), h)
+        if st == 200:
+            ids, out['looked_up_by'] = [conv_id], 'id'
+        else:
+            out['by_id_status'] = st
+    if not ids:
+        st, lst = await ahttp_json('GET', '%s/v1/convai/conversations?page_size=10' % ELEVEN_HTTP, h)
+        rows = lst.get('conversations', []) if st == 200 and isinstance(lst, dict) else []
+        ids = [r.get('conversation_id') for r in rows
+               if isinstance(r, dict) and (r.get('start_time_unix_secs') or 0) >= t_start_unix - 60]
+        out['looked_up_by'] = 'list since run start (status %s)' % st
+    for cid in ids[:3]:
+        t0, last = mono(), None
+        while mono() - t0 < wait_s:
+            st, c = await ahttp_json('GET', '%s/v1/convai/conversations/%s' % (ELEVEN_HTTP, cid), h)
+            last = c if st == 200 else '%s %s' % (st, str(c)[:200])
+            if st == 200 and isinstance(c, dict) and c.get('status') in ('done', 'failed'):
+                break
+            await asyncio.sleep(5)
+        out['conversations'].append(_trim_conversation(last))
+    return out
+
+
+class ElevenRealtime(OpenAIRealtime):
+    """Eleven Realtime v1: ElevenLabs' speech-to-speech agent model (a tuned cascade inside, per their FAQ) on the
+    OpenAI Realtime wire protocol. The key mints a short-lived client secret here, and the WebSocket uses it."""
+    name = 'eleven-rt'
+    ALIASES = {'response.audio.delta': 'response.output_audio.delta',
+               'response.audio_transcript.delta': 'response.output_audio_transcript.delta'}
+    QUIET = ('response.output_audio.delta', 'response.output_audio_transcript.delta', 'response.output_text.delta')
+
+    async def connect(self):
+        h = {'xi-api-key': key('elevenlabs.key')}
+        self.session = {
+            'type': 'realtime', 'model': self.model, 'instructions': self.prompt, 'output_modalities': ['audio'],
+            'max_duration_seconds': 600,
+            'audio': {'input': {'format': {'type': 'audio/pcm', 'rate': 24000}, 'transcription': {'language': 'ko'},
+                                'turn_detection': {'type': 'semantic_vad', 'eagerness': ELEVEN_RT_EAGERNESS}},
+                      'output': {'format': {'type': 'audio/pcm'}, 'voice': self.voice}}}
+        self.mint_log, self.connect_log, self.event_types = [], [], {}
+        self.session_id = None
+        self.updated = False
+        secret = None
+        for attempt in ('voice', 'default voice'):
+            if attempt == 'default voice':
+                self.session['audio']['output'].pop('voice', None)
+            st, data = await ahttp_json('POST', ELEVEN_HTTP + '/v1/convai/realtime/client_secrets', h,
+                                        {'session': self.session,
+                                         'expires_after': {'anchor': 'created_at', 'seconds': 600}})
+            ok = st == 200 and isinstance(data, dict) and bool(data.get('value'))
+            self.mint_log.append({'attempt': attempt, 'status': st, 'detail': None if ok else str(data)[:400],
+                                  'session_voice': _dig(data, 'session', 'audio', 'output', 'voice') if ok else None})
+            if ok:
+                secret = data['value']
+                break
+            if st not in (400, 422):
+                break
+        if not secret:
+            raise RuntimeError('client secret refused: %s' % self.mint_log)
+        self.voice_used = self.mint_log[-1]['session_voice']
+        url = '%s/v1/convai/realtime?model=%s' % (ELEVEN_WS, self.model)
+        for auth, hh in (('bearer client secret', {'Authorization': 'Bearer ' + secret}),
+                         ('subprotocol client secret',
+                          {'Sec-WebSocket-Protocol': 'realtime, openai-insecure-api-key.' + secret}),
+                         ('api key header', h)):
+            try:
+                self.ws = await WS.connect(url, hh)
+                self.connect_log.append({'auth': auth, 'ok': True})
+                break
+            except (ConnectionError, OSError, asyncio.TimeoutError) as e:
+                self.connect_log.append({'auth': auth, 'error': str(e)[:300]})
+        if self.ws is None:
+            raise RuntimeError('WebSocket refused: %s' % self.connect_log)
+
+    def handle(self, ev):
+        ty = ev.get('type', '')
+        self.event_types[ty] = self.event_types.get(ty, 0) + 1
+        if ty in self.ALIASES:
+            ty = self.ALIASES[ty]
+            ev = dict(ev, type=ty)
+        if ty == 'session.created':
+            s = ev.get('session') or {}
+            self.session_id = s.get('id')
+            self.session_log.append({'type': ty, 'model': s.get('model'), 'voice': _dig(s, 'audio', 'output', 'voice'),
+                                     'turn_detection': _dig(s, 'audio', 'input', 'turn_detection')})
+            self.ok = self.updated = True
+            self.ready.set()
+            return
+        super().handle(ev)
+        t = self.turn
+        if t is not None and ty not in self.QUIET and len(t.events) < 60:
+            if not t.events or t.events[-1][0] != ty:
+                t.events.append([ty, round(mono(), 3)])
+
+    def turn_cost(self, t):
+        return None, t.usage
+
+
+class ElevenAgent(Engine):
+    """ElevenAgents in Custom mode with Han Aim: their streaming ASR and turn-taking model, an LLM they host and Flash
+    v2.5, all on their side. The run creates one private agent tagged voice-bench (it stays in the workspace) and
+    talks to it through a signed URL made here with the key."""
+    name = 'eleven-agent'
+    in_sr = 16000
+    out_sr = 16000
+
+    async def connect(self):
+        h = {'xi-api-key': key('elevenlabs.key')}
+        prompt_cfg = {'prompt': self.prompt, 'llm': self.model, 'reasoning_effort': 'none'}
+        cfg = {'agent': {'first_message': '', 'language': 'ko', 'prompt': prompt_cfg},
+               'asr': {'provider': 'scribe_realtime', 'user_input_audio_format': 'pcm_16000'},
+               'turn': {'turn_eagerness': ELEVEN_AGENT_EAGERNESS},
+               'tts': {'model_id': 'eleven_flash_v2_5', 'voice_id': self.voice, 'agent_output_audio_format': 'pcm_16000'},
+               'conversation': {'max_duration_seconds': 480}}
+        body = {'name': 'voice-bench %s Han Aim (synthetic test)' % self.model, 'tags': ['voice-bench'],
+                'conversation_config': cfg}
+        self.create_log, self.other_types = [], {}
+        self.agent_id = self.conversation_id = self.formats = None
+        for attempt in ('reasoning none', 'model default reasoning'):
+            if attempt == 'model default reasoning':
+                prompt_cfg.pop('reasoning_effort', None)
+            st, data = await ahttp_json('POST', ELEVEN_HTTP + '/v1/convai/agents/create', h, body)
+            ok = st == 200 and isinstance(data, dict) and bool(data.get('agent_id'))
+            self.create_log.append({'attempt': attempt, 'status': st, 'detail': None if ok else str(data)[:400]})
+            if ok:
+                self.agent_id = data['agent_id']
+                break
+            if st not in (400, 422):
+                break
+        if not self.agent_id:
+            raise RuntimeError('agent create refused: %s' % self.create_log)
+        st, data = await ahttp_json('GET', '%s/v1/convai/conversation/get-signed-url?agent_id=%s'
+                                    % (ELEVEN_HTTP, self.agent_id), h)
+        if st != 200 or not isinstance(data, dict) or not data.get('signed_url'):
+            raise RuntimeError('signed URL refused: %s %s' % (st, str(data)[:300]))
+        self.ws = await WS.connect(data['signed_url'], {})
+        await self.ws.send_json({'type': 'conversation_initiation_client_data'})
+
+    def handle(self, ev):
+        ty = ev.get('type', '')
+        t = self.turn
+        now = mono()
+        if ty == 'audio':
+            a = ev.get('audio_event') or {}
+            if a.get('audio_base_64'):
+                self.on_audio(base64.b64decode(a['audio_base_64']))
+            if a.get('is_final') and t is not None:
+                t.events.append(['audio_is_final', round(now, 3)])
+        elif ty == 'ping':
+            eid = (ev.get('ping_event') or {}).get('event_id')
+            asyncio.ensure_future(self.ws.send_json({'type': 'pong', 'event_id': eid}))
+        elif ty == 'conversation_initiation_metadata':
+            m = ev.get('conversation_initiation_metadata_event') or {}
+            self.conversation_id = m.get('conversation_id')
+            self.formats = {'in': m.get('user_input_audio_format'), 'out': m.get('agent_output_audio_format')}
+            self.session_log.append({'type': ty, 'formats': self.formats})
+            self.ok = True
+            self.ready.set()
+        elif ty == 'user_transcript':
+            if t is not None:
+                txt = _dig(ev, 'user_transcription_event', 'user_transcript') or ''
+                t.user_text = (t.user_text + ' ' + txt).strip()
+                t.events.append(['user_transcript', round(now, 3)])
+        elif ty == 'agent_response':
+            if t is not None:
+                txt = _dig(ev, 'agent_response_event', 'agent_response') or ''
+                if t.t_end is not None:
+                    t.reply_text = (t.reply_text + ' ' + txt).strip()
+                t.events.append(['agent_response', round(now, 3)])
+        elif ty == 'interruption':
+            if t is not None:
+                t.events.append(['interruption', round(now, 3), _dig(ev, 'interruption_event', 'reason')])
+        elif ty == 'agent_response_complete':
+            if t is not None:
+                t.events.append([ty, round(now, 3)])
+                if t.t_end is not None and t.t_first_audio is not None:
+                    t.status, t.t_done = 'completed', now
+                    t.done.set()
+        elif ty in ('vad_score', 'context_usage'):
+            pass
+        else:
+            self.other_types[ty] = self.other_types.get(ty, 0) + 1
+            if ty == 'error' or 'error' in ev:
+                self.errors.append(str(ev)[:300])
+                self.ready.set()
+            elif t is not None and len(t.events) < 60:
+                t.events.append([ty, round(now, 3)])
+
+    async def send_audio(self, chunk):
+        await self.ws.send_json({'user_audio_chunk': base64.b64encode(chunk).decode()})
+
+
 S2S = {'gemini': (GeminiVertex, 'gemini-3.8-live', 'Sulafat', 'gemini2.key'),
        'openai': (OpenAIRealtime, 'gpt-realtime-2.1-mini', 'marin', 'openai.key'),
-       'live': (GPTLive, 'gpt-live-1', 'noeul', 'openai.key')}
+       'live': (GPTLive, 'gpt-live-1', 'noeul', 'openai.key'),
+       'eleven-rt': (ElevenRealtime, ELEVEN_RT_MODEL, HAN_AIM, 'elevenlabs.key'),
+       'eleven-agent': (ElevenAgent, ELEVEN_AGENT_LLM, HAN_AIM, 'elevenlabs.key')}
+ELEVEN = ('eleven-rt', 'eleven-agent')
 
 
 async def run_s2s(kind, prompt, turns, timeout=25.0):
@@ -774,9 +1045,19 @@ async def run_s2s(kind, prompt, turns, timeout=25.0):
         return
     eng = cls(model, voice, prompt)
     t0 = mono()
+    t0_unix = time.time()
     await eng.connect()
     recv = asyncio.ensure_future(eng.recv_loop())
-    await asyncio.wait_for(eng.ready.wait(), 20)
+    if kind == 'eleven-rt':
+        # the minted session is the starting session; send it as session.update only if nothing arrives
+        try:
+            await asyncio.wait_for(eng.ready.wait(), 5)
+        except asyncio.TimeoutError:
+            eng.session_log.append({'note': 'no session.created within 5 s, sent session.update'})
+            await eng.ws.send_json({'type': 'session.update', 'session': eng.session})
+            await asyncio.wait_for(eng.ready.wait(), 15)
+    else:
+        await asyncio.wait_for(eng.ready.wait(), 20)
     if kind == 'openai' and not eng.updated:
         # the session.update was refused: try once without input transcription, then give up
         eng.errors.append({'note': 'retry session.update without input transcription'})
@@ -804,12 +1085,15 @@ async def run_s2s(kind, prompt, turns, timeout=25.0):
         t_speech = mono()
         t.t_end = await mic.say(ut['pcm24'] if eng.in_sr == 24000 else ut['pcm16'])
         deadline = t.t_end + timeout
-        if kind == 'live':
-            # GPT-Live has no per-turn done event over WebSocket: the reply ends after 1.5 s without audio
-            while mono() < deadline and not recv.done():
+        quiet = {'live': 1.5, 'eleven-agent': 2.5}.get(kind)
+        if quiet:
+            # GPT-Live has no per-turn done event over WebSocket, and the ElevenAgents one is not documented as
+            # always sent: the reply also ends after `quiet` seconds without audio
+            while mono() < deadline and not recv.done() and not t.done.is_set():
                 await asyncio.sleep(0.05)
-                if t.t_first_audio is not None and mono() - t.t_last_audio > 1.5:
+                if t.t_first_audio is not None and mono() - t.t_last_audio > quiet:
                     t.status, t.t_done = 'completed', t.t_last_audio
+                    t.events.append(['quiet_end', round(mono(), 3)])
                     break
         else:
             try:
@@ -832,6 +1116,9 @@ async def run_s2s(kind, prompt, turns, timeout=25.0):
         if kind in ('openai', 'gemini'):
             c, tok = eng.turn_cost(t)
             rec['cost_usd'], rec['tokens'] = round(c, 6), tok
+        elif kind in ELEVEN:
+            # billed per call minute plus LLM tokens: read from the conversation after the run (summary billing)
+            rec['cost_usd'], rec['usage'] = None, t.usage
         else:
             secs = float(eng.usage_seconds or 0)
             rec['usage_seconds_cum'] = secs
@@ -861,6 +1148,26 @@ async def run_s2s(kind, prompt, turns, timeout=25.0):
     if kind == 'live':
         summary['closed_usage'] = eng.closed_usage
         summary['usage_seconds_final'] = eng.usage_seconds
+    if kind in ELEVEN:
+        price = PRICES['eleven_realtime_v1_mini' if kind == 'eleven-rt' else 'elevenagents']['per_min']
+        total = session_s / 60 * price
+        summary['call_minutes_estimate_usd'] = round(total, 6)
+        summary['price_note'] = '%.2f USD per call minute (list price 2026-11-17) plus LLM usage' % price
+        if kind == 'eleven-rt':
+            summary.update({'mint': eng.mint_log, 'connect': eng.connect_log, 'voice_used': eng.voice_used,
+                            'turn_detection': {'type': 'semantic_vad', 'eagerness': ELEVEN_RT_EAGERNESS},
+                            'event_types': eng.event_types, 'session_id': eng.session_id})
+            conv = eng.session_id
+        else:
+            summary.update({'agent_id': eng.agent_id, 'agent_create': eng.create_log, 'formats': eng.formats,
+                            'asr': 'scribe_realtime', 'turn_eagerness': ELEVEN_AGENT_EAGERNESS,
+                            'tts': 'eleven_flash_v2_5', 'llm': model + ' (reasoning_effort none when accepted)',
+                            'other_event_types': eng.other_types, 'conversation_id': eng.conversation_id})
+            conv = eng.conversation_id
+        try:
+            summary['billing'] = await eleven_billing(conv, t0_unix)
+        except Exception as e:
+            summary['billing'] = {'error': repr(e)[:300]}
     spent['usd'] += total
     log.summary(summary)
 
@@ -1463,6 +1770,9 @@ def check():
     if key('elevenlabs.key'):
         out['models']['elevenlabs voice Han Aim'] = http_get_status(
             '%s/v1/voices/%s' % (ELEVEN_HTTP, HAN_AIM), {'xi-api-key': key('elevenlabs.key')})
+    if key('elevenlabs.key'):
+        out['models']['elevenlabs agents (list, needs the agents permission)'] = http_get_status(
+            '%s/v1/convai/agents?page_size=1' % ELEVEN_HTTP, {'xi-api-key': key('elevenlabs.key')})
     if key('assemblyai.key'):
         out['models']['assemblyai key (transcript list)'] = http_get_status(
             '%s/v2/transcript?limit=1' % AAI_HTTP, {'Authorization': key('assemblyai.key')})
@@ -1516,7 +1826,7 @@ async def run_named(name, prompt, turns, budget_s):
     return {'name': name, 'status': status, 'seconds': round(mono() - t0, 1)}
 
 
-RUNS = ('gemini', 'openai', 'live', 'cascade', 'cascade-aai')
+RUNS = ('gemini', 'openai', 'live', 'cascade', 'cascade-aai', 'eleven-rt', 'eleven-agent')
 
 
 def main():

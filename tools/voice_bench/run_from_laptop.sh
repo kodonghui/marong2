@@ -4,7 +4,7 @@
 #
 #   git fetch origin claude/project-thread-p4wjk1
 #   git show origin/claude/project-thread-p4wjk1:tools/voice_bench/run_from_laptop.sh | bash -s -- start
-#   ... | bash -s -- start live # 한 엔진만 다시(gemini|openai|live|cascade|cascade-aai), 결과 묶음과 DONE은 같아요
+#   ... | bash -s -- start live # 한 엔진만 다시(gemini|openai|live|cascade|cascade-aai|eleven-rt|eleven-agent), 결과 묶음과 DONE은 같아요
 #   ... | bash -s -- start gemini,cascade,cascade-aai  # 쉼표로 여러 개를 차례로
 #   ... | bash -s -- status     # 진행 중이면 RUNNING과 마지막 줄들, 끝나면 DONE
 #   ... | bash -s -- collect    # 끝난 결과(results.tar.gz)를 받아 브랜치의 tools/voice_bench/server-results/ 에 커밋·푸시
@@ -19,7 +19,7 @@ cmd=${1:-status}
 what=${2:-all}
 IFS=',' read -r -a runs <<< "$what"
 for r in "${runs[@]}"; do
-  case "$r" in all|gemini|openai|live|cascade|cascade-aai) ;; *) echo "unknown engine: $r" >&2; exit 2 ;; esac
+  case "$r" in all|gemini|openai|live|cascade|cascade-aai|eleven-rt|eleven-agent) ;; *) echo "unknown engine: $r" >&2; exit 2 ;; esac
 done
 
 latest() { "${SSH[@]}" "$HOST" 'cat ~/marong-voice-bench/LATEST'; }

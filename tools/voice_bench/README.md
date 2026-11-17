@@ -18,11 +18,21 @@
 | `live` | `gpt-live-1`, noeul | `openai.key` |
 | `cascade` | `gpt-live-transcribe`(말이 끝나고 700ms 뒤 확정) → `gpt-6-luna`(추론 없음, 첫 문장이 나오면 바로) → 목소리 셋을 동시에: `gpt-4o-mini-tts` marin, `gemini-3.8-flash-lite-tts` Sulafat(Vertex global), ElevenLabs `eleven_flash_v2_5` Han Aim | `openai.key`, `gemini2.key`, `elevenlabs.key` |
 | `cascade-aai` | AssemblyAI 실시간 받아쓰기 `assemblyai-stt-3-7-realtime-agent`(모델이 말 끝을 정함, `mode=min_latency`, `language_codes=["ko"]`) → 나머지는 `cascade`와 같음 | 위 + `assemblyai.key` |
+| `eleven-rt` | ElevenLabs Eleven Realtime v1 Mini(`eleven_realtime_v1_mini`, 받아쓰기·말 끝 판정·글 모델·목소리를 ElevenLabs가 하나의 시스템으로 맞춘 speech-to-speech 모델), 목소리 Han Aim(안 받으면 기본 목소리로 바꾸고 적음), `semantic_vad` eagerness `medium`, 언어 `ko` | `elevenlabs.key` |
+| `eleven-agent` | ElevenAgents Custom 모드: Scribe 실시간 받아쓰기 + 말 끝 판정 모델 `turn_v3`(eagerness `normal`) + `gpt-6-luna`(추론 없음) + `eleven_flash_v2_5` Han Aim, 모두 ElevenLabs 안에서. 돌릴 때 `voice-bench` 태그를 단 비공개 에이전트를 하나 만들고(남겨 둠), 서명된 URL로 접속 | `elevenlabs.key`(에이전트 권한 필요) |
 
 - 지시문은 운영 통화 지시문 `tools/vertex_live/call_instruction.md`(main 2a473ae)에서 주인 이름만 바꾸고, 지어낸 '지금 상황'과 '기억 자료'를 붙인 `inputs/system_prompt.txt`예요.
 - 친구 음성(`inputs/u01~u10`)은 OpenAI `gpt-4o-mini-tts`(coral)로 만든 시험 음성이에요. 다른 받아쓰기 모델로 확인한 CER은 u10만 0.133, 나머지는 0이에요.
 - 턴 사이에는 마이크가 계속 무음을 보내고, 대답이 다 '재생'된 뒤 0.6초 있다가 다음 말을 해요.
 - 비용 상한은 한 번 돌릴 때 1.5달러(`VB_MAX_USD`)예요. 10턴씩 네 가지면 추정 0.3달러 안팎이에요.
+
+### ElevenLabs 실시간 엔진 (2026-11-17 추가)
+
+- `eleven-rt`: 서버가 키로 `POST https://api.elevenlabs.io/v1/convai/realtime/client_secrets`에서 짧게 쓰는 비밀값을 받고, `wss://api.elevenlabs.io/v1/convai/realtime?model=eleven_realtime_v1_mini`에 그 값으로 접속해요(OpenAI Realtime과 같은 이벤트). 입력은 24kHz PCM만 돼요. 어떤 인증 방식이 됐는지는 `summary.json`의 `connect`에, 목소리를 받았는지는 `mint`·`voice_used`에 적어요. 비밀값은 어디에도 적지 않아요.
+- `eleven-agent`: `POST /v1/convai/agents/create`로 에이전트를 만들고 `GET /v1/convai/conversation/get-signed-url`로 받은 주소에 접속해요. 소리는 16kHz PCM을 `user_audio_chunk`로 보내고, `audio` 이벤트로 받아요. 대답 끝은 `agent_response_complete`, 없으면 2.5초 동안 소리가 없을 때로 봐요.
+- 요금은 통화 1분에 0.08달러 + 글 모델 사용량이에요(elevenlabs.io/pricing/api, /pricing/agents, 2026-11-17 읽음). 둘 다 끝난 뒤 `GET /v1/convai/conversations/<id>`에서 실제 청구(`cost_fiat_usd`, `charging`)를 읽어 `summary.json`의 `billing`에 남겨요. 대화 글은 합성 시험 글이라 `turns.jsonl`에만 있어요.
+- 읽은 문서(2026-11-17): elevenlabs.io/docs의 `eleven-agents/overview.md`, `eleven-agents/customization/realtime-models.md`, `eleven-agents/guides/openai-realtime-compatibility.md`, `eleven-agents/api-reference/conversations/create-client-secret.md`, `eleven-agents/libraries/web-sockets.md`, `eleven-agents/api-reference/eleven-agents/websocket.md`, `eleven-agents/api-reference/agents/create.md`, `overview/models.md`.
+- `VB_ELEVEN_RT_MODEL`, `VB_ELEVEN_RT_EAGERNESS`, `VB_ELEVEN_AGENT_LLM`, `VB_ELEVEN_AGENT_EAGERNESS`로 바꿔요.
 
 ### 연쇄형 목소리와 받아쓰기 (2026-11-17 추가)
 
