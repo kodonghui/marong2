@@ -13,10 +13,10 @@
 | TC-201 | 최신 릴리스 있음 | API-141#200, SPEC-285, FL-147 | 빈 답, 데이터 노출 | api | 200, 본문 칸은 `versionCode`·`versionName`·`size`·`sha256`·`url` 다섯 개뿐(패키지·올린 때 없음), `Cache-Control: no-store`, 스키마에 맞음 | |
 | TC-202 | 릴리스 없음, 멈춤, 폴더가 틀림 | API-141#204, REQ-307 | 빈 답 | api | 204, 본문 없음, `no-store` | |
 | TC-203 | Access 증명 없음·틀림, 허용 목록에 없음, 꺼진 친구, DM 연결이 없는 친구 | API-141#401, #403, SPEC-285 | 접근 | api | 401 `unauthenticated`, 403 `not_allowed`, 403 `not_allowed`. DM이 없는 친구는 200(DM 확인을 하지 않음) | |
-| TC-204 | Access 키 목록을 못 읽음, 예상하지 못한 예외 | API-141#503, #500 | 외부 서비스 | api(일부러 일으킴) | 503 `db_unavailable`, 500 `internal`, Problem Details 모양과 `traceId` | |
+| TC-204 | Access 키 목록을 못 읽음, 예상하지 못한 예외 | API-141#503, #500, SPEC-285 | 외부 서비스 | api(일부러 일으킴) | 503 `db_unavailable`, 500 `internal`, Problem Details 모양과 `traceId` | |
 | TC-205 | 최신 APK 받기 | API-142#200, SPEC-286 | 빈 답 | api | 200, `application/vnd.android.package-archive`, `Content-Length`가 `size`와 같고 받은 바이트의 SHA-256이 `sha256`과 같음, `no-store`, 로그 `app_release apk sent code=<버전 코드>` | |
 | TC-206 | 옛 버전 이름, 다른 이름, 형식이 틀린 이름, `..`·`%2F`가 든 이름, 멈춤, 릴리스 없음 | API-142#404, SPEC-286, REQ-308 | 대상, 입력 | api | 모두 404 `no_release`. 릴리스 폴더 밖의 파일은 어떤 이름으로도 받지 못함 | |
-| TC-207 | API-142의 접근·외부 서비스 | API-142#401, #403, #503, #500 | 접근, 외부 서비스 | api | TC-203·204와 같은 응답 | |
+| TC-207 | API-142의 접근·외부 서비스 | API-142#401, #403, #503, #500, SPEC-286 | 접근, 외부 서비스 | api | TC-203·204와 같은 응답 | |
 | TC-208 | 로그에 개인 정보 없음 | REQ-312 | 데이터 노출 | api | TC-201\~207을 돌린 뒤 로그에 이메일·친구 이름·기기 식별자·쿠키가 없고 버전과 결과만 있음 | |
 | TC-209 | 새 버전 올리기 | SPEC-287, FL-146 | 상태 변경 | api(도구) | 종료 코드 0, 새 릴리스 한 줄, API-141이 새 값, `release.json`이 한 번에 바뀜(쓰는 중 읽어도 옛 값 또는 새 값) | |
 | TC-210 | 올리기 거절: 같은·낮은 버전 코드, 다른 패키지, zip이 아님, 서명 파일 없음, (노트북) 메타데이터 없음·`outputFile` 다름 | SPEC-287, REQ-309 | 입력, 상태 변경 | api(도구), 노트북 쪽 함수 | 종료 코드 2와 이유, 릴리스 폴더 그대로, API-141 응답 그대로 | |

@@ -36,9 +36,16 @@
       "updated": "2026-11-17T08:21:59+00:00"
     },
     "02-prd": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "질문 A~D는 D72(2026-11-17 16:33 KST)로 추천안대로 정해짐. 범위 동결(REQ-330~429) 체크포인트를 NEXUS에서 요청",
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "프로젝트 채팅 '아니 얼마나 더 남았어 설계? 나한테 확인하는 단계만 남은거야? 모두 승인이야'(2026-11-17 17:27:13 KST, D67). 남은 확인 단계를 모두 승인함: 반려동물 02 범위 동결(REQ-330~429, NEXUS 요청 nc_epkae5mq5jk2)",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJVsU16GXHgrv9AYR6fstwBT",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "없음. 바뀌면 설계 PR로",
       "checks": [
         {
           "level": "info",
@@ -46,12 +53,19 @@
           "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T07:38:11+00:00"
+      "updated": "2026-11-17T08:29:13+00:00"
     },
     "03-user-flow": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "체크포인트: FL-150~168의 주 경로와 실패 경로. NEXUS에서 요청",
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "프로젝트 채팅 '아니 얼마나 더 남았어 설계? 나한테 확인하는 단계만 남은거야? 모두 승인이야'(2026-11-17 17:27:13 KST, D67). 남은 확인 단계를 모두 승인함: 반려동물 03 흐름(FL-150~168)",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJVsU16GXHgrv9AYR6fstwBT",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "없음. 바뀌면 설계 PR로",
       "checks": [
         {
           "level": "info",
@@ -59,12 +73,19 @@
           "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T07:38:12+00:00"
+      "updated": "2026-11-17T08:29:13+00:00"
     },
     "04-functional-spec": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "명세 동결: SPEC-310~369·AI-30~36(질문 A~D는 D72로 정해짐). NEXUS에서 요청",
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "프로젝트 채팅 '아니 얼마나 더 남았어 설계? 나한테 확인하는 단계만 남은거야? 모두 승인이야'(2026-11-17 17:27:13 KST, D67). 남은 확인 단계를 모두 승인함: 반려동물 04 명세 동결(SPEC-310~369·AI-30~36)",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJVsU16GXHgrv9AYR6fstwBT",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "없음. 바뀌면 설계 PR로",
       "checks": [
         {
           "level": "info",
@@ -72,7 +93,7 @@
           "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T07:38:12+00:00"
+      "updated": "2026-11-17T08:29:13+00:00"
     },
     "05-erd": {
       "state": "done",
@@ -115,34 +136,61 @@
       "updated": "2026-11-17T07:38:11+00:00"
     },
     "07-sitemap": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "아래 탭 셋(홈·상점·내 정보, 살아 있는 아이 없으면 상점 숨김)은 D72로 정해짐. 사이트맵 SCR-140~162 내비게이션 합의를 NEXUS에서 요청",
-      "updated": "2026-11-17T07:38:11+00:00"
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "프로젝트 채팅 '아니 얼마나 더 남았어 설계? 나한테 확인하는 단계만 남은거야? 모두 승인이야'(2026-11-17 17:27:13 KST, D67). 남은 확인 단계를 모두 승인함: 반려동물 07 사이트맵(SCR-140~162, 아래 탭 셋)",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJVsU16GXHgrv9AYR6fstwBT",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "없음. 바뀌면 설계 PR로",
+      "updated": "2026-11-17T08:29:13+00:00"
     },
     "08-screen-states": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "화면 정의 승인: docs/08-screens/pet.md SCR-140~162(상태 220개)와 와이어프레임. NEXUS에서 요청",
-      "updated": "2026-11-17T07:38:11+00:00"
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "프로젝트 채팅 '아니 얼마나 더 남았어 설계? 나한테 확인하는 단계만 남은거야? 모두 승인이야'(2026-11-17 17:27:13 KST, D67). 남은 확인 단계를 모두 승인함: 반려동물 08 화면 정의(SCR-140~162, 상태 220개)와 와이어프레임",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJVsU16GXHgrv9AYR6fstwBT",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "없음. 캔버스에 그리지 않은 상태도 08 정의대로 GPT가 만듦",
+      "updated": "2026-11-17T08:29:13+00:00"
     },
     "09-mockup": {
-      "state": "in_progress",
+      "state": "done",
       "checkpoints": [
         {
           "approved": "D72: 설계 스레드 결정 카드 \"반려동물 서비스 질문 7개를 추천대로 정할까요?\"에서 \"추천대로 모두 정하기\"(16:33:42 KST), 이어 프로젝트 채팅 \"추천 모두 승인\"(16:33:51 KST). 1번 화면 방향 A(마롱이 앱 모양 그대로, 새 토큰 없음, design/pet-candidates.md)",
           "by": "the maintainer",
           "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ9Ji9GVtLfBUnp7e9euj7F8",
           "date": "2026-11-17"
+        },
+        {
+          "approved": "프로젝트 채팅 '아니 얼마나 더 남았어 설계? 나한테 확인하는 단계만 남은거야? 모두 승인이야'(2026-11-17 17:27:13 KST, D67). 남은 확인 단계를 모두 승인함: 공통 09 토큰 얼리기(base.tokens.json 103개 그대로). 반려동물은 방향 A(D72), 새 토큰 없음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJVsU16GXHgrv9AYR6fstwBT",
+          "date": "2026-11-17"
         }
       ],
-      "next": "나머지 상태를 A로 그리고 B 대지는 캔버스 아래 '고르지 않음'으로 옮김. 그 뒤 공통 토큰 얼리기를 NEXUS에서 한 번 요청",
-      "updated": "2026-11-17T07:38:11+00:00"
+      "next": "없음. 토큰 값을 바꾸려면 설계 PR과 동희님 확인",
+      "updated": "2026-11-17T08:29:14+00:00"
     },
     "10-wbs": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "체크포인트(구현 전 계획 합의): docs/10-wbs/pet.md TASK-330~378과 PR 여섯 개 순서. 04 명세 동결과 함께 NEXUS에서 요청. 통과하면 README 표를 '시작 가능'으로",
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "프로젝트 채팅 '아니 얼마나 더 남았어 설계? 나한테 확인하는 단계만 남은거야? 모두 승인이야'(2026-11-17 17:27:13 KST, D67). 남은 확인 단계를 모두 승인함: 반려동물 10 작업 목록(TASK-330~378, PR 여섯 개 순서)",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJVsU16GXHgrv9AYR6fstwBT",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "없음. GPT가 인계 절대로 ① codex/pet-core부터 구현",
       "checks": [
         {
           "level": "info",
@@ -150,12 +198,19 @@
           "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T08:00:03+00:00"
+      "updated": "2026-11-17T08:29:14+00:00"
     },
     "12-qa": {
       "state": "in_progress",
-      "checkpoints": [],
-      "next": "시험 계획 TC-380~429는 10 체크포인트와 함께 NEXUS에서 확인. 돌리는 쪽은 GPT(구현 PR마다)",
+      "checkpoints": [
+        {
+          "approved": "프로젝트 채팅 '아니 얼마나 더 남았어 설계? 나한테 확인하는 단계만 남은거야? 모두 승인이야'(2026-11-17 17:27:13 KST, D67). 남은 확인 단계를 모두 승인함: 반려동물 12 시험 계획(TC-380~429)",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJVsU16GXHgrv9AYR6fstwBT",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "시험 계획 승인됨. 돌리는 쪽은 GPT(구현 PR마다)",
       "checks": [
         {
           "level": "info",
@@ -163,7 +218,7 @@
           "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T08:00:03+00:00"
+      "updated": "2026-11-17T08:29:14+00:00"
     }
   }
 }
