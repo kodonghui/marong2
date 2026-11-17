@@ -2,9 +2,9 @@
 openapi: 3.1.0
 info:
   title: 마롱이 반려동물 서비스 API
-  version: 0.1.0-draft
+  version: 0.1.0
   description: '마롱이 반려동물 서비스(공개 서비스, 새 프로세스 `run_pet.py`, 새 DB `marong_pet`)의 모바일 웹(PWA)과 통화 서버가 쓰는 계약이에요. 설계: docs/04-functional-spec/pet.md(SPEC-310~369),
-    DB: marong/pet/schema.sql(TBL-140~163), 표 설명: docs/05-erd/pet.md. 원본은 이 파일이고 코드는 이 파일을 따라가요(06 단계).
+    DB: marong/pet/schema.sql(TBL-140~163), 표 설명: docs/05-erd/pet.md. 원본은 이 파일이고 코드는 이 파일을 따라가요(06 단계). 2026-11-17 16:33 KST 0.1.0으로 얼림(D72, 동희님 ''추천대로 모두 정하기''). 01 질문 1~3이 추천안과 다르거나 결제 대행·본인확인 기관을 고르면 아래 Open 칸만 바꿔요.
 
 
     - 로그인은 카카오·구글 OIDC이고 쿠키 `pet_session`이에요. 모든 값은 세션 회원으로만 읽고 바꿔요. 남의 것·없는 것·지운 것은 같은 404 `not_found`예요(SPEC-364).
