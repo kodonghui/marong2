@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
+import re
 from zoneinfo import ZoneInfo
 
 from psycopg import sql
@@ -338,6 +339,19 @@ class FriendCards:
                 VALUES (%s,'card_proposal',%s,%s,%s,%s,%s) RETURNING *""",
                 (friend, selected["field"], selected["value"], room, at+timedelta(hours=24), at))
             return await cur.fetchone()
+
+    async def may_propose(self, friend, room, text, at):
+        if re.search(r"잘게|자러|잘\s*자|굿밤|이만|내일\s*얘기|나중에\s*얘기|씻으러|밥\s*먹으러|"
+                     r"피곤|졸려|힘이\s*없|기운\s*없|녹초|아무것도\s*하기\s*싫", text):
+            return False
+        if at.astimezone(KST).hour < 5 and len(text) <= 20:
+            return False
+        rows = await self.store._all("""SELECT m.content FROM marong.messages m JOIN marong.people p USING(user_key)
+            WHERE p.friend_id=%s AND m.room_key=%s AND m.role='user' AND m.created_at>=%s
+            AND NOT (m.meta ? 'image') ORDER BY m.id DESC LIMIT 3""", (friend, room, at-timedelta(minutes=30)))
+        short = [len(re.sub(r"[ㅋ\U0001F000-\U0001FAFF\u2600-\u27BF\u200d\ufe0f]", "", row["content"]).strip()) <= 8
+                 for row in rows]
+        return len(short) < 3 or not all(short)
 
     async def open_choice(self, friend, room, at):
         return await self.store._one("""SELECT * FROM marong.chat_cards WHERE friend_id=%s AND room_key=%s

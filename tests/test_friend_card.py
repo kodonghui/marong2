@@ -259,6 +259,12 @@ async def scenario(db, store):
     assert not await cards.open_signals(proposal_friend, "support")
     assert (await cards.read(proposal_friend))["card"]["support"] == "listen"
     assert await cards.proposal(proposal_friend, "fixture-room-a", now+timedelta(minutes=1)) is None
+    assert not await cards.may_propose(proposal_friend, "fixture-room-a", "지금은 너무 피곤해", now)
+    assert not await cards.may_propose(proposal_friend, "fixture-room-a", "그냥 있어", now.replace(hour=1))
+    db.admin("INSERT INTO marong.people(user_key,friend_id) VALUES ('fixture-proposal-user',%s)", (proposal_friend,))
+    for text in ("응", "그래 🌰", "ㅋㅋ"):
+        await store.add_message("fixture-room-a", "user", text, user_key="fixture-proposal-user")
+    assert not await cards.may_propose(proposal_friend, "fixture-room-a", "응", datetime.now(KST))
 
     handler.llm = SimpleNamespace(create_once=AsyncMock(return_value=SimpleNamespace(
         stop_reason="end_turn", content=[SimpleNamespace(type="text", text=json.dumps({

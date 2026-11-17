@@ -2,12 +2,15 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 import asyncio
+from anthropic import APIConnectionError
+from httpx import Request
 
 from marong.capabilities import description, text_matrix
 from marong.persona_instructions import InterpretationError, interpret, validate
 from tools.persona_draft import FIELDS, validate as draft
+from tools import persona_draft as draft_job
 
 
 async def main():
@@ -40,6 +43,22 @@ async def main():
     )))
     assert (await interpret(llm, "fixture", source))["understood"] == output["understood"]
     assert llm.create_once.await_count == 1
+    source_store = SimpleNamespace(_all=AsyncMock(return_value=[
+        {"kind": "summary", "id": 1, "content": "짧게 답을 듣는다는 합성 시험 요약"}]))
+    cards = SimpleNamespace(record_run=AsyncMock(), draft=AsyncMock())
+    draft_response = SimpleNamespace(stop_reason="end_turn", content=[
+        SimpleNamespace(type="text", text=json.dumps(values))])
+    connection_error = APIConnectionError(request=Request("POST", "https://fixture.invalid"))
+    with patch.object(draft_job, "FriendCards", return_value=cards):
+        llm.create_once.side_effect = [connection_error, draft_response]
+        llm.create_once.reset_mock()
+        assert await draft_job.make(source_store, llm, SimpleNamespace(anthropic_model="fixture"), 1)
+        assert llm.create_once.await_count == 2 and cards.draft.await_count == 1
+        assert [call.args[0].outcome for call in cards.record_run.call_args_list] == ["error", "ok"]
+        llm.create_once.side_effect = [ValueError("fixture-invalid-output")]
+        llm.create_once.reset_mock()
+        assert not await draft_job.make(source_store, llm, SimpleNamespace(anthropic_model="fixture"), 1)
+        assert llm.create_once.await_count == 1
     print("TC-259/265/269 partial: draft defaults, exact-quote instruction schema, and capability matrix")
 
 

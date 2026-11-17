@@ -1,14 +1,13 @@
 """Integration test on a restored, isolated database. Never sends Kakao messages."""
-import asyncio,hashlib,json,os,subprocess,sys,uuid
+import asyncio,hashlib,json,sys,uuid
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 from call_memory import MemoryStore
 from organizer import Organizer,AsyncPostgresSaver,extract
 from marong.store import Store
 
-DB=os.environ.get('TEST_DATABASE','marong_voice_verify_20261112')
-assert DB.startswith('marong_voice_verify_'), 'Only the isolated restored database is allowed'
-DSN=f'dbname={DB} user=marong_call'
+from fixture_database import CALL_DSN, BOT_DSN, admin
+DSN=CALL_DSN
 PREFIX='testvoice_'+uuid.uuid4().hex[:10]
 CHECKS=0
 def ok(value,label):
@@ -16,10 +15,6 @@ def ok(value,label):
     assert value,label
     CHECKS+=1
     print('PASS',label,flush=True)
-def admin(sql):
-    r=subprocess.run(['sudo','-n','-u','postgres','psql','-X','-q','-At','-v','ON_ERROR_STOP=1','-d',DB],input=sql,text=True,capture_output=True)
-    if r.returncode:raise RuntimeError(r.stderr)
-    return r.stdout.strip()
 def digest(s):return hashlib.sha256(s.encode()).hexdigest()
 
 async def main():
@@ -41,7 +36,7 @@ async def main():
     c2=int(admin(f"INSERT INTO call.callers(friend_id) VALUES({f2}) RETURNING id;"))
     admin(f"INSERT INTO call.caller_logins(caller_id,email_sha256,email_hint) VALUES({c1},'{digest(PREFIX)}','t***'),({c1},'{digest(PREFIX+'alias')}','t***'),({c2},'{digest(PREFIX+'other')}','t***');")
     mem=MemoryStore(DSN);await mem.open()
-    bot=Store(f'dbname={DB} user=marong',call_bridge=True);await bot.open(wait=True)
+    bot=Store(BOT_DSN,call_bridge=True);await bot.open(wait=True)
     try:
         p=await mem.principal(digest(PREFIX));q=await mem.principal(digest(PREFIX+'other'))
         ok(p.caller_id==c1 and (await mem.principal(digest(PREFIX+'alias'))).caller_id==c1,'approved aliases resolve one caller')

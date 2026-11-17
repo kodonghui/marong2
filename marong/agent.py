@@ -468,7 +468,7 @@ class Agent:
                         return reply + "\n\n" + QUESTIONS[0][1]
                 return reply
             return reply
-        if not difficult(text):
+        if not difficult(text) and await self.friend_cards.may_propose(friend, room, text, now):
             proposal = await self.friend_cards.proposal(friend, room, now)
             if proposal:
                 msg.question = proposal

@@ -11,6 +11,7 @@ Run: .venv/bin/python tests/test_topic_pictures.py"""
 import base64
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
 import json
@@ -40,6 +41,7 @@ def ok(cond, what):
     CHECKS += 1
 
 
+@lru_cache(maxsize=8)
 def png(size: int, noise: bool = False) -> bytes:
     if noise:
         rng = random.Random(size)
@@ -109,6 +111,10 @@ def run(*argv, env=None):
 
 
 def main():
+    # The 0.5-second HTTP deadline tests a slow response, so prepare the image fixtures beforehand.
+    png(256)
+    png(1024)
+    png(1024, noise=True)
     server = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     api = f"http://127.0.0.1:{server.server_address[1]}/v1"
