@@ -1,5 +1,7 @@
 # 화면 정의(08단계)
 
+마롱이 화면 전체의 토큰·부품·화면 번호표와 다른 맥락 화면을 합치는 법은 [`design/README.md`](../../design/README.md)에 있어요(2026-11-17).
+
 원본: 이 폴더의 `SCR-001.md`\~`SCR-005.md`. 와이어프레임(상태 38개, 폭 360px·430px)과 09단계 목업 후보 두 안은 Claude 디자인 캔버스 [마롱이 통화 화면 설계](https://claude.ai/artifact/FDFCuk2xc8JE8SCUuh7hL2)에 그려요. 캔버스는 비공개라 공유받은 사람만 열 수 있어요. 캔버스와 이 정의가 다르면 이 정의가 맞아요(`.corthex/project.json` 08 메모). 색·간격 값의 원본은 [`design/base.tokens.json`](../../design/base.tokens.json)이에요.
 
 공통 규칙:
