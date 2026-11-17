@@ -5,7 +5,7 @@
 ## GPT 인계
 
 - 목표: 선톡이 너무 잦고 되풀이되고 밤에도 오는 것, 종일 일정에 알림이 없는 것, 답에 괄호 지문이 붙는 것, 딥시크가 늦으면 답이 40초 넘게 걸리는 것을 고쳐요. 동희님 D24(2026-11-17 12:24 KST 결정 카드 '바로 고치고 전부 설계', 12:25 논의 문서 댓글 "모두승인")와 D60(12:37 "구현은 gpt 시킬거야"). 원문 자리는 [docs/02-prd/persona.md](../02-prd/persona.md#출처-표기)
-- 시작: PR #27이 `main`에 합쳐진 뒤의 `main` 머리에서 새 브랜치 `codex/persona-stage0`. 합쳐지기 전이면 PR #27 브랜치 `claude/project-thread-jbvi9w`의 머리(이 절을 쓸 때 `a703918`)에서 시작하고, 합쳐진 뒤 `main` 위로 옮겨요(rebase). 설계 문서는 브랜치 `claude/project-thread-spqkcm`(PR #30)에 있어요
+- 시작: `main` 머리에서 새 브랜치 `codex/persona-stage0`(PR #27은 2026-11-17 `4c74b02`로 `main`에 합쳐짐). 설계 문서는 브랜치 `claude/project-thread-spqkcm`(PR #30)에 있어요
 - 읽을 것: [docs/04-functional-spec/persona.md](../04-functional-spec/persona.md)의 1·3절과 SPEC-184\~191, AI-11·AI-12. [docs/12-qa/persona.md](../12-qa/persona.md)의 TC-230\~255. 이 파일의 TASK 표. 그 밖의 문서는 읽지 않아도 돼요(PR #27의 SPEC-263·264·271은 명세에서 가리킬 때만)
 - 이미 된 것: 저장소 코드는 없어요. 설계 스레드가 멈춘 참고 패치(프로젝트 파일 `marong-persona-research-20261116/stage0/참고-초안-미완성-20261117.patch`)가 있지만 `main` `a5a138b` 위에서 만든 것이고 PR #27 위가 아니에요. 시험하지 않았고 괄호 지문 판정이 틀려서 쓰지 않아요. 명세가 기준이에요
 - 순서: TASK-200 → TASK-201 → TASK-202 → TASK-203 → TASK-204 → TASK-205·206·207(서로 독립, 순서 상관없음) → TASK-208 → TASK-209 → TASK-210

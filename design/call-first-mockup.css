@@ -1,0 +1,62 @@
+/* 선 전화·그림 화두 09단계 목업(2026-11-16). 화면 정의: docs/08-screens/call-first.md, SCR-002.md#topic-card.
+   후보·추천·확인한 것: design/call-first-candidates.md.
+   통화 화면(tools/vertex_live/static/style.css)과 글 대화 화면(marong/app_chat_static/chat.css) 위에 얹어 그려요.
+   색은 두 화면의 CSS 변수(design/base.tokens.json color.a·color.b와 같은 값)만 쓰고,
+   크기·간격·모서리·글자는 토큰 값이에요(줄마다 토큰 이름).
+   추천 방향: 통화 A(얼굴 원이 15초 동안 그림으로 바뀜) + 글 대화 A(말풍선 위에 따로 놓인 그림).
+   B 두 안은 비교한 기록으로 남겨요(추천하지 않음). */
+
+/* ── 통화 화면 SCR-002#topic-card ── */
+
+/* A: 같은 원(.in-call .portrait, size.face-call)에 그림을 채워요. 원 둘레 링과 말할 때의 링은 그대로라
+   마롱이가 말하는 것이 보여요. 그림은 원으로 잘려요(그림 세트는 주인공을 가운데 원 안에 그려요). */
+.topic-a .face-disc {overflow: hidden; background: var(--surface)}
+.topic-a .face-disc img.topic-picture {width: 100%; height: 100%; object-fit: cover; filter: none}
+.topic-a .topic-title {
+  position: absolute; z-index: 2; left: 50%; bottom: 0; transform: translate(-50%, 50%);
+  max-width: calc(100% - 2 * 24px);              /* 원 폭 - 2 × space.lg */
+  padding: 4px 16px;                             /* space.xs space.md */
+  border-radius: 999px;                          /* radius.full */
+  background: var(--raised); color: var(--text);
+  font-size: 13px; font-weight: 700;             /* font-size.caption, font-weight.bold */
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  box-shadow: 0 2px 10px var(--panel-shadow);
+}
+.topic-close {
+  position: absolute; z-index: 3; top: 0; right: 0;
+  width: 48px; height: 48px;                     /* size.touch-min */
+  border-radius: 50%; border: 0; display: grid; place-items: center;
+  background: var(--raised); color: var(--text); box-shadow: 0 2px 10px var(--panel-shadow);
+}
+.topic-close svg {width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round}
+
+/* B(추천하지 않음): 얼굴은 그대로, 얼굴 아래쪽과 이름을 덮는 카드. 360×740에서 음소거·끊기 단추를 가려요. */
+.topic-b .topic-card {
+  position: absolute; z-index: 3; left: 50%; top: 150px; transform: translateX(-50%);
+  width: 192px; padding: 16px; border-radius: 24px; background: var(--surface); border: 1px solid var(--line);
+  box-shadow: 0 8px 28px var(--panel-shadow); text-align: center;
+}
+.topic-b .topic-card img {display: block; width: 160px; height: 160px; border-radius: 16px; object-fit: cover}
+.topic-b .topic-card p {margin: 8px 0 0; font-size: 14px; font-weight: 650; color: var(--text)}
+.topic-b .topic-close {top: -12px; right: -12px}
+
+/* ── 글 대화 SCR-107#picture ── */
+
+/* A: 말풍선 위에 그림이 따로(메신저의 사진처럼). 기다리는 동안 같은 칸을 raised 색으로 둬요. */
+.pic-a .picture {
+  display: block; width: 240px; height: 240px;   /* size.topic-picture */
+  margin: 0 0 4px;                               /* space.xs */
+  border-radius: 16px;                           /* radius.md */
+  background: var(--surface); border: 1px solid var(--line); object-fit: cover;
+}
+.pic-a .picture.waiting {background: var(--raised); border-color: var(--raised)}
+
+/* B(추천하지 않음): 말풍선 안 위쪽에 그림, 아래에 글 */
+.pic-b .bubble.has-picture {padding: 6px 6px 10px}
+.pic-b .bubble.has-picture img {display: block; width: 240px; height: 240px; border-radius: 12px; object-fit: cover}
+.pic-b .bubble.has-picture span {display: block; padding: 8px 8px 0}
+
+/* 움직임 줄이기: 카드가 움직임 없이 나타나고 사라져요(SCR-002#topic-card). */
+@media (prefers-reduced-motion: reduce) {
+  .topic-a .face-disc img, .topic-b .topic-card {transition: none}
+}

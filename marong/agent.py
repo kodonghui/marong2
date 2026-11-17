@@ -27,7 +27,8 @@ from .knowledge import load_knowledge
 from .llm import LLM, SERVER_BLOCKS, brief, server_tool_counts, text_of
 from .photo import Photo
 from .store import Store, keyword_terms, speaker_label
-from .style import tidy
+from .style import EMPTY_FALLBACK, tidy
+from .topics import TOPIC_GUIDE, topic_text
 
 log = logging.getLogger("agent")
 
@@ -854,16 +855,20 @@ class Agent:
 
     # ── 선톡(먼저 말 걸기) ──────────────────────────────────────
 
-    async def proactive_message(self, room: dict) -> tuple[str, dict] | None:
+    async def proactive_message(self, room: dict, topic=None) -> tuple[str, dict] | None:
         """방(1:1 이나 관리자가 켠 단체방)에 먼저 보낼 말을 만든다(보내지는 않음). 오류·거절·빈 답이면 None.
         넣은 기억은 meta.memory 로.
         room: store.proactive_rooms 의 한 줄(room_key, is_channel, user_key, name, last_said, per_day …).
         단체방이면 user_key·name 은 마지막으로 마롱이에게 말한 사람, 1:1 방에 묶인 단체방이면 그 1:1 친구(1:1 처럼 말 걸고,
-        기억은 묶인 방들 것을 함께 씀)."""
+        기억은 묶인 방들 것을 함께 씀).
+        topic: 그림 화두(topics.Picture, docs/04-functional-spec/call-first.md AI-20)면 '# 오늘 꺼낼 화두'를 더해 부르고,
+        답을 못 쓰면(오류·거절·빈 답·400자 넘음) None 대신 그림의 고정 글을 준다(SPEC-271)."""
         rows = await self.store.recent(room["room_key"], self.s.recent_turns * 2)
         summaries = [x for x in await self.store.summaries(room["room_key"], RECENT_SUMMARIES) if x["content"]]
         notes = await self.store.notes(room["room_key"])
-        system = self._system(self._proactive_situation(room, notes, summaries, rows))
+        memory = {"recent": [rows[0]["id"], rows[-1]["id"]] if rows else [],
+                  "summaries": [x["id"] for x in summaries], "notes": [n["id"] for n in notes]}
+        system = self._system(self._proactive_situation(room, notes, summaries, rows, topic))
         msg = Incoming(room_key=room["room_key"], user_key=room["user_key"], text=PROACTIVE_TRIGGER,
                        is_channel=room.get("is_channel", True))
         timeout = self.s.llm_timeout_s
@@ -873,19 +878,33 @@ class Agent:
                 self.ask(system, [{"role": "user", "content": PROACTIVE_TRIGGER}], msg, end, tools=[]), timeout + 2)
         except Exception as e:
             log.warning("proactive_llm_error %s", brief(e))
+            if topic is not None:
+                return self._topic_fallback(topic, memory)
             return None
         if text in (FALLBACK_TEXT, REFUSAL_TEXT) or not text.strip():
             log.info("proactive_skipped room=%s refusal=%s", short_key(room["room_key"]), meta.get("refusal"))
+            if topic is not None:
+                return self._topic_fallback(topic, memory)
             return None
         text, fixes = tidy(text.strip(), room.get("name") if room.get("is_channel", True) else None)
         if fixes:
             meta["tidy"] = fixes
             log.info("tidy %s", ",".join(fixes))
-        meta["memory"] = {"recent": [rows[0]["id"], rows[-1]["id"]] if rows else [],
-                          "summaries": [x["id"] for x in summaries], "notes": [n["id"] for n in notes]}
+        meta["memory"] = memory
+        if topic is not None:
+            text, fixed = topic_text(None if text == EMPTY_FALLBACK else text, topic)
+            if fixed:
+                return self._topic_fallback(topic, memory)
         return text.strip(), meta
 
-    def _proactive_situation(self, room: dict, notes: list[dict], summaries: list[dict], rows: list[dict]) -> str:
+    @staticmethod
+    def _topic_fallback(topic, memory: dict) -> tuple[str, dict]:
+        """The picture's opening line and question, word for word (SPEC-271): the friend still gets the picture topic."""
+        log.info("topic_text fallback=1")
+        return topic.fallback(), {"topic_fallback": True, "memory": memory}
+
+    def _proactive_situation(self, room: dict, notes: list[dict], summaries: list[dict], rows: list[dict],
+                             topic=None) -> str:
         tz = self.s.timezone
         lines = ["# 지금 상황", f"- 지금 시각: {now_line(tz)} (한국 시간)"]
         linked = not room.get("is_channel", True) and room.get("memory_room")
@@ -917,4 +936,7 @@ class Agent:
                 lines.append(f"- ({short_time(r['created_at'], tz)}) {who}: {text}")
         guide = PROACTIVE_GROUP_GUIDE if group else PROACTIVE_GUIDE
         guide = guide.format(per_day=room.get("per_day") or self.s.proactive_per_day)
-        return "\n".join(lines + ["", guide] + ([LINKED_GUARD] if linked else []))
+        extra = ([LINKED_GUARD] if linked else [])
+        if topic is not None:  # a picture topic (AI-20): the set's own words, reviewed by people
+            extra += ["", TOPIC_GUIDE.format(alt=topic.alt, scene=topic.scene, line=topic.line, ask=topic.ask)]
+        return "\n".join(lines + ["", guide] + extra)

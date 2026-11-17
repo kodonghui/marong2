@@ -32,9 +32,9 @@
 })();
 
 const $=id=>document.getElementById(id);
-const CLIENT_VERSION='20261115-ring1';
+const CLIENT_VERSION='20261117-topic1';
 const clientId=crypto.randomUUID();
-const faceNames={1:'01-neutral',3:'03-listening',15:'15-mouth-slightly-open',16:'16-mouth-wide-open',18:'18-eyes-half-closed',19:'19-eyes-closed',20:'20-mouth-slightly-open-eyes-half-closed',21:'21-mouth-slightly-open-eyes-closed',22:'22-mouth-wide-open-eyes-half-closed',23:'23-mouth-wide-open-eyes-closed'};
+const faceNames={1:'01-neutral',15:'15-mouth-slightly-open',16:'16-mouth-wide-open',18:'18-eyes-half-closed',19:'19-eyes-closed',20:'20-mouth-slightly-open-eyes-half-closed',21:'21-mouth-slightly-open-eyes-closed',22:'22-mouth-wide-open-eyes-half-closed',23:'23-mouth-wide-open-eyes-closed'};
 const faceURL=n=>`/face/v1/${faceNames[n]}.webp`;
 for(const n of Object.keys(faceNames)){const image=new Image();image.src=faceURL(n);}
 const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
@@ -43,7 +43,7 @@ let socket=null,stream=null,audioContext=null,worklet=null,player=null,micSource
 let playbackStats={},outputTurnOpen=false,lastAudioAt=0,maxArrivalGapMs=0,contextInterruptions=0,speaking=false;
 let retryTimer=null,starting=false,ready=false,intended=false,hangingUp=false,hangupTimer=null;
 let lastSpeaker=null,lastText=null,retryDelay=1000,firstReady=null,micMode=false,muted=false,hasConnected=false;
-let speakingSince=0,lastFace=0,listenUntil=0,blinkAt=performance.now()+3500,blinkStarted=0;
+let speakingSince=0,lastFace=0,blinkAt=performance.now()+3500,blinkStarted=0;
 let generation=0,epoch=0,callId=null,memoryConnected=false;
 let rtcClient=null,rtcEnabled=false;
 // A call Marong placed at a time the friend set (docs/app-ring.md SPEC-135): the app opens /?ring=<id>.
@@ -58,6 +58,35 @@ let ringId=null,ringShown=false;
     history.replaceState(null,'',location.pathname+rest+(location.hash||''));
     if(UUID_RE.test(value))ringId=value;
   }
+}
+// The picture of a hello call (docs/04-functional-spec/call-first.md SPEC-269): the first 'ready' of the call that
+// answered it carries {picture, title}; the face circle shows the picture for 15 seconds, once per picture.
+const TOPIC_RE=/^\/chat\/topics\/v[0-9]{1,3}\/[a-z0-9-]{1,40}\.webp$/,TOPIC_MS=15000;
+const topicSeen=new Set();let topicTimer=null,topicOn=false;
+function topicCard(topic){
+  const picture=topic?.picture,title=typeof topic?.title==='string'?topic.title.trim():'';
+  if(typeof picture!=='string'||!TOPIC_RE.test(picture)||!title||title.length>20||topicSeen.has(picture))return;
+  topicSeen.add(picture);
+  const run=generation,image=new Image();
+  // A picture that does not load shows nothing: the call goes on with her face.
+  image.onload=()=>{
+    if(!intended||generation!==run)return;
+    const shown=$('topic-picture');shown.src=picture;shown.alt=title;shown.hidden=false;
+    $('topic-title').textContent=title;$('topic-title').hidden=false;$('topic-close').hidden=false;
+    document.body.classList.add('topic-on');topicOn=true;
+    clearTimeout(topicTimer);topicTimer=setTimeout(closeTopic,TOPIC_MS);
+  };
+  image.src=picture;
+}
+function closeTopic(){
+  clearTimeout(topicTimer);topicTimer=null;
+  if(!topicOn)return;
+  topicOn=false;
+  const focused=document.activeElement===$('topic-close');
+  document.body.classList.remove('topic-on');
+  $('topic-picture').hidden=true;$('topic-picture').removeAttribute('src');$('topic-picture').alt='';
+  $('topic-title').hidden=true;$('topic-close').hidden=true;
+  if(focused&&!$('mute').hidden)$('mute').focus();
 }
 let pcmFallback=false,fallbackPending=false,fallbackReason=null,fallbackTimer=null;
 function requestPCM(){
@@ -154,7 +183,7 @@ function hangUpAfterPlayback(pendingMs=0){
   check();
 }
 async function end(message='또 이야기하자. 여기 있을게.'){
-  sendPlaybackStats();ringId=null;if(ringShown)ringOffer(false);
+  sendPlaybackStats();ringId=null;if(ringShown)ringOffer(false);closeTopic();
   if(memoryConnected&&callId)fetch(`/api/calls/${encodeURIComponent(callId)}/end`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',keepalive:true}).catch(()=>{});
   generation++;
   intended=false;ready=false;starting=false;clearTimeout(retryTimer);retryTimer=null;
@@ -193,7 +222,8 @@ function connect(){
       sendPlaybackStats();
       connection('함께 이야기 중');status(micMode?'듣고 있어. 편하게 말해 줘.':'글로 말해도 괜찮아. 목소리로 답할게.');
       // Marong's own call: the server lets her speak first. A ring past its time is an ordinary call.
-      if(ringId&&!hasConnected&&!message.ring)status('약속 시간이 지나서 보통 전화로 이어졌어.');
+      if(ringId&&!hasConnected&&!message.ring)status('벨이 울린 지 오래돼서 보통 전화로 이어졌어.');
+      if(message.topic)topicCard(message.topic);
       if(!hasConnected&&!message.resumed&&!message.ring&&micMode)current.send(JSON.stringify({type:'text',id:crypto.randomUUID(),text:'통화를 막 시작했어. 한국어로 짧고 편안하게 인사해 줘.'}));
       hasConnected=true;const resolve=firstReady;firstReady=null;if(resolve)resolve(true);
       if(rtcClient&&message.audioTransport==='pcm')fallbackToPCM('server_pcm');
@@ -257,7 +287,6 @@ async function begin(microphone){
       if(run!==generation)return false;
       micSource=audioContext.createMediaStreamSource(stream);worklet=new AudioWorkletNode(audioContext,'capture-pcm');micSource.connect(worklet);worklet.connect(audioContext.destination);
       worklet.port.onmessage=event=>{
-        if(!muted&&event.data.rms>.018)listenUntil=performance.now()+800;
         if(event.data.pcm&&intended&&ready&&socket?.readyState===WebSocket.OPEN&&socket.bufferedAmount<64000)socket.send(event.data.pcm);
       };
     }
@@ -289,10 +318,11 @@ function answerRing(state){
     const run=generation+1;
     setTimeout(()=>{if(intended&&generation===run&&starting&&audioContext?.state!=='running')status('화면을 한 번 눌러 줘. 바로 이어질게.');},2000);
     void begin(true);
-  }else{ringOffer(true);status('마롱이가 약속한 전화를 걸었어. 받기를 누르면 바로 이어져.');}
+  }else{ringOffer(true);status('마롱이가 전화를 걸었어. 받기를 누르면 바로 이어져.');}
 }
 $('start').onclick=()=>begin(true);
 $('stop').onclick=()=>end();
+for(const id of ['topic-close','topic-picture','topic-title'])$(id).onclick=closeTopic;
 $('login').onclick=()=>location.assign('/');
 $('mute').onclick=()=>{
   muted=!muted;if(stream)stream.getAudioTracks().forEach(track=>{track.enabled=!muted;});
@@ -317,7 +347,7 @@ window.addEventListener('pagehide',()=>{intended=false;clearTimeout(retryTimer);
 setInterval(()=>{
   const now=performance.now();
   document.body.classList.toggle('speaking',intended&&speaking);
-  let frame=intended&&now<listenUntil&&!muted?3:1;
+  let frame=1;  // 친구가 말하는 동안도 기본 얼굴(03 '듣는 얼굴'은 두 눈 높이가 달라 삐뚤어져 보여서 뺌, 2026-11-16)
   if(speaking){
     if(!speakingSince)speakingSince=now;
     let phase=(now-speakingSince+210)%1980;

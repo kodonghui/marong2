@@ -407,6 +407,13 @@
         "unit": "px"
       }
     },
+    "topic-picture": {
+      "$value": {
+        "value": 240,
+        "unit": "px"
+      },
+      "$description": "글 대화에서 마롱이 말 위에 놓는 그림 화두 그림(SPEC-274, SCR-107#picture, 09단계 추천 A). 기다리는 동안의 빈 칸도 같은 크기"
+    },
     "face-call": {
       "$value": {
         "value": 248,
