@@ -48,7 +48,8 @@ public final class AppUpdateReceiver extends BroadcastReceiver {
                     Log.i(AppUpdateJob.TAG, "update_install success code=" + code);
                     break;
                 case CONFIRM:
-                    AppUpdateJob.save(prefs, new AppUpdateJob.Candidate(candidate.release, candidate.session, true));
+                    AppUpdateJob.save(prefs, new AppUpdateJob.Candidate(candidate.release, candidate.session, true,
+                        AppUpdateJob.installPermissionMissing(context)));
                     if (AppUpdate.notifyVersion(code, prefs.getInt("notified", -1))
                             && notify(context, confirmation(intent), candidate.release)) {
                         prefs.edit().putInt("notified", code).apply();
@@ -56,6 +57,14 @@ public final class AppUpdateReceiver extends BroadcastReceiver {
                     break;
                 case FAILED:
                     cancelNotification(context);
+                    if (candidate.permissionBlocked && status == PackageInstaller.STATUS_FAILURE_ABORTED) {
+                        // Settings can abort this session even when the user allows the source.
+                        // Keep the verified APK and wait for the permission before creating another session.
+                        AppUpdateJob.save(prefs, new AppUpdateJob.Candidate(candidate.release, -1, true, true));
+                        if (!AppUpdateJob.installPermissionMissing(context)) AppUpdateJob.check(context);
+                        Log.i(AppUpdateJob.TAG, "update_install permission_session_ended code=" + code);
+                        break;
+                    }
                     AppUpdateJob.fail(context, prefs, code);
                     Log.i(AppUpdateJob.TAG, "update_install fail=" + status + " code=" + code);
                     break;
@@ -106,7 +115,7 @@ public final class AppUpdateReceiver extends BroadcastReceiver {
         }
     }
 
-    private static void cancelNotification(Context context) {
+    static void cancelNotification(Context context) {
         NotificationManager manager = context.getSystemService(NotificationManager.class);
         if (manager != null) manager.cancel(NOTIFICATION_ID);
     }

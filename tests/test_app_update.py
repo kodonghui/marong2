@@ -122,6 +122,19 @@ async def run_api(db, base, logs):
             r = await http.get(GET, headers=headers)
             ok(r.status == 200 and r.headers["Cache-Control"] == "no-store" and await r.json() == release.public(),
                "TC-201 exact API-141 schema")
+            checked = logs.getvalue().count("app_release check")
+            for path, user_agent, request_headers, status in (
+                (GET, "MarongApp/0.2.2", headers, 200),
+                (GET, "MarongApp/0.2.2", {}, 401),
+                (GET, "MarongApp/invalid PRIVATE_USER_AGENT", headers, 200),
+                (APK + release.file, "MarongApp/0.2.2", headers, 200),
+            ):
+                r = await http.get(path, headers={**request_headers, "User-Agent": user_agent})
+                ok(r.status == status, "TC-229 check doesn't change the response")
+                await r.read()
+            logged = [line for line in logs.getvalue().splitlines() if line.startswith("app_release check")]
+            ok(logged[checked:] == ["app_release check version=0.2.2 status=200",
+                                    "app_release check version=0.2.2 status=401"], "TC-229 version and status only")
             r = await http.get(APK + release.file, headers=headers)
             ok(r.status == 200 and r.headers["Cache-Control"] == "no-store"
                and r.headers["Content-Type"] == "application/vnd.android.package-archive"

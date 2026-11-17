@@ -76,6 +76,11 @@ public final class AppUpdateJob extends JobService {
         schedule(context, DAILY_JOB, true);
     }
 
+    static boolean installPermissionMissing(Context context) {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+            && !context.getPackageManager().canRequestPackageInstalls();
+    }
+
     private static void schedule(Context context, int job, boolean replace) {
         JobScheduler scheduler = context.getSystemService(JobScheduler.class);
         if (scheduler == null || (!replace && scheduler.getPendingJob(job) != null)) return;
@@ -167,7 +172,7 @@ public final class AppUpdateJob extends JobService {
                     return false;
                 }
             }
-            cached = new Candidate(release, -1, false);
+            cached = new Candidate(release, -1, false, false);
         }
         cancel.throwIfCanceled();
         int check;
@@ -193,6 +198,8 @@ public final class AppUpdateJob extends JobService {
             if (latest != null && latest.release.sameAs(release)) cached = latest;
             save(prefs, cached);
         }
+        if (cached.permissionBlocked && installPermissionMissing(this)
+                && prefs.getInt("notified", -1) == release.code) return false;
         if (!quiet()) return true;
         return install(cached, apk, cancel);
     }
@@ -302,12 +309,19 @@ public final class AppUpdateJob extends JobService {
             synchronized (STATE_LOCK) {
                 Candidate latest = candidate(prefs);
                 if (latest == null || !latest.release.sameAs(release)) return false;
+                boolean permissionGranted = latest.permissionBlocked && !installPermissionMissing(this);
                 if (latest.session >= 0 && installer.getSessionInfo(latest.session) != null) {
-                    // Keep a live session while its result or the already-shown confirmation is pending.
-                    if (!latest.waitingForUser || prefs.getInt("notified", -1) == release.code) return false;
-                    save(prefs, new Candidate(release, -1, false));
-                    installer.abandonSession(latest.session);
+                    // An ordinary pending confirmation still owns its install session.
+                    if (!permissionGranted && (!latest.waitingForUser
+                            || prefs.getInt("notified", -1) == release.code)) return false;
+                    save(prefs, new Candidate(release, -1, false, false));
+                    try {
+                        installer.abandonSession(latest.session);
+                    } catch (IllegalStateException alreadyClosed) {
+                        // Android can close the old permission-gated session from Settings.
+                    }
                 }
+                if (permissionGranted) AppUpdateReceiver.cancelNotification(this);
             }
             cancel.throwIfCanceled();
             PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
@@ -333,7 +347,7 @@ public final class AppUpdateJob extends JobService {
                 PendingIntent callback = PendingIntent.getBroadcast(this, sessionId, result, flags);
                 synchronized (STATE_LOCK) {
                     cancel.throwIfCanceled();
-                    save(prefs, new Candidate(release, sessionId, false));
+                    save(prefs, new Candidate(release, sessionId, false, false));
                     session.commit(callback.getIntentSender());
                     committed = true;
                 }
@@ -413,10 +427,12 @@ public final class AppUpdateJob extends JobService {
         final AppUpdate.Release release;
         final int session;
         final boolean waitingForUser;
-        Candidate(AppUpdate.Release release, int session, boolean waitingForUser) {
+        final boolean permissionBlocked;
+        Candidate(AppUpdate.Release release, int session, boolean waitingForUser, boolean permissionBlocked) {
             this.release = release;
             this.session = session;
             this.waitingForUser = waitingForUser;
+            this.permissionBlocked = permissionBlocked;
         }
     }
 
@@ -439,7 +455,8 @@ public final class AppUpdateJob extends JobService {
         try {
             JSONObject data = new JSONObject(saved);
             AppUpdate.Release release = parse(data);
-            return release == null ? null : new Candidate(release, data.optInt("session", -1), data.optBoolean("waitingForUser"));
+            return release == null ? null : new Candidate(release, data.optInt("session", -1),
+                data.optBoolean("waitingForUser"), data.optBoolean("permissionBlocked"));
         } catch (JSONException error) {
             return null;
         }
@@ -451,7 +468,7 @@ public final class AppUpdateJob extends JobService {
             JSONObject data = new JSONObject()
                 .put("versionCode", release.code).put("versionName", release.name).put("size", release.size)
                 .put("sha256", release.sha256).put("url", release.url).put("session", candidate.session)
-                .put("waitingForUser", candidate.waitingForUser);
+                .put("waitingForUser", candidate.waitingForUser).put("permissionBlocked", candidate.permissionBlocked);
             prefs.edit().putString("release", data.toString()).apply();
         } catch (JSONException error) {
             throw new IllegalStateException(error);

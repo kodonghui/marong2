@@ -44,6 +44,7 @@ FILES = {"": ("index.html", "text/html"), "chat.js": ("chat.js", "text/javascrip
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 FID = re.compile(r"[A-Za-z0-9_-]{16,200}\Z")
 VERSION = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\Z")
+RELEASE_CHECK_PATH = "/chat/api/app/release"
 NUMBER = re.compile(r"[0-9]{1,18}\Z")
 PROBLEMS = {
     "invalid_request": (400, "요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)"),
@@ -138,6 +139,10 @@ class AppChat:
         except Exception as e:
             log.error("app_chat_error %s trace=%s", type(e).__name__, trace)
             res = self._problem(Problem("internal"), trace)
+        if req.method == "GET" and req.path == RELEASE_CHECK_PATH:
+            prefix, _, version = req.headers.get("User-Agent", "").partition("/")
+            if prefix == "MarongApp" and VERSION.fullmatch(version):
+                log.info("app_release check version=%s status=%d", version, res.status)
         res.headers.update(HEADERS)
         if req.get("cache") and res.status == 200:  # a picture of a picture set never changes (API-140)
             res.headers["Cache-Control"] = req["cache"]
@@ -480,7 +485,7 @@ class AppChat:
         app.router.add_get("/chat/api/messages/wait", self.wait)
         app.router.add_put("/chat/api/devices/{installId}", self.device)
         app.router.add_get("/chat/topics/{set}/{file}", self.picture)
-        app.router.add_get("/chat/api/app/release", self.app_release, allow_head=False)
+        app.router.add_get(RELEASE_CHECK_PATH, self.app_release, allow_head=False)
         app.router.add_get("/chat/app/{file:.*}", self.app_apk, allow_head=False)
         return app
 

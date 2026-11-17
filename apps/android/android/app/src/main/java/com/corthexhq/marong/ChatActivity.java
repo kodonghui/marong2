@@ -69,6 +69,12 @@ public class ChatActivity extends BridgeActivity {
         chat.finish();
     }
 
+    @Override
+    public void onResume() {
+        super.onResume();
+        AppUpdateJob.check(this);
+    }
+
     /**
      * The app's own Capacitor settings with two changes: the start path /chat/ and the chat's
      * "can't connect" page. Capacitor reads the debug flag only when it loads the file itself, and
@@ -76,12 +82,6 @@ public class ChatActivity extends BridgeActivity {
      * call window sets them.
      */
     @SuppressWarnings("deprecation") // The JSON constructor is the one way to start from the app's own file.
-    @Override
-    public void onStart() {
-        super.onStart();
-        AppUpdateJob.check(this);
-    }
-
     private CapConfig chatConfig() {
         try (InputStream in = getAssets().open("capacitor.config.json")) {
             JSONObject json = new JSONObject(readAll(in));
