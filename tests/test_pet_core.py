@@ -26,6 +26,8 @@ import jwt
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
@@ -34,9 +36,12 @@ from pg import ROOT, TestDB
 from marong.pet.jobs import JobQueue
 from marong.pet.cost import Budget, KST, Run, microusd, timings
 from marong.pet.account import require_overseas
+from marong.pet.delete import erase_next
 from marong.pet.auth import AuthConfig, Provider, STATE_COOKIE, subject_hash
 from marong.pet.http import COOKIE, POOL, Problem, cookie_hash, require_member
 from marong.pet.log import member_ref
+from marong.pet.push import notify
+from marong.pet.quota import release_expired, reserve, settle
 from marong.pet.settings import PRICE_FILE, Settings, SettingsError
 from run_pet import make_app
 
@@ -559,6 +564,158 @@ async def check_signup(admin_dsn, dsn):
         assert values == [(False,), (True,), (False,)] and calls == 1
 
 
+async def check_delete_push_quota(admin_dsn, dsn, root):
+    origin = "https://pet.test"
+    raw = token_urlsafe(32)
+    with psycopg.connect(admin_dsn, autocommit=True) as conn:
+        member = conn.execute(
+            """INSERT INTO pet.members(member_no,provider,sub_hash,adult_self_declared_at)
+            VALUES('P0000420','google',%s,now()) RETURNING id""", (sha256(uuid4().bytes).digest(),),
+        ).fetchone()[0]
+        conn.execute(
+            """INSERT INTO pet.sessions(token_hash,kind,member_id,expires_at,absolute_expires_at)
+            VALUES(%s,'member',%s,now()+interval '30 days',now()+interval '90 days')""",
+            (cookie_hash(raw), member),
+        )
+        pets = []
+        for mode in ("living", "memorial"):
+            creation = conn.execute("INSERT INTO pet.creations(member_id,kind) VALUES(%s,%s) RETURNING id",
+                                    (member, mode)).fetchone()[0]
+            sheet = json.dumps(dict.fromkeys(("front", "smile", "excited", "sleepy", "surprised", "sad", "pout"), None))
+            pets.append(conn.execute(
+                """INSERT INTO pet.pets(member_id,creation_id,name,intro,species,template,sheet,mode,memorial_since)
+                VALUES(%s,%s,'시험아이','{}','dog','dog_small',%s::jsonb,%s,
+                       CASE WHEN %s='memorial' THEN now() ELSE NULL END) RETURNING id""",
+                (member, creation, sheet, mode, mode),
+            ).fetchone()[0])
+        for index in range(3):
+            order = conn.execute(
+                """INSERT INTO pet.orders(order_no,member_id,product,amount_krw,vat_krw,withdrawal_rule,idempotency_key)
+                VALUES(%s,%s,'subscription_month',1000,90,'fixture',%s) RETURNING id""",
+                (f"fixture-erasure-{index}", member, uuid4()),
+            ).fetchone()[0]
+        conn.execute(
+            """INSERT INTO pet.subscriptions(member_id,status,billing_key_enc,price_krw,first_order_id,period_start,period_end)
+            VALUES(%s,'active',%s,1000,%s,'2026-12-01 05:00+09','2026-12-01 06:00+09')""",
+            (member, b"fixture", order),
+        )
+        (root / "fixture-erase.png").write_bytes(b"fixture")
+        conn.execute(
+            """INSERT INTO pet.media(member_id,kind,storage_key,content_type,bytes,sha256)
+            VALUES (%s,'photo','fixture-erase.png','image/png',7,%s)""", (member, sha256(b"fixture").digest()),
+        )
+    options = {"PET_DATABASE_URL": dsn, "PET_MONTHLY_BUDGET_KRW": "50000", "PET_ORIGIN": origin,
+               "PET_MEDIA_DIR": str(root)}
+    settings = Settings.read(options)
+    app = make_app(settings, auth_config=AuthConfig({}, b""))
+    headers = {"Origin": origin, "Cookie": f"{COOKIE}={raw}"}
+    fixed = datetime(2026, 12, 1, 3, 59, tzinfo=KST)
+    async with TestClient(TestServer(app)) as client:
+        pool = app[POOL]
+
+        async def hold(kind, at=fixed, memorial=False):
+            async with pool.connection() as conn, conn.transaction():
+                return await reserve(conn, member, kind, at=at, memorial=memorial)
+
+        async def settle_hold(id, at=fixed, commit=True):
+            async with pool.connection() as conn, conn.transaction():
+                return await settle(conn, member, id, at=at, commit=commit)
+
+        async def quota():
+            result = await client.get("/api/me/quota", headers=headers)
+            assert result.status == 200
+            return await result.json()
+
+        assert (await client.get("/api/me/quota")).status == 401
+        with patch("marong.pet.quota.datetime", wraps=datetime) as clock:
+            clock.now.return_value = fixed
+            assert await quota() == {"percent": 100, "resetsAt": "2026-12-01T04:00:00+09:00"}
+            first, error = await hold("call_minute")
+            assert first and not error and (await quota())["percent"] == 70
+            second, error = await hold("new_picture")
+            assert second and not error and (await quota())["percent"] == 30
+            third, error = await hold("call_minute")
+            assert third and not error and (await quota())["percent"] == 0
+            assert (await hold("call_minute", memorial=True))[1].extra == {"prompt": "none"}
+            assert (await hold("call_minute"))[1].extra == {"prompt": "recharge"}
+            assert (await hold("call_minute"))[1].extra == {"prompt": "brief"}
+            assert await settle_hold(second, commit=False) and not await settle_hold(second, commit=False)
+            pair = await asyncio.gather(hold("new_picture"), hold("new_picture"))
+            assert sum(id is not None for id, _ in pair) == 1 and (await quota())["percent"] == 0
+            assert await settle_hold(first) and not await settle_hold(first, commit=False)
+            assert await release_expired(pool, fixed + timedelta(minutes=11)) == 2
+            assert (await quota())["percent"] == 70
+            clock.now.return_value = fixed + timedelta(minutes=1)
+            assert (await quota())["percent"] == 100
+            subscribed = fixed + timedelta(hours=2)
+            assert (await hold("new_picture", at=subscribed))[0]
+            clock.now.return_value = subscribed
+            assert (await quota())["percent"] == 80
+            clock.now.return_value = fixed + timedelta(hours=3)
+            assert (await quota())["percent"] == 80
+            clock.now.return_value = fixed + timedelta(days=1, minutes=1)
+            assert (await quota())["percent"] == 100
+
+        point = ec.generate_private_key(ec.SECP256R1()).public_key().public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+        value = {"endpoint": "https://fcm.googleapis.com/fcm/send/fixture",
+                 "keys": {"p256dh": urlsafe_b64encode(point).decode(), "auth": token_urlsafe(16)}}
+        for bad in ("http://fcm.googleapis.com/a", "https://127.0.0.1/a", "https://fcm.googleapis.com@other.test/a"):
+            response = await client.post("/api/me/push", json={**value, "endpoint": bad}, headers=headers)
+            assert response.status == 400
+        assert (await client.post("/api/me/push", json=value)).status == 403
+        assert (await client.post("/api/me/push", json=value, headers={"Origin": origin})).status == 401
+        first = await client.post("/api/me/push", json=value, headers=headers)
+        assert first.status == 201
+        subscription = (await first.json())["jobId"]
+        replay = await client.post("/api/me/push", json=value, headers=headers)
+        assert replay.status == 201 and (await replay.json())["jobId"] == subscription
+        records = []
+        replies = []
+
+        async def send(_target, payload):
+            records.append(payload)
+            return replies.pop(0) if replies else 201
+
+        for kind in ("sheet", "proactive", "diary", "refund", "export"):
+            assert await notify(pool, member, pets[0], kind, send=send) == 1
+        assert len(records) == 5 and all(p["title"] == "시험아이(AI)" and set(p) == {"title", "body"} for p in records)
+        assert await notify(pool, member, pets[1], "diary", send=send) == 0
+        assert len(records) == 5
+        replies[:] = [500, 500, 410]
+        assert await notify(pool, member, pets[0], "diary", send=send) == 0 and len(records) == 7
+        assert await notify(pool, member, pets[0], "diary", send=send) == 0 and len(records) == 8
+        path = "/api/me/push/" + subscription
+        assert (await client.delete(path, headers=headers)).status == 404
+        new = await client.post("/api/me/push", json=value, headers=headers)
+        path = "/api/me/push/" + (await new.json())["jobId"]
+        assert (await client.delete(path, headers=headers)).status == 204
+        assert (await client.delete(path, headers=headers)).status == 404
+        assert (await client.post("/api/me/push", json=value, headers=headers)).status == 201
+
+        wrong = await client.delete("/api/me", json={"confirm": "시험"}, headers=headers)
+        assert wrong.status == 400 and (await wrong.json())["code"] == "confirm_required"
+        assert (await client.delete("/api/me", json={"confirm": "계정 지우기"}, headers=headers)).status == 202
+        assert (await client.get("/api/me", headers=headers)).status == 401
+        assert await erase_next(pool, root)
+        with psycopg.connect(admin_dsn, autocommit=True) as conn:
+            assert conn.execute("SELECT status FROM pet.subscriptions WHERE member_id=%s", (member,)).fetchone() == ("canceling",)
+            assert conn.execute("SELECT count(*) FROM pet.sessions WHERE member_id=%s", (member,)).fetchone() == (0,)
+            assert conn.execute("""UPDATE pet.jobs SET run_after=now() WHERE member_id=%s AND status='queued'
+                AND error_code='account_delete_retry' AND run_after>=now()+interval '59 minutes' RETURNING attempts""",
+                (member,)).fetchone() == (1,)
+
+        async def revoke(key):
+            assert key == b"fixture"
+
+        assert await erase_next(pool, root, revoke=revoke)
+        assert not (root / "fixture-erase.png").exists()
+        with psycopg.connect(admin_dsn) as conn:
+            for table in ("subscriptions", "media", "pets", "push_subscriptions", "sessions", "jobs", "member_days"):
+                assert conn.execute(f"SELECT count(*) FROM pet.{table} WHERE member_id=%s", (member,)).fetchone() == (0,)
+            assert conn.execute("SELECT count(*) FROM pet.members WHERE id=%s", (member,)).fetchone() == (0,)
+            assert conn.execute("SELECT count(*) FROM pet.orders WHERE order_no LIKE 'fixture-erasure-%' AND member_id IS NULL").fetchone() == (3,)
+
+
 if __name__ == "__main__":
     db = TestDB()
     try:
@@ -570,6 +727,8 @@ if __name__ == "__main__":
         asyncio.run(check_cost(admin, pet))
         asyncio.run(check_oidc(admin, pet))
         asyncio.run(check_signup(admin, pet))
+        with tempfile.TemporaryDirectory() as tmp:
+            asyncio.run(check_delete_push_quota(admin, pet, Path(tmp)))
     finally:
         db.close()
-    print("TC-380–390: isolated database, startup, access, costs, OIDC, signup, invitations and consent verified")
+    print("TC-380–393: isolated core, OIDC, signup, consent, account erasure, Web Push and quota verified")

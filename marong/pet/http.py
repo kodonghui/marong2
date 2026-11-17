@@ -33,6 +33,8 @@ ERRORS = {
                         "지금은 초대받은 분만 가입할 수 있어요."),
     "already_member": (409, "이미 가입한 회원", "이미 가입했어요."),
     "use_delete_account": (400, "필수 동의는 끌 수 없음", "필수 동의를 거두려면 계정을 지워 주세요."),
+    "quota_exhausted": (409, "하루 한도 소진", "오늘 한도를 다 썼어요. 새벽 4시에 다시 차요."),
+    "confirm_required": (400, "지우기 확인 문구가 다름", "입력을 확인해 주세요."),
     "server_error": (500, "예상하지 못한 오류", "잠시 뒤 다시 해 주세요."),
 }
 
@@ -46,6 +48,8 @@ class Problem(Exception):
 
 def problem_response(req, error):
     status, title, detail = ERRORS[error.code]
+    if error.code == "quota_exhausted" and error.extra.get("prompt") == "none":
+        detail = "오늘은 여기까지, 새벽 4시 뒤에 또 이야기해요."
     type_url = req.app[CONFIG].origin + "/problems/" + error.code.replace("_", "-")
     body = {"type": type_url, "status": status, "title": title, "code": error.code,
             "detail": detail, "traceId": req["trace"], **error.extra}
