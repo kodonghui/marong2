@@ -115,8 +115,8 @@ class Organizer:
                   VALUES(%s,%s,%s,%s,%s) ON CONFLICT(call_id) DO UPDATE SET summary=EXCLUDED.summary,
                   truncated=EXCLUDED.truncated,updated_at=now() WHERE call.cards.forgotten_at IS NULL""",(call_id,summary,trimmed,TEXT_MODEL,PROMPT))
             await c.execute("UPDATE call.calls SET organize_status=%s,organized_at=now(),organize_lease_until=NULL WHERE id=%s",('done' if users else 'skipped',call_id))
-            await c.execute("""INSERT INTO call.ai_runs(kind,call_id,trace_id,model,prompt_version,thinking,sent_at,total_ms,input_tokens,output_tokens,outcome)
-              VALUES('organize',%s,%s,%s,%s,'LOW',now(),%s,%s,%s,'ok')""",(call_id,'organize:'+call_id,TEXT_MODEL,PROMPT,round((time.monotonic()-started)*1000),usage.get('promptTokenCount'),usage.get('candidatesTokenCount')))
+            await c.execute("""INSERT INTO call.ai_runs(kind,call_id,trace_id,model,prompt_version,thinking,sent_at,total_ms,input_tokens,output_tokens,thoughts_tokens,outcome)
+              VALUES('organize',%s,%s,%s,%s,'LOW',now(),%s,%s,%s,%s,'ok')""",(call_id,'organize:'+call_id,TEXT_MODEL,PROMPT,round((time.monotonic()-started)*1000),usage.get('promptTokenCount'),usage.get('candidatesTokenCount'),usage.get('thoughtsTokenCount')))
         return {'saved':len(verified)}
 
     def graph(self,checkpointer=None):

@@ -8,11 +8,13 @@ import struct
 import time
 import uuid
 from collections import deque
+from datetime import datetime, timezone
 
 from aiohttp import ClientSession,ClientTimeout,WSMsgType
 from memory_tools import TranscriptRecorder,execute_tool
 from hangup import Consent
 from call_search import queries as search_queries
+from quiet_mic import QuietMic
 
 BUILD='20261117-hello'
 FRAME=struct.Struct('!4sIIIII')
@@ -34,6 +36,7 @@ OUTPUT_RATE=24000
 # A call Marong placed at a time the friend set (docs/app-ring.md): the friend's answer opens it with this text,
 # once, on the connection that answered the ring. It is not a turn of the friend's and is never recorded.
 RING_ANSWERED_TEXT='(전화 연결됨)'
+BUDGET_GOODBYE='(이번 달 통화를 더 할 수 없어서 곧 끊어야 해. 금액은 말하지 말고, 다음에 또 얘기하자고 한 문장으로 인사해.)'
 RING_CLAIM_S=1
 # The picture a hello call carries (docs/04-functional-spec/call-first.md SPEC-268): served by the bot under /chat/.
 TOPIC_KEY=re.compile(r'v[0-9]{1,3}/[a-z0-9-]{1,40}')
@@ -51,6 +54,7 @@ class LiveSession:
         self.revision=principal.revision if principal else 0;self.recorder=None;self.ready=False;self.turn_segments={}
         self.legacy_pcm=False
         self.rtc=None
+        self.quiet_mic=None
         self.entry_transport=entry_transport
         self.pcm_forced=False;self.connection_id=str(uuid.uuid4());self.transport_log=[]
         # The client ends the call on a 'hangup' message: the web page asks with
@@ -167,6 +171,7 @@ class LiveSession:
                         if reason not in {'rtc_disconnected','rtc_reconnecting','rtc_media_stalled','rtc_track_lost','rtc_no_media','control_reconnect','network_change','server_pcm'}:reason='rtc_disconnected'
                         await self.request_pcm(reason);continue
                     if item.get('type')=='text':
+                        if self.close_reason=='budget_hard_stop':continue
                         text=str(item.get('text',''))[:2000]
                         if not text:continue
                         key=str(item.get('id') or uuid.uuid4())[:100]
@@ -285,11 +290,22 @@ class LiveSession:
             if self.reset.is_set():
                 self.handle=None;self.pending.clear();self.resume.clear();self.recorder.parts.clear();self.reset.clear()
                 if self.store and self.p:self.revision=await self.store.revision(self.p)
-            seed='';self.segment=None
+            seed='';self.segment=None;tuning=None
+            ledger=getattr(self.store,'live_usage',None)
+            usage_mode=await ledger.mode() if ledger else None
+            if usage_mode and self.p:
+                try:tuning=await asyncio.wait_for(self.store.tuning(),.4)
+                except Exception:print('call_tuning_fallback',flush=True)
+            if tuning and tuning['web_quiet_mic'] and self.entry_transport!='discord':
+                if self.quiet_mic is None:self.quiet_mic=QuietMic(tuning['quiet_rms'])
+                else:self.quiet_mic.threshold=float(tuning['quiet_rms'])
+            else:self.quiet_mic=None
             if self.store and self.p:
                 try:
-                    self.segment=await asyncio.wait_for(self.store.start_segment(self.p,self.call_id,self.client_id,self.model),3)
-                    seed=await asyncio.wait_for(self.store.seed(self.p,self.call_id),1)
+                    segment_options={'tuning':tuning['name']} if tuning else {}
+                    memory_options={'memory_limit':tuning['seed_call_memories']} if tuning else {}
+                    self.segment=await asyncio.wait_for(self.store.start_segment(self.p,self.call_id,self.client_id,self.model,**segment_options),3)
+                    seed=await asyncio.wait_for(self.store.seed(self.p,self.call_id,**memory_options),1)
                     self.d['memoryConnected']=True
                 except Exception:self.d['memoryConnected']=False
             try:
@@ -300,6 +316,7 @@ class LiveSession:
                         options={'hangup':self.hangup}
                         if mode:options['search']=mode
                         if self.ring_info:options['ring']=self.ring_info
+                        if tuning:options['tuning']=tuning
                         await upstream.send_json(self.setup(self.handle,seed,bool(self.p and self.segment),**options))
                         first=await upstream.receive(timeout=20)
                         if first.type not in (WSMsgType.TEXT,WSMsgType.BINARY) or 'setupComplete' not in json.loads(first.data):
@@ -319,11 +336,29 @@ class LiveSession:
                             self.ring_greet=False
                             await self.controls.put({'clientContent':{'turns':[{'role':'user','parts':[{'text':RING_ANSWERED_TEXT}]}],'turnComplete':True}})
                             self.available.set()
-                        await self.provider(upstream)
+                        if usage_mode and self.segment:
+                            entrypoint='discord' if self.entry_transport=='discord' else 'web'
+                            async def check_budget():
+                                if not self.stop.is_set() and self.hanging_up is None:
+                                    state=await self.store.monthly_cost.status(entrypoint)
+                                    if state=='hard_stop' and not self.stop.is_set() and self.hanging_up is None:
+                                        self.begin_budget_goodbye()
+                            meter=ledger.meter(self.call_id,self.segment,entrypoint,self.model,usage_mode,self.searches,
+                                               tuning=tuning['name'] if tuning else None,after_flush=check_budget)
+                            try:await self.provider(upstream,meter)
+                            finally:
+                                meter.close()
+                                if self.quiet_mic:
+                                    try:await asyncio.wait_for(self.store.record_mic(self.segment,*self.quiet_mic.counts()),.4)
+                                    except Exception:self.d['micCountsFailed']=True
+                        else:
+                            await self.provider(upstream)
             except asyncio.CancelledError:raise
             except Exception as error:
                 print('connection_retry',type(error).__name__,flush=True)
             self.ready=False
+            if self.close_reason=='budget_hard_stop':
+                self.stop.set();return
             if self.reset.is_set():continue
             if self.planned_reconnect:
                 # Searches spent: resume at once with a setup without search, no 'reconnecting' notice.
@@ -351,28 +386,47 @@ class LiveSession:
             self.background(self.finish_after_goodbye())
         return {'result':'ending','note':'친구 부탁대로 통화가 곧 끊겨. 작별 인사를 아직 안 했으면 한 문장으로만 하고, 이미 했으면 아무 말도 하지 마.'}
 
+    def begin_budget_goodbye(self):
+        self.hanging_up=time.monotonic()
+        self.close_reason='budget_hard_stop'
+        self.explicit=True
+        if not self.ready:
+            self.stop.set();return
+        self.audio.clear();self.pending.clear()
+        while not self.controls.empty():self.controls.get_nowait()
+        self.goodbye_done.clear()
+        self.hangup_answered=self.hanging_up
+        self.controls.put_nowait({'clientContent':{'turns':[{'role':'user','parts':[{'text':BUDGET_GOODBYE}]}],'turnComplete':True}})
+        self.available.set()
+        self.background(self.finish_after_goodbye())
+
     async def finish_after_goodbye(self):
         """Send 'hangup' after the goodbye's last sample, then end the call if the client does not."""
+        budget=self.close_reason=='budget_hard_stop'
+        deadline=self.hanging_up+HANGUP_MAX_S
         while not self.stop.is_set():
             now=time.monotonic();answered=self.hangup_answered
-            if now-self.hanging_up>=HANGUP_MAX_S:break
+            if now>=deadline-(.2 if budget else 0):break
             if answered is not None:
                 spoke=self.last_model_audio>answered;quiet=now-max(answered,self.last_model_audio)
                 # turnComplete after goodbye audio that followed the answer: the goodbye is out.
                 if spoke and self.goodbye_done.is_set() and quiet>=.5:break
                 # Otherwise wait for silence, and give a goodbye that only starts after the answer time to begin.
-                if quiet>=HANGUP_QUIET_S and (spoke or now-answered>=HANGUP_REPLY_S):break
+                if not budget and quiet>=HANGUP_QUIET_S and (spoke or now-answered>=HANGUP_REPLY_S):break
             await asyncio.sleep(.1)
         if self.stop.is_set():return
-        if self.in_turn:
-            # A tool call can end the turn without turnComplete: close the turn for playback.
-            self.in_turn=False;await self.emit({'type':'audio_end','epoch':self.epoch,'turn':self.turn})
-        await self.output.put(('hangup',self.epoch))
-        try:await asyncio.wait_for(self.stop.wait(),HANGUP_CLIENT_S)
+        async def finish():
+            if self.in_turn:
+                # A tool call can end the turn without turnComplete: close the turn for playback.
+                self.in_turn=False;await self.emit({'type':'audio_end','epoch':self.epoch,'turn':self.turn})
+            await self.output.put(('hangup',self.epoch))
+            await self.stop.wait()
+        wait=max(0.01,deadline-time.monotonic()) if budget else HANGUP_CLIENT_S
+        try:await asyncio.wait_for(finish(),wait)
         except TimeoutError:
             self.d['hangupServerEnded']=True;self.explicit=True;self.stop.set()
 
-    async def provider(self,upstream):
+    async def provider(self,upstream,meter=None):
         sequence=0;last_audio=None;tool_tasks={};speaking=False;go_away=False;audio_finished=False;turn_queries=set()
         async def send(payload,remember=True):
             nonlocal sequence
@@ -397,7 +451,12 @@ class LiveSession:
                     if self.hanging_up is not None:continue
                     if time.monotonic()-at>.4:
                         self.d['inputDroppedFrames']=self.d.get('inputDroppedFrames',0)+1;continue
-                    await send({'realtimeInput':{'audio':{'mimeType':'audio/pcm;rate=16000','data':base64.b64encode(pcm).decode()}}})
+                    blocks=self.quiet_mic.feed(pcm) if self.quiet_mic else (pcm,)
+                    for block in blocks:
+                        if self.hanging_up is not None:break
+                        value=({'audioStreamEnd':True} if block is None else
+                               {'audio':{'mimeType':'audio/pcm;rate=16000','data':base64.b64encode(block).decode()}})
+                        await send({'realtimeInput':value})
 
         async def tool(call):
             name=call.get('name','');identifier=str(call.get('id',''))[:200]
@@ -417,6 +476,8 @@ class LiveSession:
             async for msg in upstream:
                 if msg.type not in (WSMsgType.TEXT,WSMsgType.BINARY):return
                 data=json.loads(msg.data)
+                usage=data.get('usageMetadata') if meter else None
+                received=datetime.now(timezone.utc) if isinstance(usage,dict) else None
                 update=data.get('sessionResumptionUpdate',{})
                 if update.get('resumable') and update.get('newHandle'):
                     self.handle=update['newHandle'];self.resume.update(handle=self.handle,owner=self.owner,call_id=self.call_id,revision=self.revision,updated=time.time())
@@ -454,6 +515,7 @@ class LiveSession:
                     self.recorder.boundary('user')
                 fresh=[q for q in search_queries(content) if q not in turn_queries]
                 if fresh:turn_queries.update(fresh);self.searched(len(fresh))
+                if received:meter.receive(usage,self.searches,received)
                 if content.get('generationComplete') and self.in_turn and not audio_finished:
                     audio_finished=True;await self.emit({'type':'audio_end','epoch':self.epoch,'turn':self.turn})
                 if content.get('turnComplete'):

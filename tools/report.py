@@ -118,10 +118,13 @@ def call_sessions(c, start, until, tz):
         'rtc_server_lost': '음성 중계 연결 끊김', None: '이전 기록 없음'}
     rows = [[str(r['id']), stamp(r['started_at'], tz), stamp(r['ended_at'], tz), state[r['status']],
         round(r['session_seconds'], 1), r['segment_count'], paths[r['initial_transport']], paths[r['last_transport']],
-        r['fallback_count'], reasons[r['last_reason']], organized[r['organize_status']]] for r in records]
+        r['fallback_count'], reasons[r['last_reason']], organized[r['organize_status']],
+        r.get('input_tokens', ''), r.get('output_tokens', ''), float(r['usd']) if r.get('usd') is not None else '',
+        '추정' if r.get('usd_estimated') else '', r.get('tunings') or ''] for r in records]
     return tab('통화 세션', ['통화 ID', '시작(한국 시각)', '종료(한국 시각)', '상태', '세션 시간(초)', '연결 구간 수',
-        '첫 전송 방식', '마지막 전송 방식', '자동 전환 수', '마지막 연결 사유', '기억 정리'],
-        rows, [42, 21, 21, 12, 16, 15, 20, 20, 15, 24, 12])
+        '첫 전송 방식', '마지막 전송 방식', '자동 전환 수', '마지막 연결 사유', '기억 정리',
+        '입력 토큰', '출력 토큰', '비용(USD)', '추정 여부', '설정 실험'],
+        rows, [42, 21, 21, 12, 16, 15, 20, 20, 15, 24, 12, 15, 15, 16, 14, 24])
 
 
 def call_transcripts(c, start, until):

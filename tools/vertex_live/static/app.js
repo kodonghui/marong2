@@ -34,7 +34,7 @@
 const $=id=>document.getElementById(id);
 const CLIENT_VERSION='20261117-topic1';
 const clientId=crypto.randomUUID();
-const faceNames={1:'01-neutral',15:'15-mouth-slightly-open',16:'16-mouth-wide-open',18:'18-eyes-half-closed',19:'19-eyes-closed',20:'20-mouth-slightly-open-eyes-half-closed',21:'21-mouth-slightly-open-eyes-closed',22:'22-mouth-wide-open-eyes-half-closed',23:'23-mouth-wide-open-eyes-closed'};
+const faceNames={1:'01-neutral',6:'06-sad',15:'15-mouth-slightly-open',16:'16-mouth-wide-open',18:'18-eyes-half-closed',19:'19-eyes-closed',20:'20-mouth-slightly-open-eyes-half-closed',21:'21-mouth-slightly-open-eyes-closed',22:'22-mouth-wide-open-eyes-half-closed',23:'23-mouth-wide-open-eyes-closed'};
 const faceURL=n=>`/face/v1/${faceNames[n]}.webp`;
 for(const n of Object.keys(faceNames)){const image=new Image();image.src=faceURL(n);}
 const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
@@ -46,6 +46,8 @@ let lastSpeaker=null,lastText=null,retryDelay=1000,firstReady=null,micMode=false
 let speakingSince=0,lastFace=0,blinkAt=performance.now()+3500,blinkStarted=0;
 let generation=0,epoch=0,callId=null,memoryConnected=false;
 let rtcClient=null,rtcEnabled=false;
+let budgetBlocked=false;
+const BUDGET_MESSAGE='이번 달 통화는 여기까지야. 다음 달에 또 걸어 줘. 글로는 계속 얘기할 수 있어';
 // A call Marong placed at a time the friend set (docs/app-ring.md SPEC-135): the app opens /?ring=<id>.
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 let ringId=null,ringShown=false;
@@ -128,16 +130,21 @@ async function refresh(){
   try{
     const response=await fetch('/status',{headers:{'X-Requested-With':'XMLHttpRequest'}});
     if(response.status===401||response.status===403||response.redirected){
+      budgetBlocked=false;
       $('start').disabled=true;$('send').disabled=true;$('login').hidden=false;
       connection('로그인 필요');status('로그인하면 바로 이야기할 수 있어.');return null;
     }
     if(!response.ok)throw new Error('잠시 연결을 확인하고 있어.');
     const state=await response.json();
+    const wasBudgetBlocked=budgetBlocked;
+    budgetBlocked=state.canCall===false&&state.blockedReason==='budget';
     rtcEnabled=Boolean(state.webRTC);
     memoryConnected=Boolean(state.memoryConnected);
-    $('login').hidden=true;$('start').disabled=!state.ready||intended||state.active;
-    $('send').disabled=!state.ready||starting||(!intended&&state.active);
+    $('login').hidden=true;$('start').disabled=!state.ready||intended||state.active||budgetBlocked;
+    $('send').disabled=!state.ready||starting||(!intended&&(state.active||budgetBlocked));
     if(!intended){connection(state.active?'통화 중':'곁에 있어요');if(state.active)status('다른 창에서 통화 중이야. 그 통화를 마치면 여기서 걸 수 있어.');}
+    if(!intended&&budgetBlocked)status(BUDGET_MESSAGE);
+    else if(!intended&&!state.active&&wasBudgetBlocked)status('준비됐어. 네 이야기를 들려줘.');
     return state;
   }catch{
     $('start').disabled=true;$('send').disabled=true;connection('연결 확인 중');
@@ -228,7 +235,8 @@ function connect(){
       hasConnected=true;const resolve=firstReady;firstReady=null;if(resolve)resolve(true);
       if(rtcClient&&message.audioTransport==='pcm')fallbackToPCM('server_pcm');
       if(fallbackPending)requestPCM();
-    }else if(message.type==='call_busy'){void end('디스코드 통화가 진행 중이야. 거기서 통화를 마치면 여기서 다시 걸 수 있어.');}
+    }else if(message.type==='budget_exhausted'){budgetBlocked=true;void end(BUDGET_MESSAGE);}
+    else if(message.type==='call_busy'){void end('디스코드 통화가 진행 중이야. 거기서 통화를 마치면 여기서 다시 걸 수 있어.');}
     else if(message.type==='hangup'){hangUpAfterPlayback(message.pendingMs);}
     else if(message.type==='transcript'){transcript(message.who,message.text,message.key,message.replace);}
     else if(message.type==='audio_transport'&&message.mode==='pcm'){
@@ -252,6 +260,7 @@ function connect(){
   };
 }
 async function begin(microphone){
+  if(budgetBlocked)return false;
   if(intended){if(ready)return true;return false;}
   const run=++generation;
   intended=true;starting=true;micMode=microphone;retryDelay=1000;hasConnected=false;
@@ -312,7 +321,7 @@ function ringOffer(show){
   $('control-caption').textContent=show?'받으면 마롱이가 먼저 말할게':'편하게 전화해';
 }
 function answerRing(state){
-  if(!ringId||!state?.ready||state.active||intended)return;
+  if(!ringId||!state?.ready||state.active||intended||budgetBlocked)return;
   if(window.__marongApp?.autoAnswer===true){
     // The app's answer button was the tap. If audio still waits for a gesture, any tap on the page resumes it.
     const run=generation+1;
@@ -362,7 +371,8 @@ setInterval(()=>{
       else{blinkStarted=0;blinkAt=now+3000+Math.random()*3000;}
     }
   }
-  if(frame!==lastFace){lastFace=frame;$('face').src=faceURL(frame);$('face').alt=speaking?'말하고 있는 마롱이':'곁에서 기다리는 마롱이';}
+  if(budgetBlocked&&!intended)frame=6;
+  if(frame!==lastFace){lastFace=frame;$('face').src=faceURL(frame);$('face').alt=frame===6?'슬픈 얼굴의 마롱이':speaking?'말하고 있는 마롱이':'곁에서 기다리는 마롱이';}
 },50);
 setInterval(()=>{if(!intended)refresh();},15000);
 setInterval(sendPlaybackStats,2000);
@@ -371,7 +381,7 @@ setInterval(sendPlaybackStats,2000);
   if(token){
     try{const response=await fetch('/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});if(response.ok)history.replaceState(null,'',location.pathname);}catch{}
   }
-  const state=await refresh();if(state?.ready&&!state.active)status('준비됐어. 네 이야기를 들려줘.');
+  const state=await refresh();if(state?.ready&&!state.active&&!budgetBlocked)status('준비됐어. 네 이야기를 들려줘.');
   answerRing(state);
 })();
 // The in-app chat link (docs/app-chat.md SPEC-124): only when the chat answers 200 for this sign-in.

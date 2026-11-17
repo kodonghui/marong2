@@ -8,6 +8,7 @@ from google.oauth2 import service_account
 from google.auth.transport.requests import Request
 import jwt
 from live_session import LiveSession, BUILD
+from call_cost import BLOCKED, budget_status
 from memory_tools import DECLARATIONS, END_CALL
 from call_memory import CallBusy, MemoryStore
 import call_search
@@ -106,7 +107,8 @@ async def status(req):
     authn=await identity(req)
     if not authn:raise web.HTTPUnauthorized()
     person=await get_principal(authn)
-    return web.json_response({'ready':True,'active':active,'model':MODEL,'voice':VOICE,'route':'Vertex AI','project':PROJECT,'automaticReconnect':True,'durationLimit':None,'callCountLimit':None,'build':BUILD,'webRTC':rtc_transport.enabled(),'memoryConnected':bool(person),'name':person.name if person else None,'diagnostics':diagnostics})
+    blocked = await budget_status(memory_store, 'web') in BLOCKED
+    return web.json_response({'ready':True,'active':active,'canCall':not blocked,'blockedReason':'budget' if blocked else None,'model':MODEL,'voice':VOICE,'route':'Vertex AI','project':PROJECT,'automaticReconnect':True,'durationLimit':None,'callCountLimit':None,'build':BUILD,'webRTC':rtc_transport.enabled(),'memoryConnected':bool(person),'name':person.name if person else None,'diagnostics':diagnostics})
 
 async def health(req):return web.json_response({'ok':True,'route':'Vertex AI','model':MODEL,'build':BUILD})
 
@@ -149,7 +151,7 @@ def ring_part(ring):
     data['울린 때']=ring['at'].astimezone(KST).strftime('%H:%M')
     return (HELLO_GUIDE if hello else RING_GUIDE)+json.dumps(data,ensure_ascii=False)
 
-def setup(handle=None,seed='',memory=False,hangup=False,search=None,ring=None):
+def setup(handle=None,seed='',memory=False,hangup=False,search=None,ring=None,tuning=None):
     # search: 'on' adds Google Search and its guide, 'spent'/'off' only a guide that she cannot search now,
     # None (callers without a search budget) neither. ring: the promise of a call Marong placed, or None.
     resume={'transparent':True}
@@ -160,6 +162,13 @@ def setup(handle=None,seed='',memory=False,hangup=False,search=None,ring=None):
       'realtimeInputConfig':{'automaticActivityDetection':{'silenceDurationMs':700,'prefixPaddingMs':100}},
       'contextWindowCompression':{'triggerTokens':8192,'slidingWindow':{'targetTokens':4096}},
       'sessionResumption':resume,'inputAudioTranscription':{},'outputAudioTranscription':{},'explicitVadSignal':True}}
+    if tuning:
+        config=result['setup']
+        config['generationConfig']['maxOutputTokens']=tuning['max_output_tokens']
+        config['realtimeInputConfig']['automaticActivityDetection']={
+            'silenceDurationMs':tuning['vad_silence_ms'],'prefixPaddingMs':tuning['vad_prefix_ms']}
+        config['contextWindowCompression']={'triggerTokens':tuning['compression_trigger'],
+            'slidingWindow':{'targetTokens':tuning['compression_target']}}
     guide=call_search.guide(search)
     if guide:result['setup']['systemInstruction']['parts'].append({'text':guide})
     if ring:result['setup']['systemInstruction']['parts'].append({'text':ring_part(ring)})
@@ -213,6 +222,14 @@ async def live(req):
         try:ring=str(uuid.UUID(req.query.get('ring','')))
         except ValueError:ring=None
         await ws.prepare(req)
+        if await budget_status(memory_store, 'web') in BLOCKED:
+            if person:
+                resumable = await memory_store.can_resume_call(person, 'web', client_id)
+            else:
+                resumable = resume_state.get('owner') == authn['owner'] and time.time() - resume_state.get('updated',0) < 600
+            if not resumable:
+                await ws.send_json({'type':'budget_exhausted'})
+                return ws
         session=LiveSession(ws,authn['owner'],memory_store,person,setup,google_headers,resume_state,diagnostics,LOCATION,MODEL,VOICE,client_id,search=SEARCH,ring=ring)
         # Previously loaded pages used headerless PCM. Keep their wire format
         # until the page refreshes, so headers never become audible clicks.

@@ -26,6 +26,7 @@
 #                url: 시트 웹 앱 주소 넣기(화면엔 안 보임)와 한 번 보내 보기 / on·off: 5분마다 보내기와 시트 메뉴
 #                '마롱이 > 지금 새로고침'(서버가 1분마다 물어봄) 켜기·끄기
 #                now: 지금 한 번 보내기 / status: 타이머와 최근 결과
+#   call-admin …  통화 비용, 예산, 단가와 설정 실험
 #   backup       DB 백업 파일을 서버의 /var/backups/marong 에 만듦(자동 백업은 하지 않음)
 #   chat         서버에서 터미널로 마롱이와 대화(카카오 없이. 'terminal' 방으로 저장됨)
 #   galaxy-test start|stop|status  통화 갤럭시 시험(기능 명세 7.1). start는 시험 파일만 서버의 ~/marong-galaxy-test 로
@@ -42,6 +43,10 @@ AS_MARONG="sudo -u marong sh -c"
 on_server() { "${SSH[@]}" "$HOST" "$@"; }
 
 case "${1:-}" in
+  call-admin)
+    shift
+    on_server "/home/opc/marong-vertex-test/venv-memory2/bin/python /home/opc/marong-vertex-test/app/cost_admin.py $(printf '%q ' "$@")"
+    ;;
   install)
     tar -czf - --exclude .venv --exclude .env --exclude .cache --exclude .git --exclude __pycache__ \
         --exclude tests --exclude '*.db*' . |
