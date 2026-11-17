@@ -203,6 +203,9 @@ async def scenario(db, store):
         await bridge.caption("fixture-answer", "assistant", "같이 있을게. 자살예방 상담전화 109", True)
         assert await bridge.caption("fixture-signal", "user", "약 모아 놨어", True) is None
         assert await bridge.caption("fixture-next", "user", "고마워", True) == ""
+        with patch.dict("os.environ", {"MARONG_FRIEND_CARD": "on", "MARONG_SAFETY": "on"}):
+            renewed = await voice.friend_instruction(Principal(caller, 1, "fixture"))
+        assert "직접 한 번 물어봐" not in renewed and "109" not in renewed
         await voice.finish(Principal(caller, 1, "fixture"), call, True)
     finally:
         await voice.close()

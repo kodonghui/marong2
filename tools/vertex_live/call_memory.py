@@ -116,6 +116,8 @@ class MemoryStore:
                     safety = BODY_HELP if not state["told_help_at"] else ""
                 elif not state["told_109_at"] and (state["injured"] or state["answer"] == "now"):
                     safety = URGENT if state["injured"] else CALL_HELP
+                elif state["told_109_at"] and state["asked_at"] is None:
+                    safety = ""
                 else:
                     safety = ASK if state["asked_at"] is None else ASKED
                 prompt += "\n\n" + safety
