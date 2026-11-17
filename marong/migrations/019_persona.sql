@@ -1,12 +1,12 @@
 -- 019 Persona, proactive gate, favors and friend memory, stages 1 to 4
--- (docs/04-functional-spec/persona.md SPEC-192~242, CTX-008~013). Design draft: the schema is not frozen.
+-- (docs/04-functional-spec/persona.md SPEC-192~242, CTX-008~013).
 -- Eighteen new tables (TBL-115~124, TBL-127~134) and one schema for graph checkpoints. Nothing existing changes.
 -- Rules kept here:
 --   * Logs and result rows hold ids, labels and counts only. Text a friend wrote lives only where the spec needs it
 --     (card values, rules, the custom instruction, memory items, a relay or call text until it is sent) and is
 --     emptied when that row ends (common rule 10).
 --   * Nobody gets DELETE on marong tables, as in schema.sql. Forgetting marks and empties rows instead (SPEC-230).
---     The one proposed exception is marong.forget_embeddings(), which drops search vectors of forgotten sources only.
+--     D63 approved marong.forget_embeddings() as the exception for vectors of forgotten sources.
 --   * Friend writes run under pg_advisory_xact_lock(friend_id) in the bot and the call server (common rule 11).
 --   * The call server (marong_call) never shares transcripts with the bot: call jobs run in the call organizer,
 --     and the bot learns of a forgotten call turn only through forget_marks.
@@ -512,10 +512,9 @@ CREATE TABLE IF NOT EXISTS marong.persona_tool_calls (
 );
 CREATE INDEX IF NOT EXISTS persona_tool_calls_friend_idx ON marong.persona_tool_calls (friend_id, created_at DESC);
 
--- Proposed exception to "no DELETE" (to settle before implementation): search vectors are rebuildable copies
+-- D63 exception to "no DELETE": search vectors are rebuildable copies
 -- (schema.sql), and a forgotten message must stop turning up in search (3.20 step 3). The function deletes only the
--- vectors of sources one forget marked, so the bot still cannot delete anything else. Without it, every search
--- query has to leave out forget_marks instead, and the vectors stay on disk.
+-- vectors of sources one forget marked, so the bot still cannot delete anything else.
 CREATE OR REPLACE FUNCTION marong.forget_embeddings(p_forget bigint)
 RETURNS integer LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
   WITH gone AS (
