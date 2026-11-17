@@ -4,9 +4,16 @@
   "part": "pet",
   "stages": {
     "01-domain": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "NEXUS 체크포인트 요청 보냄(2026-11-17 17:05 KST, nc_27gm9te1rhvv, 먼저 볼 것 CTX-022). 통과하면 02 요청",
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "프로젝트 채팅 '모두 승인'(2026-11-17 17:18:41 KST). NEXUS 체크포인트 요청 다섯 개(반려동물 01과 예전 기능 넷 묶음)에 대한 답. 이 기능의 요청 nc_45yfy5ejqbwa는 반려동물 01 도메인(CTX-022~025, 규칙 넷, 추측으로 둔 값 넷)을 확인해 달라는 요청",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ4NaazQu3QW45S1NaoCm9d6",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "없음. 다음은 02 요구사항(REQ-330~429) NEXUS 체크포인트 요청",
       "checks": [
         {
           "level": "info",
@@ -19,7 +26,7 @@
           "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T08:10:39+00:00"
+      "updated": "2026-11-17T08:19:53+00:00"
     },
     "02-prd": {
       "state": "in_progress",
