@@ -1,7 +1,7 @@
 # FL-151 사진을 올려 특징표 만들기
 
 Serves: REQ-342, REQ-343, REQ-344, REQ-345, REQ-346, REQ-347, REQ-357, REQ-376, REQ-334
-Screens: 07 단계 뒤에 SCR를 채워요
+Screens: SCR-140, SCR-142, SCR-143
 Context: CTX-022
 
 ```mermaid

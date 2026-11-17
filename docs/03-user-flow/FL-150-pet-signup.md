@@ -1,7 +1,7 @@
 # FL-150 가입하고 동의하기
 
 Serves: REQ-330, REQ-331, REQ-333, REQ-334, REQ-335, REQ-336, REQ-337, REQ-392, REQ-428
-Screens: 07 단계 뒤에 SCR를 채워요
+Screens: SCR-140, SCR-141, SCR-159
 Context: CTX-025
 
 ```mermaid

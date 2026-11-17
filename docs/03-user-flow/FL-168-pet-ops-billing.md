@@ -1,7 +1,7 @@
 # FL-168 운영자가 결제를 켜고 원가 예산을 지키기
 
 Serves: REQ-414, REQ-415, REQ-416, REQ-417
-Screens: 07 단계 뒤에 SCR를 채워요
+Screens: 없음(운영자가 서버 셸의 `tools/pet_admin.py`로 함)
 Context: CTX-024
 
 ```mermaid

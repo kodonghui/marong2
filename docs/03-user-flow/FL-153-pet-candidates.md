@@ -1,7 +1,7 @@
 # FL-153 그림 후보를 골라 캐릭터 시트 만들기
 
 Serves: REQ-350, REQ-351, REQ-352, REQ-353, REQ-354, REQ-358, REQ-424, REQ-425
-Screens: 07 단계 뒤에 SCR를 채워요
+Screens: SCR-145
 Context: CTX-022
 
 ```mermaid

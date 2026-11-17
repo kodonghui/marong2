@@ -101,7 +101,7 @@
       flows: [FL-119]
       terms: [CTX-007, TERM-030, TERM-031]
 
-# 듣기 시험(CTX-002, 2026-11-16). 동희님이 보내 준 주소로만 들어와요. 다른 화면에서 가는 길은 두지 않아요(시험이 끝나면 묶음을 치움).
+# 듣기 시험(CTX-002, 2026-11-16). 동희님이 보내 준 주소로만 들어와요. 다른 화면에서 가는 경로는 두지 않아요(시험이 끝나면 번들을 치움).
 # without a screen: TERM-034(통화 사용량), TERM-035(단가표), TERM-036(지출 상한 예산, Google Cloud 콘솔), TERM-037(설정 실험), TERM-038(글로 갈아타기). 동희님 관리 명령·시트만이거나 친구에게 보이지 않아요
 - id: SCR-119
   name: 듣기 시험
@@ -138,3 +138,181 @@
       status: active
       flows: [FL-135]
       terms: [CTX-011, TERM-063, TERM-064, TERM-066, TERM-071, TERM-072, TERM-073]
+
+# 반려동물 서비스(CTX-022~025, 2026-11-17 설계, 아직 만들지 않음). 친구용 마롱이와 다른 공개 서비스예요: 새 프로세스 run_pet.py가 내보내는 모바일 웹(PWA)이고,
+# Cloudflare Access 없이 카카오·구글 로그인으로 들어와요(SPEC-310, 368). 화면 정의는 docs/08-screens/pet.md, API는 api/pet.openapi.yaml(API-150~210)이에요.
+# 경로 앞의 `pet:`은 반려동물 서비스의 공개 도메인(SPEC-368, 아직 정하지 않음)이라는 뜻이에요. 실제 주소는 `pet:`을 뺀 경로이고, 친구용 화면의 `/`와 다른 도메인이에요.
+# 접근: '누구나'는 로그인 전, '가입 대기'는 로그인했지만 가입하지 않은 세션(signup만 됨), '회원'은 가입한 만 19세 이상이에요. 남의 것·없는 것은 모두 같은 404예요(SPEC-364).
+# '#' 뒤 이름은 같은 페이지 위에 아래에서 올라오는 칸이에요(일기장 SCR-114~118과 같은 방식). 신고 칸(SCR-156)은 일기 한 장(SCR-150) 위에서도 같은 모양으로 떠요.
+# 본인인증 창과 결제 창은 결제 대행·본인확인 기관이 그려서 화면이 없고(02 질문 A·B), 끝나면 결제 확인(SCR-162)이나 그 화면으로 돌아와요. 기록 내보내기는 받기 주소(zip)라 화면이 없어요.
+# 화면이 없는 흐름: FL-167(운영자 아이템 올리기)·FL-168(운영자 결제 켜기·예산)은 서버 셸의 tools/pet_admin.py예요.
+# without a screen: TERM-111(몸 템플릿, 서버가 고름), TERM-122(확률형 아이템, 팔지 않음), TERM-139(광고성 푸시 동의, 1차에 없음), TERM-144(배경 세트, 합성 그림 안에서만), TERM-145(한도 단위, 회원에게 %로만 보임), TERM-147(공개 서비스, 서비스 전체)
+- id: SCR-140
+  name: 홈
+  path: 'pet:/'
+  access: 누구나(로그인 전에는 소개와 카카오·구글 로그인, 회원은 자기 아이 목록)
+  status: active
+  flows: [FL-150, FL-151, FL-155, FL-161]
+  terms: [CTX-022, CTX-025, TERM-101, TERM-102, TERM-103, TERM-132, TERM-134, TERM-136]
+  children:
+    - id: SCR-141
+      name: 가입
+      path: 'pet:/signup'
+      access: 가입 대기(카카오·구글 로그인을 마쳤고 아직 회원이 아님)
+      status: active
+      flows: [FL-150]
+      terms: [CTX-025, TERM-134, TERM-136, TERM-137, TERM-138]
+    - id: SCR-142
+      name: 아이 만들기
+      path: 'pet:/create'
+      access: 회원
+      status: active
+      flows: [FL-151]
+      terms: [CTX-022, TERM-110, TERM-138]
+      children:
+        - id: SCR-143
+          name: 특징표 고치기
+          path: 'pet:/create/:id/traits'
+          access: 회원(자기 만들기만)
+          status: active
+          flows: [FL-151, FL-152]
+          terms: [CTX-022, TERM-105, TERM-110]
+        - id: SCR-144
+          name: 미리 보기와 결제
+          path: 'pet:/create/:id/preview'
+          access: 회원(자기 만들기만)
+          status: active
+          flows: [FL-152]
+          terms: [CTX-022, CTX-024, TERM-109, TERM-127, TERM-128, TERM-129, TERM-148]
+        - id: SCR-145
+          name: 그림 후보 고르기
+          path: 'pet:/create/:id/candidates'
+          access: 회원(자기 만들기만)
+          status: active
+          flows: [FL-153]
+          terms: [CTX-022, TERM-106, TERM-107, TERM-108]
+        - id: SCR-146
+          name: 이름 짓기
+          path: 'pet:/create/:id/name'
+          access: 회원(자기 만들기만)
+          status: active
+          flows: [FL-154]
+          terms: [CTX-022, TERM-101, TERM-107, TERM-134, TERM-141]
+    - id: SCR-147
+      name: 아이 화면
+      path: 'pet:/pets/:id'
+      access: 회원(자기 아이만)
+      status: active
+      flows: [FL-154, FL-155, FL-156, FL-157, FL-159, FL-160, FL-161]
+      terms: [CTX-022, CTX-023, CTX-024, TERM-101, TERM-102, TERM-103, TERM-120, TERM-123, TERM-132, TERM-134, TERM-142, TERM-146]
+      children:
+        - id: SCR-148
+          name: 통화
+          path: 'pet:/pets/:id/call'
+          access: 회원(자기 아이만, 보관하지 않은 아이)
+          status: active
+          flows: [FL-156]
+          terms: [CTX-022, CTX-024, TERM-101, TERM-123, TERM-134]
+        - id: SCR-149
+          name: 일기장
+          path: 'pet:/pets/:id/diary'
+          access: 회원(자기 아이만)
+          status: active
+          flows: [FL-160, FL-162]
+          terms: [CTX-022, CTX-023, TERM-116, TERM-130, TERM-135]
+          children:
+            - id: SCR-150
+              name: 일기 한 장
+              path: 'pet:/pets/:id/diary/:date'
+              access: 회원(자기 아이만)
+              status: active
+              flows: [FL-160, FL-162]
+              terms: [CTX-023, TERM-116, TERM-117, TERM-118, TERM-130, TERM-131, TERM-135, TERM-142]
+              children:
+                - id: SCR-151
+                  name: 새 그림으로 다시 그리기
+                  path: 'pet:/pets/:id/diary/:date#redraw'
+                  access: 회원(자기 아이만, 살아 있는 아이와 추억 모드, 보관하지 않은 아이)
+                  status: active
+                  flows: [FL-160, FL-157]
+                  terms: [CTX-023, CTX-024, TERM-123, TERM-143]
+        - id: SCR-152
+          name: 옷 입히기
+          path: 'pet:/pets/:id/closet'
+          access: 회원(자기 아이만, 보관하지 않은 아이)
+          status: active
+          flows: [FL-159]
+          terms: [CTX-023, TERM-112, TERM-113, TERM-114, TERM-115, TERM-120]
+        - id: SCR-153
+          name: 아이 설정
+          path: 'pet:/pets/:id/settings'
+          access: 회원(자기 아이만)
+          status: active
+          flows: [FL-161, FL-162, FL-163]
+          terms: [CTX-022, TERM-102, TERM-103, TERM-104, TERM-132, TERM-133, TERM-141]
+          children:
+            - id: SCR-154
+              name: 작별 의식
+              path: 'pet:/pets/:id/farewell'
+              access: 회원(자기 아이만, 추억 모드, 작별 의식 전)
+              status: active
+              flows: [FL-162]
+              terms: [CTX-022, TERM-103, TERM-130, TERM-132]
+        - id: SCR-155
+          name: 한도 다 씀과 충전
+          path: 'pet:/pets/:id#recharge'
+          access: 회원(자기 아이만, 살아 있는 아이 모드. 추억 모드는 SCR-147의 안내만)
+          status: active
+          flows: [FL-157]
+          terms: [CTX-024, TERM-123, TERM-124, TERM-125, TERM-126]
+        - id: SCR-156
+          name: 신고
+          path: 'pet:/pets/:id#report'
+          access: 회원(자기 아이의 대화 한 줄이나 그림)
+          status: active
+          flows: [FL-166]
+          terms: [CTX-025, TERM-140]
+    - id: SCR-157
+      name: 상점
+      path: 'pet:/shop'
+      access: 회원(살아 있는 아이가 하나 이상. 추억 모드 아이만 있으면 들어가는 단추가 없음)
+      status: active
+      flows: [FL-158]
+      terms: [CTX-023, TERM-113, TERM-116, TERM-117, TERM-118, TERM-119, TERM-121]
+      children:
+        - id: SCR-158
+          name: 아이템 보기
+          path: 'pet:/shop/:itemId'
+          access: 회원
+          status: active
+          flows: [FL-158]
+          terms: [CTX-023, CTX-024, TERM-112, TERM-113, TERM-114, TERM-128, TERM-129]
+    - id: SCR-159
+      name: 내 정보
+      path: 'pet:/me'
+      access: 회원
+      status: active
+      flows: [FL-150, FL-166]
+      terms: [CTX-025, TERM-136, TERM-137, TERM-138, TERM-148]
+      children:
+        - id: SCR-160
+          name: 한도와 구독
+          path: 'pet:/me/plan'
+          access: 회원
+          status: active
+          flows: [FL-157, FL-164]
+          terms: [CTX-024, TERM-123, TERM-124, TERM-125, TERM-126, TERM-129]
+        - id: SCR-161
+          name: 주문 내역
+          path: 'pet:/me/orders'
+          access: 회원(자기 주문만)
+          status: active
+          flows: [FL-165]
+          terms: [CTX-024, TERM-127, TERM-128, TERM-129]
+    - id: SCR-162
+      name: 결제 확인
+      path: 'pet:/pay/return'
+      access: 회원(자기 주문만, 결제 대행 창에서 돌아옴)
+      status: active
+      flows: [FL-152, FL-157, FL-158, FL-164]
+      terms: [CTX-024, TERM-127, TERM-129]

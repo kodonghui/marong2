@@ -1,7 +1,7 @@
 # FL-154 이름을 짓고 첫 인사 받기
 
 Serves: REQ-356, REQ-359, REQ-367, REQ-333
-Screens: 07 단계 뒤에 SCR를 채워요
+Screens: SCR-146, SCR-147
 Context: CTX-022
 
 ```mermaid

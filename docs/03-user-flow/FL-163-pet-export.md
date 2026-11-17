@@ -1,7 +1,7 @@
 # FL-163 기록 내보내기
 
 Serves: REQ-384, REQ-385
-Screens: 07 단계 뒤에 SCR를 채워요
+Screens: SCR-153(받기 주소는 zip 파일)
 Context: CTX-022
 
 ```mermaid

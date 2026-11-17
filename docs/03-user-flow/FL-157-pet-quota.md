@@ -1,7 +1,7 @@
 # FL-157 하루 한도를 다 쓰고 충전하기
 
 Serves: REQ-403, REQ-404, REQ-405, REQ-406, REQ-379, REQ-360, REQ-413
-Screens: 07 단계 뒤에 SCR를 채워요
+Screens: SCR-147, SCR-151, SCR-155, SCR-160, SCR-162
 Context: CTX-024
 
 ```mermaid

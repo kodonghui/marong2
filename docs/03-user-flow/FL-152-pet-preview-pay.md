@@ -1,7 +1,7 @@
 # FL-152 미리 보기를 보고 캐릭터 만들기 결제하기
 
 Serves: REQ-348, REQ-349, REQ-332, REQ-408, REQ-412, REQ-413, REQ-414, REQ-415, REQ-350
-Screens: 07 단계 뒤에 SCR를 채워요
+Screens: SCR-143, SCR-144, SCR-162(본인인증 창과 결제 창은 결제 대행·본인확인 기관이 그림)
 Context: CTX-022, CTX-024
 
 ```mermaid

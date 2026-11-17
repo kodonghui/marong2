@@ -1,7 +1,7 @@
 # FL-166 신고하고 계정 지우기
 
 Serves: REQ-340, REQ-341, REQ-338, REQ-339, REQ-336
-Screens: 07 단계 뒤에 SCR를 채워요
+Screens: SCR-156, SCR-159
 Context: CTX-025
 
 ```mermaid

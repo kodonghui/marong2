@@ -1,7 +1,7 @@
 # FL-165 청약철회하고 환불받기
 
 Serves: REQ-409, REQ-408, REQ-352
-Screens: 07 단계 뒤에 SCR를 채워요
+Screens: SCR-161
 Context: CTX-024
 
 ```mermaid

@@ -1,7 +1,7 @@
 # FL-156 아이와 통화하기
 
 Serves: REQ-387, REQ-388, REQ-389, REQ-390, REQ-367, REQ-379, REQ-417
-Screens: 07 단계 뒤에 SCR를 채워요
+Screens: SCR-147, SCR-148
 Context: CTX-002, CTX-024
 
 ```mermaid

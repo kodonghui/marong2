@@ -1,7 +1,7 @@
 # FL-159 아이에게 입히고 아이템 반응 선톡 받기
 
 Serves: REQ-396, REQ-371, REQ-370, REQ-375
-Screens: 07 단계 뒤에 SCR를 채워요
+Screens: SCR-147, SCR-152
 Context: CTX-023, CTX-009
 
 ```mermaid

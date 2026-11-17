@@ -1,7 +1,7 @@
 # FL-164 구독을 시작하고 해지하기
 
 Serves: REQ-407, REQ-408, REQ-410, REQ-411, REQ-332
-Screens: 07 단계 뒤에 SCR를 채워요
+Screens: SCR-160, SCR-162(정기결제 등록 창은 결제 대행이 그림)
 Context: CTX-024
 
 ```mermaid

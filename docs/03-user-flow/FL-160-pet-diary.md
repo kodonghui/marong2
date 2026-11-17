@@ -1,7 +1,7 @@
 # FL-160 아이 시점 그림일기를 받고 일기장 꾸미기
 
 Serves: REQ-372, REQ-373, REQ-374, REQ-375, REQ-385, REQ-386, REQ-397, REQ-398
-Screens: 07 단계 뒤에 SCR를 채워요
+Screens: SCR-147, SCR-149, SCR-150, SCR-151
 Context: CTX-007, CTX-023
 
 ```mermaid

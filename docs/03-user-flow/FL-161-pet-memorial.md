@@ -1,7 +1,7 @@
 # FL-161 추억 모드로 바꾸기
 
 Serves: REQ-376, REQ-377, REQ-375, REQ-378
-Screens: 07 단계 뒤에 SCR를 채워요
+Screens: SCR-140, SCR-147, SCR-153
 Context: CTX-022
 
 ```mermaid

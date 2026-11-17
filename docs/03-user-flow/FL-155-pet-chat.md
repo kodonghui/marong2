@@ -1,7 +1,7 @@
 # FL-155 아이와 글로 이야기하기
 
 Serves: REQ-359, REQ-360, REQ-361, REQ-362, REQ-363, REQ-364, REQ-365, REQ-366, REQ-368, REQ-369, REQ-380, REQ-426
-Screens: 07 단계 뒤에 SCR를 채워요
+Screens: SCR-140, SCR-147
 Context: CTX-022(바뀌는 기존 맥락 CTX-008·011·012·013)
 
 ```mermaid

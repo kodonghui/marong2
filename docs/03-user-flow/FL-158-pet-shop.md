@@ -1,7 +1,7 @@
 # FL-158 상점에서 미리 입혀 보고 사기
 
 Serves: REQ-393, REQ-394, REQ-395, REQ-399, REQ-400, REQ-408, REQ-412, REQ-413, REQ-378
-Screens: 07 단계 뒤에 SCR를 채워요
+Screens: SCR-157, SCR-158, SCR-162
 Context: CTX-023, CTX-024
 
 ```mermaid

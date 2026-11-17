@@ -1,7 +1,7 @@
 # FL-167 운영자가 아이템을 올리고 판매를 끝내기
 
 Serves: REQ-399, REQ-400, REQ-401, REQ-402
-Screens: 07 단계 뒤에 SCR를 채워요
+Screens: 없음(운영자가 서버 셸의 `tools/pet_admin.py`로 함)
 Context: CTX-023
 
 ```mermaid

@@ -1,7 +1,7 @@
 # FL-162 작별 의식을 하고 캐릭터 보관하기
 
 Serves: REQ-381, REQ-382, REQ-383, REQ-380, REQ-366
-Screens: 07 단계 뒤에 SCR를 채워요
+Screens: SCR-149, SCR-150, SCR-153, SCR-154
 Context: CTX-022
 
 ```mermaid
