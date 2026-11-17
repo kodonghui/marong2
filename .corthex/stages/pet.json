@@ -15,6 +15,45 @@
         }
       ],
       "updated": "2026-11-17T05:56:53+00:00"
+    },
+    "02-prd": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "새 질문 A~D(PWA·웹 결제, 생년월일·본인인증, 시작 값, 대화 모델)를 09 목업 뒤 한 번에 여쭘",
+      "checks": [
+        {
+          "level": "info",
+          "message": "REQ-330~429 초안(2026-11-17), REQ-332·348·407·418은 질문 답 전 proposed",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T06:30:34+00:00"
+    },
+    "03-user-flow": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "07 사이트맵에서 FL-150~168의 Screens 줄을 SCR-140~149로 채움",
+      "checks": [
+        {
+          "level": "info",
+          "message": "FL-150~168 19개, Mermaid 그림 검사 통과, 기능 Must REQ 모두 흐름에 있음",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T06:30:34+00:00"
+    },
+    "04-functional-spec": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "05 표(TBL-140~159)·06 API(API-150~169)를 SPEC-310~369에서 만듦",
+      "checks": [
+        {
+          "level": "info",
+          "message": "SPEC-310~369, AI-30~36 초안. 기능 Must REQ 모두 SPEC 있음(REQ-391 통화 미룸 제외), SPEC-313·320·359·368 proposed",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T06:30:35+00:00"
     }
   }
 }
