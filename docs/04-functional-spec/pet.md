@@ -12,7 +12,7 @@
 - 시각: 저장은 UTC(`timestamptz`). '오늘'과 하루 한도·메시지 수·미리 보기 수의 하루 경계는 한국 시각 04:00이에요. 이번 달(원가 예산)은 한국 시각 달력 달이에요.
 - 돈: 회원 값은 원 단위 정수(부가세 포함 원화 총액)예요. 원가는 마이크로달러 정수와 설정 환율(기본 ₩1,337/$)로 계산해요.
 - ID: 주소와 응답에 나가는 id는 UUID예요. 회원에게 보이는 '회원 번호'는 무작위 8자(운영자가 회원을 찾을 때 씀)예요.
-- 응답: JSON, `Cache-Control: no-store`(그림은 3.1). 오류는 `{"error": "<코드>", "detail": "<회원에게 보일 글>"}`이고 코드와 글은 3.10이에요.
+- 응답: JSON, `Cache-Control: no-store`(그림은 3.1). 오류는 RFC 9457 Problem Details(`application/problem+json`)에 `code`와 `traceId`를 더한 모양이고, 회원에게 보일 글은 `detail`이에요. 코드와 글은 3.10, 응답 모양은 `api/pet.openapi.yaml`(06 API 계약, 2026-11-17)이에요.
 - 로그: `pet` 로거에 이벤트 이름·결과·개수·걸린 시간·주문 금액만 남겨요(REQ-421, SPEC-366).
 - 확실도 표시: [사실] 문서나 코드에서 확인, [추정] 근거 있는 짐작, [추측] 근거 없이 정한 시작 값, [확인 필요] 출시 전 원문·실계정에서 봐야 함.
 
@@ -23,8 +23,8 @@
 | ID | Behaviour | From | Preconditions | Main behaviour | Exceptions | Acceptance criteria | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | SPEC-310 | 로그인 | REQ-330, FL-150 | 없음 | `GET /api/auth/{provider}/start`(`kakao`·`google`) → 인가 코드와 PKCE, `state`·`nonce`는 10분 쿠키. `GET /api/auth/{provider}/callback` → 토큰을 받아 id_token의 서명·`iss`·`aud`·`nonce`·`exp`를 확인하고 (공급자, `sub`)로 회원을 찾아요. 있으면 세션, 없으면 '가입 대기' 세션(30분)으로 SPEC-311. 세션은 무작위 32바이트, DB에는 SHA-256만, 쿠키 `pet_session`(HttpOnly, Secure, SameSite=Lax, 30일, 쓸 때마다 늘리되 처음부터 90일까지). `POST /api/auth/logout`은 그 세션을 지워요 | `state` 다름·만료 → 400 `auth_state`<br>공급자 오류·토큰 확인 실패 → 502 `auth_provider`<br>지운 회원의 `sub` → 새 가입(앞 데이터 없음) | Given 가짜 OIDC 공급자, When 처음 로그인, Then 가입 대기 세션<br>When 같은 `sub`로 다시, Then 같은 회원<br>Given 다른 `state`, Then 400 | active |
-| SPEC-311 | 가입 | REQ-331, REQ-333, REQ-334, REQ-335, REQ-392, FL-150 | 가입 대기 세션, 가입 방식이 `open`이거나 초대 코드가 맞음(SPEC-368) | `POST /api/signup` `{birthDate, agreeTerms, agreePrivacy, aiNoticeConfirmed, overseasTransfer, inviteCode?}` → 한국 시각 오늘 기준 만 나이가 19세 이상이고 필수 셋(`agreeTerms`, `agreePrivacy`, `aiNoticeConfirmed`)이 참이면 회원을 만들어요. 생년월일은 저장하지 않고 `adult_self_declared_at`만 남겨요. 동의는 종류·문서 버전·값·시각으로 줄마다 남겨요(덮어쓰지 않음). 무료 기본 아이템을 넣고(SPEC-346) 세션을 정식 세션으로 바꿔요 → 201 | 만 19세 미만 → 403 `underage`, 아무것도 저장하지 않고 가입 대기 세션을 지움<br>날짜 형식·미래 날짜 → 400 `invalid_input`<br>필수 동의가 거짓 → 400 `consent_required`<br>초대 코드 틀림·다 씀 → 403 `invite_required`<br>이미 회원 → 409 `already_member` | Given 2007-11-18생, When 2026-11-17 가입, Then 403, DB에 그 회원 줄 없음<br>Given 2007-11-17생, Then 201<br>Given `overseasTransfer=false`, Then 201이고 SPEC-312의 막힘이 걸림 | active |
-| SPEC-312 | 동의 보기·바꾸기 | REQ-334, REQ-335, REQ-336, REQ-337, FL-150, FL-166 | 회원 | `GET /api/me/consents` → 종류마다 지금 값과 시각. `PUT /api/me/consents/overseas_transfer` `{value}` → 줄을 더해 바꿔요. 국외 이전이 꺼져 있으면 사진 올리기·메시지·통화·새 그림·작별 의식·밤 일기 쓰기를 하지 않고, API는 409 `consent_required`(`detail`에 무엇이 왜 막히는지)로 답해요. 이미 만든 캐릭터·일기·그림 보기와 내보내기는 돼요. 1차에는 광고성 푸시가 없어서 그 동의 종류도 없어요(REQ-337) | 이용약관·개인정보·AI 고지를 끄려 함 → 400 `use_delete_account`(계정 지우기로 안내) | Given 동의 철회, When 메시지 보냄, Then 409 `consent_required`, 모델을 부르지 않음 | active |
+| SPEC-311 | 가입 | REQ-331, REQ-333, REQ-334, REQ-335, REQ-392, FL-150 | 가입 대기 세션, 가입 방식이 `open`이거나 초대 코드가 맞음(SPEC-368) | `POST /api/signup` `{birthDate, agreeTerms, agreePrivacy, aiNoticeConfirmed, overseasTransfer, inviteCode?}` → 한국 시각 오늘 기준 만 나이가 19세 이상이고 필수 셋(`agreeTerms`, `agreePrivacy`, `aiNoticeConfirmed`)이 참이면 회원을 만들어요. 생년월일은 저장하지 않고 `adult_self_declared_at`만 남겨요. 동의는 종류·문서 버전·값·시각으로 줄마다 남겨요(덮어쓰지 않음). 무료 기본 아이템을 넣고(SPEC-346) 세션을 정식 세션으로 바꿔요 → 201 | 만 19세 미만 → 403 `underage`, 아무것도 저장하지 않고 가입 대기 세션을 지움<br>날짜 형식·미래 날짜 → 400 `invalid_input`<br>필수 동의가 거짓 → 400 `consents_missing`<br>초대 코드 틀림·다 씀 → 403 `invite_required`<br>이미 회원 → 409 `already_member` | Given 2007-11-18생, When 2026-11-17 가입, Then 403, DB에 그 회원 줄 없음<br>Given 2007-11-17생, Then 201<br>Given `overseasTransfer=false`, Then 201이고 SPEC-312의 막힘이 걸림 | active |
+| SPEC-312 | 동의 보기·바꾸기 | REQ-334, REQ-335, REQ-336, REQ-337, FL-150, FL-166 | 회원 | `GET /api/me/consents` → 종류마다 지금 값과 시각. `PUT /api/me/consents/{kind}` `{value}` → 줄을 더해 바꿔요(바꿀 수 있는 것은 `overseas_transfer`뿐). 국외 이전이 꺼져 있으면 사진 올리기·메시지·통화·새 그림·작별 의식·밤 일기 쓰기를 하지 않고, API는 409 `consent_required`(`detail`에 무엇이 왜 막히는지)로 답해요. 이미 만든 캐릭터·일기·그림 보기와 내보내기는 돼요. 1차에는 광고성 푸시가 없어서 그 동의 종류도 없어요(REQ-337) | 이용약관·개인정보·AI 고지를 끄려 함 → 400 `use_delete_account`(계정 지우기로 안내) | Given 동의 철회, When 메시지 보냄, Then 409 `consent_required`, 모델을 부르지 않음 | active |
 | SPEC-313 | 첫 결제 전 본인인증 | REQ-332, FL-152, FL-164 | 회원, 결제 켜짐, 본인인증 기록 없음 | 주문 만들기(SPEC-355)가 409 `identity_required`를 주면 화면이 본인확인 기관 창을 열어요. 끝나면 `POST /api/me/identity` `{token}` → 서버가 그 기관 API로 결과를 다시 받아 만 19세 이상이면 `identity_verified_at`과 CI의 솔트 해시만 저장해요. 이름·전화번호·생년월일은 저장하지 않아요 [확인 필요: 본인확인 기관과 결제 대행 선택, 건당 비용] | 만 19세 미만 → 403 `underage`, 그 회원을 `minor_locked`로 두고(로그인하면 안내만), 7일 뒤 SPEC-314와 같이 지움<br>기관 오류 → 502 `identity_provider`, 횟수 안 셈 | Given 가짜 기관이 성인을 돌려줌, Then 주문 만들기가 됨<br>Given 미성년, Then 403과 결제 막힘 | proposed |
 | SPEC-314 | 계정 지우기 | REQ-338, REQ-339, FL-166 | 회원 | `DELETE /api/me` 본문 `{"confirm": "계정 지우기"}` → 세션을 모두 끊고, 구독은 해지하고 빌링 키 지움 요청(SPEC-359), 회원을 `deleting`으로 둬요. 지우기 작업이 24시간 안에 아이·사진·특징표·그림·대화·기억·일기·꾸밈·보관함·웹 푸시 구독·회원이 낸 신고를 지우고, 주문은 `member_id`를 비워 주문 번호·상품·금액·시각·결제 대행 거래 번호만 5년 남겨요. 다 지우면 회원 줄을 지워요 | `confirm`이 다름 → 400 `confirm_required`<br>지우기 실패 → 1시간마다 다시, 24시간 넘으면 운영자 알림 | Given 아이 2마리와 주문 3개, When 지우기 작업, Then 회원·아이·대화 0줄, 주문 3줄은 회원 없이 남음 | active |
 | SPEC-315 | 신고 | REQ-340, REQ-341, FL-166 | 회원, 자기 아이의 메시지나 그림 | `POST /api/reports` `{targetType: message·picture, targetId, reason: 3.10의 6종, note ≤ 200자}` → 신고 줄(대상의 사본: 글이나 그림 id)을 저장하고 201. 매일 09:00 KST에 처리하지 않은 신고 수를 운영 알림으로 보내요(0이면 안 보냄). 운영자는 `tools/pet_admin.py report list·show·resolve` | 남의 것·없는 것 → 404<br>같은 대상 두 번 → 200 앞 신고<br>하루 20건 넘음 → 429 `rate_limited` | Given 아이의 답 한 줄, When 신고, Then 201, 다음 날 09:00 운영 알림 1건 | active |
@@ -63,7 +63,7 @@
 | SPEC-333 | 아이템 반응 선톡 | REQ-371, FL-159 | 살아 있는 아이, 산 착용 아이템을 이 아이에게 처음 입힘(SPEC-349의 이벤트) | 3분 뒤 작업: 그 아이템을 아직 입고 있고 게이트(SPEC-332, 가벼운 것으로 셈)를 지나면 AI-36(`item_reaction`)의 한 마디와 그 차림의 합성 그림(표정 `excited`, 배경은 아이템 태그로 3.6)을 보내요. 막히면 다음 날 08:00 뒤 첫 차례에 한 번 더, 또 막히면 버려요. (아이, 아이템)마다 한 번이에요 | 3분 안에 벗김 → 보내지 않음<br>무료 기본 아이템 → 보내지 않음<br>그사이 추억 모드로 바뀜 → 보내지 않음 | Given 오늘 선톡 0번, When 털모자를 처음 입힘, Then 3분 뒤 털모자 합성 그림과 한 마디 1개<br>When 벗었다 다시 입힘, Then 더 없음 | active |
 | SPEC-334 | 합성 그림 | REQ-373, REQ-385, FL-159, FL-160 | 캐릭터 시트 | 합성 지정 = `{backgroundId, expression, outfit: {head, body, neck}}`. 화면은 3.6의 순서와 자리로 레이어 그림을 겹쳐 보여 줘요(서버가 그리지 않음). 서버는 밖으로 나갈 때(공유 카드, 내보내기, 웹 푸시 그림)만 Pillow로 1536×1024 PNG 한 장을 만들고 워터마크를 달아요(SPEC-342) | 판매를 끝낸 아이템의 레이어 → 그대로 씀(그림은 지우지 않음)<br>없는 배경 → 기본 배경 `home_livingroom` | Given 털모자·목도리 착용, Then 화면 레이어 순서가 배경 → 아이 → 목 → 머리 | active |
 | SPEC-335 | 아이 시점 그림일기 쓰기 | REQ-372, REQ-373, REQ-375, FL-160 | 그날 회원 메시지가 있는 `active` 아이(두 모드 모두), 국외 이전 동의 | 일기 줄(SPEC-151\~153의 시각: 04:10 줄 만들기, 30분·2시간 뒤 다시, 22:00 마감)을 (회원, 아이)마다 만들어요. 하루 모음은 그 아이와 회원의 그날 글 대화와 통화 자막이에요. AI-33이 `{title, weather, body, mood, backgroundId, scene}`을 주면 확인 뒤 일기와 합성 지정(입은 아이템은 그 순간의 착용)을 저장해요. 살아 있는 아이면 08:30 뒤 웹 푸시 한 번, 추억 모드면 알림 없음 | 회원 말 40자 미만 → 건너뛴 날(일기 REQ-144와 같음)<br>세 번 실패 → 못 쓴 날 | Given 그날 대화, Then 아이 1인칭 일기 1편, 그림은 합성<br>Given 추억 모드, Then 웹 푸시 0 | active |
-| SPEC-336 | 새 그림으로 다시 그리기 | REQ-374, REQ-417, FL-160 | 그날 일기 `ready`, 이 일기 다시 그리기 2번 미만 | `POST /api/pets/{id}/diary/{date}/redraw` `{note ≤ 100자}` → 한도 40 단위를 잡고(SPEC-353) AI-31(`scene`)로 장면 그림(1536×1024)을 그려요. 성공하면 한도를 확정하고 일기 그림을 새 그림으로 바꿔요(합성으로 되돌리기 가능). 실패하면 한도를 돌려줘요 | 한도 모자람 → 409 `quota_exhausted`(SPEC-354)<br>예산 멈춤 → 409 `budget_paused`<br>그리는 중 → 409 `busy`<br>2번 다 씀 → 409 `redraw_limit` | Given 남은 한도 30 단위, When 다시 그리기, Then 409, 한도 그대로 | active |
+| SPEC-336 | 새 그림으로 다시 그리기 | REQ-374, REQ-417, FL-160 | 그날 일기 `ready`, 이 일기 다시 그리기 2번 미만 | `POST /api/pets/{id}/diary/{date}/redraw` `{note ≤ 100자}` → 한도 40 단위를 잡고(SPEC-353) AI-31(`scene`)로 장면 그림(1536×1024)을 그려요. 성공하면 한도를 확정하고 일기 그림을 새 그림으로 바꿔요(합성으로 되돌리기 가능). 실패하면 한도를 돌려줘요. API는 바로 202로 답하고(그리는 중 `drawing`), 결과는 일기의 `lastRedraw`(`done`·`failed`)로 알려요(06 계약 결정 3) | 한도 모자람 → 409 `quota_exhausted`(SPEC-354)<br>예산 멈춤 → 409 `budget_paused`<br>그리는 중 → 409 `busy`<br>2번 다 씀 → 409 `redraw_limit` | Given 남은 한도 30 단위, When 다시 그리기, Then 409, 한도 그대로 | active |
 | SPEC-337 | 웹 푸시 | REQ-370, REQ-371, REQ-372, REQ-375, FL-153, FL-159, FL-160 | 회원이 알림을 허용 | 서비스 워커와 VAPID 키(서버 설정). `POST /api/me/push` `{subscription}`(기기마다), `DELETE /api/me/push/{id}`. 보내는 종류: 캐릭터 시트 완성, 선톡·아이템 반응 선톡, 그림일기 아침 알림, 결제 자동 취소, 내보내기 완료. 잠금 화면 글은 '<아이 이름>(AI)' 제목과 '말을 걸었어요'처럼 대화 원문 없는 한 줄이에요. 추억 모드·보관된 아이로는 보내지 않아요 | 푸시 서비스 404·410 → 그 구독을 지움<br>그 밖의 오류 → 한 번 다시, 그다음 버림(메시지는 앱 안에 남음) | Given 추억 모드 아이의 일기, Then 웹 푸시 요청 0 | active |
 
 ### 추억 모드와 작별(CTX-022)
@@ -81,8 +81,8 @@
 
 | ID | Behaviour | From | Preconditions | Main behaviour | Exceptions | Acceptance criteria | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| SPEC-344 | 통화 시작 | REQ-367, REQ-387, REQ-390, REQ-417, FL-156 | 회원의 `active` 아이(보관 아님), 국외 이전 동의 | `POST /api/pets/{id}/calls` → 예산과 한도를 확인하고 30 단위를 잡은 뒤(SPEC-353) 공개 서비스용 통화 서버에 쓸 일회용 통화 토큰(60초)을 줘요. 화면이 통화 서버 WebSocket에 붙으면 통화 서버가 먼저 정해 둔 녹음 '안녕, 나는 AI로 만든 <아이 이름> 목소리야'(이름은 붙이지 않은 고정 녹음 + 화면 표시. [추정: 이름을 넣으려면 TTS가 필요해 1차는 고정 문장 'AI로 만든 목소리예요'])를 틀고, 그다음 AI-35 지시문으로 모델 말을 시작해요. 목소리는 종(개·고양이)마다 정한 하나예요 | 한도 모자람 → 409 `quota_exhausted`(SPEC-354)<br>예산 멈춤 → 409 `budget_paused`<br>회원마다 통화 하나 → 409 `call_in_progress`<br>통화 서버 없음 → 503 `call_unavailable`, 잡은 한도 돌려줌 | Given 남은 한도 29 단위, Then 409<br>Given 30 단위, Then 통화, 첫 소리가 고정 안내 | active |
-| SPEC-345 | 통화 중 한도와 마치기 | REQ-379, REQ-388, REQ-389, FL-156 | 통화 중 | 연결된 뒤 1분마다 통화 서버가 내부 API(`POST /internal/calls/{id}/minute`, 서버 사이 비밀 헤더)로 30 단위를 써요(첫 1분은 시작 때 잡은 것을 확정). 답이 `exhausted`면 통화 서버가 모델에 '졸려서 자러 간다고 한두 문장으로 인사하고 마쳐' 지시를 넣고 30초 뒤 끊어요. 끝나면 쓴 분과 마친 이유(회원, 한도, 오류)를 남겨요 | 내부 API 실패 → 통화는 이어 가고 분을 모아 끝날 때 한 번에 써요. 그날 한도를 넘는 만큼은 회원에게 물리지 않고 0에서 멈춰요 | Given 남은 한도 60 단위, Then 2분 뒤 자러 간다는 인사, 30초 안에 끊김 | active |
+| SPEC-344 | 통화 시작 | REQ-367, REQ-387, REQ-390, REQ-417, FL-156 | 회원의 `active` 아이(보관 아님), 국외 이전 동의 | `POST /api/pets/{id}/calls` → 예산과 한도를 확인하고 30 단위를 잡은 뒤(SPEC-353) 공개 서비스용 통화 서버에 쓸 일회용 통화 토큰(60초)을 줘요. 화면이 통화 서버 WebSocket에 붙으면 통화 서버가 먼저 정해 둔 녹음 '안녕, 나는 AI로 만든 <아이 이름> 목소리야'(이름은 붙이지 않은 고정 녹음 + 화면 표시. [추정: 이름을 넣으려면 TTS가 필요해 1차는 고정 문장 'AI로 만든 목소리예요'])를 틀고, 그다음 AI-35 지시문으로 모델 말을 시작해요. 통화 서버는 토큰을 내부 API `POST /internal/calls/verify`로 한 번만 확인하고, 지시문(AI-35)은 그 응답으로만 받아요. 목소리는 종(개·고양이)마다 정한 하나예요 | 한도 모자람 → 409 `quota_exhausted`(SPEC-354)<br>예산 멈춤 → 409 `budget_paused`<br>회원마다 통화 하나 → 409 `call_in_progress`<br>통화 서버 없음 → 503 `call_unavailable`, 잡은 한도 돌려줌 | Given 남은 한도 29 단위, Then 409<br>Given 30 단위, Then 통화, 첫 소리가 고정 안내 | active |
+| SPEC-345 | 통화 중 한도와 마치기 | REQ-379, REQ-388, REQ-389, FL-156 | 통화 중 | 연결된 뒤 1분마다 통화 서버가 내부 API(`POST /internal/calls/{id}/minute`, 서버 사이 비밀 헤더)로 30 단위를 써요(첫 1분은 시작 때 잡은 것을 확정). 답이 `exhausted`면 통화 서버가 모델에 '졸려서 자러 간다고 한두 문장으로 인사하고 마쳐' 지시를 넣고 30초 뒤 끊어요. 끝나면 통화 서버가 `POST /internal/calls/{id}/end`로 마친 이유(회원, 한도, 오류), 못 쓴 분, 자막을 보내고, 자막은 대화 기록에 `kind: call`로 들어가 그날 일기의 하루 모음에 쓰여요(SPEC-335). 같은 끝을 두 번 보내도 204 그대로예요 | 내부 API 실패 → 통화는 이어 가고 분을 모아 끝날 때 한 번에 써요. 그날 한도를 넘는 만큼은 회원에게 물리지 않고 0에서 멈춰요 | Given 남은 한도 60 단위, Then 2분 뒤 자러 간다는 인사, 30초 안에 끊김 | active |
 
 ### 꾸미기(CTX-023)
 
@@ -231,9 +231,13 @@
 | `unauthenticated` | 401 | 다시 로그인해 주세요. |
 | `auth_state`, `auth_provider` | 400, 502 | 로그인을 마치지 못했어요. 다시 해 주세요. |
 | `underage` | 403 | 이 서비스는 만 19세 이상만 쓸 수 있어요. |
-| `consent_required` | 409, 400 | 사진과 대화를 해외 AI 회사로 보내는 데 동의해야 쓸 수 있어요. 설정에서 바꿀 수 있어요. |
+| `consent_required` | 409 | 사진과 대화를 해외 AI 회사로 보내는 데 동의해야 쓸 수 있어요. 설정에서 바꿀 수 있어요. |
 | `invite_required` | 403 | 지금은 초대받은 분만 가입할 수 있어요. |
+| `consents_missing` | 400 | 필수 항목에 동의해야 가입할 수 있어요. |
+| `already_member` | 409 | 이미 가입했어요. |
+| `use_delete_account` | 400 | 필수 동의를 거두려면 계정을 지워 주세요. |
 | `invalid_photo` | 400 | {n}번째 사진을 열 수 없어요. JPEG나 PNG, 8MB 이하로 올려 주세요. |
+| `too_large` | 413 | 사진이 너무 커요. 다시 골라 주세요.(요청 본문 25MB 넘음) |
 | `photo_check_unavailable` | 503 | 사진을 확인하지 못했어요. 잠시 뒤 다시 해 주세요. |
 | `pet_limit` | 409 | 아이는 5마리까지 만들 수 있어요. |
 | `too_many_creations` | 409 | 만들고 있는 아이가 있어요. 먼저 마치거나 지워 주세요. |
@@ -255,6 +259,8 @@
 | `wrong_slot`, `invalid_input`, `confirm_required` | 400 | 입력을 확인해 주세요. |
 | `wrong_state`, `export_limit`, `rate_limited` | 409, 429 | 지금은 할 수 없어요. / 오늘은 이미 내보냈어요. / 잠시 뒤 다시 해 주세요. |
 | `cross_site`, `not_found` | 403, 404 | 요청을 처리할 수 없어요. / 찾을 수 없어요. |
+| `bad_signature` | 401 | (서버 사이 요청만: 결제 대행 웹훅 서명이나 내부 API 비밀 헤더가 틀림. 회원에게 보이지 않음) |
+| `server_error` | 500 | 잠시 뒤 다시 해 주세요. |
 
 신고 이유 6종: 이상한 말, 상처 주는 말, 성적인 말, 위험한 말, 그림이 이상함, 그 밖.
 결제 실패 글: '결제가 되지 않았어요. 돈은 나가지 않았어요.'(결제 대행의 실패 코드는 로그에만).

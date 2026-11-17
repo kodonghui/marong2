@@ -58,7 +58,7 @@
     "05-erd": {
       "state": "in_progress",
       "checkpoints": [],
-      "next": "06 API(API-150~169) 뒤 스키마 동결을 01·02 질문과 함께 한 번에 여쭘",
+      "next": "스키마 동결은 09 뒤 질문 묶음에서",
       "checks": [
         {
           "level": "info",
@@ -66,7 +66,20 @@
           "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T06:37:46+00:00"
+      "updated": "2026-11-17T06:47:00+00:00"
+    },
+    "06-api": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "07 사이트맵·08 화면 상태·09 목업(SCR-140~149) 뒤 01·02 질문과 스키마·계약 동결을 한 번에 여쭘",
+      "checks": [
+        {
+          "level": "info",
+          "message": "API-150~210(61개) 초안, api/pet.openapi.yaml. 계약 결정 7가지는 info.description, 결제 대행·본인확인 기관(02 질문 A·B) 고른 뒤 Checkout.pg·웹훅 모양 맞춤",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T06:47:00+00:00"
     }
   }
 }
