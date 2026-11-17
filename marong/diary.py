@@ -10,6 +10,8 @@ from psycopg.rows import dict_row
 
 KST = ZoneInfo("Asia/Seoul")
 DIARY_START = time(4)
+WRITE_FROM = time(4, 10)
+STOP_AT = time(22)
 DAY_LIMIT = 12_000
 _OMIT = re.compile(r"일기(?:에|엔|에는|에다)?\s*(?:쓰지|적지|넣지)\s*(?:마|말아)|일기\s*(?:말고|빼고)")
 _OMISSION = "[일기 제외 요청: 여기 앞에서 하던 얘기는 일기에 쓰지 마]"
@@ -95,6 +97,16 @@ def image_budget(value: str | None) -> Decimal:
     except InvalidOperation:
         pass
     return Decimal(5)
+
+
+async def drawing_allowed(store, budget: Decimal, now: datetime) -> bool:
+    start = now.astimezone(KST).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    row = await store._one(
+        "SELECT COALESCE(sum(cost_usd),0) AS usd FROM marong.diary_ai_runs "
+        "WHERE kind='draw' AND sent_at >= %s AND sent_at <= %s",
+        (start, now),
+    )
+    return row["usd"] + Decimal("0.03") <= budget
 
 
 @dataclass(frozen=True)

@@ -4,21 +4,20 @@ import os
 import re
 from calendar import monthrange
 from datetime import date, datetime
-from decimal import Decimal
 
 from aiohttp import web
 
 from .app_chat import UUID, Problem, bad
-from .diary import KST, diary_day, image_budget
+from .diary import KST, diary_day, drawing_allowed, image_budget
+from .diary_models import GLASSES, HAIR, WEATHER
 
 _PREFIX = "/chat/diary/api"
 _DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _MONTH = re.compile(r"[0-9]{4}-[0-9]{2}")
 _VISIBLE = "state='ready' AND NOT hidden"
-_WEATHER = frozenset({"sunny", "cloudy", "rain", "snow", "rainbow"})
 _LOOK = {
-    "hair": frozenset({"long", "bob", "short", "ponytail", "curly"}),
-    "glasses": frozenset({"none", "round", "square"}),
+    "hair": HAIR,
+    "glasses": GLASSES,
     "top": frozenset({"white", "black", "gray", "navy", "beige", "pink", "yellow", "green"}),
 }
 
@@ -119,7 +118,7 @@ class AppDiary:
             raise bad(("body", "bad_format"))
         if type(revision) is not int or revision < 1:
             raise bad(("revision", "bad_format"))
-        if not isinstance(weather, str) or weather not in _WEATHER:
+        if not isinstance(weather, str) or weather not in WEATHER:
             raise bad(("weather", "bad_format"))
         now = datetime.now(KST)
         async with self.store.pool.connection() as conn, conn.transaction():
@@ -178,14 +177,8 @@ class AppDiary:
         redraws = 2 - row["redraws_used"]
         fix_block = "fix_limit" if not fixes else "busy" if busy else None
         redraw_block = "redraw_limit" if not redraws else "busy" if busy else None
-        if redraw_block is None:
-            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            spend = await self.store._one(
-                "SELECT COALESCE(sum(cost_usd),0) AS usd FROM marong.diary_ai_runs "
-                "WHERE kind='draw' AND sent_at>=%s AND sent_at<=%s", (start, now),
-            )
-            if spend["usd"] + Decimal("0.03") > self.draw_budget:
-                redraw_block = "drawing_budget"
+        if redraw_block is None and not await drawing_allowed(self.store, self.draw_budget, now):
+            redraw_block = "drawing_budget"
         drawing_id = row["drawing_id"]
         last = {"result": row["redraw_result"], "at": _iso(row["redraw_at"])} if row["redraw_result"] else None
         return {

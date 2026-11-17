@@ -4,7 +4,7 @@ import re
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
-from .diary import KST, diary_day
+from .diary import KST, STOP_AT, WRITE_FROM, diary_day
 
 USAGE = "diary status | diary month [YYYY-MM] | diary <친구|#키> on|off [--now]|run <YYYY-MM-DD>"
 
@@ -33,6 +33,8 @@ def toggle(conn, friend, enabled: bool, immediate: bool, now: datetime) -> bool:
         when -= timedelta(days=1)
     previous = setting(conn, friend, when)
     changed = bool(previous and previous["enabled"]) != enabled
+    if immediate and previous and not previous["stop_now"]:
+        changed = True
     if changed:
         conn.execute(
             "INSERT INTO marong.diary_settings(friend_id, enabled, from_date, stop_now) VALUES (%s,%s,%s,%s)",
@@ -59,12 +61,15 @@ def rerun(conn, friend, day: date, now: datetime):
     enabled = setting(conn, friend, day)
     if not enabled or not enabled["enabled"]:
         raise DiaryAdminError("그 날은 일기가 꺼져 있었어요.")
+    local = now.astimezone(KST)
+    next_day = local.date() + timedelta(days=local.time() >= STOP_AT)
+    next_at = max(now, datetime.combine(next_day, WRITE_FROM, KST))
     changed = conn.execute(
-        """INSERT INTO marong.diaries(friend_id, diary_date, next_at) VALUES (%s,%s,%s)
+        """INSERT INTO marong.diaries(friend_id, diary_date, next_at, updated_at) VALUES (%s,%s,%s,%s)
         ON CONFLICT (friend_id, diary_date) DO UPDATE SET state='pending', fail_reason=NULL,
             attempts=0, draw_tries=0, next_at=EXCLUDED.next_at, lease_until=NULL, updated_at=EXCLUDED.next_at
         WHERE marong.diaries.state IN ('pending','skipped','failed')
-        RETURNING id""", (friend, day, now),
+        RETURNING id""", (friend, day, next_at, next_at),
     ).fetchone()
     if not changed:
         raise DiaryAdminError("이미 준비됐거나 쓰는 중인 일기는 다시 돌릴 수 없어요.")
