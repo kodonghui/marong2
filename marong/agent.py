@@ -17,11 +17,12 @@ import logging
 import math
 from collections import OrderedDict
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from .cache_warm import hour_writes
 from .config import PER_DAY_MAX, Settings, proactive_schedule
+from .diary import KST, recent_stamp
 from .embed import Embeddings
 from .fmt import now_line, short_key, short_time
 from .knowledge import load_knowledge
@@ -372,6 +373,10 @@ class Agent:
                   "recalled": [self._hit(h) for h in recalled], "friends": [c["id"] for c in known],
                   "close": [c["id"] for c in known if self._close_facts(c)] if msg.is_channel else []}
         situation = self._situation(msg, person, notes, shown, recalled, circle)
+        stamp = await self._diary_stamp(msg, person)
+        if stamp:
+            header, separator, rest = situation.partition("\n\n")
+            situation = header + "\n" + stamp + separator + rest
         if msg.is_channel and getattr(self.store, "discord_context_enabled", False):
             try:
                 discord_context = await asyncio.wait_for(self.store.discord_context(msg.room_key, msg.user_key, user_id), 1)
@@ -396,6 +401,21 @@ class Agent:
             except Exception as e:
                 log.warning('call_memory_unavailable %s',type(e).__name__)
         return self._system(situation), messages, memory
+
+    async def _diary_stamp(self, msg: Incoming, person: dict | None) -> str:
+        friend = (person or {}).get("friend_id")
+        if not friend or not msg.is_channel or getattr(msg, "channel", False):
+            return ""
+        try:
+            day = await asyncio.wait_for(recent_stamp(self.store, friend, msg.room_key, datetime.now(KST)), 0.5)
+        except Exception as error:
+            log.warning("diary_stamp_unavailable %s", type(error).__name__)
+            return ""
+        if day is None:
+            return ""
+        name = clean_name(person.get("name")) or "친구"
+        return (f"- {name}가 {day.month}월 {day.day}일 마롱이 일기에 도장을 찍어 줬어"
+                "(일기 내용은 여기 없어. 자연스러울 때만 고마워해도 돼)")
 
     def _shown_photos(self, room_key: str, first: int | None) -> dict[int, dict]:
         """답할 때 다시 보여 줄 사진(메시지 id → 사진 블록): 이번에 답하는 말들(first 부터)의 사진만."""

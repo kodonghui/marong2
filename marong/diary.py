@@ -72,6 +72,21 @@ def diary_day(at: datetime) -> date:
     return (at.astimezone(KST) - timedelta(hours=DIARY_START.hour)).date()
 
 
+async def recent_stamp(store, friend_id: int, room: str, now: datetime) -> date | None:
+    row = await store._one(
+        """SELECT d.diary_date FROM marong.diaries d
+        JOIN marong.discord_dm_links link USING (friend_id)
+        JOIN marong.rooms r ON r.room_key=%s AND r.room_key IN (link.room_key, link.kakao_room_key)
+        WHERE d.friend_id=%s AND r.is_channel AND r.memory_room IS NULL
+          AND d.state='ready' AND NOT d.hidden AND d.stamped_at > %s AND d.stamped_at <= %s
+          AND (SELECT enabled FROM marong.diary_settings WHERE friend_id=d.friend_id
+               AND from_date<=%s ORDER BY id DESC LIMIT 1)
+        ORDER BY d.stamped_at DESC, d.id DESC LIMIT 1""",
+        (room, friend_id, now - timedelta(hours=24), now, diary_day(now)),
+    )
+    return row["diary_date"] if row else None
+
+
 def image_budget(value: str | None) -> Decimal:
     try:
         budget = Decimal(value or "5")

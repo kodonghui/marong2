@@ -1,4 +1,4 @@
-"""Authenticated read routes for one friend's diary (API-108~110, 116~117)."""
+"""Authenticated routes for one friend's diary."""
 
 import os
 import re
@@ -15,6 +15,7 @@ _PREFIX = "/chat/diary/api"
 _DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _MONTH = re.compile(r"[0-9]{4}-[0-9]{2}")
 _VISIBLE = "state='ready' AND NOT hidden"
+_WEATHER = frozenset({"sunny", "cloudy", "rain", "snow", "rainbow"})
 _LOOK = {
     "hair": frozenset({"long", "bob", "short", "ponytail", "curly"}),
     "glasses": frozenset({"none", "round", "square"}),
@@ -72,7 +73,9 @@ class AppDiary:
     async def day(self, req):
         friend = (await self.chat._who(req))["friend_id"]
         day = _date(req.match_info["date"], "date")
-        now = datetime.now(KST)
+        return await self._day_response(friend, day, datetime.now(KST))
+
+    async def _day_response(self, friend, day, now):
         row = await self.store._one(
             f"""WITH params AS (SELECT %s::bigint AS friend, %s::date AS day, %s::date AS today)
             SELECT d.state, d.revision, d.drawing_id, d.hidden, d.stamped_at, d.busy, d.busy_until,
@@ -93,6 +96,81 @@ class AppDiary:
             state = "writing"
         return self.chat._json(200, {"date": day.isoformat(), "state": state,
             "prev": _iso(row["prev"]), "next": _iso(row["next"]), "diary": content})
+
+    async def _ready(self, conn, friend, day, now):
+        if day > diary_day(now):
+            raise Problem("not_ready")
+        cur = await conn.execute(
+            """SELECT id, revision, busy_until, hidden, stamped_at FROM marong.diaries
+            WHERE friend_id=%s AND diary_date=%s AND state='ready' FOR UPDATE""",
+            (friend, day),
+        )
+        row = await cur.fetchone()
+        if row is None:
+            raise Problem("not_ready")
+        return row
+
+    async def put_weather(self, req):
+        friend = (await self.chat._who(req, write=True))["friend_id"]
+        day = _date(req.match_info["date"], "date")
+        data = await self.chat._body(req)
+        revision, weather = data.get("revision"), data.get("weather")
+        if set(data) - {"revision", "weather"}:
+            raise bad(("body", "bad_format"))
+        if type(revision) is not int or revision < 1:
+            raise bad(("revision", "bad_format"))
+        if not isinstance(weather, str) or weather not in _WEATHER:
+            raise bad(("weather", "bad_format"))
+        now = datetime.now(KST)
+        async with self.store.pool.connection() as conn, conn.transaction():
+            diary = await self._ready(conn, friend, day, now)
+            if diary["revision"] != revision:
+                raise Problem("stale_revision")
+            if diary["busy_until"] and diary["busy_until"] > datetime.now(KST):
+                raise Problem("busy")
+            cur = await conn.execute(
+                """INSERT INTO marong.diary_revisions (diary_id, revision, source, title, weather, body, scene)
+                SELECT diary_id, revision+1, 'weather', title, %s, body, scene
+                FROM marong.diary_revisions WHERE diary_id=%s AND revision=%s AND weather<>%s
+                RETURNING revision""", (weather, diary["id"], revision, weather),
+            )
+            changed = await cur.fetchone()
+            if changed:
+                await conn.execute("UPDATE marong.diaries SET revision=%s, updated_at=now() WHERE id=%s",
+                                   (changed["revision"], diary["id"]))
+        return await self._day_response(friend, day, now)
+
+    async def put_hidden(self, req):
+        return await self._put_flag(req, "hidden")
+
+    async def put_stamp(self, req):
+        return await self._put_flag(req, "stamped")
+
+    async def _put_flag(self, req, field):
+        friend = (await self.chat._who(req, write=True))["friend_id"]
+        day = _date(req.match_info["date"], "date")
+        data = await self.chat._body(req)
+        if set(data) != {field} or type(data[field]) is not bool:
+            raise bad((field, "bad_format"))
+        value = data[field]
+        now = datetime.now(KST)
+        async with self.store.pool.connection() as conn, conn.transaction():
+            diary = await self._ready(conn, friend, day, now)
+            if field == "hidden" and diary["hidden"] != value:
+                await conn.execute(
+                    """UPDATE marong.diaries SET hidden=%s, updated_at=now(),
+                    notice_next_at=CASE WHEN %s AND notice_state IN ('none','waiting','failed')
+                                        THEN NULL ELSE notice_next_at END,
+                    notice_state=CASE WHEN %s AND notice_state IN ('none','waiting','failed')
+                                      THEN 'cancelled' ELSE notice_state END
+                    WHERE id=%s""", (value, value, value, diary["id"]),
+                )
+            if field == "stamped" and (diary["stamped_at"] is not None) != value:
+                await conn.execute(
+                    """UPDATE marong.diaries SET stamped_at=CASE WHEN %s THEN clock_timestamp() END,
+                    updated_at=now() WHERE id=%s""", (value, diary["id"]),
+                )
+        return await self._day_response(friend, day, now)
 
     async def _content(self, row, now):
         busy = row["busy"] if row["busy_until"] and row["busy_until"] > now else None
@@ -178,6 +256,8 @@ class AppDiary:
         for path, handler in (("/latest", self.latest), ("/days", self.month), ("/days/{date}", self.day),
                               ("/hidden", self.hidden), ("/drawings/{id}", self.drawing)):
             app.router.add_get(_PREFIX + path, handler, allow_head=False)
+        for path, handler in (("weather", self.put_weather), ("hidden", self.put_hidden), ("stamp", self.put_stamp)):
+            app.router.add_put(f"{_PREFIX}/days/{{date}}/{path}", handler)
         app.router.add_get(_PREFIX + "/look", self.look, allow_head=False)
         app.router.add_put(_PREFIX + "/look", self.put_look)
         app.router.add_delete(_PREFIX + "/look", self.clear_look)
