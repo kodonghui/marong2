@@ -7,37 +7,37 @@
       "state": "in_progress",
       "checkpoints": [],
       "next": "체크포인트 3: CTX-007 마롱이의 일기 맥락 표·규칙·맥락 지도(docs/01-domain/domain.md). 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
-      "updated": "2026-11-17T06:10:00+00:00"
+      "updated": "2026-11-17T05:49:16+00:00"
     },
     "02-prd": {
       "state": "in_progress",
       "checkpoints": [],
       "next": "범위 동결: docs/02-prd/diary.md REQ-138~178과 확인 질문 1~3(REQ-139 일기 하루 04시, 일기 글 모델 회사, REQ-155 도장). 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
-      "updated": "2026-11-17T06:10:00+00:00"
+      "updated": "2026-11-17T05:49:16+00:00"
     },
     "03-user-flow": {
       "state": "in_progress",
       "checkpoints": [],
       "next": "체크포인트: FL-114~119의 주 경로와 실패 경로. 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
-      "updated": "2026-11-17T06:10:00+00:00"
+      "updated": "2026-11-17T05:49:16+00:00"
     },
     "04-functional-spec": {
       "state": "in_progress",
       "checkpoints": [],
       "next": "명세 동결: SPEC-150~168·AI-6~8. 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
-      "updated": "2026-11-17T06:10:00+00:00"
+      "updated": "2026-11-17T05:49:16+00:00"
     },
     "05-erd": {
       "state": "in_progress",
       "checkpoints": [],
       "next": "스키마 동결: 016_diary.sql TBL-103~109. 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
-      "updated": "2026-11-17T06:10:00+00:00"
+      "updated": "2026-11-17T05:49:16+00:00"
     },
     "06-api": {
       "state": "in_progress",
       "checkpoints": [],
       "next": "계약 검토: api/diary.openapi.yaml API-108~120의 응답(깨지는 변경 없음). 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
-      "updated": "2026-11-17T06:10:00+00:00"
+      "updated": "2026-11-17T05:49:16+00:00"
     },
     "07-sitemap": {
       "state": "in_progress",
@@ -50,13 +50,13 @@
           "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T06:10:00+00:00"
+      "updated": "2026-11-17T05:49:16+00:00"
     },
     "08-screen-states": {
       "state": "in_progress",
       "checkpoints": [],
       "next": "화면 정의 승인: SCR-113~118 상태와 와이어프레임 https://claude.ai/artifact/SnzgPx64NHhxgcxpa3HRho. 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
-      "updated": "2026-11-17T06:10:00+00:00"
+      "updated": "2026-11-17T05:49:16+00:00"
     },
     "09-mockup": {
       "state": "in_progress",
@@ -75,19 +75,19 @@
           "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T06:10:00+00:00"
+      "updated": "2026-11-17T05:49:16+00:00"
     },
     "10-wbs": {
       "state": "in_progress",
       "checkpoints": [],
       "next": "GPT 인계 docs/10-wbs/diary-call-cost.md(TASK-137~155). PR #25 합친 뒤 봇·서버·API는 바로, 화면 작업(TASK-152~155)은 토큰 얼리기 뒤",
-      "updated": "2026-11-17T06:10:00+00:00"
+      "updated": "2026-11-17T05:49:16+00:00"
     },
     "12-qa": {
       "state": "in_progress",
       "checkpoints": [],
       "next": "시험 계획 TC-159~172(docs/12-qa/diary-call-cost.md). 시험 코드·실행은 GPT",
-      "updated": "2026-11-17T06:10:00+00:00"
+      "updated": "2026-11-17T05:49:16+00:00"
     }
   }
 }
