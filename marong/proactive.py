@@ -122,7 +122,7 @@ class Proactive:
             planned = self.plan(room, now)
             if planned is None or self._skip.get(room["room_key"]) == planned[0] or self.rng() >= planned[1]:
                 continue
-            if await self.store.proactive_count(today) >= self.s.proactive_daily_max:
+            if await self.daily_count(today) >= self.s.proactive_daily_max:
                 break
             async with self.room_lock(room["room_key"]):
                 # 기다리는 동안 친구가 말을 걸었거나 선톡이 나갔으면 보내지 않음
@@ -135,6 +135,10 @@ class Proactive:
             if result["text"]:
                 sent += 1
         return sent
+
+    async def daily_count(self, today: timedelta) -> int:
+        """오늘(한국 시각 0시부터 today 만큼) 나간 선톡 수. 하루 최대(PROACTIVE_DAILY_MAX)와 비교한다."""
+        return await self.store.proactive_count(today)
 
     async def deliver(self, room: dict, dry: bool = False) -> dict:
         """그 방에 보낼 선톡을 만들어 보내고 저장한다. dry 면 만들기만 한다.

@@ -117,5 +117,6 @@ class AppPush:
             return []
         return [d for d in await self.store.app_devices(friend_id) if can_ring(d)]
 
-    async def ring(self, devices: list[dict], ring_id: str) -> int:
-        return await self._fan_out("ring", devices, lambda fid: fcm_messages.ring(fid, ring_id))
+    async def ring(self, devices: list[dict], ring_id: str, *, reason: str = "promise",
+                   line: str | None = None) -> int:
+        return await self._fan_out("ring", devices, lambda fid: fcm_messages.ring(fid, ring_id, reason, line))

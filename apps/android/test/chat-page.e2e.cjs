@@ -62,8 +62,8 @@ describe('chat page', { skip }, () => {
     await site?.close();
   });
 
-  async function openChat({ at = null, init = null } = {}) {
-    const context = await browser.newContext(PHONE);
+  async function openChat({ at = null, init = null, device = {} } = {}) {
+    const context = await browser.newContext({ ...PHONE, ...device });
     contexts.push(context);
     if (init) await context.addInitScript(init);
     const page = await context.newPage();
@@ -87,7 +87,7 @@ describe('chat page', { skip }, () => {
 
   function reset() {
     Object.assign(site.state, { me: { status: 200, body: ME }, sends: [], typing: false, reply: null, posted: [],
-      waits: [], postDelayMs: 0, read: 0, answered: 0, marks: true });
+      waits: [], postDelayMs: 0, read: 0, answered: 0, marks: true, pictures: {}, pictureDelayMs: 0 });
     history(site);
   }
 
@@ -328,6 +328,68 @@ describe('chat page', { skip }, () => {
     await broken.page.click('#state-retry');
     await ready(broken.page);
     await broken.context.close();
+  });
+
+  // Picture topics (docs/04-functional-spec/call-first.md SPEC-273, SPEC-274; SCR-107#picture, #picture-loading,
+  // #picture-missing, #hello). A face WebP stands in for the set's pictures.
+  function pictures() {
+    reset();
+    const stand = path.join(__dirname, '..', '..', '..', 'marong', 'call', 'static', 'face', 'v1', '05-excited.webp');
+    site.state.pictures = { '/chat/topics/v1/winter-hat.webp': stand, '/chat/topics/v1/chicken-skewer.webp': stand };
+    const list = site.state.messages;
+    Object.assign(list[30], { from: 'marong', kind: 'proactive', text: '나 털모자 샀다!\n\n어울려?',
+      picture: { src: '/chat/topics/v1/winter-hat.webp', alt: '털모자를 쓴 마롱이' } });
+    Object.assign(list[31], { from: 'marong', kind: 'proactive', text: '그림이 없어진 말',
+      picture: { src: '/chat/topics/v1/no-such-picture.webp', alt: '없는 그림' } });
+    Object.assign(list[32], { from: 'marong', kind: 'proactive', text: '바깥 주소의 그림',
+      picture: { src: 'https://example.test/x.webp', alt: '바깥' } });
+    Object.assign(list[34], { from: 'marong', kind: 'hello', text: '전화했는데 바빴나 봐!\n\n닭꼬치 먹는 중이야\n\n넌 뭐 먹었어?',
+      picture: { src: '/chat/topics/v1/chicken-skewer.webp', alt: '닭꼬치를 든 마롱이' } });
+  }
+
+  it('SCR-107#picture, #hello: the picture above her words, its text, the tags; a missing one leaves the words', async () => {
+    pictures();
+    const { context, page, outside } = await openChat();
+    await ready(page);
+    await page.waitForFunction(() => document.querySelectorAll('.picture:not(.waiting)').length === 2);
+    const hat = page.locator('li[data-id="31"] .picture');
+    assert.equal(await hat.getAttribute('alt'), '털모자를 쓴 마롱이');
+    const order = await page.$eval('li[data-id="31"] .body', (body) => [...body.children].map((c) => c.className));
+    assert.deepEqual(order, ['picture', 'bubble', 'meta'], 'picture, then words, then tag and time');
+    const box = await hat.boundingBox();
+    assert.ok(Math.abs(box.width - 240) < 1 && Math.abs(box.height - 240) < 1, `picture ${box.width}x${box.height}`);
+    assert.equal(await page.textContent('li[data-id="31"] .tag'), '먼저 톡');
+    assert.equal(await page.textContent('li[data-id="35"] .tag'), '먼저 건 전화');
+    assert.equal(await page.locator('li[data-id="35"] .picture').getAttribute('alt'), '닭꼬치를 든 마롱이');
+    assert.equal(await page.locator('li[data-id="32"] .picture').count(), 0, 'a picture that cannot come is gone');
+    assert.equal(await page.textContent('li[data-id="32"] .bubble'), '그림이 없어진 말', 'and its words stay');
+    assert.equal(await page.locator('li[data-id="33"] .picture').count(), 0, 'an address of another shape is never asked');
+    assert.equal(await page.$$eval('.bubble img', (imgs) => imgs.length), 0, 'nothing inside the bubbles');
+    assert.deepEqual(outside, [], 'no request leaves the site');
+    await context.close();
+  });
+
+  it('SCR-107#picture-loading: an empty box of the same size while the picture comes, at 360 and 430 px, day and night', async () => {
+    pictures();
+    site.state.pictureDelayMs = 1200;
+    for (const [width, height] of [[360, 740], [430, 932]]) {
+      for (const [at, theme] of [[DAY, 'chestnut'], [NIGHT, 'night']]) {
+        const { context, page } = await openChat({ at, device: { viewport: { width, height } } });
+        await ready(page);
+        const waiting = page.locator('li[data-id="31"] .picture.waiting');
+        assert.equal(await waiting.count(), 1, 'waiting while it comes');
+        const empty = await waiting.boundingBox();
+        assert.ok(Math.abs(empty.width - 240) < 1 && Math.abs(empty.height - 240) < 1, `box ${empty.width}x${empty.height}`);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, `${width}px`);
+        await page.waitForFunction(() => !document.querySelector('li[data-id="31"] .picture').classList.contains('waiting'));
+        const shown = await page.locator('li[data-id="31"] .picture').boundingBox();
+        assert.ok(shown.x >= 0 && shown.x + shown.width <= width, `picture inside ${width}px`);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, `${width}px`);
+        await page.locator('li[data-id="35"]').scrollIntoViewIfNeeded();
+        await shot(page, `chat-picture-${width}-${theme}`);
+        await context.close();
+      }
+    }
   });
 
   it('TC-132: 52px send button and box, 44px header buttons, cream by day and night colors by night', async () => {

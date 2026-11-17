@@ -93,6 +93,9 @@ button:disabled {cursor: default; opacity: .45}
   font-size: 15px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; word-break: keep-all;
 }
 .message.me .bubble {border-radius: 18px 4px 18px 18px; background: var(--raised)}
+/* A picture topic's picture above Marong's words (SCR-107#picture, 09 mockup A): size.topic-picture 240px, radius.md, space.xs */
+.picture {display: block; width: 240px; max-width: 100%; height: auto; aspect-ratio: 1 / 1; margin: 0 0 4px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); object-fit: cover}
+.picture.waiting {background: var(--raised); border-color: var(--raised)}
 .bubble a {color: var(--accent); text-decoration: underline; text-underline-offset: 2px}
 .meta {display: flex; gap: 6px; align-items: center; margin: 4px 0 0; font-size: 11px; color: var(--muted)}
 .tag {padding: 1px 7px; border-radius: 8px; border: 1px solid var(--line)}

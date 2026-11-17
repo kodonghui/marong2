@@ -10,13 +10,13 @@
   "stages": {
     "01-domain": {
       "human": "github",
-      "source": "docs/01-domain/domain.md",
+      "source": "docs/01-domain/",
       "truth": "source",
       "note": "2026-11-12 통화 기능을 기존 제품에 더하는 일이라 이벤트 스토밍 보드 없이 한 번에 초안으로 씀. 사람 보기는 Miro 보드 대신 GitHub PR(Claude 선택, 동희님 기본 규칙 '제품 명세는 제품 Git, Notion은 의도·결정과 링크'에 맞춤)."
     },
     "02-prd": {
       "human": "github",
-      "source": "docs/02-prd/requirements.md",
+      "source": "docs/02-prd/",
       "truth": "source",
       "note": "기본 사람 보기는 Notion DB 행이지만 같은 명세를 Notion에 한 번 더 만들지 않으려고 GitHub PR에서 봄. Notion 설계 문서 행은 요약·결정·링크만 가짐(2026-11-12, Claude 선택, 동희님이 바꿀 수 있음)."
     },
@@ -28,21 +28,22 @@
     },
     "04-functional-spec": {
       "human": "github",
-      "source": "docs/04-functional-spec/spec.md",
+      "source": "docs/04-functional-spec/",
       "truth": "source",
       "note": "02-prd와 같은 이유(2026-11-12)."
     },
     "05-erd": {
       "human": "github",
       "link": "docs/05-erd/erd.md",
-      "source": "marong/call/schema.sql",
+      "source": "marong/",
       "truth": "source",
       "note": "카톡 마롱이 표(marong/schema.sql)는 그대로 두고 통화 표는 같은 DB의 call 스키마에 둠. ERD Editor는 이 작업 환경에서 쓸 수 없어 Mermaid erDiagram(docs/05-erd/erd.md)으로 봄(2026-11-12)."
     },
     "06-api": {
       "human": "swagger-ui",
-      "source": "api/openapi.yaml",
-      "truth": "source"
+      "source": "api/",
+      "truth": "source",
+      "note": "2026-11-16 source를 파일 하나(api/openapi.yaml)에서 `api/` 폴더로 바꿈: 서버마다 계약 파일이 따로라서. openapi.yaml(처음 통화 설계, OpenAI 길, API-001~012), app-chat.openapi.yaml(글 대화, API-101~106), diary.openapi.yaml(일기, API-108~120), listen-test.openapi.yaml(듣기 시험, API-121~123), call-live.openapi.yaml(지금 통화 서버 Gemini 길, API-124·API-107), discord-relay.openapi.yaml(디스코드 음성 중계, API-125~126). 사람이 보는 곳은 Swagger UI 그대로이고 파일마다 열어요."
     },
     "07-sitemap": {
       "human": "github",

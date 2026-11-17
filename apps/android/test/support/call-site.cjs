@@ -15,6 +15,8 @@ const REPO = path.resolve(__dirname, '..', '..', '..', '..');
 const STATIC = path.join(REPO, 'tools', 'vertex_live', 'static');
 const FACES = path.join(REPO, 'marong', 'call', 'static', 'face', 'v1');
 const APP_WWW = path.join(REPO, 'apps', 'android', 'www');
+const TOPICS = path.join(REPO, 'marong', 'topics');
+const TOPIC_PATH = /^\/chat\/topics\/(v[0-9]{1,3}\/[a-z0-9-]{1,40}\.webp)$/;
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.webp': 'image/webp', '.txt': 'text/plain; charset=utf-8' };
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
@@ -65,7 +67,9 @@ function readFrames(socket, onFrame) {
 // chat: the status /chat/api/me answers (the call page shows its '글 대화' link only on 200, SPEC-124).
 // ready: more fields for the 'ready' message, such as {ring: true} for Marong's own call (SPEC-136), or a function
 // of the /live address that returns them.
-async function startCallSite({ status = {}, port = 0, log = () => {}, chat = 404, ready = {} } = {}) {
+// topics: picture files of hello calls by address ('/chat/topics/v1/<name>.webp' → a file, the bot serves them in
+// production, docs/04-functional-spec/call-first.md SPEC-274); other addresses come from marong/topics or are 404.
+async function startCallSite({ status = {}, port = 0, log = () => {}, chat = 404, ready = {}, topics = {} } = {}) {
   const received = [];
   const upgrades = [];
   const audio = { frames: 0, bytes: 0 };
@@ -85,6 +89,14 @@ async function startCallSite({ status = {}, port = 0, log = () => {}, chat = 404
       return;
     }
     if (req.method === 'POST') { res.writeHead(204); res.end(); return; }
+    const topic = TOPIC_PATH.exec(pathname);
+    if (topic || pathname.startsWith('/chat/topics/')) {
+      const picture = topics[pathname] || (topic ? path.join(TOPICS, topic[1]) : null);
+      if (!picture || !fs.existsSync(picture)) { res.writeHead(404, { 'Cache-Control': 'no-store' }); res.end(); return; }
+      res.writeHead(200, { 'Content-Type': 'image/webp', 'Cache-Control': 'public, max-age=31536000, immutable' });
+      fs.createReadStream(picture).pipe(res);
+      return;
+    }
     const file = fileFor(decodeURIComponent(pathname));
     if (!file || !fs.existsSync(file) || !fs.statSync(file).isFile()) { res.writeHead(404); res.end('not found'); return; }
     res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });

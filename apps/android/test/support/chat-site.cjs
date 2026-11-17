@@ -40,6 +40,8 @@ async function startChatSite({ waitMs = 1500 } = {}) {
     meCount: 0,                             // GET /chat/api/me answered
     devices: [],                            // every PUT /chat/api/devices/{installId}, in order
     deviceStatus: 201,                      // what the next device report gets: 200 | 201 | 401
+    pictures: {},                           // picture topics by address (/chat/topics/v1/<name>.webp → a file)
+    pictureDelayMs: 0,                      // how long a picture takes to come (SCR-107#picture-loading)
   };
   const waiters = new Set();
 
@@ -105,6 +107,15 @@ async function startChatSite({ waitMs = 1500 } = {}) {
         res.end(fs.readFileSync(file));
         return;
       }
+    }
+    if (pathname.startsWith('/chat/topics/')) {  // API-140 (docs/04-functional-spec/call-first.md SPEC-274)
+      const file = state.pictures[pathname];
+      setTimeout(() => {
+        if (!file || !fs.existsSync(file)) { problem(res, 404, 'no_picture'); return; }
+        res.writeHead(200, { 'Content-Type': 'image/webp', 'Cache-Control': 'public, max-age=31536000, immutable' });
+        res.end(fs.readFileSync(file));
+      }, state.pictureDelayMs);
+      return;
     }
     if (pathname === '/chat/api/me' && req.method === 'GET') {
       state.meCount++;

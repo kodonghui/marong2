@@ -28,6 +28,7 @@ WARN_EVERY_S = 3600       # key or permission problems: one warning an hour
 PREVIEW_MAX = 120
 TITLE = "마롱이"
 RING_TTL_S = 45
+RING_LINE_MAX = 30
 
 
 @dataclass(frozen=True)
@@ -63,10 +64,15 @@ def notice(fid: str, kind: str, text: str, *, channel: str, ttl_s: int, open_pat
                         "notification": {"channel_id": channel, "visibility": "PRIVATE"}}}
 
 
-def ring(fid: str, ring_id: str) -> dict:
-    """The ring signal (SPEC-131): data only, nothing about the promise (REQ-130). The app shows the call itself."""
-    return {"fid": fid, "data": {"kind": "ring", "ringId": ring_id, "v": "1"},
-            "android": {"priority": "HIGH", "ttl": f"{RING_TTL_S}s"}}
+def ring(fid: str, ring_id: str, reason: str = "promise", line: str | None = None) -> dict:
+    """The ring signal (SPEC-131): data only, nothing about the promise (REQ-130). The app shows the call itself.
+    reason: promise | hello (a call without a promise, docs/04-functional-spec/call-first.md 3.4). A hello call adds
+    the picture's preview line (1~30 characters, one line), the only words it carries."""
+    data = {"kind": "ring", "ringId": ring_id, "v": "1", "reason": "hello" if reason == "hello" else "promise"}
+    line = (line or "").strip()
+    if reason == "hello" and 1 <= len(line) <= RING_LINE_MAX and "\n" not in line and "\r" not in line:
+        data["line"] = line
+    return {"fid": fid, "data": data, "android": {"priority": "HIGH", "ttl": f"{RING_TTL_S}s"}}
 
 
 def _error(r: httpx.Response) -> tuple[str, set]:

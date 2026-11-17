@@ -17,6 +17,8 @@
 #                선톡 일정: admin schedule <친구> <하루 횟수> [시작-끝 시] | schedule <친구> default
 #                           | schedule <친구> off|on (선톡 끄기·다시 켜기). 친구 대신 '#방키'(admin rooms)면 그 방,
 #                           단체방은 기본 꺼짐이라 schedule '#방키' on 으로 켬
+#                선 전화·그림 화두: admin topics status | topics <친구> call on|off | topics <친구> pictures on|off
+#                           | topics <친구> window 19:00-21:30 (디스코드 봇의 복사본으로 돎)
 #   proactive <이름|#키|#방키> [--dry]  그 친구의 1:1 방(또는 그 방)에 선톡 한 개를 지금 보냄(시험용). --dry 면 만든 말만 보여 줌
 #   report <저장할 파일.xlsx> [시간] [끝 시각]  지난 24시간(기본) 대화·임베딩·답에 들어간 기억·요약/메모를 엑셀로 받음
 #                끝 시각 예: 2026-10-27T19:00+09:00 (비우면 지금). 서버엔 파일을 남기지 않음
@@ -89,7 +91,10 @@ case "${1:-}" in
     ;;
   admin)
     shift
-    on_server "cd / && sudo -u marong $DEST/.venv/bin/python $DEST/tools/admin.py $(printf '%q ' "$@")"
+    # topics(선 전화·그림 화두)는 디스코드 봇 코드에만 있어서 그 복사본(/opt/marong-discord)으로 돌림. 파이썬은 같은 venv
+    where=$DEST
+    if [ "${1:-}" = topics ]; then where=/opt/marong-discord; fi
+    on_server "cd / && sudo -u marong $DEST/.venv/bin/python $where/tools/admin.py $(printf '%q ' "$@")"
     ;;
   report)
     out=${2:?"사용법: bash deploy/ovh.sh report <저장할 파일.xlsx> [시간] [끝 시각]"}

@@ -34,19 +34,22 @@ def reminder_ttl(late: timedelta) -> int:
 
 class AppRoutes:
     async def say(self, friend_id: int, channel_id: str | None, text: str, *, kind: str, app_channel: str,
-                  ttl_s: int, open_path: str = "/chat/") -> tuple[str, dict]:
+                  ttl_s: int, open_path: str = "/chat/", app_text: str | None = None,
+                  picture=None) -> tuple[str, dict]:
         """(sent | failed | later, meta). later: nothing could be tried, because the friend has no phone for the app
-        and Discord is away; the caller tries again later without counting a failure."""
+        and Discord is away; the caller tries again later without counting a failure. app_text: the notification's
+        words when they differ from the text kept in the chat; picture: attached to the Discord message."""
         tried = 0
         if self.app is not None and self.app.enabled:
-            ok, tried = await self.app.notify(friend_id, kind, text, channel=app_channel, ttl_s=ttl_s,
+            ok, tried = await self.app.notify(friend_id, kind, app_text or text, channel=app_channel, ttl_s=ttl_s,
                                               open_path=open_path)
             if ok:
                 return "sent", {"transport": "app", "devices": ok}
         if self.client.available and channel_id:
-            from .discord_dm import send_text  # discord_dm mixes this class in
+            from .discord_dm import picture_file, send_text  # discord_dm mixes this class in
             channel = self.client.get_partial_messageable(int(channel_id), type=discord.ChannelType.private)
-            return ("sent" if await send_text(channel, text) else "failed"), {"transport": "discord"}
+            sent = await send_text(channel, text, file=picture_file(picture) if picture else None)
+            return ("sent" if sent else "failed"), {"transport": "discord"}
         return ("failed" if tried else "later"), {}
 
     async def remind(self, row: dict, text: str, following, meta: dict, *, kind: str = "reminder",
@@ -139,8 +142,11 @@ class RingCalls(AppRoutes):
         A Discord invitation already said everything. A note that cannot be sent is not tried again."""
         noted = 0
         for ring in await self.store.rings_missed():
-            log.info("ring_missed via=%s", ring["via"])
+            log.info("ring_missed via=%s reason=%s", ring["via"], ring["reason"])
             if ring["via"] != "app":
+                continue
+            if ring["reason"] == "hello":
+                noted += await self._hello_missed(ring)
                 continue
             target = await self.store.dm_target(ring["friend_id"])
             text = MISSED_LINES[int(self.rng() * len(MISSED_LINES)) % len(MISSED_LINES)]
@@ -157,3 +163,32 @@ class RingCalls(AppRoutes):
                 log.error("db_error %s", brief(e))
             noted += 1
         return noted
+
+    async def _hello_missed(self, ring: dict) -> int:
+        """A hello call nobody took (docs/04-functional-spec/call-first.md SPEC-270): one note by the D18 path. With its
+        picture, the picture topic made of the set's own words (3.6); without, a short line. Never meta.proactive: the
+        call already counted as the turn (SPEC-276). 1 when it went out."""
+        from .topics import HELLO_MISSED_LINES, MISSED_NOTE, picture_set
+        found = picture_set()
+        picture = found.get(ring["topic"]) if found and ring["topic"] else None
+        target = await self.store.dm_target(ring["friend_id"])
+        if picture:
+            text, app_text, extra = picture.missed(), MISSED_NOTE, {"topic": picture.key}
+        else:
+            text = HELLO_MISSED_LINES[int(self.rng() * len(HELLO_MISSED_LINES)) % len(HELLO_MISSED_LINES)]
+            app_text, extra = None, {}
+        outcome, sent = await self.say(ring["friend_id"], target and target["channel_id"], text, kind="missed_call",
+                                       app_channel=TALK, ttl_s=NOTE_TTL_S, open_path="/chat/", app_text=app_text,
+                                       picture=picture)
+        if outcome != "sent" or not target:
+            log.info("hello_missed noted=0")
+            return 0
+        try:
+            await self.store.add_message(target["room_key"], "assistant", text, meta={
+                "ring": ring["id"], "hello": True, "missed": True, "delivered": True, **extra, **sent})
+            self.agent.on_saved()
+            await self.store.topic_noted(ring["id"], sent["transport"])
+        except Exception as e:
+            log.error("db_error %s", brief(e))
+        log.info("hello_missed noted=1 via=%s", sent["transport"])
+        return 1

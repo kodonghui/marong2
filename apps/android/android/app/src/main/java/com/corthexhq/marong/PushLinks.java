@@ -107,6 +107,39 @@ final class PushLinks {
         return received > 0 && nowMs - received <= RING_MAX_AGE_MS;
     }
 
+    /** The ring message's preview line is shown up to this many characters (SPEC-267). */
+    static final int RING_LINE_MAX = 30;
+
+    /**
+     * A ring Marong placed without a promise (a hello call, docs/04-functional-spec/call-first.md
+     * SPEC-267): reason "hello". A missing or unknown reason is a promise ring, as before 0.2.2.
+     */
+    static boolean isHello(String reason) {
+        return "hello".equals(reason);
+    }
+
+    /** The line a hello ring shows under its second line: trimmed, 1 to 30 characters, one line. Else null. */
+    static String ringLine(String reason, String line) {
+        if (!isHello(reason) || line == null) {
+            return null;
+        }
+        String trimmed = line.trim();
+        int length = trimmed.codePointCount(0, trimmed.length());
+        if (length < 1 || length > RING_LINE_MAX || trimmed.indexOf('\n') >= 0 || trimmed.indexOf('\r') >= 0) {
+            return null;
+        }
+        return trimmed;
+    }
+
+    /** The call notification's text (SCR-111): the promise text, or the hello text with its line after " · ". */
+    static String ringText(String reason, String line, String promiseText, String helloText) {
+        if (!isHello(reason)) {
+            return promiseText;
+        }
+        String shown = ringLine(reason, line);
+        return shown == null ? helloText : helloText + " · " + shown;
+    }
+
     private static String trimSlash(String url) {
         return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
     }

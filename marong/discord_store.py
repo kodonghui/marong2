@@ -5,6 +5,7 @@ from .app_store import AppStore
 from .google_calendar import GoogleStore
 from .schedules import ScheduleStore
 from .store import Store
+from .topic_store import TopicStore
 
 SNOWFLAKE = re.compile(r"[1-9][0-9]{16,19}\Z")
 
@@ -82,7 +83,7 @@ SELECT d.*, f.name, true AS is_channel, d.last_incoming_at AS last_said,
 """
 
 
-class DiscordStore(AppStore, GoogleStore, ScheduleStore, Store):
+class DiscordStore(AppStore, TopicStore, GoogleStore, ScheduleStore, Store):
     def _reply_rooms(self, room: str) -> str:
         # A DM: the friend's own DM and their verified private Kakao 1:1 room. No memory_room traversal: it would pull
         # in linked Kakao group chats. A channel of the private server ('discord-ch:'): that channel alone, never a DM.
