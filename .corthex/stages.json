@@ -198,7 +198,7 @@
     "07-sitemap": {
       "state": "in_progress",
       "checkpoints": [],
-      "next": "체크포인트(화면 구조 합의): 선 전화·그림 화두는 새 화면 없이 SCR-002 통화 중과 앱 화면(SCR-107·108·110·111·112)의 상태만 늘림. 확인 대기. 그다음 08 화면 상태",
+      "next": "성향 맞춤: 사이트맵 조각을 일기 스레드가 합친 뒤 2차 논의에서 확인. 선 전화·그림 화두: 화면 구조 합의 확인 대기(새 화면 없음)",
       "checks": [
         {
           "level": "info",
@@ -224,14 +224,19 @@
           "level": "info",
           "message": "CTX-021 사이트맵 줄은 되돌림: sitemap.yaml·sitemap.md는 일기 스레드(PR #25)만 씀(docs/10-wbs/README.md 겹치는 파일). SCR-109 줄·SCR-130은 그쪽 번호표(design/README.md 5절)에 올라감",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "성향 맞춤(CTX-008~012) 새 화면 SCR-120 /chat/persona/, SCR-121 /chat/persona/instructions, SCR-122 /chat/persona/memory(SCR-123 카드는 SCR-107 안 부품이라 사이트맵 밖). sitemap.yaml 조각은 docs/08-screens/persona.md §1, sitemap.yaml은 일기 스레드가 합침. SCR-124~129 비워 둠",
+          "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T03:49:16+00:00"
+      "updated": "2026-11-17T05:24:25+00:00"
     },
     "08-screen-states": {
       "state": "in_progress",
       "checkpoints": [],
-      "next": "체크포인트(화면 정의 승인): docs/08-screens/call-first.md와 SCR-002#topic-card, 와이어프레임 wireframes-call-first.html(11상태×360·430px). 확인 대기. 그다음 09 목업",
+      "next": "성향 맞춤: 화면 정의 승인은 구현 전 2차 논의에서. 선 전화·그림 화두: call-first.md 확인 대기",
       "checks": [
         {
           "level": "info",
@@ -252,12 +257,17 @@
           "level": "info",
           "message": "CTX-021 화면 상태 docs/08-screens/app-update.md: SCR-109#update-on·off·none, SCR-130#shown·locked·none. 새 토큰 없음",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "성향 맞춤 화면 정의 docs/08-screens/persona.md와 SCR-120~123(상태 37개). 회색 와이어프레임 wireframes-persona.html 74틀(37상태×360·430px), Playwright로 넘침 0·누르는 곳 44px 이상 확인. 오류 문구는 api/persona.openapi.yaml 13개 코드에서",
+          "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T03:43:55+00:00"
+      "updated": "2026-11-17T05:24:25+00:00"
     },
     "09-mockup": {
-      "state": "done",
+      "state": "in_progress",
       "checkpoints": [
         {
           "approved": "CTX-020 목업: 통화 A·글 대화 A와 토큰 size.topic-picture 240px 승인(작업 스레드, '목업 A안 모두 승인' 12:19 KST)",
@@ -265,7 +275,7 @@
           "date": "2026-11-17"
         }
       ],
-      "next": "CTX-020 없음. 앱 스스로 업데이트(CTX-021)는 07~09에서 따로",
+      "next": "성향 맞춤 09-1 방향 선택(추천 A)을 구현 전 2차 논의에서 동희님께. CTX-020 목업은 승인됨",
       "checks": [
         {
           "level": "info",
@@ -276,9 +286,14 @@
           "level": "info",
           "message": "CTX-021은 따로 목업을 만들지 않고 '마롱이의 일기 설계하기' 스레드의 목업 한 벌에 두 상태(SCR-109 줄, SCR-130 알림)를 넘김(동희님 11/17 12:36). 새 토큰 없음",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "성향 맞춤 목업 후보 A(칩 한 장)·B(줄과 아래 칸) 대지 12개(360px, 밤하늘·군밤 크림), 넘침 0, 누르는 곳 44px 이상, 대비 5.27~15.77:1. 비교와 추천(네 화면 A): design/persona-candidates.md, 그림은 프로젝트 파일 persona-mockup-20261117/. 새 토큰 없음",
+          "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T03:43:55+00:00"
+      "updated": "2026-11-17T05:24:26+00:00"
     },
     "10-wbs": {
       "state": "in_progress",

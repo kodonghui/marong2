@@ -128,7 +128,7 @@ paths:
     patch:
       operationId: updateFriendCard
       summary: 친구 약속 값 바꾸기
-      description: 화면에서 고른 값으로 친구 약속을 바꿔요(SCR-120). 약속이 아직 없거나(none, asking, draft) 초안 확인에서 '고칠래'를 골랐으면 세 값(support, advice, honesty)을 모두 보내야 하고, 받으면 바로 '설정됨'(source screen)이에요. 이미 있으면 바꿀 값만 보내요. 친구 잠금 안에서 적용하고 다음 답부터 모든 방·통화가 읽어요. 선톡 정도는 내리기만 돼요.
+      description: 화면에서 고른 값으로 친구 약속을 바꿔요(SCR-120). 약속이 아직 없거나(none, asking, draft) 초안 확인에서 '고칠래'를 골랐으면 세 값(support, advice, honesty)을 모두 보내야 하고, 받으면 바로 '설정됨'(source screen)이고, 열려 있던 첫 질문·초안 카드(TBL-119)는 같은 트랜잭션에서 replaced가 돼요(SCR-120). 이미 있으면 바꿀 값만 보내요. 친구 잠금 안에서 적용하고 다음 답부터 모든 방·통화가 읽어요. 선톡 정도는 내리기만 돼요.
       x-corthex:
         id: API-128
         spec:
