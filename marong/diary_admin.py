@@ -32,25 +32,24 @@ def toggle(conn, friend, enabled: bool, immediate: bool, now: datetime) -> bool:
     if immediate and time(4) <= now.astimezone(KST).time() < time(4, 10):
         when -= timedelta(days=1)
     previous = setting(conn, friend, when)
-    if bool(previous and previous["enabled"]) == enabled and (
-        not immediate or (previous and previous["stop_now"])
-    ):
-        return False
-    conn.execute(
-        "INSERT INTO marong.diary_settings(friend_id, enabled, from_date, stop_now) VALUES (%s,%s,%s,%s)",
-        (friend, enabled, when, immediate),
-    )
-    if immediate:
+    changed = bool(previous and previous["enabled"]) != enabled
+    if changed:
         conn.execute(
+            "INSERT INTO marong.diary_settings(friend_id, enabled, from_date, stop_now) VALUES (%s,%s,%s,%s)",
+            (friend, enabled, when, immediate),
+        )
+    if immediate:
+        unfinished = conn.execute(
             """UPDATE marong.diaries SET state='failed', fail_reason='off', lease_until=NULL, updated_at=%s
             WHERE friend_id=%s AND state IN ('pending','writing','drawing')""", (now, friend)
         )
-        conn.execute(
+        notices = conn.execute(
             """UPDATE marong.diaries SET notice_state='cancelled', notice_next_at=NULL, updated_at=%s
             WHERE friend_id=%s AND state='ready' AND notice_state IN ('none','waiting','failed')""",
             (now, friend),
         )
-    return True
+        changed = changed or bool(unfinished.rowcount or notices.rowcount)
+    return changed
 
 
 def rerun(conn, friend, day: date, now: datetime):

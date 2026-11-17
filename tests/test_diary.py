@@ -4,6 +4,8 @@ import sys
 import unittest
 import asyncio
 import io
+import os
+import subprocess
 from contextlib import redirect_stdout
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -171,6 +173,10 @@ class DiaryWithPostgres(unittest.TestCase):
             def run(args, now):
                 command(conn, args, lambda *_: 1, now, Decimal(5))
 
+            run(["fixture", "off", "--now"], at(16, 14))
+            self.assertEqual(conn.execute("SELECT count(*) AS n FROM marong.diary_settings").fetchone()["n"], 0)
+            with self.assertRaises(DiaryAdminError):
+                run(["fixture", "on", "--now"], at(16, 14))
             run(["fixture", "on"], at(16, 15))
             run(["fixture", "on"], at(16, 16))
             self.assertIsNone(setting(conn, 1, date(2026, 11, 16)))
@@ -181,7 +187,15 @@ class DiaryWithPostgres(unittest.TestCase):
             with self.assertRaises(DiaryAdminError):
                 run(["fixture", "run", "2026-11-17"], at(25, 12))
             run(["fixture", "run", "2026-11-17"], at(18, 12))
-            conn.execute("UPDATE marong.diaries SET state='writing', lease_until=now() WHERE friend_id=1")
+            conn.execute(
+                """INSERT INTO marong.diary_revisions(diary_id,revision,source,title,weather,body)
+                SELECT id,1,'weather','시험 일기','sunny',repeat('밤',60) FROM marong.diaries WHERE friend_id=1"""
+            )
+            conn.execute("UPDATE marong.diaries SET state='ready',revision=1,ready_at=now() WHERE friend_id=1")
+            with self.assertRaises(DiaryAdminError):
+                run(["fixture", "run", "2026-11-17"], at(18, 12))
+            self.assertEqual(conn.execute("SELECT state FROM marong.diaries").fetchone()["state"], "ready")
+            conn.execute("UPDATE marong.diaries SET state='writing',ready_at=NULL,lease_until=now() WHERE friend_id=1")
             run(["fixture", "off", "--now"], at(18, 4, 5))
             self.assertFalse(setting(conn, 1, date(2026, 11, 17))["enabled"])
             self.assertEqual(conn.execute("SELECT fail_reason FROM marong.diaries").fetchone()["fail_reason"], "off")
@@ -190,6 +204,14 @@ class DiaryWithPostgres(unittest.TestCase):
         self.assertIn("이미 켜져 있어요.", output.getvalue())
         self.assertIn("failed=1", output.getvalue())
         self.assertNotIn("Call fixture", output.getvalue())
+        self.assertNotIn("시험 일기", output.getvalue())
+        process = subprocess.run(
+            [sys.executable, str(ROOT / "tools/admin.py"), "diary", "fixture-alpha", "run", "2000-01-01"],
+            env={**os.environ, "DATABASE_URL": self.db.app_url}, cwd=ROOT,
+            capture_output=True, text=True, encoding="utf-8", timeout=15,
+        )
+        self.assertEqual(process.returncode, 2, process.stderr)
+        self.assertIn("최근 7일", process.stderr)
 
 
 if __name__ == "__main__":
