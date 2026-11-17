@@ -53,7 +53,7 @@
 
 넣은 것(`base.tokens.json`): `size.topic-picture` 240px. 글 대화의 그림과 기다리는 동안의 빈 칸이에요.
 
-쓰는 기존 토큰: `size.face-call`(248px, 통화 A의 그림 원), `size.touch-min`(48px, 그림 닫기), `space.xs`·`space.md`·`space.lg`(4·16·24px), `radius.md`·`radius.full`(16·999px), `font-size.caption`(13px)과 `font-weight.bold`(700, 제목 칩), 색은 `color.a`·`color.b`의 `surface`, `surface-2`(화면 CSS의 `--raised`), `text`, `line`. 그림자는 두 화면 CSS의 `--panel-shadow`를 그대로 써요(토큰 없음, 지금 화면과 같음).
+쓰는 기존 토큰: `size.face-call`(248px, 통화 A의 그림 원), `size.touch-min`(48px, 그림 닫기), `space.xs`·`space.md`·`space.lg`(4·16·24px), `radius.md`·`radius.full`(16·999px), `font-size.caption`(13px)과 `font-weight.bold`(700, 제목 칩), 색은 `color.a`·`color.b`의 `surface`, `surface-2`(화면 CSS의 `--raised`), `text`, `line`. 그림자는 두 화면 CSS의 `--panel-shadow`를 그대로 써요. 같은 값이 화면 공통 기준(PR #25)의 토큰 `color.a.panel-shadow`·`color.b.panel-shadow`로 올라갔어요(2026-11-17, 두 PR이 합쳐지면 이 토큰을 가리킴).
 
 B의 값은 토큰에 넣지 않았어요. 08 정의의 '그림 닫기 44px'은 `size.touch-min`(48px)으로 맞췄어요.
 
