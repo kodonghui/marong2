@@ -88,17 +88,22 @@ def one_card_and_forget(db):
         assert conn.execute("SELECT count(*) FROM marong.messages").fetchone() == (2,)
 
 
-def main():
-    db = TestDB()
+def prepare(db):
     bot = ROOT / "marong/migrations"
     call = ROOT / "marong/call/migrations"
+    steps = (call.parent / "schema.sql", *sorted(call.glob("00[2-4]*.sql")), *sorted(bot.glob("01[0-3]*.sql")),
+             *sorted(call.glob("00[5-6]*.sql")), *sorted(bot.glob("01[4-8]*.sql")), *call.glob("007*.sql"))
+    for file in steps:
+        db.admin(file.read_text(encoding="utf-8"), None)
+    migration = (bot / "019_persona.sql").read_text(encoding="utf-8")
+    db.admin(migration, None)
+    return migration
+
+
+def main():
+    db = TestDB()
     try:
-        steps = (call.parent / "schema.sql", *sorted(call.glob("00[2-4]*.sql")), *sorted(bot.glob("01[0-3]*.sql")),
-                 *sorted(call.glob("00[5-6]*.sql")), *sorted(bot.glob("01[4-8]*.sql")), *call.glob("007*.sql"))
-        for file in steps:
-            db.admin(file.read_text(encoding="utf-8"), None)
-        migration = (bot / "019_persona.sql").read_text(encoding="utf-8")
-        db.admin(migration, None)
+        migration = prepare(db)
         db.admin(migration, None)
         privileges(db)
         one_card_and_forget(db)
