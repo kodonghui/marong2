@@ -169,9 +169,14 @@
           "level": "info",
           "message": "CTX-021: 웹 화면 변화 없음. 앱 SCR-109에 '자동 업데이트' 줄, 새 화면 SCR-130 안드로이드 알림(SCR-130~139 이 맥락 몫, 일기 스레드 번호표에 알림)",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "CTX-021 사이트맵 줄은 되돌림: sitemap.yaml·sitemap.md는 일기 스레드(PR #25)만 씀(docs/10-wbs/README.md 겹치는 파일). SCR-109 줄·SCR-130은 그쪽 번호표(design/README.md 5절)에 올라감",
+          "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T03:43:55+00:00"
+      "updated": "2026-11-17T03:49:16+00:00"
     },
     "08-screen-states": {
       "state": "in_progress",
@@ -234,9 +239,14 @@
           "level": "info",
           "message": "CTX-020 작업 TASK-160~178(docs/10-wbs/call-first.md), Must SPEC 행마다 작업, 의존 고리 없음. TASK-137~159는 일기 설계용으로 비움",
           "at": "2026-11-16"
+        },
+        {
+          "level": "info",
+          "message": "CTX-021 WBS docs/10-wbs/app-update.md: GPT 인계 절(PR #29 형식), TASK-179~193, Owner GPT. CTX-020 call-first.md에 GPT 인계 절과 실제 폰 TC-180~184 더함",
+          "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-16T15:10:35+00:00"
+      "updated": "2026-11-17T03:49:16+00:00"
     },
     "11-development": {
       "state": "in_progress",
@@ -260,6 +270,19 @@
         }
       ],
       "updated": "2026-11-16T16:50:57+00:00"
+    },
+    "12-qa": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "",
+      "checks": [
+        {
+          "level": "info",
+          "message": "CTX-021 시험 계획 docs/12-qa/app-update.md: TC-200~229(계약 응답 12개·화면 상태 6개·흐름 3개 모두), 실행은 GPT, 아직 0개 돌림",
+          "at": "2026-11-17"
+        }
+      ],
+      "updated": "2026-11-17T03:49:16+00:00"
     }
   }
 }

@@ -1,5 +1,23 @@
 # 선 전화·그림 화두 작업 목록(10단계 WBS, CTX-020)
 
+## GPT 인계
+
+2026-11-17 13시대 KST 더함(Claude). 동희님 2026-11-17 12:37·12:38 "모든 작업에 대해 설계만 여기서 하고, 구현은 지피티 시킬거임" 뒤의 남은 일이에요. 그 전에 Claude가 구현한 TASK-160\~177의 기록은 아래 표와 '11단계 진행'에 그대로 둬요.
+
+- 목표: 선 전화·그림 화두(CTX-020)의 남은 두 가지, 앱 0.2.2 서명 APK와 실제 폰 확인을 끝내요. 동희님 원문은 [도메인 설계](../01-domain/call-first.md) 머리의 출처 표기에 있어요.
+- 시작: 따로 브랜치를 만들지 않아요. 앱 스스로 업데이트 패키지(`codex/app-self-update`, [app-update.md](app-update.md#gpt-인계))의 TASK-192가 이 APK를 같이 만들어요(0.2.2는 CTX-020과 CTX-021을 한 APK로 묶음).
+- 읽을 것: 이 파일의 TASK-176 행과 '11단계 진행'의 TASK-176 결과, [화면 상태](../08-screens/call-first.md)의 SCR-110·SCR-111, 아래 '12단계에서 실제로 볼 것'(TC-180\~184).
+- 이미 된 것: TASK-160\~175·177 끝(Claude). 서버 반영은 2026-11-17 01:24 KST(TASK-177). 앱 코드는 커밋 `6d9f24a`·`2fba258`이고, 그 커밋의 node·JVM 시험과 에뮬레이터 벨 두 번(약속 벨, 선 전화 벨)까지는 믿어도 돼요. 실제 폰은 아직이에요.
+- 순서: app-update의 TASK-190(에뮬레이터, 0.2.2 전체) → TASK-192(서명·설치, 이것으로 TASK-176이 끝남) → TC-180\~184.
+- 시험 환경: AGENTS.md와 같아요. 진짜 모델·유료 API는 쓰지 않아요.
+- 반영: 서버에 새로 넣는 것은 없어요. 앱은 0.2.2(versionCode 5) 한 APK, 서명은 `GPT(동희님 노트북)`.
+- 하면 안 되는 것: 선 전화 서버 설정(drop-in `zz-topics.conf`의 `MARONG_TOPICS`)과 0.2.2 미만 기기에 선 전화를 보내지 않는 조건(SPEC-265 ③)을 바꾸지 않아요.
+- 겹치는 파일: `apps/android/`는 앱 스스로 업데이트와 같은 브랜치예요.
+- 사람 확인: TC-180\~184(아래), 현경님 폰은 동희님이 부탁해요.
+- 끝 조건: 서명 APK의 크기·SHA-256을 '11단계 진행'의 TASK-176 칸에 적고, 현경님 폰이 0.2.2이고, TC-180\~184 결과를 적음.
+- 설계 질문: PR 설명 맨 위 '설계 질문'에 적으면 이 설계 스레드가 답해요.
+- TASK-178(기록과 보고)은 설계 쪽 일이라 Claude가 끝내요.
+
 2026-11-17 00:15 KST 작성(Claude, corthex 0.12.1). 입력: 기능 명세 [call-first.md](../04-functional-spec/call-first.md)(SPEC-260\~283, AI-20\~22), 계약 [call-first.openapi.yaml](../../api/call-first.openapi.yaml)(API-140, `RingPushData`, `LiveReady.topic`)과 [app-chat.openapi.yaml](../../api/app-chat.openapi.yaml) 0.3.0-draft(API-102·104의 `picture`, `kind: hello`), 표 [018_call_first.sql](../../marong/migrations/018_call_first.sql)(TBL-125·126, TBL-102의 `reason`·`topic`), 화면 정의 [08-screens/call-first.md](../08-screens/call-first.md)와 [SCR-002](../08-screens/SCR-002.md)#topic-card, 09 목업 추천 A([call-first-candidates.md](../../design/call-first-candidates.md)).
 
 - 번호: TASK-160부터예요. TASK-137\~159는 다른 설계(마롱이의 일기, PR #25)가 쓸 수 있게 비워 둬요.
@@ -58,9 +76,13 @@
 
 ## 12단계에서 실제로 볼 것(사람 폰)
 
-- 현경님 폰에 0.2.2를 깐 뒤: 선 전화 벨(잠금 화면, 폰을 쓰는 중), 통화 화면 그림, 못 받았을 때의 글.
-- 동희님 폰: 디스코드 DM의 그림 첨부.
-- 앱 글 대화의 그림(앱 창, 360px 폭).
+| ID | 경우 | From | 기대 결과 | 결과 |
+| --- | --- | --- | --- | --- |
+| TC-180 | 현경님 폰 0.2.2: 선 전화 벨, 잠금 화면과 폰을 쓰는 중 두 번 | SPEC-266, SPEC-267, SCR-110#hello, SCR-111#hello | 잠금 화면은 전체 화면 벨, 쓰는 중엔 위에 뜨는 알림. 둘 다 '마롱이가 먼저 걸었어요'와 미리보기 한 줄 | |
+| TC-181 | 선 전화를 받음 | SPEC-268, SPEC-269, SCR-002#topic-card | 통화 화면 얼굴 원이 15초 동안 그림, 마롱이가 화두로 말을 꺼냄 | |
+| TC-182 | 선 전화를 못 받음 | SPEC-270, SCR-107#hello | 한 번만 오는 글, 누르면 글 대화, 태그 '먼저 건 전화' | |
+| TC-183 | 동희님 폰: 디스코드 DM 그림 화두 | SPEC-273 | 첫 말에 그림 첨부, 글과 그림이 맞음 | |
+| TC-184 | 앱 글 대화의 그림(앱 창, 360px 폭) | SPEC-274, SCR-107#picture | 240px 그림이 말풍선 위에, 글이 밀리지 않음 | |
 
 ## 검사
 
