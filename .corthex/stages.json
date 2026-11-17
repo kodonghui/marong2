@@ -164,9 +164,14 @@
           "level": "info",
           "message": "PR #25도 sitemap.md 머리·목록·슬라이드 1을 고쳐서 합칠 때 같은 줄이 겹침. 두 쪽 내용을 다 남기면 됨",
           "at": "2026-11-16"
+        },
+        {
+          "level": "info",
+          "message": "CTX-021: 웹 화면 변화 없음. 앱 SCR-109에 '자동 업데이트' 줄, 새 화면 SCR-130 안드로이드 알림(SCR-130~139 이 맥락 몫, 일기 스레드 번호표에 알림)",
+          "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-16T14:48:15+00:00"
+      "updated": "2026-11-17T03:43:55+00:00"
     },
     "08-screen-states": {
       "state": "in_progress",
@@ -187,9 +192,14 @@
           "level": "info",
           "message": "docs/app-ring.md의 SPEC-135 문장과 SCR-101·110·111 줄을 고침(벨 시간 지남 문구, 선 전화 상태 링크). app-chat.md는 PR #25가 같은 줄을 고쳐서 건드리지 않음",
           "at": "2026-11-16"
+        },
+        {
+          "level": "info",
+          "message": "CTX-021 화면 상태 docs/08-screens/app-update.md: SCR-109#update-on·off·none, SCR-130#shown·locked·none. 새 토큰 없음",
+          "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-16T14:52:28+00:00"
+      "updated": "2026-11-17T03:43:55+00:00"
     },
     "09-mockup": {
       "state": "done",
@@ -206,9 +216,14 @@
           "level": "info",
           "message": "CTX-020 목업 27장(360·430, 밤하늘·군밤 크림), 페이지 오류 0, 가로 넘침 0, 대비 11.7~12.75:1. 후보·추천: design/call-first-candidates.md, 목업 페이지 https://claude.ai/artifact/UQYxaGXQ72wGRSWv5YuU8x. 토큰 size.topic-picture 240px 추가",
           "at": "2026-11-16"
+        },
+        {
+          "level": "info",
+          "message": "CTX-021은 따로 목업을 만들지 않고 '마롱이의 일기 설계하기' 스레드의 목업 한 벌에 두 상태(SCR-109 줄, SCR-130 알림)를 넘김(동희님 11/17 12:36). 새 토큰 없음",
+          "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T03:25:10+00:00"
+      "updated": "2026-11-17T03:43:55+00:00"
     },
     "10-wbs": {
       "state": "in_progress",
