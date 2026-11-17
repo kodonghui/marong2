@@ -22,6 +22,7 @@ from . import reactions
 from .agent import CAPTION_PROMPT, Agent, Incoming
 from .app_delivery import RingCalls
 from .app_push import TALK, can_notify
+from .config import proactive_schedule
 from .fmt import short_time
 from .google_calendar import (CONNECT_TEXT, DISCONNECTED_TEXT, LINK_MARK, NOT_CONNECTED_TEXT, REVOKE_FAILED_TEXT,
                               UNAVAILABLE_TEXT, calendar_lines, command as google_command)
@@ -349,8 +350,9 @@ class DiscordAgent(Agent):
     def _dm_lines(link, private=False):
         lines = []
         if link and link.get("opted_in_at"):
-            lines.append(f"- 마롱이는 이 친구에게 이 DM으로 한국 시간 {link['start_hour']}~{link['end_hour']}시에 하루 "
-                         f"{link['per_day']}번까지 먼저 말을 걸어(선톡). 그만 받고 싶어 하면 '선톡 끄기'라고 그대로 보내면 "
+            (start, end), per_day = proactive_schedule(link["start_hour"], link["end_hour"], link["per_day"])
+            lines.append(f"- 마롱이는 이 친구에게 이 DM으로 한국 시간 {start}~{end}시에 하루 "
+                         f"{per_day}번까지 먼저 말을 걸어(선톡). 그만 받고 싶어 하면 '선톡 끄기'라고 그대로 보내면 "
                          "바로 멈춘다고 알려 줘.")
         elif link:
             lines.append("- 지금은 마롱이가 이 친구에게 먼저 말을 걸지 않아(선톡 꺼짐). 받고 싶어 하면 '먼저 톡해 줘'라고 "
@@ -532,8 +534,10 @@ class DiscordAgent(Agent):
             return "응, 나도 먼저 톡할게 🌰", {}
         if text in GUIDE:
             link = await self.store.link(msg.user_key.removeprefix("discord-user:"))
-            schedule_text = (f"먼저 톡은 한국 시간 {link['start_hour']:02d}:00~{link['end_hour']:02d}:00에 "
-                             f"하루 최대 {link['per_day']}번이야. " if link else "")
+            schedule_text = ""
+            if link:
+                (start, end), per_day = proactive_schedule(link["start_hour"], link["end_hour"], link["per_day"])
+                schedule_text = f"한국 시간 {start}~{end}시에 하루 {per_day}번까지 먼저 톡할게. "
             return ("여기서 평소처럼 말 걸어 줘. 이 대화는 연구용 시트에 기록돼. " + schedule_text
                     + "원하면 ‘먼저 톡해 줘’, 그만 받으려면 ‘선톡 끄기’라고 말해 줘. "
                       "‘내일 3시에 알려 줘’처럼 말하면 그때 여기로 알려 줄게."
@@ -1020,7 +1024,7 @@ class DiscordProactive(Proactive):
             count += await self.store.hello_count(today)
         return count
 
-    async def deliver(self, room, dry=False):
+    async def deliver(self, room, dry=False, *, send_until=None):
         empty = {"text": None, "ok": False, "code": None}
         now = self.clock()
         planned = self.plan(room, now)
@@ -1028,6 +1032,8 @@ class DiscordProactive(Proactive):
             return empty
         if not self.client.available and not await self._app_phone(room):
             return empty  # Discord is away and no phone takes it: keep the slot for when Discord is back
+        if send_until is not None and time.monotonic() >= send_until:
+            return empty
         begin = planned[0]
         if not dry and not await self.store.claim_slot(room, begin):
             return empty

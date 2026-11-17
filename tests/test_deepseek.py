@@ -269,6 +269,148 @@ async def create_checks():
     print("PASS replies, effort, function tools, Claude-delegated search/fetch, retry/fallback/time limit, refusals")
 
 
+async def hedge_checks():
+    logs = Logs()
+    logger = logging.getLogger("marong.deepseek")
+    logger.addHandler(logs)
+    logger.setLevel(logging.INFO)
+    request = body(tools=[SET_NAME_TOOL, SEARCH_SPEC])
+
+    class Backup(ScriptedLLM):
+        def __init__(self, outcome):
+            super().__init__(lambda _: outcome)
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.cancelled = False
+            self.budgets = []
+
+        async def create(self, request_body, timeout):
+            self.budgets.append(timeout)
+            self.started.set()
+            try:
+                await self.release.wait()
+                return await super().create(request_body, timeout)
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+
+    # Both requests hit a separate gate. Release either one first to check the chosen reply and cancellation.
+    for preferred in ("backup", "primary", "backup_after_error", "primary_after_error", "refusal", "both_error"):
+        backup = Backup(RuntimeError("backup-failed") if preferred in ("primary_after_error", "both_error")
+                        else message([text("대체 답")]))
+        primary_release = asyncio.Event()
+        primary_cancelled = asyncio.Event()
+        primary_count = 0
+
+        async def delayed(_):
+            nonlocal primary_count
+            primary_count += 1
+            try:
+                await primary_release.wait()
+            except asyncio.CancelledError:
+                primary_cancelled.set()
+                raise
+            if preferred == "refusal":
+                return httpx.Response(400, text="PRIVATE_RELAY_TEXT content risk")
+            if preferred in ("backup_after_error", "both_error"):
+                return httpx.Response(502, text="PRIVATE_RELAY_TEXT")
+            return httpx.Response(200, json=chat("기본 답"))
+
+        ds = llm(delayed, backup)
+        ds.hedge_s = 0.01  # the runtime threshold is tested independently from these ordering fixtures
+        turn = asyncio.create_task(ds.create(request, 10))
+        try:
+            await asyncio.wait_for(backup.started.wait(), 2)
+            if preferred in ("backup", "primary_after_error", "both_error"):
+                backup.release.set()
+            if preferred != "backup":
+                if preferred in ("primary_after_error", "both_error"):
+                    while not backup.bodies:
+                        await asyncio.sleep(0)
+                    ok(not turn.done(), "W6 an alternate error cannot hide a later primary answer")
+                primary_release.set()
+            if preferred == "backup_after_error":
+                # Let the primary error reach the scheduler before releasing the alternate.
+                await asyncio.sleep(0.02)
+                ok(not turn.done(), "W6 wait for an alternate already in flight")
+                backup.release.set()
+            if preferred == "both_error":
+                try:
+                    await asyncio.wait_for(turn, 2)
+                    ok(False, "W6 both requests failed")
+                except Exception as e:
+                    ok(getattr(e, "status_code", None) == 502, "W6 the last error reaches the caller")
+            else:
+                reply = await asyncio.wait_for(turn, 2)
+                if preferred == "backup":
+                    ok(reply.served_model == CLAUDE and reply.content[0].text == "대체 답"
+                       and primary_cancelled.is_set(), "W6 the alternate wins and cancels the primary")
+                elif preferred == "backup_after_error":
+                    ok(reply.served_model == CLAUDE and backup.bodies == [request],
+                       "W6 one alternate only after the primary error")
+                elif preferred == "refusal":
+                    ok(reply.stop_reason == "refusal" and reply.served_model is None and backup.cancelled,
+                       "W6 a first refusal still counts as a response")
+                else:
+                    ok(reply.served_model is None and reply.content[0].text == "기본 답", "W6 the primary wins")
+                    if preferred == "primary":
+                        ok(backup.cancelled, "W6 the losing alternate was cancelled")
+            ok(primary_count == 1 and len(backup.budgets) == 1 and 0 < backup.budgets[0] < 10,
+               "W6 one request per provider and the remaining budget")
+        finally:
+            turn.cancel()
+            await asyncio.gather(turn, return_exceptions=True)
+            await ds.close()
+
+    fast = ScriptedLLM(lambda _: message([text("대체 답")]))
+    ds = llm(Relay(chat("빠른 기본 답")), fast)
+    ds.hedge_s = 0.1
+    reply = await ds.create(request, 10)
+    ok(reply.content[0].text == "빠른 기본 답" and not fast.bodies, "W6 a fast primary has no alternate")
+    await ds.close()
+
+    async def slow_answer(_):
+        await asyncio.sleep(0.03)
+        return httpx.Response(200, json=chat("기본 답"))
+
+    continuation = body(
+        {"role": "user", "content": "일정 저장해 줘"},
+        {"role": "assistant", "content": [SimpleNamespace(type="tool_use", id="t1", name="schedule_add", input={})]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "저장"}]},
+    )
+    for threshold, payload in ((0, request), (0.01, continuation)):
+        ds = llm(slow_answer, fast)
+        ds.hedge_s = threshold
+        reply = await ds.create(payload, 10)
+        ok(reply.served_model is None and not fast.bodies, "W6 disabled and continuing rounds send no alternate")
+        await ds.close()
+
+    # The relay responds within the initial window, then the one delegated search takes longer than it.
+    search = Backup(message([text("검색 시험 결과")]))
+    relay = Relay(chat(None, calls=[("web_search", {"query": "시험용 질문"})], finish="tool_calls"), chat("기본 검색 답"))
+    ds = llm(relay, search)
+    ds.hedge_s = 0.02
+    turn = asyncio.create_task(ds.create(request, 10))
+    try:
+        await asyncio.wait_for(search.started.wait(), 2)
+        await asyncio.sleep(0.06)
+        ok(len(search.budgets) == 1, "W6 no additional request while delegated search is running")
+        search.release.set()
+        reply = await asyncio.wait_for(turn, 2)
+        ok(reply.served_model is None and reply.content[-1].text == "기본 검색 답"
+           and len(search.bodies) == 1 and search.bodies[0].get("system") is None and len(relay.requests) == 2,
+           "W6 one delegated search and the original answer")
+    finally:
+        turn.cancel()
+        await asyncio.gather(turn, return_exceptions=True)
+        await ds.close()
+    log = logs.text()
+    ok("deepseek_hedge start" in log and "winner=deepseek" in log and "winner=claude" in log
+       and "PRIVATE_RELAY_TEXT" not in log and KEY not in log, "W6 anonymous race logs")
+    logger.removeHandler(logs)
+    print("PASS W6 alternate response, winner, cancellation, errors, refusal, continuing turn and delegated lookup")
+
+
 def setting_checks():
     ok(rooms_of("*") == ("*",) and rooms_of(" discord-dm:* , discord-ch:123 ") == ("discord-dm:*", "discord-ch:123"),
        "patterns")
@@ -294,8 +436,16 @@ def setting_checks():
         route = from_env({"MARONG_DEEPSEEK_ROOMS": "*", "MARONG_DEEPSEEK_KEY_NAME": "RELAY_KEY",
                           "MARONG_DEEPSEEK_EFFORT": "off", "MARONG_DEEPSEEK_TIMEOUT_S": "20"}, creds, None, CLAUDE)
         ok(route is not None and route.rooms == ("*",) and route.model == MODEL and route.llm.effort == "off"
-           and route.llm.timeout_s == 20 and route.llm.http.headers["authorization"] == f"Bearer {KEY}", route)
+           and route.llm.timeout_s == 20 and route.llm.hedge_s == 0
+           and route.llm.http.headers["authorization"] == f"Bearer {KEY}", route)
         asyncio.run(route.llm.close())
+        for raw_hedge, want in ((None, 20), ("0", 0), ("5", 5), ("4", 0), ("30", 0), ("bad", 0)):
+            env = {"MARONG_DEEPSEEK_ROOMS": "discord-dm:1234", "MARONG_DEEPSEEK_KEY_NAME": "RELAY_KEY"}
+            if raw_hedge is not None:
+                env["MARONG_DEEPSEEK_HEDGE_S"] = raw_hedge
+            route = from_env(env, creds, None, CLAUDE)
+            ok(route is not None and route.llm.hedge_s == want, "W6 threshold setting")
+            asyncio.run(route.llm.close())
         for env in ({"MARONG_DEEPSEEK_ROOMS": "*", "MARONG_DEEPSEEK_KEY_NAME": "MISSING"},
                     {"MARONG_DEEPSEEK_ROOMS": "*"},
                     {"MARONG_DEEPSEEK_ROOMS": "dm", "MARONG_DEEPSEEK_KEY_NAME": "RELAY_KEY"},
@@ -305,8 +455,8 @@ def setting_checks():
             ok(from_env(env, creds, None, CLAUDE) is None, env)
         ok(from_env({"MARONG_DEEPSEEK_ROOMS": "*", "MARONG_DEEPSEEK_KEY_NAME": "RELAY_KEY"}, None, None, CLAUDE) is None,
            "no credentials directory")
-    ok(KEY not in logs.text() and "deepseek off: bad setting" in logs.text() and "deepseek on rooms=*" in logs.text(),
-       logs.text())
+    ok(KEY not in logs.text() and "discord-dm:1234" not in logs.text() and "deepseek off: bad setting" in logs.text()
+       and "deepseek on rooms=1" in logs.text() and "hedge=20.0s" in logs.text() and "hedge=off" in logs.text(), logs.text())
     print("PASS room patterns, key file reading, settings errors keep Claude (and never log the key)")
 
 
@@ -394,6 +544,7 @@ async def discord_checks(db):
 if __name__ == "__main__":
     conversion_checks()
     asyncio.run(create_checks())
+    asyncio.run(hedge_checks())
     setting_checks()
     db = TestDB()
     try:

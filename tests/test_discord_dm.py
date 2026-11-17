@@ -208,6 +208,39 @@ async def check(db):
             assert data["rows"][index][2].startswith("Discord DM") and data["colors"][index] == "#fff2cc"
             assert sum(row[5] == greeting for row in data["rows"]) == 1
         print("PASS research report contains Discord DM text with existing speaker color")
+
+        room_key = f"discord-dm:{HK}"
+        db.admin("UPDATE marong.discord_dm_links SET per_day=48, start_hour=0, end_hour=24, "
+                 "last_slot=NULL, last_attempt_at=NULL, failures=0, "
+                 "last_incoming_at=now()-interval '2 days', opted_in_at=now()-interval '2 days' "
+                 "WHERE discord_user_id=%s", (HK,))
+        link = (await store.proactive_rooms(room_key))[0]
+        assert "8~22시에 하루 3번까지" in "\n".join(agent._dm_lines(link))
+        await client.on_message(event(client, HK, DM_HK, 71, "도움말"))
+        assert "8~22시에 하루 3번까지" in client.channels[DM_HK].sent[-1]
+        assert db.admin("SELECT per_day, start_hour, end_hour FROM marong.discord_dm_links WHERE discord_user_id=%s",
+                        (HK,)) == [(48, 0, 24)]
+        print("PASS W1 caps the DM schedule and help while retaining the saved schedule")
+
+        for i, flags in enumerate((
+            {"proactive": True, "delivered": True}, {"hello": True, "delivered": True},
+            {"proactive": True, "delivered": False}, {"reminder": 5, "delivered": True},
+        )):
+            await store.add_message(room_key, "assistant", f"시험용 먼저 보낸 말 {i}", meta=flags)
+        link = (await store.proactive_rooms(room_key))[0]
+        assert link["unanswered"] == 2
+        assert plan.plan({**link, "quiet_for": timedelta(hours=2), "sent_ago": timedelta(hours=44, minutes=59)}, now) is None
+        assert plan.plan({**link, "quiet_for": timedelta(hours=2), "sent_ago": timedelta(hours=45)}, now) is not None
+        db.admin("INSERT INTO call.calls(caller_id,client_id,prompt_version,voice) "
+                 "SELECT id,gen_random_uuid(),'fixture','fixture' FROM call.callers WHERE friend_id=2")
+        assert (await store.proactive_rooms(room_key))[0]["unanswered"] == 0
+        await store.add_message(room_key, "assistant", "통화 뒤 시험 메시지", meta={"proactive": True, "delivered": True})
+        assert (await store.proactive_rooms(room_key))[0]["unanswered"] == 1
+        llm.fn = lambda _: message([text("(조용히 기다립니다)")])
+        await client.on_message(event(client, HK, DM_HK, 72, "테스트 답장 부탁"))
+        assert client.channels[DM_HK].sent[-1] == "응응"
+        assert (await store.proactive_rooms(room_key))[0]["unanswered"] == 0
+        print("PASS W2 counts delivered greetings and missed calls, resets on a call or DM, W5 filters the reply")
     finally:
         await store.close()
         await kakao.close()

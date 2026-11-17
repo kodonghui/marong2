@@ -306,6 +306,12 @@ async def main(db):
             await delivery_checks(db, settings, store, agent, client, push, sender)
             await page_checks(http)
             await list_checks(db, http)
+            ok((await store.link(HK))["unanswered"] > 0, "W2 unanswered before the app reply")
+            reply = await http.post("/chat/api/messages",
+                                    json={"clientId": str(uuid.uuid4()), "text": "앱에서 쓰는 시험용 답장"},
+                                    headers=auth(write=True))
+            ok(reply.status == 202 and (await store.link(HK))["unanswered"] == 0,
+               "W2 an app reply clears unanswered")
         await settle(chat)
         await own_runner_checks(store, agent, client, access, push, logs)
     finally:
@@ -775,6 +781,9 @@ async def own_runner_checks(store, agent, client, access, push, logs):
 
 
 def reset_proactive(db):
+    # Each transport scenario starts with an older greeting, outside W2/W3's windows.
+    db.admin("UPDATE marong.messages SET created_at = now() - interval '8 days' "
+             "WHERE room_key = %s AND meta->>'proactive' = 'true'", (HK_ROOM,))
     db.admin("UPDATE marong.discord_dm_links SET last_slot = NULL, last_attempt_at = NULL, failures = 0, "
              "last_incoming_at = now() - interval '2 hours', opted_in_at = now() - interval '2 hours' "
              "WHERE discord_user_id = %s", (HK,))

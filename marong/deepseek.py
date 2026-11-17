@@ -49,6 +49,7 @@ ROUNDS = 4              # create 한 번 안에서 DeepSeek 를 부르는 횟수
 RETRY_WAIT_S = 2
 BUSY = (429, 503)       # '바쁨'은 금방 돌아와서 Claude 로 넘기기 전에 한 번 더 물어봄(2026-11-16 503 세 번이 Claude 대체 답이 됨)
 TIMEOUT_S = 30.0        # DeepSeek 한 번 부르기를 기다리는 최대 시간(넘으면 첫 요청은 Claude 가 대신 답함)
+HEDGE_S = 20.0           # 첫 응답이 이만큼 늦으면 같은 요청으로 대체 답도 시작
 DIGEST_CHARS = 3000     # Claude 가 찾은 결과 글을 DeepSeek 에 돌려줄 때 최대 글자 수
 RESULT_LINKS = 8        # 그 글 끝에 붙이는 검색 결과(제목 — 주소) 수
 DELEGATE_TIMEOUT_S = 45
@@ -84,7 +85,7 @@ EMPTY_QUERY_TEXT = "검색어가 비었어."
 
 
 class DeepSeekError(Exception):
-    """DeepSeek 중계 오류. status_code 는 HTTP 상태(연결 오류·시간 초과는 None). 글에는 응답 앞부분만(키 없음)."""
+    """DeepSeek 중계 오류. status_code 는 HTTP 상태(연결 오류·시간 초과는 None). detail 은 짧은 오류 종류."""
 
     def __init__(self, status_code: int | None, detail: str):
         super().__init__(f"deepseek {status_code or '-'}: {detail[:200]}")
@@ -237,14 +238,18 @@ class DeepSeekLLM:
 
     def __init__(self, key: str, *, base_url: str = BASE_URL, model: str = MODEL, effort: str = "",
                  claude=None, claude_model: str = "", fallback: bool = True, timeout_s: float = TIMEOUT_S,
-                 transport=None):
+                 hedge_s: float = HEDGE_S, transport=None):
         if not key:
             raise ValueError("DeepSeek key is empty")
         if effort not in EFFORTS:
             raise ValueError("Invalid DeepSeek effort")
         if not 5 <= timeout_s <= 300:
             raise ValueError("Invalid DeepSeek timeout")
+        if hedge_s != 0 and not 5 <= hedge_s < timeout_s:
+            log.warning("deepseek hedge off: invalid MARONG_DEEPSEEK_HEDGE_S")
+            hedge_s = 0.0
         self.model, self.effort, self.timeout_s = model, effort, timeout_s
+        self.hedge_s = hedge_s
         self.claude, self.claude_model, self.fallback = claude, claude_model, fallback
         self.host = urlsplit(base_url).hostname or "-"
         self.http = httpx.AsyncClient(base_url=base_url.rstrip("/"), transport=transport,
@@ -265,7 +270,7 @@ class DeepSeekLLM:
             payload["reasoning_effort"] = self.effort
         return payload
 
-    async def _post(self, payload: dict, deadline: float, retry: bool = True) -> dict:
+    async def _post(self, payload: dict, deadline: float, retry: bool = True, replied: asyncio.Event | None = None) -> dict:
         loop = asyncio.get_running_loop()
         for attempt in (1, 2):
             left = deadline - loop.time()
@@ -279,6 +284,8 @@ class DeepSeekLLM:
             except httpx.TransportError as e:
                 error = DeepSeekError(None, type(e).__name__)
             else:
+                if replied is not None:
+                    replied.set()
                 if resp.status_code == 200:
                     try:
                         data = resp.json()
@@ -286,7 +293,8 @@ class DeepSeekLLM:
                     except (ValueError, KeyError, IndexError, TypeError):
                         raise DeepSeekError(200, "bad response") from None
                     return data
-                error = DeepSeekError(resp.status_code, resp.text)
+                risk = resp.status_code == 400 and "risk" in resp.text.lower()
+                error = DeepSeekError(resp.status_code, "risk" if risk else "HTTP error")
                 if resp.status_code not in (429, 500, 502, 503, 504):
                     raise error
             if attempt == 1 and deadline - loop.time() > RETRY_WAIT_S + 5 and (retry or error.status_code in BUSY):
@@ -367,9 +375,64 @@ class DeepSeekLLM:
 
     async def create(self, body: dict, timeout: float):
         loop = asyncio.get_running_loop()
-        started, deadline = time.monotonic(), loop.time() + timeout
-        messages, functions, delegated = to_chat(body)
+        started = loop.time()
+        deadline = started + timeout
         first = not _continuing(body)
+        if not self._can_fall_back(first) or not 0 < self.hedge_s < timeout:
+            return await self._run(body, deadline, first)
+
+        replied = asyncio.Event()
+        primary = asyncio.create_task(self._run(body, deadline, first, replied, fall_back=False))
+        signal = asyncio.create_task(replied.wait())
+        tasks = [primary, signal]
+        try:
+            await asyncio.wait(tasks, timeout=self.hedge_s, return_when=asyncio.FIRST_COMPLETED)
+            if replied.is_set() or primary.done() or deadline <= loop.time():
+                try:
+                    return await primary
+                except DeepSeekError as e:
+                    return await self._after_error(body, deadline, first, e)
+
+            log.info("deepseek_hedge start after=%.1fs", self.hedge_s)
+            alternate = asyncio.create_task(self._claude_answer(body, deadline))
+            tasks.append(alternate)
+            finished = asyncio.Queue()
+            primary.add_done_callback(finished.put_nowait)
+            alternate.add_done_callback(finished.put_nowait)
+            for last in (False, True):
+                done = await finished.get()
+                try:
+                    answer = done.result()
+                except Exception:
+                    if last:
+                        raise
+                    continue
+                log.info("deepseek_hedge winner=%s total=%.1fs", "deepseek" if done is primary else "claude",
+                         loop.time() - started)
+                return answer
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _claude_answer(self, body: dict, deadline: float):
+        resp = await self.claude.create(body, deadline - asyncio.get_running_loop().time())
+        resp.served_model = self.claude_model
+        return resp
+
+    async def _after_error(self, body: dict, deadline: float, first: bool, error: DeepSeekError):
+        if not self._can_fall_back(first) or deadline - asyncio.get_running_loop().time() < 5:
+            log.warning("deepseek_error %s", brief(error))
+            raise error
+        log.warning("deepseek_error %s → claude", brief(error))
+        return await self._claude_answer(body, deadline)
+
+    async def _run(self, body: dict, deadline: float, first: bool, replied: asyncio.Event | None = None,
+                   fall_back: bool = True):
+        loop = asyncio.get_running_loop()
+        started = time.monotonic()
+        messages, functions, delegated = to_chat(body)
         budget = {name: max(1, int(spec.get("max_uses") or 1)) for name, spec in delegated.items()}
         found: list = []  # 대신 찾은 것: server_tool_use(digest 포함)·출처 블록
         total = {"in": 0, "out": 0, "cached": 0, "searches": 0, "fetches": 0, "claude_in": 0, "claude_out": 0}
@@ -380,7 +443,7 @@ class DeepSeekLLM:
             for rounds in range(1, ROUNDS + 1):
                 cap = min(deadline, loop.time() + self.timeout_s)
                 data = await self._post(self._payload(messages, functions, int(body.get("max_tokens") or 4000)),
-                                        cap, retry=not self._can_fall_back(first))
+                                        cap, retry=not self._can_fall_back(first), replied=replied if rounds == 1 else None)
                 usage = data.get("usage") or {}
                 total["in"] += int(usage.get("prompt_tokens") or 0)
                 total["out"] += int(usage.get("completion_tokens") or 0)
@@ -418,15 +481,9 @@ class DeepSeekLLM:
             if refused:
                 log.info("deepseek refusal status=400")
                 return self._response([], "refusal", total, served=None)
-            left = deadline - loop.time()
-            if not self._can_fall_back(first) or left < 5:
-                log.warning("deepseek_error %s", brief(e))
-                raise
-            # 첫 요청: Claude 가 같은 요청으로 대신 답함(대신 찾은 검색이 있었으면 Claude 가 자기 도구로 다시 찾음)
-            log.warning("deepseek_error %s → claude", brief(e))
-            resp = await self.claude.create(body, left)
-            resp.served_model = self.claude_model
-            return resp
+            if fall_back:
+                return await self._after_error(body, deadline, first, e)
+            raise
         calls = [c for c in (last.get("tool_calls") or []) if c.get("function", {}).get("name") not in delegated]
         content = list(found)
         text = (last.get("content") or "").strip()
@@ -503,6 +560,10 @@ def from_env(env, credentials: Path | None, claude, claude_model: str, *, transp
         rooms = rooms_of(raw)
         effort = (env.get("MARONG_DEEPSEEK_EFFORT") or "").strip().lower()
         timeout_s = float((env.get("MARONG_DEEPSEEK_TIMEOUT_S") or TIMEOUT_S))
+        try:
+            hedge_s = float(env.get("MARONG_DEEPSEEK_HEDGE_S") or HEDGE_S)
+        except (TypeError, ValueError):
+            hedge_s = float("nan")
         fallback = (env.get("MARONG_DEEPSEEK_FALLBACK") or "claude").strip().lower()
         if effort not in EFFORTS or fallback not in ("claude", "off"):
             raise ValueError("MARONG_DEEPSEEK_EFFORT/FALLBACK")
@@ -518,10 +579,11 @@ def from_env(env, credentials: Path | None, claude, claude_model: str, *, transp
         if urlsplit(base).scheme != "https" or not model:
             raise ValueError("MARONG_DEEPSEEK_BASE_URL/MODEL")
         llm = DeepSeekLLM(key, base_url=base, model=model, effort=effort, claude=claude, claude_model=claude_model,
-                          fallback=fallback == "claude", timeout_s=timeout_s, transport=transport)
+                          fallback=fallback == "claude", timeout_s=timeout_s, hedge_s=hedge_s, transport=transport)
     except (ValueError, OSError) as e:
         log.error("deepseek off: bad setting %s", e if isinstance(e, ValueError) else type(e).__name__)
         return None
-    log.info("deepseek on rooms=%s model=%s host=%s effort=%s timeout=%gs fallback=%s", ",".join(rooms), model,
-             llm.host, effort or "default", llm.timeout_s, fallback)
+    hedge = f"{llm.hedge_s:.1f}s" if llm.hedge_s else "off"
+    log.info("deepseek on rooms=%d model=%s host=%s effort=%s timeout=%gs fallback=%s hedge=%s", len(rooms), model,
+             llm.host, effort or "default", llm.timeout_s, fallback, hedge)
     return Route(llm, rooms, model, effort)

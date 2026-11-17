@@ -29,7 +29,7 @@ from marong.photo import MAX_DOWNLOAD  # noqa: E402
 from marong.schedules import SCHEDULE_TOOLS  # noqa: E402
 from marong.shopping import FETCH_TOOL, MALL_NAMES, MALLS, ShopFetch, guide as shop_guide  # noqa: E402
 from marong.store import Store  # noqa: E402
-from marong.style import tidy, vocative  # noqa: E402
+from marong.style import REPEAT_SIMILARITY, repeat_similarity, tidy, vocative  # noqa: E402
 from marong.web_search import GUIDE as WEB_GUIDE, OFF_GUIDE as WEB_OFF_GUIDE, WebSearch  # noqa: E402
 from pg import TestDB  # noqa: E402
 from test_discord_dm import DH, DM_DH, DM_HK, HK, Client, prepare  # noqa: E402
@@ -123,6 +123,28 @@ def style_checks():
     ok(tidy(SIGH)[0] and tidy(SIGH)[0] != SIGH, "never empty")
     ok(tidy("앗 좀 늦었다 미안 🙏\n야 3시야!") == ("앗 좀 늦었다 미안 🙏\n3시야!", ["ya"]), "line start too")
     ok(vocative("현경이") == "현경아" and vocative("Jay") is None and vocative("") is None, "vocative")
+    for source, expected in (
+        ("(조용히 기다립니다)", "응응"),
+        ("응 알겠어 (웃음)", "응 알겠어"),
+        ("*끄덕* 맞아", "맞아"),
+        ("헤헤 (살짝 웃음) 고마워", "헤헤 고마워"),
+        ("좋아!\n\n(꼬리를 흔듭니다)\n\n가자", "좋아!\n\n가자"),
+        ("(속삭이며) 비밀이야", "비밀이야"),
+        ("（가만히 웃습니다...） 이제 가자", "이제 가자"),
+        ("응응 (토닥)", "응응"),
+    ):
+        ok(tidy(source) == (expected, ["stage"]), f"W5 stage direction: {source}")
+    for literal in ("내일 (3시) 보자", "그거 (진짜) 좋다", "오늘 일정(종일)이야", "(내 기억 맞으면)", "*별이 예쁘다*"):
+        ok(tidy(literal) == (literal, []), f"W5 keep as spoken: {literal}")
+    ok(tidy("야 (웃음) 뭐해", "수빈") == ("수빈아 뭐해", ["stage", "ya"]), "W5 runs before the greeting filter")
+
+    for before, after in (
+        ("수빈아 군밤 먹으니까 너무 달더라", "수빈아 군밤 먹으니까 진짜 달더라"),
+        ("수빈아 이불 꺼냈는데 포근하다", "수빈이 이불 꺼냈는데 따뜻하다"),
+    ):
+        ok(repeat_similarity(before, after, "수빈") >= REPEAT_SIMILARITY, "W3 same topic")
+    ok(repeat_similarity("수빈아 군밤 먹었어 🌰", "수빈아 이불 꺼냈어!", "수빈") < REPEAT_SIMILARITY, "W3 distinct topics")
+    ok(repeat_similarity("수빈아 뭐 해?", "수빈아 오늘 출근했어?", "수빈") == 0, "W3 strip the name and punctuation")
 
     prompt = (ROOT / "prompt.md").read_text(encoding="utf-8")
     ok(SIGH not in prompt and "한숨 쉬는 이모티콘은 쓰지 마" in prompt, "prompt: no sigh example, rule present")
