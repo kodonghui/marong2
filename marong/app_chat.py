@@ -46,6 +46,7 @@ VERSION = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\Z")
 NUMBER = re.compile(r"[0-9]{1,18}\Z")
 PROBLEMS = {
     "invalid_request": (400, "요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)"),
+    "not_found": (404, "없는 그림이거나 로그인한 친구의 그림이 아님"),
     "unauthenticated": (401, "Access 로그인 증명이 없거나 맞지 않음"),
     "not_allowed": (403, "허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐"),
     "cross_site": (403, "다른 사이트에서 온 쓰기 요청"),
@@ -442,7 +443,10 @@ class AppChat:
     # ── server ─────────────────────────────────────────────────
 
     def web_app(self) -> web.Application:
+        from .app_diary import AppDiary
+
         app = web.Application(client_max_size=BODY_MAX, middlewares=[self.guard])
+        AppDiary(self).register(app)
         app.router.add_get("/chat/healthz", self.health)
         app.router.add_get("/chat", self.home)
         app.router.add_get("/chat/", self.page)
