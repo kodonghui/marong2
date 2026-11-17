@@ -187,6 +187,18 @@
         }
       ],
       "updated": "2026-11-17T03:46:40+00:00"
+    },
+    "10-wbs": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "일기·통화 비용 GPT 인계(docs/10-wbs/diary-call-cost.md, TASK-137~159·300~306). 시작 조건: 토큰 얼리기와 PR #25 병합",
+      "updated": "2026-11-17T04:00:12+00:00"
+    },
+    "12-qa": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "시험 계획 TC-159~179(docs/12-qa/diary-call-cost.md). 시험 코드·실행은 GPT",
+      "updated": "2026-11-17T04:00:12+00:00"
     }
   }
 }
