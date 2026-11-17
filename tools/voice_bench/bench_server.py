@@ -6,14 +6,19 @@
     python3 -I bench_server.py gemini    # 지금 통화와 같은 Vertex 설정(gemini-3.8-live, Sulafat, 침묵 700ms)
     python3 -I bench_server.py openai    # gpt-realtime-2.1-mini, marin
     python3 -I bench_server.py live      # gpt-live-1, noeul
-    python3 -I bench_server.py cascade   # gpt-live-transcribe -> gpt-6-luna -> Gemini 3.8 Flash-Lite TTS·gpt-4o-mini-tts
+    python3 -I bench_server.py cascade   # gpt-live-transcribe -> gpt-6-luna -> 목소리 셋(아래)을 동시에
+    python3 -I bench_server.py cascade-aai  # AssemblyAI 실시간 받아쓰기(자체 말 끝 판정) -> gpt-6-luna -> 목소리 셋
+    python3 -I bench_server.py gemini,cascade,cascade-aai  # 쉼표로 여러 개를 차례로
+
+연쇄형의 목소리는 gpt-4o-mini-tts marin, Gemini 3.8 Flash-Lite TTS Sulafat(Vertex global),
+ElevenLabs Flash v2.5 Han Aim이에요. VB_CASCADE_TTS=openai,gemini,elevenlabs 로 고르고, 없으면 키 파일이 있는 것만 켜요.
 
 같은 가짜 친구(지우)의 10턴 통화 음성을 실제 말하는 속도로 보내고, 말이 끝난 때부터 첫 대답 소리가 올 때까지를
 재요. 턴 사이에는 마이크가 계속 무음을 보내고, 대답이 다 '재생'된 뒤 0.6초 있다가 다음 말을 해요.
 
-키는 ~/.config/marong-call/ 의 openai.key, gemini2.key(운영 통화와 같은 Vertex 키), gemini.key(AI Studio)에서
-읽기만 하고 출력·저장하지 않아요. sudo를 쓰지 않고, 이 폴더 밖에는 쓰지 않으며, 운영 서비스는 건드리지 않아요.
-말 내용은 지어낸 이름(지우, 도윤)의 시험 대본뿐이에요.
+키는 ~/.config/marong-call/ 의 openai.key, gemini2.key(운영 통화와 같은 Vertex 키), gemini.key(AI Studio),
+elevenlabs.key, assemblyai.key에서 읽기만 하고 출력·저장하지 않아요. sudo를 쓰지 않고, 이 폴더 밖에는 쓰지 않으며,
+운영 서비스는 건드리지 않아요. 말 내용은 지어낸 이름(지우, 도윤)의 시험 대본뿐이에요.
 """
 import argparse
 import array
@@ -52,9 +57,22 @@ OPENAI_HTTP = os.environ.get('VB_OPENAI_HTTP', 'https://api.openai.com')
 OPENAI_WS = os.environ.get('VB_OPENAI_WS', 'wss://api.openai.com')
 VERTEX_WS = os.environ.get('VB_VERTEX_WS', 'wss://us-central1-aiplatform.googleapis.com')
 GEMINI_HTTP = os.environ.get('VB_GEMINI_HTTP', 'https://generativelanguage.googleapis.com')
+VERTEX_HTTP = os.environ.get('VB_VERTEX_HTTP', 'https://aiplatform.googleapis.com')
+ELEVEN_HTTP = os.environ.get('VB_ELEVEN_HTTP', 'https://api.elevenlabs.io')
+AAI_WS = os.environ.get('VB_AAI_WS', 'wss://streaming.assemblyai.com')
+AAI_HTTP = os.environ.get('VB_AAI_HTTP', 'https://api.assemblyai.com')
 
 VERTEX_PROJECT = 'project-bc2d15a4-11c0-476b-ae8'  # tools/vertex_live/server.py
 VERTEX_LOCATION = 'us-central1'
+
+# Gemini TTS goes through Vertex (global, the production key) unless VB_GEMINI_TTS_VIA=aistudio.
+GEMINI_TTS_VIA = os.environ.get('VB_GEMINI_TTS_VIA', 'vertex')
+HAN_AIM = '8jHHF8rMqMlg8if2mOUe'   # ElevenLabs voice the maintainer picked by ear (2026-11-17)
+TTS_TIMEOUT = float(os.environ.get('VB_TTS_TIMEOUT', '10'))  # seconds without bytes before a TTS request fails
+# AssemblyAI streaming, docs read 2026-11-17: assemblyai.com/docs/streaming/select-the-speech-model.md,
+# .../turn-detection.md, .../message-sequence.md, .../api-spec/streaming-websocket.md
+AAI_MODEL = os.environ.get('VB_AAI_MODEL', 'assemblyai-stt-3-7-realtime-agent')
+AAI_MODE = os.environ.get('VB_AAI_MODE', 'min_latency')
 
 VAD_MS = 700           # production silenceDurationMs
 GAP_AFTER_REPLY = 0.6  # the friend answers 0.6 s after the reply finished playing
@@ -71,6 +89,12 @@ PRICES = {
     'gpt-6-luna': {'in': 0.10, 'in_cached': 0.01, 'out': 0.50},
     'gpt-4o-mini-tts': {'per_min_est': 0.015},
     'gemini-3.8-flash-lite-tts': {'text_in': 0.50, 'audio_out': 6.0},
+    # elevenlabs.io/pricing/api read 2026-11-16, billed on characters sent
+    'eleven_flash_v2_5': {'usd_per_1k_chars': 0.04},
+    # assemblyai.com/docs/getting-started/models.md read 2026-11-17, billed on WebSocket session duration
+    'assemblyai-stt-3-7-realtime-agent': {'per_hour': 0.45},
+    'universal-3-6-pro': {'per_hour': 0.45},
+    'assemblyai-stt-3-7-realtime': {'per_hour': 0.30},
 }
 
 mono = time.monotonic
@@ -965,68 +989,118 @@ def llm_turn(messages, on_first_sentence, model='gpt-6-luna'):
     return out
 
 
-def tts_openai(text, voice='marin'):
-    res = {'t_req': mono(), 't_first': None, 'pcm': bytearray(), 'sr': 24000, 'error': None}
+def _tts_call(res, send):
+    """Run send() and, when it fails before any audio with a timeout, a dropped connection, 429 or 5xx, once more.
 
+    t_req stays at the first attempt, so a retry counts in the waiting time the way a caller would feel it.
+    """
+    for attempt in (1, 2):
+        res['t_req_last'] = mono()
+        try:
+            send()
+            return
+        except HTTPError as e:
+            msg = str(e)[:300]
+            retry = msg[:1] == '5' or msg[:3] == '429'
+        except Exception as e:  # socket timeout, reset, DNS
+            msg = repr(e)[:300]
+            retry = True
+        if attempt == 1 and retry and res['t_first'] is None:
+            res.setdefault('retries', []).append(msg)
+            continue
+        res['error'] = msg
+        return
+
+
+def _pcm_res(text):
+    return {'t_req': mono(), 't_first': None, 'pcm': bytearray(), 'sr': 24000, 'error': None, 'chunks': 0,
+            'chars': len(text)}
+
+
+def _pcm_sink(res):
     def on_chunk(chunk, t):
         if res['t_first'] is None:
             res['t_first'] = t
         res['pcm'] += chunk
-    try:
-        http_post_stream(OPENAI_HTTP + '/v1/audio/speech', {'Authorization': 'Bearer ' + key('openai.key')},
-                         {'model': 'gpt-4o-mini-tts', 'voice': voice, 'input': text, 'response_format': 'pcm',
-                          'instructions': ('한국어 원어민 성인 여성 목소리로, 친한 친구와 전화하듯 다정하고 차분하게 말해. '
-                                           '아이 같거나 과장된 톤은 쓰지 마.')}, on_chunk)
-    except Exception as e:
-        res['error'] = repr(e)[:400]
+        res['chunks'] += 1
+    return on_chunk
+
+
+def _even(res):
     if len(res['pcm']) % 2:
         res['pcm'] = res['pcm'][:-1]
     return res
 
 
-def tts_gemini(text, voice='Sulafat', model='gemini-3.8-flash-lite-tts'):
-    res = {'t_req': mono(), 't_first': None, 'pcm': bytearray(), 'sr': 24000, 'error': None, 'usage': None,
-           'chunks': 0}
-    sse = SSE()
+def tts_openai(text, voice='marin'):
+    res = _pcm_res(text)
+    _tts_call(res, lambda: http_post_stream(
+        OPENAI_HTTP + '/v1/audio/speech', {'Authorization': 'Bearer ' + key('openai.key')},
+        {'model': 'gpt-4o-mini-tts', 'voice': voice, 'input': text, 'response_format': 'pcm',
+         'instructions': ('한국어 원어민 성인 여성 목소리로, 친한 친구와 전화하듯 다정하고 차분하게 말해. '
+                          '아이 같거나 과장된 톤은 쓰지 마.')}, _pcm_sink(res), timeout=TTS_TIMEOUT))
+    return _even(res)
 
-    def on_chunk(chunk, t):
-        for data in sse.feed(chunk):
+
+def tts_elevenlabs(text, voice_id=HAN_AIM, model='eleven_flash_v2_5'):
+    """ElevenLabs streaming TTS as raw 24 kHz PCM. No style prompt and no unverified latency options."""
+    res = _pcm_res(text)
+    _tts_call(res, lambda: http_post_stream(
+        '%s/v1/text-to-speech/%s/stream?output_format=pcm_24000' % (ELEVEN_HTTP, voice_id),
+        {'xi-api-key': key('elevenlabs.key')}, {'text': text, 'model_id': model, 'language_code': 'ko'},
+        _pcm_sink(res), timeout=TTS_TIMEOUT))
+    return _even(res)
+
+
+def tts_gemini(text, voice='Sulafat', model='gemini-3.8-flash-lite-tts'):
+    res = _pcm_res(text)
+    res.update({'usage': None, 'via': GEMINI_TTS_VIA, 'mode': 'stream'})
+
+    def on_data(data, t):
+        try:
             d = json.loads(data)
-            if d.get('usageMetadata'):
-                res['usage'] = d['usageMetadata']
-            for cand in d.get('candidates') or []:
-                for part in (cand.get('content') or {}).get('parts') or []:
-                    inline = part.get('inlineData') or {}
-                    if inline.get('data'):
-                        if res['t_first'] is None:
-                            res['t_first'] = t
-                        m = re.search(r'rate=(\d+)', inline.get('mimeType', ''))
-                        if m:
-                            res['sr'] = int(m.group(1))
-                        res['pcm'] += base64.b64decode(inline['data'])
-                        res['chunks'] += 1
+        except ValueError:
+            return
+        if d.get('usageMetadata'):
+            res['usage'] = d['usageMetadata']
+        for cand in d.get('candidates') or []:
+            for part in (cand.get('content') or {}).get('parts') or []:
+                inline = part.get('inlineData') or {}
+                if inline.get('data'):
+                    if res['t_first'] is None:
+                        res['t_first'] = t
+                    m = re.search(r'rate=(\d+)', inline.get('mimeType', ''))
+                    if m:
+                        res['sr'] = int(m.group(1))
+                    res['pcm'] += base64.b64decode(inline['data'])
+                    res['chunks'] += 1
     body = {'contents': [{'role': 'user', 'parts': [{'text': text}]}],
             'generationConfig': {'responseModalities': ['AUDIO'], 'speechConfig': {
                 'voiceConfig': {'prebuiltVoiceConfig': {'voiceName': voice}}}}}
-    hdr = {'x-goog-api-key': key('gemini.key')}
-    res['mode'] = 'stream'
-    try:
-        http_post_stream('%s/v1beta/models/%s:streamGenerateContent?alt=sse' % (GEMINI_HTTP, model), hdr, body,
-                         on_chunk)
-    except HTTPError as e:
-        res['stream_error'] = str(e)[:300]
-        res['mode'], res['t_req'] = 'unary', mono()
+    if GEMINI_TTS_VIA == 'aistudio':
+        base, hdr = '%s/v1beta/models/%s' % (GEMINI_HTTP, model), {'x-goog-api-key': key('gemini.key')}
+    else:
+        base = '%s/v1beta1/projects/%s/locations/global/publishers/google/models/%s' % (VERTEX_HTTP, VERTEX_PROJECT,
+                                                                                        model)
+        hdr = {'x-goog-api-key': key('gemini2.key')}
+
+    def stream():
+        sse = SSE()
+        http_post_stream(base + ':streamGenerateContent?alt=sse', hdr, body,
+                         lambda c, t: [on_data(d, t) for d in sse.feed(c)], timeout=TTS_TIMEOUT)
+    _tts_call(res, stream)
+    if res['error'] and res['error'][:3] in ('400', '404') and res['t_first'] is None:
+        # the streaming method was refused: one plain request, marked as unary
+        res['stream_error'], res['error'], res['mode'] = res['error'], None, 'unary'
         raw = bytearray()
-        try:
-            http_post_stream('%s/v1beta/models/%s:generateContent' % (GEMINI_HTTP, model), hdr, body,
-                             lambda c, t: raw.extend(c))
-            t = mono()
-            on_chunk(b'data: ' + bytes(raw).replace(b'\n', b' ') + b'\n', t)
-        except Exception as e2:
-            res['error'] = repr(e2)[:400]
-    except Exception as e:
-        res['error'] = repr(e)[:400]
-    return res
+
+        def unary():
+            del raw[:]
+            http_post_stream(base + ':generateContent', hdr, body, lambda c, t: raw.extend(c), timeout=60)
+        _tts_call(res, unary)
+        if not res['error']:
+            on_data(bytes(raw).decode('utf-8', 'replace'), mono())
+    return _even(res)
 
 
 def gemini_tts_cost(res):
@@ -1041,44 +1115,224 @@ def gemini_tts_cost(res):
     return (u.get('promptTokenCount', 0) * p['text_in'] + out * p['audio_out']) / 1e6
 
 
-def cascade_turn(history, user_text, use_gemini):
-    """LLM stream; at its first sentence both TTS start at once; the rest is synthesized after for the samples."""
-    pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+TTS = {
+    'openai': (tts_openai, 'gpt-4o-mini-tts marin'),
+    'gemini': (tts_gemini, 'gemini-3.8-flash-lite-tts Sulafat'),
+    'elevenlabs': (tts_elevenlabs, 'eleven_flash_v2_5 Han Aim'),
+}
+
+
+def tts_keys(vendor):
+    if vendor == 'gemini':
+        return ['gemini.key'] if GEMINI_TTS_VIA == 'aistudio' else ['gemini2.key']
+    return {'openai': ['openai.key'], 'elevenlabs': ['elevenlabs.key']}[vendor]
+
+
+def tts_label(vendor):
+    if vendor == 'gemini':
+        return TTS[vendor][1] + (' (AI Studio)' if GEMINI_TTS_VIA == 'aistudio' else ' (Vertex global)')
+    return TTS[vendor][1]
+
+
+def tts_cost(vendor, results, secs):
+    rs = [r for r in results if r]
+    if vendor == 'openai':
+        return secs / 60 * PRICES['gpt-4o-mini-tts']['per_min_est']
+    if vendor == 'gemini':
+        return sum(gemini_tts_cost(r) for r in rs)
+    return sum(r['chars'] for r in rs) / 1000 * PRICES['eleven_flash_v2_5']['usd_per_1k_chars']
+
+
+def cascade_vendors():
+    """Voices from VB_CASCADE_TTS, otherwise every voice whose key file exists. Returns (on, skipped reasons)."""
+    want = os.environ.get('VB_CASCADE_TTS', '')
+    names = [n.strip() for n in want.split(',') if n.strip()] or list(TTS)
+    on, skipped = [], {}
+    for n in names:
+        if n not in TTS:
+            skipped[n] = 'unknown voice'
+            continue
+        missing = [k for k in tts_keys(n) if not key(k)]
+        if missing:
+            skipped[n] = 'no key file ' + ', '.join(missing)
+        else:
+            on.append(n)
+    return on, skipped
+
+
+def cascade_turn(history, user_text, vendors):
+    """LLM stream; at its first sentence every voice starts at once; the rest is synthesized after for the samples."""
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=2 * len(vendors) + 1)
     first = {}
 
     def on_first_sentence(sentence, t):
         first['sentence'], first['t'] = sentence, t
-        first['openai'] = pool.submit(tts_openai, sentence)
-        if use_gemini:
-            first['gemini'] = pool.submit(tts_gemini, sentence)
-    llm = llm_turn(history + [{'role': 'user', 'content': user_text}], on_first_sentence)
-    rest = llm['text'][len(first.get('sentence', '')):].strip() if first else ''
-    out = {'llm': llm, 'sentence': first.get('sentence', ''), 'rest': rest}
-    for vendor in ('openai', 'gemini'):
-        if vendor in first:
-            r1 = first[vendor].result()
-            r2 = None
-            if rest and not r1['error']:
-                r2 = tts_openai(rest) if vendor == 'openai' else tts_gemini(rest)
-            out[vendor] = {'first': r1, 'rest': r2}
-    pool.shutdown(wait=False)
+        for v in vendors:
+            first[v] = pool.submit(TTS[v][0], sentence)
+    try:
+        llm = llm_turn(history + [{'role': 'user', 'content': user_text}], on_first_sentence)
+        rest = llm['text'][len(first.get('sentence', '')):].strip() if first else ''
+        out = {'llm': llm, 'sentence': first.get('sentence', ''), 'rest': rest}
+        pending = {}
+        for v in vendors:
+            if v in first:
+                r1 = first[v].result()
+                pending[v] = (r1, pool.submit(TTS[v][0], rest) if rest and not r1['error'] else None)
+        for v, (r1, f2) in pending.items():
+            out[v] = {'first': r1, 'rest': f2.result() if f2 else None}
+    finally:
+        pool.shutdown(wait=False)
     return out
 
 
-async def run_cascade(prompt, turns):
-    outdir = os.path.join(RESULTS, 'cascade')
+class AAITranscribe:
+    """AssemblyAI streaming (v3): binary PCM frames in, Turn messages out. The model decides where each turn ends.
+
+    Docs read 2026-11-17: the final of a turn is the Turn message with end_of_turn true; ForceEndpoint ends the
+    current turn at once; Terminate closes the session and Termination reports its duration (the billed time).
+    """
+    sr = 24000
+
+    def __init__(self):
+        self.ws = None
+        self.ready = asyncio.Event()
+        self.event = asyncio.Event()
+        self.errors = []
+        self.begin = None
+        self.termination = None
+        self.finals = []          # (turn_order, transcript, t)
+        self.first_partial = {}   # turn_order -> t
+        self.speech_started = 0
+        self.in_turn = False
+        self.t_open = None
+        self.t_closed = None
+
+    def params(self):
+        p = {'speech_model': AAI_MODEL, 'sample_rate': self.sr, 'encoding': 'pcm_s16le',
+             'language_codes': json.dumps(['ko'])}
+        if AAI_MODE:
+            p['mode'] = AAI_MODE
+        return p
+
+    async def connect(self):
+        self.t_open = mono()
+        self.ws = await WS.connect('%s/v3/ws?%s' % (AAI_WS, urllib.parse.urlencode(self.params())),
+                                   {'Authorization': key('assemblyai.key')})
+
+    async def configure(self):
+        try:
+            await asyncio.wait_for(self.ready.wait(), 15)
+        except asyncio.TimeoutError:
+            pass
+        if not self.begin:
+            raise RuntimeError('AssemblyAI session not started: %s' % self.errors[-3:])
+        return {'requested': self.params(), 'applied': self.begin.get('configuration')}
+
+    async def recv_loop(self):
+        try:
+            while True:
+                op, data = await self.ws.recv()
+                if op != 0x1:
+                    continue
+                ev = json.loads(data.decode('utf-8'))
+                ty = ev.get('type')
+                now = mono()
+                if ty == 'Begin':
+                    self.begin = ev
+                    self.ready.set()
+                elif ty == 'SpeechStarted':
+                    self.in_turn = True
+                    self.speech_started += 1
+                elif ty == 'Turn':
+                    order = ev.get('turn_order')
+                    if ev.get('end_of_turn'):
+                        if self.finals and self.finals[-1][0] == order:  # a later copy of the same final
+                            self.finals[-1] = (order, ev.get('transcript', ''), self.finals[-1][2])
+                        else:
+                            self.finals.append((order, ev.get('transcript', ''), now))
+                        self.in_turn = False
+                    else:
+                        self.in_turn = True
+                        self.first_partial.setdefault(order, now)
+                elif ty == 'Termination':
+                    self.termination = ev
+                elif ty == 'Error' or 'error' in ev:
+                    self.errors.append(json.dumps(ev, ensure_ascii=False)[:300])
+                self.event.set()
+        except (WSClosed, asyncio.IncompleteReadError, ConnectionError) as e:
+            if self.termination is None:  # a close after Termination is the normal end
+                self.errors.append({'closed': repr(e)[:200]})
+            self.t_closed = mono()
+            self.ready.set()
+            self.event.set()
+
+    async def send_audio(self, chunk):
+        await self.ws.send(chunk, 0x2)
+
+    async def finish(self, n0, t_end, hold=3.0):
+        """Wait for the final of the turn holding the end of speech; ForceEndpoint if none came within `hold` s."""
+        forced = None
+        deadline = t_end + hold
+        while True:
+            segs = self.finals[n0:]
+            if segs and not self.in_turn and segs[-1][2] >= t_end:
+                break
+            if self.t_closed is not None:
+                break
+            now = mono()
+            if now >= deadline:
+                if forced is None:
+                    forced = now
+                    await self.ws.send_json({'type': 'ForceEndpoint'})
+                    deadline = now + 2.0
+                    continue
+                break
+            self.event.clear()
+            try:
+                await asyncio.wait_for(self.event.wait(), max(0.01, deadline - now))
+            except asyncio.TimeoutError:
+                pass
+        segs = self.finals[n0:]
+        text = ' '.join(s[1].strip() for s in segs if s[1].strip())
+        last = segs[-1] if segs and segs[-1][2] >= t_end else None
+        info = {'stt_final_after_end_s': round(last[2] - t_end, 3) if last else None,
+                'stt_first_partial_after_end_s': (round(self.first_partial[last[0]] - t_end, 3)
+                                                  if last and last[0] in self.first_partial else None),
+                'stt_segments': sum(1 for s in segs if s[1].strip()),
+                'stt_finals_before_end': sum(1 for s in segs if s[2] < t_end and s[1].strip()),
+                'stt_forced_endpoint_after_end_s': round(forced - t_end, 3) if forced else None}
+        return text, (last[2] if last else None), info
+
+    async def close(self):
+        try:
+            await self.ws.send_json({'type': 'Terminate'})
+            t = mono()
+            while self.termination is None and self.t_closed is None and mono() - t < 5:
+                await asyncio.sleep(0.05)
+        except Exception as e:
+            self.errors.append({'terminate': repr(e)[:200]})
+        await self.ws.close()
+
+
+async def run_cascade(prompt, turns, stt_kind='openai'):
+    name = 'cascade' if stt_kind == 'openai' else 'cascade-aai'
+    outdir = os.path.join(RESULTS, name)
     log = Log(outdir)
-    if not key('openai.key'):
-        log.summary({'engine': 'cascade', 'skipped': 'no key file openai.key'})
+    need = ['openai.key'] + (['assemblyai.key'] if stt_kind == 'assemblyai' else [])
+    missing = [k for k in need if not key(k)]
+    vendors, skipped = cascade_vendors()
+    if missing or not vendors:
+        log.summary({'engine': name, 'skipped': ('no key file ' + ', '.join(missing)) if missing else 'no voice',
+                     'tts_skipped': skipped})
         return
-    use_gemini = bool(key('gemini.key'))
-    stt = LiveTranscribe()
+    stt = LiveTranscribe() if stt_kind == 'openai' else AAITranscribe()
     t0 = mono()
     await stt.connect()
     recv = asyncio.ensure_future(stt.recv_loop())
     variant = await stt.configure()
     connect_s = mono() - t0
-    mic = Mic(stt.send_audio, 24000).start()
+    # AssemblyAI wants 20-1000 ms per frame and recommends 50-100 ms
+    mic = Mic(stt.send_audio, 24000, chunk_ms=20 if stt_kind == 'openai' else 50).start()
     await asyncio.sleep(1.0)
     session_t0 = mono()
     loop = asyncio.get_event_loop()
@@ -1086,21 +1340,30 @@ async def run_cascade(prompt, turns):
     total = 0.0
     for ut in turns:
         t_speech = mono()
+        n0 = len(getattr(stt, 'finals', []))
         t_end = await mic.say(ut['pcm24'])
-        await asyncio.sleep(max(0.0, t_end + VAD_MS / 1000 - mono()))  # a 700 ms end-of-speech detector
-        t_commit = mono()
-        text, t_final, t_first_delta = await stt.commit_and_wait()
-        rec = {'engine': 'cascade', 'turn': ut['id'], 'user_ref': ut['text'], 'user_heard': text,
-               'user_cer': cer(ut['refs'], text) if text else None, 'speech_s': round(t_end - t_speech, 2),
-               'commit_after_end_s': round(t_commit - t_end, 3),
-               'stt_final_after_commit_s': round(t_final - t_commit, 3) if t_final else None,
-               'stt_first_delta_after_end_s': round(t_first_delta - t_end, 3) if t_first_delta else None}
+        rec = {'engine': name, 'turn': ut['id'], 'user_ref': ut['text'], 'speech_s': round(t_end - t_speech, 2)}
+        if stt_kind == 'openai':
+            await asyncio.sleep(max(0.0, t_end + VAD_MS / 1000 - mono()))  # a 700 ms end-of-speech detector
+            t_commit = mono()
+            text, t_final, t_first_delta = await stt.commit_and_wait()
+            rec.update({'commit_after_end_s': round(t_commit - t_end, 3),
+                        'stt_final_after_commit_s': round(t_final - t_commit, 3) if t_final else None,
+                        'stt_final_after_end_s': round(t_final - t_end, 3) if t_final else None,
+                        'stt_first_delta_after_end_s': round(t_first_delta - t_end, 3) if t_first_delta else None})
+        else:
+            text, t_final, info = await stt.finish(n0, t_end)
+            rec.update(info)
+            if text and t_final is None:
+                t_final = mono()
+                rec['note'] = 'no final after the end of speech; the reply starts when the wait ended'
+        rec.update({'user_heard': text, 'user_cer': cer(ut['refs'], text) if text else None})
         if not text:
             rec['status'] = 'no-transcript'
             log.write(rec)
             continue
         try:
-            res = await loop.run_in_executor(None, cascade_turn, history, text, use_gemini)
+            res = await loop.run_in_executor(None, cascade_turn, history, text, vendors)
         except Exception as e:
             rec.update({'status': 'llm-failed', 'error': repr(e)[:500]})
             log.write(rec)
@@ -1119,36 +1382,40 @@ async def run_cascade(prompt, turns):
                     'llm_done_after_final_s': round(llm['t_done'] - t_final, 3),
                     'llm_usage': {'prompt': u.get('prompt_tokens'), 'cached': cached, 'out': u.get('completion_tokens')},
                     'llm_cost_usd': round(llm_cost, 6)})
-        play_s = 0.0
-        t_first_audio_any = None
-        for vendor in ('openai', 'gemini'):
+        play = {}
+        turn_cost = llm_cost
+        for vendor in vendors:
             v = res.get(vendor)
             if not v:
                 continue
             r1, r2 = v['first'], v['rest']
             pcm = bytes(r1['pcm']) + (bytes(r2['pcm']) if r2 and r2['sr'] == r1['sr'] else b'')
             secs = len(pcm) / 2 / r1['sr']
-            tts_cost = (secs / 60 * PRICES['gpt-4o-mini-tts']['per_min_est'] if vendor == 'openai'
-                        else gemini_tts_cost(r1) + (gemini_tts_cost(r2) if r2 else 0))
+            c = tts_cost(vendor, [r1, r2], secs)
             rec[vendor] = {'error': r1['error'] or (r2 or {}).get('error'),
                            'latency_s': round(r1['t_first'] - t_end, 3) if r1['t_first'] else None,
                            'tts_first_audio_after_request_s': round(r1['t_first'] - r1['t_req'], 3) if r1['t_first'] else None,
                            'tts_first_audio_after_sentence_s': round(r1['t_first'] - llm['t_first_sentence'], 3) if r1['t_first'] else None,
-                           'audio_s': round(secs, 2), 'tts_cost_usd': round(tts_cost, 6), 'chunks': r1.get('chunks'),
+                           'audio_s': round(secs, 2), 'tts_cost_usd': round(c, 6), 'chunks': r1.get('chunks'),
+                           'chars': r1['chars'] + (r2['chars'] if r2 else 0),
+                           'retries': (r1.get('retries') or []) + ((r2 or {}).get('retries') or []) or None,
                            'mode': r1.get('mode'), 'stream_error': r1.get('stream_error')}
+            rec['cost_usd_llm_plus_%s_tts' % vendor] = round(llm_cost + c, 6)
+            turn_cost += c
             if pcm:
                 write_wav(os.path.join(outdir, '%s-%s.wav' % (ut['id'], vendor)), pcm, r1['sr'])
-            if vendor == 'openai' and r1['t_first']:
-                t_first_audio_any, play_s = r1['t_first'], secs
-        rec['cost_usd_llm_plus_openai_tts'] = round(llm_cost + (rec.get('openai') or {}).get('tts_cost_usd', 0), 6)
-        rec['cost_usd_llm_plus_gemini_tts'] = round(llm_cost + (rec.get('gemini') or {}).get('tts_cost_usd', 0), 6)
-        total += rec['cost_usd_llm_plus_openai_tts'] + (rec.get('gemini') or {}).get('tts_cost_usd', 0)
+            if r1['t_first']:
+                play[vendor] = (r1['t_first'], secs)
+        total += turn_cost
         log.write(rec)
-        print('cascade %s stt=%s llm1=%s openai=%s gemini=%s' % (
-            ut['id'], rec['stt_final_after_commit_s'], rec.get('llm_first_sentence_after_final_s'),
-            (rec.get('openai') or {}).get('latency_s'), (rec.get('gemini') or {}).get('latency_s')), flush=True)
-        if t_first_audio_any:
-            await asyncio.sleep(max(0.0, t_first_audio_any + play_s - mono()) + GAP_AFTER_REPLY)
+        print('%s %s stt=%s llm1=%s %s' % (
+            name, ut['id'], rec.get('stt_final_after_end_s'), rec.get('llm_first_sentence_after_final_s'),
+            ' '.join('%s=%s' % (v, (rec.get(v) or {}).get('latency_s')) for v in vendors)), flush=True)
+        # the friend waits until the reply has played; Han Aim when it answered, otherwise the first voice that did
+        lead = next((v for v in ['elevenlabs'] + vendors if v in play), None)
+        if lead:
+            t_first_audio, play_s = play[lead]
+            await asyncio.sleep(max(0.0, t_first_audio + play_s - mono()) + GAP_AFTER_REPLY)
         else:
             await asyncio.sleep(GAP_AFTER_REPLY)
         if spent['usd'] + total > MAX_USD:
@@ -1156,24 +1423,34 @@ async def run_cascade(prompt, turns):
             break
     session_s = mono() - session_t0
     await mic.stop()
-    stt_minutes = mic.sent_bytes / 2 / 24000 / 60
-    await stt.ws.close()
+    if stt_kind == 'openai':
+        stt_minutes = mic.sent_bytes / 2 / 24000 / 60
+        await stt.ws.close()
+        stt_cost = stt_minutes * PRICES['gpt-live-transcribe']['per_min']
+        stt_desc = 'gpt-live-transcribe, client commit 700 ms after speech'
+        billed = {'stt_minutes_streamed': round(stt_minutes, 2)}
+    else:
+        await stt.close()
+        secs = (stt.termination or {}).get('session_duration_seconds') or (mono() - stt.t_open)
+        stt_cost = secs / 3600 * PRICES.get(AAI_MODEL, {'per_hour': 0.45})['per_hour']
+        stt_desc = '%s, its own end-of-turn detection (mode %s), language_codes ["ko"]' % (AAI_MODEL, AAI_MODE)
+        billed = {'stt_session_seconds': round(secs, 1), 'stt_termination': stt.termination,
+                  'stt_speech_started': stt.speech_started}
     recv.cancel()
-    stt_cost = stt_minutes * PRICES['gpt-live-transcribe']['per_min']
     spent['usd'] += total + stt_cost
-    log.summary({'engine': 'cascade', 'stt': 'gpt-live-transcribe, client commit 700 ms after speech',
-                 'stt_settings': variant,
-                 'llm': 'gpt-6-luna (reasoning_effort none)', 'tts': ['gpt-4o-mini-tts marin',
-                 'gemini-3.8-flash-lite-tts Sulafat' if use_gemini else 'gemini skipped: no gemini.key'],
-                 'connect_s': round(connect_s, 2), 'session_s': round(session_s, 1),
-                 'stt_minutes_streamed': round(stt_minutes, 2), 'stt_cost_usd': round(stt_cost, 6),
-                 'turn_cost_sum_usd': round(total, 6), 'stt_errors': stt.errors[:5], 'mic_errors': mic.errors[:3]})
+    summary = {'engine': name, 'stt': stt_desc, 'stt_settings': variant,
+               'llm': 'gpt-6-luna (reasoning_effort none)', 'tts': [tts_label(v) for v in vendors],
+               'tts_skipped': skipped, 'tts_timeout_s': TTS_TIMEOUT,
+               'connect_s': round(connect_s, 2), 'session_s': round(session_s, 1), 'stt_cost_usd': round(stt_cost, 6),
+               'turn_cost_sum_usd': round(total, 6), 'stt_errors': stt.errors[:5], 'mic_errors': mic.errors[:3]}
+    summary.update(billed)
+    log.summary(summary)
 
 
 # ------------------------------------------------------------------ check, all, pack
 
 def check():
-    names = ['openai.key', 'gemini2.key', 'gemini.key']
+    names = ['openai.key', 'gemini2.key', 'gemini.key', 'elevenlabs.key', 'assemblyai.key']
     out = {'time': now_iso(), 'python': sys.version.split()[0], 'platform': platform.platform(),
            'ffmpeg': bool(shutil.which('ffmpeg')), 'keys_present': {n: bool(key(n)) for n in names}, 'models': {}}
     if key('openai.key'):
@@ -1183,6 +1460,16 @@ def check():
     if key('gemini.key'):
         out['models']['gemini-3.8-flash-lite-tts (AI Studio)'] = http_get_status(
             '%s/v1beta/models/gemini-3.8-flash-lite-tts' % GEMINI_HTTP, {'x-goog-api-key': key('gemini.key')})
+    if key('elevenlabs.key'):
+        out['models']['elevenlabs voice Han Aim'] = http_get_status(
+            '%s/v1/voices/%s' % (ELEVEN_HTTP, HAN_AIM), {'xi-api-key': key('elevenlabs.key')})
+    if key('assemblyai.key'):
+        out['models']['assemblyai key (transcript list)'] = http_get_status(
+            '%s/v2/transcript?limit=1' % AAI_HTTP, {'Authorization': key('assemblyai.key')})
+    if key('gemini2.key') and GEMINI_TTS_VIA != 'aistudio':
+        r = tts_gemini('안녕, 나 마롱이야.')
+        out['models']['gemini-3.8-flash-lite-tts (Vertex global, one sentence)'] = (
+            'ok %.2f s audio' % (len(r['pcm']) / 2 / r['sr']) if r['pcm'] else (r['error'] or 'no audio')[:120])
     os.makedirs(RESULTS, exist_ok=True)
     with open(os.path.join(RESULTS, 'check.json'), 'w', encoding='utf-8') as f:
         json.dump(out, f, ensure_ascii=False, indent=1)
@@ -1217,6 +1504,8 @@ async def run_named(name, prompt, turns, budget_s):
             await asyncio.wait_for(run_s2s(name, prompt, turns), budget_s)
         elif name == 'cascade':
             await asyncio.wait_for(run_cascade(prompt, turns), budget_s)
+        elif name == 'cascade-aai':
+            await asyncio.wait_for(run_cascade(prompt, turns, 'assemblyai'), budget_s)
         status = 'ok'
     except Exception as e:
         status = 'failed'
@@ -1227,11 +1516,17 @@ async def run_named(name, prompt, turns, budget_s):
     return {'name': name, 'status': status, 'seconds': round(mono() - t0, 1)}
 
 
+RUNS = ('gemini', 'openai', 'live', 'cascade', 'cascade-aai')
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('what', choices=['check', 'all', 'gemini', 'openai', 'live', 'cascade', 'pack'])
+    ap.add_argument('what', help='check | pack | all | one or more of %s, comma-separated' % ','.join(RUNS))
     ap.add_argument('--turns', type=int, default=10)
     a = ap.parse_args()
+    names = ['gemini', 'openai', 'live', 'cascade'] if a.what == 'all' else a.what.split(',')
+    if a.what not in ('check', 'pack') and any(n not in RUNS for n in names):
+        ap.error('unknown run in %r' % a.what)
     os.makedirs(RESULTS, exist_ok=True)
     if a.what == 'check':
         check()
@@ -1241,9 +1536,8 @@ def main():
         return
     prompt, turns = load_inputs()
     turns = turns[:a.turns]
-    names = ['gemini', 'openai', 'live', 'cascade'] if a.what == 'all' else [a.what]
     meta = {'started': now_iso(), 'host_python': sys.version.split()[0], 'runs': [], 'max_usd': MAX_USD}
-    if a.what == 'all':
+    if a.what == 'all' or len(names) > 1:
         meta['check'] = check()
     for n in names:
         meta['runs'].append(asyncio.run(run_named(n, prompt, turns, 420)))
