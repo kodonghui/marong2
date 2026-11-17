@@ -1,6 +1,6 @@
 -- 019 Persona, proactive gate, favors and friend memory, stages 1 to 4
 -- (docs/04-functional-spec/persona.md SPEC-192~242, CTX-008~013). Design draft: the schema is not frozen.
--- Seventeen new tables (TBL-115~124, TBL-127~133) and one schema for graph checkpoints. Nothing existing changes.
+-- Eighteen new tables (TBL-115~124, TBL-127~134) and one schema for graph checkpoints. Nothing existing changes.
 -- Rules kept here:
 --   * Logs and result rows hold ids, labels and counts only. Text a friend wrote lives only where the spec needs it
 --     (card values, rules, the custom instruction, memory items, a relay or call text until it is sent) and is
@@ -484,6 +484,34 @@ CREATE TABLE IF NOT EXISTS marong.persona_ai_runs (
 );
 CREATE INDEX IF NOT EXISTS persona_ai_runs_sent_idx ON marong.persona_ai_runs (kind, sent_at);
 
+-- TBL-134 persona_tool_calls (CTX-008, CTX-010, CTX-011) ← SPEC-195, SPEC-198, SPEC-202, SPEC-229, SPEC-230, SPEC-237, SPEC-238, SPEC-241 | terms: TERM-059, TERM-065
+-- One row per call of a new model tool in text talk (card_update, memory_list, memory_forget, watch_add, watch_fire,
+-- relay_add, relay_reply), written when the tool returns. Arguments are not kept (only their length): the target id
+-- and the outcome are enough to audit the quote check (common rule 9). The model's tool call id makes a repeated
+-- call return the first result (common rule 11). Calls in a call stay in call.delegations, as today.
+CREATE TABLE IF NOT EXISTS marong.persona_tool_calls (
+  id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  friend_id   bigint NOT NULL REFERENCES marong.friends (id),
+  room_key    text NOT NULL REFERENCES marong.rooms (room_key),
+  message_id  bigint REFERENCES marong.messages (id),               -- the friend message of the turn
+  tool        text NOT NULL CHECK (tool IN ('card_update', 'memory_list', 'memory_forget', 'watch_add', 'watch_fire',
+                                            'relay_add', 'relay_reply')),
+  request_key text NOT NULL CHECK (char_length(request_key) BETWEEN 1 AND 100),  -- the model's tool call id
+  outcome     text NOT NULL CHECK (outcome IN ('ok', 'refused', 'invalid', 'none_matched', 'ask_which', 'error')),
+  why         text CHECK (why IN ('quote_missing', 'other_friend', 'not_speaker', 'group_room', 'limit',
+                                  'raise_needs_owner', 'unknown_receiver', 'not_known', 'share_off', 'too_long',
+                                  'closed', 'db_error')),
+  target_type text CHECK (target_type IN ('card', 'rule', 'memory_item', 'open_loop', 'forget', 'watch', 'relay')),
+  target_id   bigint,
+  arg_chars   smallint CHECK (arg_chars >= 0),                     -- length of the arguments, never their text
+  total_ms    integer CHECK (total_ms >= 0),
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (friend_id, request_key),
+  CHECK ((target_type IS NULL) = (target_id IS NULL)),
+  CHECK (outcome IN ('ok', 'none_matched', 'ask_which') OR why IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS persona_tool_calls_friend_idx ON marong.persona_tool_calls (friend_id, created_at DESC);
+
 -- Proposed exception to "no DELETE" (to settle before implementation): search vectors are rebuildable copies
 -- (schema.sql), and a forgotten message must stop turning up in search (3.20 step 3). The function deletes only the
 -- vectors of sources one forget marked, so the bot still cannot delete anything else. Without it, every search
@@ -512,7 +540,7 @@ GRANT SELECT, INSERT, UPDATE ON marong.friend_cards, marong.friend_rules, marong
   marong.preference_signals, marong.chat_cards, marong.safety_states, marong.proactive_turns, marong.proactive_drafts,
   marong.memory_items, marong.open_loops, marong.memory_jobs, marong.forget_marks, marong.watches, marong.relays
   TO marong;
-GRANT SELECT, INSERT ON marong.memory_forgets, marong.persona_ai_runs TO marong;
+GRANT SELECT, INSERT ON marong.memory_forgets, marong.persona_ai_runs, marong.persona_tool_calls TO marong;
 GRANT SELECT, UPDATE ON marong.call_texts TO marong;
 GRANT EXECUTE ON FUNCTION marong.forget_embeddings(bigint) TO marong;
 

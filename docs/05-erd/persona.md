@@ -8,7 +8,7 @@
 
 ## 1. 바뀌는 것
 
-새 표 17개와 그래프 체크포인트 스키마 하나예요. 지금 있는 표는 바꾸지 않아요.
+새 표 18개와 그래프 체크포인트 스키마 하나예요. 지금 있는 표는 바꾸지 않아요.
 
 | TBL | 표 | 하는 일 | 명세 |
 | --- | --- | --- | --- |
@@ -29,16 +29,17 @@
 | TBL-131 | `marong.relays` | 전할 말과 받은 친구의 답 하나(`reply_of`). 글은 보내거나 취소·만료되면 비워요 | SPEC-238, 241 |
 | TBL-132 | `marong.call_texts` | 통화 중 `send_text`로 보낼 글. 통화 서버가 넣고 봇이 D18 경로로 보낸 뒤 비워요 | SPEC-239 |
 | TBL-133 | `marong.persona_ai_runs` | AI-13\~19 호출마다 한 줄. 숫자와 이름만(일기 `diary_ai_runs`, 통화 `call.ai_runs`와 같은 칸) | SPEC-193, 199, 206, 212, 213, 218, 225, 230 |
+| TBL-134 | `marong.persona_tool_calls` | 글 대화의 새 모델 도구(`card_update`, `memory_list`, `memory_forget`, `watch_add`, `watch_fire`, `relay_add`, `relay_reply`) 호출마다 한 줄. 결과·거절 이유·대상 id·인자 길이만(인자 글은 없음). 같은 도구 호출 id면 처음 결과 | SPEC-195, 198, 202, 229, 230, 237, 238, 241 |
 
 - 그래프 체크포인트: 스키마 `talk_graph`(주인 봇 `marong`)에 `AsyncPostgresSaver.setup()`이 표를 만들어요. 우리가 정의하지 않는 표라 TBL 번호가 없어요(`call_graph`와 같음, [erd.md](erd.md)). 스레드는 `proactive:{친구}:{칸}`, `memory:{친구}`, `talk:{친구}`이고 상태는 id만이에요(명세 공통 13).
-- 번호: 이 작업에 나눈 TBL-115\~124(10개)가 모자라 TBL-127\~133을 더 썼어요. 2026-11-17 14시대에 모든 원격 브랜치에서 TBL-126보다 큰 번호를 쓴 곳이 없음을 확인했어요. [WBS README의 ID 범위](../10-wbs/README.md#id-범위)에 더해 달라고 인계 목록 스레드에 알려요.
+- 번호: 이 작업에 나눈 TBL-115\~124(10개)가 모자라 TBL-127\~134를 더 썼어요. 2026-11-17 14시대에 모든 원격 브랜치에서 TBL-126보다 큰 번호를 쓴 곳이 없음을 확인했어요. [WBS README의 ID 범위](../10-wbs/README.md#id-범위)에 더해 달라고 인계 목록 스레드에 알려요.
 - 마이그레이션 번호 019: 016·017은 일기(PR #25), 018은 선 전화(PR #27)가 써요.
 
 ### 권한
 
 | 계정 | 새 표에 하는 것 |
 | --- | --- |
-| 봇 `marong` | 읽기·더하기·고치기: 115\~124, 127, 128, 130, 131. 읽기·더하기만: 129, 133. 읽기·고치기만: 132(보낸 결과만 적음). `talk_graph` 주인. `forget_embeddings()` 실행 |
+| 봇 `marong` | 읽기·더하기·고치기: 115\~124, 127, 128, 130, 131. 읽기·더하기만: 129, 133, 134. 읽기·고치기만: 132(보낸 결과만 적음). `talk_graph` 주인. `forget_embeddings()` 실행 |
 | 통화 서버 `marong_call` | 읽기만: 115\~117(통화 지시문). 읽기·더하기·고치기: 120, 123, 124, 127, 128(위기 상태 같이 쓰기, 통화 정리 작업, 통화에서 잊기). 읽기·더하기만: 118, 129, 132, 133. 선톡 표(121·122)·카드(119)·전하기(131)·조건 연락(130)은 못 읽어요 |
 | 둘 다 | 지우기(DELETE) 없음. 예외 제안 하나: `marong.forget_embeddings(잊기 id)`가 그 잊기가 표시한 메시지·요약의 검색 벡터만 지워요(8절 질문 1) |
 
@@ -74,6 +75,7 @@ erDiagram
   MEMORY_ITEMS |o--o{ CHAT_CARDS : "민감 기억 허락"
   FRIENDS ||--o{ CALL_TEXTS : "통화에서 글"
   FRIENDS |o--o{ PERSONA_AI_RUNS : "AI 호출"
+  FRIENDS ||--o{ PERSONA_TOOL_CALLS : "도구 호출"
   FRIEND_CARDS {
     bigint friend_id PK
     text state "none, asking, draft, set"
@@ -219,6 +221,15 @@ erDiagram
     text outcome
     numeric cost_usd
   }
+  PERSONA_TOOL_CALLS {
+    bigint id PK
+    bigint friend_id FK
+    text tool
+    text request_key "친구와 함께 유니크"
+    text outcome "ok, refused, invalid, none_matched, ask_which, error"
+    text why "거절 이유"
+    bigint target_id
+  }
 ```
 
 ## 3. 규칙을 DB로 지키는 곳
@@ -248,13 +259,15 @@ erDiagram
 | 같은 조건 연락은 열린 것 하나, 끝나면 조건 글을 비움 | `watches_same_idx`와 CHECK. 친구당 3개는 코드가 셈 |
 | 전할 말은 자기에게 안 됨, 보낼 때까지만 글이 있음, 보냄은 메시지·답 기한과 함께 | `relays` CHECK. 받는 친구 하루 3개는 코드가 셈 |
 | 같은 통화의 같은 `send_text`는 한 번, 보냄은 메시지와 경로와 함께 | `call_texts` 유니크와 CHECK |
-| AI 호출 기록은 고치지 않음 | `persona_ai_runs`는 읽기·더하기만 |
+| AI 호출·도구 호출 기록은 고치지 않음 | `persona_ai_runs`·`persona_tool_calls`는 읽기·더하기만 |
+| 같은 도구 호출이 다시 오면 처음 결과 | `persona_tool_calls` 유니크(친구, 모델의 도구 호출 id). 거절이면 이유가 있음(CHECK) |
 
 ## 4. AI 호출 기록
 
 - AI-13\~19는 호출마다 `persona_ai_runs`에 한 줄(종류, 친구 id, 관련 id, 모델, 프롬프트 버전, 시간, 토큰, 비용, 결과, 대체)을 적어요. 프롬프트·답·카드 값·기억 연산·친구 글은 적지 않아요(공통 10).
 - 관련 id(`ref_id`): AI-15는 선톡 결과 id, AI-16은 없음(친구 id로 충분), AI-17은 선톡 결과 id나 비움, AI-19는 잊기 id, AI-13·14·18은 비움.
 - AI-11·12(0단계)는 지금처럼 `marong.messages.meta`에 남아요.
+- 도구 호출(05 단계 계약의 '도구 호출마다 이름·결과·대상 id, 인자는 개인 정보를 가림'): 글 대화의 새 도구는 `persona_tool_calls`에 이름, 결과, 거절 이유, 대상 종류와 id, 인자 길이를 적어요. 대화 id는 친구 id와 방 키, 그 턴의 친구 메시지 id예요. 인자 글은 남기지 않아요(가림 대신 길이만). 통화 안의 도구(`memory_forget`, `send_text`)는 지금처럼 `call.delegations`에 남아요. 지금 있는 도구(`ask_owner`, `set_name`, 일정 도구)는 이번에 바꾸지 않아요.
 - 오래된 줄 지우기는 봇 권한에 없어요(일기와 같음). 통화의 `call.ai_runs` 400일처럼 줄이고 싶으면 관리자 작업으로 해요.
 
 ## 5. LangGraph Store 대신 marong 표(작은 시험)
@@ -287,7 +300,7 @@ erDiagram
 ## 7. 확인한 것
 
 - 2026-11-17 시험용 Postgres 16.4(pgvector 포함, `pgserver` 패키지의 실행 파일)에서 `marong/schema.sql` → 통화 스키마 → 통화 002\~004 → 010 → 통화 005\~006 → 011\~015 → 018 → 019를 적용하고 019를 한 번 더 적용: 두 번째도 오류 없음. 016·017(일기, PR #25)은 이 브랜치에 없어 넣지 않았어요(019는 그 표를 쓰지 않음).
-- 제약·권한 시험 76개 통과(스크립트는 Git 밖 작업 폴더): 위 3절 규칙마다 거절(CheckViolation, UniqueViolation)과 통과, 봇의 표 지우기 거절, 봇의 검색 벡터 지우기 거절, `forget_embeddings`가 표시한 메시지 벡터 1개만 지우고 다른 1개는 남김, 통화 서버의 선톡 결과·전할 말 읽기 거절, 봇의 `call_texts` 더하기 거절, 봇이 `talk_graph`에 표를 만들 수 있고 통화 서버는 못 함.
+- 제약·권한 시험 81개 통과(스크립트는 Git 밖 작업 폴더): 위 3절 규칙마다 거절(CheckViolation, UniqueViolation)과 통과, 봇의 표 지우기 거절, 봇의 검색 벡터 지우기 거절, `forget_embeddings`가 표시한 메시지 벡터 1개만 지우고 다른 1개는 남김, 통화 서버의 선톡 결과·전할 말 읽기 거절, 봇의 `call_texts` 더하기 거절, 봇이 `talk_graph`에 표를 만들 수 있고 통화 서버는 못 함.
 - LangGraph Store 표 모양(5절).
 - 확인하지 못한 것: 실제 서버 DB에 적용, `AsyncPostgresSaver.setup()`이 `talk_graph`에 표를 만드는지(같은 방식의 `call_graph`는 돌고 있음), 데이터가 많을 때 색인 속도, 일기 016·017과 같이 적용.
 
