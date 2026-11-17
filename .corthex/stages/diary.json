@@ -12,8 +12,8 @@
     "02-prd": {
       "state": "in_progress",
       "checkpoints": [],
-      "next": "범위 동결: docs/02-prd/diary.md REQ-138~178과 확인 질문 1~3(REQ-139 일기 하루 04시, 일기 글 모델 회사, REQ-155 도장). 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
-      "updated": "2026-11-17T05:49:16+00:00"
+      "next": "확인 질문 3개(REQ-139 04:00, 일기 글 Anthropic, REQ-155 도장 날짜만)는 D63(2026-11-17 15:15 KST)으로 추천안대로 정해짐. 체크포인트는 NEXUS에서 요청",
+      "updated": "2026-11-17T07:45:55+00:00"
     },
     "03-user-flow": {
       "state": "in_progress",
@@ -24,8 +24,8 @@
     "04-functional-spec": {
       "state": "in_progress",
       "checkpoints": [],
-      "next": "명세 동결: SPEC-150~168·AI-6~8. 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
-      "updated": "2026-11-17T05:49:16+00:00"
+      "next": "확인 질문 3개(REQ-139 04:00, 일기 글 Anthropic, REQ-155 도장 날짜만)는 D63(2026-11-17 15:15 KST)으로 추천안대로 정해짐. 체크포인트는 NEXUS에서 요청",
+      "updated": "2026-11-17T07:45:55+00:00"
     },
     "05-erd": {
       "state": "in_progress",
