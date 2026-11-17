@@ -3,6 +3,14 @@
   "title": "마롱이",
   "team": false,
   "language": "ko",
+  "parts": [
+    "call-first",
+    "app-update",
+    "diary",
+    "call-cost",
+    "persona",
+    "pet"
+  ],
   "records": {
     "kind": "notion",
     "location": "https://app.notion.com/p/416bf16cc3ec81549d92ffa38b4aa834"
@@ -12,7 +20,7 @@
       "human": "github",
       "source": "docs/01-domain/",
       "truth": "source",
-      "note": "2026-11-12 통화 기능을 기존 제품에 더하는 일이라 이벤트 스토밍 보드 없이 한 번에 초안으로 씀. 사람 보기는 Miro 보드 대신 GitHub PR(Claude 선택, 동희님 기본 규칙 '제품 명세는 제품 Git, Notion은 의도·결정과 링크'에 맞춤). 2026-11-16 마롱이의 일기(CTX-007)와 Gemini 길 통화 비용(CTX-002·006 변경)을 같은 방식으로 더함: 한 번에 초안, 바뀌는 맥락만 새로 그림, 체크포인트는 9단계 뒤 한 번(사용자님이 매번 묻지 말라고 해서 추천안으로 이어 가고 확인 질문은 한 번에 모아 드림)."
+      "note": "2026-11-12 통화 기능을 기존 제품에 더하는 일이라 이벤트 스토밍 보드 없이 한 번에 초안으로 씀. 사람 보기는 Miro 보드 대신 GitHub PR(Claude 선택, 동희님 기본 규칙 '제품 명세는 제품 Git, Notion은 의도·결정과 링크'에 맞춤). 2026-11-16 마롱이의 일기(CTX-007)와 Gemini 길 통화 비용(CTX-002·006 변경)을 같은 방식으로 더함: 한 번에 초안, 바뀌는 맥락만 새로 그림, 체크포인트는 9단계 뒤 한 번(사용자님이 매번 묻지 말라고 해서 추천안으로 이어 가고 확인 질문은 한 번에 모아 드림). 2026-11-17 마롱이 설계를 한 스레드로 모으면서(동희님 14:40 '한 군데서 설계 시켜') 기능마다 parts로 나눔: call-first, app-update, diary, call-cost, persona, pet. 단계 기록은 .corthex/stages/<part>.json이고, 단계 원본 파일 이름이 part 이름으로 시작하면 그 part에 붙음(domain.md는 통화·일기·통화 비용을 함께 담아 프로젝트 전체 그림)."
     },
     "02-prd": {
       "human": "github",
@@ -65,6 +73,18 @@
       "source": "design/base.tokens.json",
       "truth": "source",
       "note": "같은 캔버스의 '목업 후보' 페이지. 통화 홈·통화 중 화면만 두 안(A 밤하늘, B 군밤 크림). 방향은 현경님이 첫 시험 전에 고르고, 고른 쪽만 토큰에 남김(2026-11-12). 마롱이의 일기 화면의 목업 후보는 새 디자인 캔버스 '마롱이의 일기 화면 설계'(https://claude.ai/artifact/CC154gunovJS3tqa8XkpZ9)에 그림(2026-11-16)."
+    },
+    "10-wbs": {
+      "human": "github",
+      "source": "docs/10-wbs/",
+      "truth": "source",
+      "note": "2026-11-17 작업 패키지마다 docs/10-wbs/<패키지>.md(맨 위 'GPT 인계' 절, D60)와 README.md 인계 목록. 기본 사람 보기는 GitHub Projects 보드지만 02~04와 같은 이유로 PR에서 봄(Claude 선택, 동희님이 바꿀 수 있음)."
+    },
+    "12-qa": {
+      "human": "github",
+      "source": "docs/12-qa/",
+      "truth": "source",
+      "note": "2026-11-17 작업 패키지마다 docs/12-qa/<패키지>.md 시험 계획(TC). 시험을 돌리는 쪽은 GPT, 결과는 PR 설명과 이 파일의 Last result(Claude 선택, 동희님이 바꿀 수 있음)."
     },
     "13-presentation": {
       "skip": true,
