@@ -1532,6 +1532,7 @@ paths:
                     id: 00000000-0000-4000-8000-000000000003
                     name: 콩이
                     species: dog
+                    template: dog_small
                     mode: living
                     status: active
                     intro:
@@ -1652,6 +1653,7 @@ paths:
                     id: 00000000-0000-4000-8000-000000000003
                     name: 콩이
                     species: dog
+                    template: dog_small
                     mode: living
                     status: active
                     intro:
@@ -1737,6 +1739,7 @@ paths:
                     id: 00000000-0000-4000-8000-000000000003
                     name: 콩순이
                     species: dog
+                    template: dog_small
                     mode: living
                     status: active
                     intro:
@@ -2077,6 +2080,7 @@ paths:
                     id: 00000000-0000-4000-8000-000000000003
                     name: 콩이
                     species: dog
+                    template: dog_small
                     mode: memorial
                     status: active
                     intro:
@@ -2254,6 +2258,7 @@ paths:
                     id: 00000000-0000-4000-8000-000000000003
                     name: 콩이
                     species: dog
+                    template: dog_small
                     mode: memorial
                     status: archived
                     intro:
@@ -2335,6 +2340,7 @@ paths:
                     id: 00000000-0000-4000-8000-000000000003
                     name: 콩이
                     species: dog
+                    template: dog_small
                     mode: memorial
                     status: active
                     intro:
@@ -2926,6 +2932,7 @@ paths:
                     id: 00000000-0000-4000-8000-000000000003
                     name: 콩이
                     species: dog
+                    template: dog_small
                     mode: living
                     status: active
                     intro:
@@ -3042,6 +3049,7 @@ paths:
                     id: 00000000-0000-4000-8000-000000000003
                     name: 콩이
                     species: dog
+                    template: dog_small
                     mode: living
                     status: active
                     intro:
@@ -3197,6 +3205,8 @@ paths:
                       source: order
                       wornBy:
                       - 00000000-0000-4000-8000-000000000003
+                      contents: []
+                      withdrawableUntil: null
         '400':
           $ref: '#/components/responses/InvalidInput'
         '401':
@@ -4607,6 +4617,7 @@ components:
       - id
       - name
       - species
+      - template
       - mode
       - status
       - intro
@@ -4631,6 +4642,15 @@ components:
           enum:
           - dog
           - cat
+        template:
+          type: string
+          enum:
+          - dog_small
+          - dog_large
+          - dog_long
+          - cat
+          - cat_round
+          description: 몸 템플릿. 화면이 아이템 레이어(API-196 `template`)를 고를 때 써요
         mode:
           type: string
           enum:
@@ -4914,6 +4934,8 @@ components:
       - slot
       - source
       - wornBy
+      - contents
+      - withdrawableUntil
       properties:
         itemId:
           type: string
@@ -4949,6 +4971,19 @@ components:
           items:
             type: string
             format: uuid
+        contents:
+          type: array
+          maxItems: 40
+          items:
+            type: string
+            pattern: ^[a-z0-9_]{1,40}$
+          description: 스티커 팩의 스티커 이름들, 테마 패키지에 든 아이템 이름들. 그림 파일은 `/static/items/<itemId>/`(계약 밖)
+        withdrawableUntil:
+          oneOf:
+          - type: string
+            format: date-time
+            description: 산 것이고 아직 쓰지 않아 청약철회할 수 있으면 그 끝 시각. 화면은 처음 쓰기 전에 철회할 수 없게 된다고 알려요(명세 3.8)
+          - type: 'null'
     Inventory:
       type: object
       additionalProperties: false

@@ -86,6 +86,12 @@
       "checkpoints": [],
       "next": "08 화면 상태(docs/08-screens/pet.md)·09 목업 뒤 01·02 질문, 스키마·계약 동결과 함께 내비게이션 구조를 한 번에 여쭘",
       "updated": "2026-11-17T06:52:11+00:00"
+    },
+    "08-screen-states": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "SCR-140~162 상태 정의 초안(docs/08-screens/pet.md) 뒤 회색 와이어프레임, 이어서 09 목업(공통 캔버스 '반려동물' 줄)",
+      "updated": "2026-11-17T07:08:43+00:00"
     }
   }
 }
