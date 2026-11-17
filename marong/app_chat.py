@@ -61,6 +61,7 @@ PROBLEMS = {
     "too_many_requests": (429, "고치기와 다시 그리기를 합쳐 1분에 5번 넘게 보냄"),
     "drawing_budget": (429, "이번 달 그림 월 예산을 다 씀"),
     "fix_failed": (503, "고치기 모델이 실패함"),
+    "stale_test": (409, "화면이 연 시험과 지금 시험 묶음이 다름"),
     "db_unavailable": (503, "DB에 닿지 않음"),
     "internal": (500, "예상하지 못한 서버 오류"),
 }
@@ -74,9 +75,10 @@ HEADERS = {
 
 
 class Problem(Exception):
-    def __init__(self, code: str, errors: list | None = None, headers: dict | None = None):
+    def __init__(self, code: str, errors: list | None = None, headers: dict | None = None, *, title=None):
         super().__init__(code)
         self.code, self.errors, self.headers = code, errors or [], headers or {}
+        self.title = title
 
 
 def bad(*errors) -> Problem:
@@ -118,7 +120,7 @@ class AppChat:
 
     def _problem(self, p: Problem, trace: str) -> web.Response:
         status, title = PROBLEMS[p.code]
-        body = {"type": f"{self.origin}/problems/{p.code.replace('_', '-')}", "title": title, "status": status,
+        body = {"type": f"{self.origin}/problems/{p.code.replace('_', '-')}", "title": p.title or title, "status": status,
                 "code": p.code, "traceId": trace}
         if p.errors:
             body["errors"] = p.errors
@@ -454,9 +456,11 @@ class AppChat:
 
     def web_app(self) -> web.Application:
         from .app_diary import AppDiary
+        from .app_listen import AppListen
 
         app = web.Application(client_max_size=BODY_MAX, middlewares=[self.guard])
         AppDiary(self).register(app)
+        AppListen(self).register(app)
         app.router.add_get("/chat/healthz", self.health)
         app.router.add_get("/chat", self.home)
         app.router.add_get("/chat/", self.page)

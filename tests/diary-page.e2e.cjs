@@ -9,6 +9,7 @@ const { chromium } = require('playwright');
 const { startChatSite, ME } = require('../apps/android/test/support/chat-site.cjs');
 
 const SITE = path.join(__dirname, '..', 'marong', 'app_chat_static', 'diary');
+const LISTEN_SITE = path.join(SITE, '..', 'listen');
 const FACES = path.join(__dirname, '..', 'marong', 'call', 'static', 'face', 'v1');
 const API = '/chat/diary/api';
 const DATE = '2026-11-17';
@@ -34,6 +35,12 @@ function server() {
     if (name === '/chat/diary/' || /^\/chat\/diary\/\d{4}-\d{2}-\d{2}$/.test(name)) {
       file = path.join(SITE, 'index.html');
       type = 'text/html; charset=utf-8';
+    } else if (name === '/chat/listen/') {
+      file = path.join(LISTEN_SITE, 'index.html');
+      type = 'text/html; charset=utf-8';
+    } else if (/^\/chat\/listen\/listen\.(js|css)$/.test(name)) {
+      file = path.join(LISTEN_SITE, path.basename(name));
+      type = name.endsWith('.css') ? 'text/css' : 'text/javascript';
     } else if (name.startsWith('/chat/diary/') && FILETYPES[path.basename(name)]) {
       const asset = path.basename(name);
       file = path.join(SITE, asset);
@@ -255,5 +262,139 @@ describe('TC-172 diary page in Chromium with local fixtures', { timeout: 20000 }
     state = { enabled: true, date: null };
     await Promise.all([loading(), page.reload()]);
     await link.waitFor();
+  });
+});
+
+function wave() {
+  const size = 8_000 * 6 * 2;
+  const bytes = Buffer.alloc(44 + size);
+  bytes.write('RIFF', 0); bytes.writeUInt32LE(36 + size, 4);
+  bytes.write('WAVEfmt ', 8); bytes.writeUInt32LE(16, 16);
+  bytes.writeUInt16LE(1, 20); bytes.writeUInt16LE(1, 22);
+  bytes.writeUInt32LE(8000, 24); bytes.writeUInt32LE(16000, 28);
+  bytes.writeUInt16LE(2, 32); bytes.writeUInt16LE(16, 34);
+  bytes.write('data', 36); bytes.writeUInt32LE(size, 40);
+  return bytes;
+}
+
+describe('TC-178 listening page with a local test', { timeout: 15000 }, () => {
+  let browser, host, url;
+  const listeningApi = '/chat/listen/api/';
+  before(async () => {
+    host = await server();
+    url = `http://127.0.0.1:${host.address().port}`;
+    browser = await chromium.launch();
+  });
+  after(async () => {
+    await browser?.close();
+    if (host) await new Promise(resolve => host.close(resolve));
+  });
+
+  function seededTest(scored = false) {
+    return { testId: 'fixture-listen', sentences: Array.from({ length: 10 }, (_, i) => ({
+      no: i + 1, text: `${i + 1}번째 시험 문장`,
+      clips: Array.from({ length: 3 }, (_, j) => ({ id: `sample${i}x${j}`, score: scored ? 4 : null, marongLike: false })),
+    })) };
+  }
+
+  async function openVoice(t, state, width = 360) {
+    const context = await browser.newContext({ viewport: { width, height: 800 }, isMobile: true,
+      hasTouch: true, deviceScaleFactor: 1, locale: 'ko-KR' });
+    t.after(() => context.close());
+    const page = await context.newPage();
+    const requests = [];
+    const audio = wave();
+    await page.clock.install({ time: new Date('2026-11-17T01:00:00Z') });
+    await page.route(`**${listeningApi}**`, async route => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname.slice(listeningApi.length);
+      if (path === 'test') {
+        state.reads = (state.reads || 0) + 1;
+        if (state.gate) await state.gate;
+        if (state.readError) return route.fulfill({ status: state.readError[0], json: state.readError[1] });
+        if (state.unauthenticated && state.reads === 1) {
+          return route.fulfill({ status: 401, json: { code: 'unauthenticated' } });
+        }
+        return route.fulfill({ json: { test: state.test } });
+      }
+      if (path.startsWith('clips/')) {
+        if (state.noAudio) return route.fulfill({ status: 404 });
+        return route.fulfill({ status: 200, body: audio, contentType: 'audio/wav' });
+      }
+      const { testId, score, marongLike } = request.postDataJSON();
+      requests.push({ path, testId, score, marongLike });
+      if (state.answerError) return route.fulfill({ status: state.answerError[0], json: state.answerError[1] });
+      if (testId !== state.test.testId) return route.fulfill({ status: 409, json: { code: 'stale_test' } });
+      const id = path.slice('answers/'.length);
+      const sentence = state.test.sentences.find(item => item.clips.some(clip => clip.id === id));
+      if (marongLike) sentence.clips.forEach(clip => { clip.marongLike = false; });
+      Object.assign(sentence.clips.find(clip => clip.id === id), { score, marongLike });
+      return route.fulfill({ json: sentence });
+    });
+    await page.goto(`${url}/chat/listen/`);
+    return { page, requests };
+  }
+
+  it('plays audio, scores and moves a pick, then refreshes after a stale test', async t => {
+    const state = { test: seededTest() };
+    const { page, requests } = await openVoice(t, state);
+    const first = page.locator('.sample').nth(0);
+    const second = page.locator('.sample').nth(1);
+    await page.getByText('1번째 시험 문장').waitFor();
+    await first.getByRole('button', { name: '소리 듣기' }).click();
+    await first.getByRole('button', { name: '소리 멈추기' }).waitFor();
+    assert.ok(await first.locator('progress').isVisible());
+    await second.getByRole('button', { name: '소리 듣기' }).click();
+    await second.getByRole('button', { name: '소리 멈추기' }).waitFor();
+    assert.equal(await first.getByRole('button', { name: '소리 멈추기' }).count(), 0);
+    for (const score of [3, 5]) {
+      const rating = first.getByRole('button', { name: `자연스러움 ${score}점` });
+      await rating.click();
+      await first.locator(`[aria-label="자연스러움 ${score}점"][aria-pressed="true"]`).waitFor();
+    }
+    await first.getByRole('button', { name: '마롱이 같다' }).click();
+    await first.locator('.choice[aria-pressed="true"]').waitFor();
+    await second.getByRole('button', { name: '마롱이 같다' }).click();
+    await second.locator('.choice[aria-pressed="true"]').waitFor();
+    assert.equal(await first.locator('.choice').getAttribute('aria-pressed'), 'false');
+    assert.deepEqual(requests.slice(0, 2).map(answer => answer.score), [3, 5]);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 360);
+    assert.ok(await first.locator('.scores > button').first().evaluate(el => el.clientHeight >= 44));
+    await page.getByRole('button', { name: '다음 문장 ›' }).click();
+    await page.getByText('2번째 시험 문장').waitFor();
+    state.test = { ...seededTest(true), testId: 'fixture-replacement' };
+    await first.getByRole('button', { name: '자연스러움 1점' }).click();
+    await page.getByText('시험이 바뀌었어. 새로 보여 줄게').waitFor();
+    await page.getByText('다 들었어! 고마워. 바꾸고 싶으면 언제든 다시 골라도 돼').waitFor();
+    await page.getByText('1번째 시험 문장').waitFor();
+    assert.equal(await page.getByText('fixture-replacement').count(), 0);
+  });
+
+  it('shows the loading screen, retries 503, and lets a missing audio file be retried', async t => {
+    let release;
+    const state = { test: seededTest(), readError: [503, { code: 'db_unavailable' }], noAudio: true,
+      gate: new Promise(resolve => { release = resolve; }) };
+    const { page } = await openVoice(t, state, 430);
+    assert.equal(await page.locator('.skeleton').count(), 5);
+    release();
+    await page.getByText('잠깐 문제가 생겼어. 조금 있다가 다시 해 줘').waitFor();
+    state.readError = null;
+    await page.clock.runFor(5200);
+    const first = page.locator('.sample').first();
+    await first.getByRole('button', { name: '소리 듣기' }).click();
+    await first.getByText('그 소리를 찾지 못했어').waitFor();
+    state.test = null;
+    await first.getByRole('button', { name: '시험 다시 불러오기' }).click();
+    await page.getByText('지금은 들을 시험이 없어').waitFor();
+  });
+
+  it('reloads on 401 and renders denied access and errors without leaking an implementation stack', async t => {
+    const { page } = await openVoice(t, { test: seededTest(), unauthenticated: true });
+    await page.getByText('1번째 시험 문장').waitFor();
+    const denied = await openVoice(t, { readError: [403, { code: 'not_allowed' }] });
+    await denied.page.getByText('이 계정으로는 시험을 볼 수 없어').waitFor();
+    const bad = await openVoice(t, { readError: [500, { code: 'internal', traceId: '123abc456def' }] });
+    await bad.page.getByText('잠깐 문제가 생겼어. 다시 해 볼래?').waitFor();
+    await bad.page.getByText('123abc456def').waitFor();
   });
 });
