@@ -93,6 +93,7 @@ async def main():
         "BOT_TOKEN": "t", "ANTHROPIC_API_KEY": "k", "DATABASE_URL": db.app_url,
         "PROMPT_PATH": str(ROOT / "prompt.md"), "KNOWLEDGE_DIR": str(tmp / "knowledge"),
         "RECENT_TURNS": "2", "SUMMARY_TURNS": "2", "EMBED_MODEL": "fake-bigram",
+        "REPLY_TURNS": "2", "REPLY_MAX_ROWS": "4",
     })
     from marong.agent import (CALLED_TEXT, EMPTY_NUDGE, EMPTY_TEXT, FALLBACK_TEXT, LATE_TEXT, REFUSAL_TEXT, Agent,
                               Incoming, clean_name)
@@ -330,6 +331,89 @@ async def main():
     await worker.step()
     ok(db.admin("SELECT count(*) FROM marong.summaries WHERE room_key = 'r5' AND content = ''")[0][0] == 2,
        "형식 오류 2번째 → 빈 요약으로 넘김")
+
+    # ── 기억 넉넉하게(2026-11-16, Notion RAG 연구: 필받음 6장 최근 15턴, M10 낱말+임베딩+RRF·짧은 되물음,
+    #    R04 최소 관련성·임베딩 1.5초 넘으면 낱말만, LangGraph 실측 원문 문답 쌍) ──
+    from marong.store import keyword_terms, pick_recent
+    ok(keyword_terms("뭔코트? 울 코트 Musinsa 2만원 ㅋㅋ") == ["뭔코", "코트", "musinsa", "만원"],
+       "낱말 조각: 한글은 두 글자씩, 영문은 낱말, 한 글자·자모는 뺌")
+    ok(replace(s, reply_turns=0).problems() and replace(s, reply_max_rows=1).problems(), "REPLY_TURNS·REPLY_MAX_ROWS 검사")
+
+    def turns(spec):  # u 친구, a 마롱이 답, p 선톡. id 는 1부터
+        return [{"id": i + 1, "role": "user" if c == "u" else "assistant", "proactive": c == "p"}
+                for i, c in enumerate(spec)]
+
+    def ids(rows):
+        return [r["id"] for r in rows]
+
+    convo = turns("uapuappppu")  # 3번 선톡엔 친구가 답함, 6~9번 선톡 넷 중 6번은 답 없이 묻힘
+    ok(ids(pick_recent(convo, 3, 60)) == [1, 2, 3, 4, 5, 7, 8, 9, 10], "답 없는 선톡은 최근 3개만, 답한 선톡은 남김")
+    ok(ids(pick_recent(convo, 2, 60)) == [4, 5, 7, 8, 9, 10], "친구 말 turns 번까지만 거슬러 올라감")
+    ok(ids(pick_recent(convo, 3, 4)) == [7, 8, 9, 10], "그래도 한도를 넘으면 오래된 줄부터 뺌")
+    ok(ids(pick_recent(convo, 1, 2, since_id=4)) == [4, 5, 6, 7, 8, 9, 10], "묶어 답할 첫 말부터는 한도와 상관없이 다 넣음")
+    ok(ids(pick_recent(turns("ua" + "p" * 40), 15, 60)) == [1, 2, 40, 41, 42],
+       "선톡 40개가 몰려도 친구와 나눈 말이 남음(11/16 최근 20줄이 다 선톡이던 일)")
+
+    # 짧은 되물음('뭔코트?')은 앞 말을 붙여 낱말로도 찾고, 찾은 친구 말은 마롱이 답과 한 쌍으로 넣음.
+    # 임베딩이 1.5초를 넘기면 그 답에서는 낱말 검색만 씀
+    class SlowEmbeddings(FakeEmbeddings):
+        async def query(self, s):
+            await asyncio.sleep(3)
+            return self.vec(s)
+
+    await store.touch("r11", True, "u11")
+
+    async def put(role, t, room="r11", user="u11", meta=None):
+        await store.add_message(room, role, t, user_key=user if role == "user" else None,
+                                meta=meta or {"delivered": True})
+
+    await put("user", "마롱아 안녕")
+    await put("assistant", "안녕! 반가워")
+    await put("user", "나 요즘 울 코트 하나 사고 싶어")
+    await put("assistant", "울 코트 사고 싶으면 베이지색이 예쁘던데 같이 골라 볼까?")
+    for _ in range(60):
+        await put("user", "ㅋㅋㅋ")
+        await put("assistant", "ㅎㅎ")
+    await put("user", "오늘 쇼핑몰 갔다 왔어")
+    await put("assistant", "오 그때 사고 싶다던 거 샀어?")
+    t0 = asyncio.get_running_loop().time()
+    await Agent(s, store, SlowEmbeddings(), llm).handle(Incoming("r11", "u11", "마롱아 뭔코트?"), send)
+    sit = situation(llm.bodies[-1])
+    recalled_part = sit.split("# 지금 말과 비슷한 예전 대화")[1] if "# 지금 말과 비슷한 예전 대화" in sit else ""
+    ok("울 코트 하나 사고 싶어" in recalled_part and "\n  마롱이: 울 코트 사고 싶으면" in recalled_part
+       and recalled_part.count("베이지색") == 1,
+       f"짧은 되물음으로 예전 친구 말과 마롱이 답을 한 쌍으로 찾음(둘 다 찾혀도 한 번만): {recalled_part!r}")
+    ok("마롱아 안녕" not in recalled_part, "'마롱아'처럼 부르는 말로는 예전 대화를 찾지 않음")
+    mem = memory_of("r11")
+    coat, beige = (db.admin("SELECT id FROM marong.messages WHERE room_key = 'r11' AND content = %s", (t,))[0][0]
+                   for t in ("나 요즘 울 코트 하나 사고 싶어", "울 코트 사고 싶으면 베이지색이 예쁘던데 같이 골라 볼까?"))
+    hit = next((h for h in mem["recalled"] if h["id"] == coat), None)
+    ok(mem["recall"] == "slow" and hit and hit["similarity"] is None and hit["keyword"] > 0 and hit["pair"] == beige
+       and asyncio.get_running_loop().time() - t0 < 3, f"임베딩이 늦으면 낱말 검색만(R04): {mem}")
+
+    # 선톡 표시(meta.proactive)를 DB 에서 읽어, 답 없는 선톡은 최근 3개만 넣고 앞의 친구 말은 남김
+    roomy = Agent(replace(s, reply_turns=15, reply_max_rows=60), store, emb, llm)
+    await store.touch("r12", True, "u12")
+    await put("user", "내일 영어 시험이라 떨려", room="r12", user="u12")
+    await put("assistant", "잘 볼 거야! 끝나고 뭐 먹을래?", room="r12")
+    for i in range(6):
+        await put("assistant", f"선톡 {i}번", room="r12", meta={"delivered": True, "proactive": True})
+    await roomy.handle(Incoming("r12", "u12", "아 미안 이제 봤어"), send)
+    convo = json.dumps(llm.bodies[-1]["messages"], ensure_ascii=False)
+    ok("영어 시험" in convo and all(f"선톡 {i}번" in convo for i in (3, 4, 5))
+       and not any(f"선톡 {i}번" in convo for i in (0, 1, 2)), f"답 없는 선톡은 최근 3개만: {convo}")
+
+    # 요약할 때 선톡은 '마롱이(먼저 보낸 말)'로 따로 보여 줘서 답 없는 선톡을 한 줄로 줄이게 함
+    llm.bodies.clear()
+    while await worker.step():
+        pass
+    told = [b["messages"][0]["content"] for b in llm.bodies
+            if "format" in b.get("output_config", {}) and "선톡 0번" in b["messages"][0]["content"]]
+    ok(told and "마롱이(먼저 보낸 말): 선톡 0번" in told[0], f"요약에서 선톡 구분: {told}")
+    from marong.memory import NOTE_RULE, SUMMARY_SYSTEM
+    ok("먼저 보낸 말" in SUMMARY_SYSTEM and "답 없음" in SUMMARY_SYSTEM and "약속" in SUMMARY_SYSTEM,
+       "요약 지시문: 남길 것(약속·부탁 등)을 적고, 답 없는 선톡은 한 줄로")
+    ok("예전엔" in NOTE_RULE and "들은 날" in NOTE_RULE, "메모: 바뀐 취향은 지우지 말고 고쳐 적고 들은 날을 붙임")
 
     # ── 기록 보기(tools/admin.py, 읽기만) ──
     def admin(*args):

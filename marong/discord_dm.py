@@ -32,6 +32,7 @@ from .schedules import (LATE_LIMIT, SCHEDULE_TOOL_NAMES, occurrence, parse_when,
                         run_tool as run_schedule_tool, schedule_guide, schedule_lines, schedule_tools)
 from .shopping import guide as shop_guide
 from .style import tidy
+from .topics import ANSWER_WINDOW, HELLO_ANSWER, PREF_FAILED, REPLIES as TOPIC_REPLIES, phrase as topic_phrase
 from .web_search import GUIDE as WEB_GUIDE, OFF_GUIDE as WEB_OFF_GUIDE, sources_line, sources_of
 
 log = logging.getLogger("marong.discord")
@@ -97,7 +98,8 @@ CHANNEL_SYSTEM = ("지금은 디스코드 서버 채널에서 친구들과 같�
                   "기록을 찾아 주겠다고 말하지 마. 친구처럼 바로 대화하고, 사용법을 먼저 설명하지 마.")
 DM_SYSTEM = ("지금은 디스코드에서 마롱이와 하는 개인 DM이야. 이름을 바꾸거나 다른 친구의 기록을 찾아 주겠다고 말하지 마. "
              "친구처럼 바로 대화하고, 사용법이나 선톡 설정을 먼저 설명하지 마. "
-             "먼저 말 걸 때에는 잠금 화면에 보여도 괜찮은 가벼운 이야기만 하고, 개인적인 내용은 인용하지 마.")
+             "먼저 말 거는 말(선톡)은 잠금 화면 알림에 그대로 보여. 친구가 전에 말한 시험·약속·하던 일을 이어 가는 건 "
+             "좋지만, 몸·연애·성·돈·비밀처럼 남이 보면 곤란한 얘기는 선톡에서 먼저 꺼내지 마.")
 
 
 @dataclass
@@ -110,6 +112,7 @@ class DiscordIncoming(Incoming):
     schedule_total: int = 0
     actions: list = field(default_factory=list)  # schedule tool results, kept in the reply meta
     google_command: str | None = None     # connect | disconnect, from the exact phrases only
+    topic_command: tuple | None = None    # (hello_call | pictures, on) from the exact phrases only (topics.PHRASES)
     google_link: dict | None = None       # google_links state when answering (None: never linked)
     google_events: list | None = None     # upcoming Google events shown to the model (None: not read)
     google_more: bool = False
@@ -133,6 +136,11 @@ def proactive_preference(text: str) -> bool | None:
     if phrase in OFF:
         return False
     return None
+
+
+def picture_file(picture) -> discord.File:
+    """A picture topic's picture for a Discord message (SPEC-273): marong-<name>.webp, its alt text as description."""
+    return discord.File(picture.path, filename=f"marong-{picture.name}.webp", description=picture.alt)
 
 
 def chunks(text: str):
@@ -175,10 +183,15 @@ async def react(message, emoji: str) -> bool:
     return True
 
 
-async def send_text(channel, text: str, reference=None) -> bool:
-    """reference (channels): the first part goes as a reply to the friend's message, without pinging anyone."""
+async def send_text(channel, text: str, reference=None, file=None) -> bool:
+    """reference (channels): the first part goes as a reply to the friend's message, without pinging anyone.
+    file (a discord.File, a picture topic's picture): attached to the first part."""
     try:
         for chunk in chunks(text):
+            if file is not None:
+                await channel.send(chunk, allowed_mentions=NO_MENTIONS, suppress_embeds=True, file=file)
+                file = None
+                continue
             if reference is not None:
                 try:
                     await channel.send(chunk, allowed_mentions=NO_MENTIONS, suppress_embeds=True, reference=reference,
@@ -200,6 +213,7 @@ async def send_text(channel, text: str, reference=None) -> bool:
 class DiscordAgent(Agent):
     caption_prompt = CAPTION_PROMPT.replace("카카오톡", "디스코드 DM")
     ring = False  # MARONG_APP_RING=1: schedule_add takes call promises (docs/app-ring.md SPEC-128)
+    topics = False  # MARONG_TOPICS=1: the phrases that turn hello calls and pictures on or off (SPEC-277)
 
     def __init__(self, settings, store, embeddings, llm, on_saved=None, *, first_replies=None, google=None, shop=None,
                  web=None, clock=time.monotonic):
@@ -504,6 +518,8 @@ class DiscordAgent(Agent):
         """A DM reply that needs no model (opt-out/in, Google link, the opening, the guide), or None."""
         if msg.proactive_preference is False:
             return "응, 먼저 연락하는 건 멈출게.", {}
+        if msg.topic_command and self.topics and msg.friend_id is not None:
+            return await self._topic_command(msg)
         if msg.google_command:
             return await self._google_command(msg)
         opening = self.first_replies.get(str((person or {}).get("friend_id")))
@@ -523,6 +539,18 @@ class DiscordAgent(Agent):
                       "‘내일 3시에 알려 줘’처럼 말하면 그때 여기로 알려 줄게."
                     + (" 구글 캘린더를 붙이려면 ‘구글 캘린더 연결’이라고 보내 줘." if self.google else "")), {}
         return None
+
+    async def _topic_command(self, msg):
+        """Turn hello calls or picture topics on or off and say so, without the model (SPEC-277). From the next
+        proactive turn on. The same setting again gets the same answer."""
+        field, on = msg.topic_command
+        try:
+            await self.store.topic_pref_set(msg.friend_id, field, on)
+        except Exception as e:
+            log.warning("topic_pref_failed %s", type(e).__name__)
+            return PREF_FAILED, {"topic_pref": "failed"}
+        log.info("topic_pref field=%s on=%s", field, on)
+        return TOPIC_REPLIES[(field, on)], {"topic_pref": {field: on}}
 
     def _may_react(self, room_key):
         last = self._reacted.get(room_key)
@@ -715,7 +743,7 @@ class DiscordDM(discord.Client):
         if text:
             items.append(DiscordIncoming(room, link["user_key"], text, kakao_id=message_key,
                                          proactive_preference=preference, google_command=google_command(text),
-                                         **common))
+                                         topic_command=topic_phrase(text), **common))
         else:
             items[-1].kakao_id = message_key  # a photo-only message: answer at its last photo
         incoming = items[-1]  # the one that answers
@@ -919,11 +947,13 @@ class DiscordDM(discord.Client):
 
 
 class DiscordProactive(Proactive):
-    def __init__(self, settings, store, agent, client, *, clock=None, app=None, **kwargs):
+    def __init__(self, settings, store, agent, client, *, clock=None, app=None, topics=None, **kwargs):
         super().__init__(settings, store, agent, None, client.room_lock, **kwargs)
         self.client = client
         self.app = app  # app_push.AppPush: friends with a phone for app notifications get it there (D18)
+        self.topics = topics  # topics.Topics with MARONG_TOPICS=1: picture topics and hello calls (CTX-020)
         self.clock = clock or (lambda: datetime.now(ZoneInfo(settings.timezone)))
+        self._due: dict[str, tuple] = {}  # room -> (its slot's start, today's topic time when it falls in that slot)
 
     def ready(self) -> bool:
         return self.client.available or (self.app is not None and self.app.enabled)
@@ -934,12 +964,66 @@ class DiscordProactive(Proactive):
             return False
         return any(can_notify(d) for d in await self.store.app_devices(room["friend_id"]))
 
+    def _slot(self, room, now):
+        hours, count = schedule(room, self.s)
+        return slot(now, hours, count)
+
     async def step(self, now=None):
-        return await super().step(now or self.clock()) if self.ready() else 0
+        if not self.ready():
+            return 0
+        now = now or self.clock()
+        if self.topics is not None:
+            await self._topic_round(now)
+        return await super().step(now)
+
+    async def _topic_round(self, now):
+        """Each check (docs/04-functional-spec/call-first.md SPEC-275, SPEC-263): decide the answers of open topics and
+        find, once per slot, whether today's topic time falls in each friend's current slot."""
+        try:
+            answers = await self.store.topic_answers(ANSWER_WINDOW)
+            if answers:
+                log.info("topic_answer answered=%d none=%d", answers.count("answered"), answers.count("none"))
+        except Exception as e:  # the next check tries again
+            log.warning("topic_answer_error %s", type(e).__name__)
+        try:
+            rooms = await self.store.proactive_rooms()
+        except Exception as e:
+            log.warning("topic_error %s", type(e).__name__)
+            return
+        for room in rooms:
+            key, found = room["room_key"], self._slot(room, now)
+            if found is None:
+                self._due.pop(key, None)
+                continue
+            if key in self._due and self._due[key][0] == found[0]:
+                continue
+            try:
+                today = await self.topics.today(room, now)
+            except Exception as e:
+                log.warning("topic_error %s", type(e).__name__)
+                today = None
+            at = getattr(today, "at", None)
+            self._due[key] = (found[0], at if at is not None and found[0] <= at < found[1] else None)
+
+    def plan(self, room, now):
+        planned = super().plan(room, now)
+        due = self._due.get(room["room_key"]) if planned else None
+        if due is None or due[0] != planned[0] or due[1] is None:
+            return planned
+        # The slot that holds today's topic time waits for it, then goes at the first check after it (SPEC-263 ②):
+        # a hello call then rings inside the call window even when the friend has only a few long slots a day.
+        return None if now < due[1] else (planned[0], 1.0)
+
+    async def daily_count(self, today):
+        count = await self.store.proactive_count(today)
+        if self.topics is not None:  # a hello call is one proactive turn without a message (SPEC-276)
+            count += await self.store.hello_count(today)
+        return count
 
     async def deliver(self, room, dry=False):
         empty = {"text": None, "ok": False, "code": None}
-        planned = self.plan(room, self.clock())
+        now = self.clock()
+        planned = self.plan(room, now)
         if not self.ready() or planned is None:
             return empty
         if not self.client.available and not await self._app_phone(room):
@@ -947,15 +1031,29 @@ class DiscordProactive(Proactive):
         begin = planned[0]
         if not dry and not await self.store.claim_slot(room, begin):
             return empty
+        if self.topics is not None and not dry:
+            choice = None
+            try:
+                choice = await self.topics.choose(room, now, self._slot(room, now)[1])
+            except Exception as e:  # never keeps the ordinary proactive message from going out
+                log.warning("topic_error %s", type(e).__name__)
+            if choice is not None:
+                return await self._topic(room, begin, choice)
         made = await self.agent.proactive_message(room)
         if not made:
             return empty
         text, meta = made
         if dry:
             return {**empty, "text": text}
-        # D18: the app only when the friend has a phone for it; every phone failing falls back to Discord (SPEC-118).
+        return await self._send(room, begin, text, meta)
+
+    async def _send(self, room, begin, text, meta, *, app_text=None, picture=None):
+        """Send a proactive turn's text by the D18 path and keep it: the app only when the friend has a phone for it;
+        every phone failing falls back to Discord (SPEC-118). A picture topic shows only its preview line on the phone
+        (the in-app chat shows the text with the picture) and attaches the picture to the first Discord message.
+        'via' in the result: app | discord | None (nothing could be tried)."""
         if self.app is not None and self.app.enabled and await self.still_current(room, begin, discord=False):
-            accepted, _ = await self.app.notify(room["friend_id"], "proactive", text, channel=TALK,
+            accepted, _ = await self.app.notify(room["friend_id"], "proactive", app_text or text, channel=TALK,
                                                 ttl_s=PROACTIVE_APP_TTL_S)
             if accepted:
                 await self.store.record_delivery(room, begin, True)
@@ -963,7 +1061,7 @@ class DiscordProactive(Proactive):
                     **meta, "proactive": True, "delivered": True, "transport": "app", "devices": accepted})
                 self.agent.on_saved()
                 log.info("app_proactive_sent devices=%d", accepted)
-                return {"text": text, "ok": True, "code": None}
+                return {"text": text, "ok": True, "code": None, "via": "app"}
 
         channel = self.client.get_partial_messageable(int(room["channel_id"]), type=discord.ChannelType.private)
         done = []
@@ -975,18 +1073,68 @@ class DiscordProactive(Proactive):
             if not await self.still_current(room, begin):
                 break
             attempted = True
-            if not await send_text(channel, sentence):
+            if not await send_text(channel, sentence, file=picture_file(picture) if picture and not i else None):
                 break
             done.append(sentence)
         if not attempted:
-            return empty
+            return {"text": None, "ok": False, "code": None, "via": None}
         await self.store.record_delivery(room, begin, bool(done))
         await self.store.add_message(room["room_key"], "assistant", "\n\n".join(done) or text,
                                      meta={**meta, "proactive": True, "delivered": bool(done),
                                            "transport": "discord", "parts": [len(done), len(sentences)]})
         self.agent.on_saved()
         log.info("discord_proactive_sent ok=%s parts=%d/%d", bool(done), len(done), len(sentences))
-        return {"text": text, "ok": bool(done), "code": None}
+        return {"text": text, "ok": bool(done), "code": None, "via": "discord"}
+
+    async def _topic(self, room, begin, choice):
+        """This turn's topic (SPEC-263 ⑥, ⑦): a hello call, or a picture topic message when the call cannot ring.
+        Whatever goes, the turn counts once (REQ-289). The topic row ends sent or failed."""
+        try:
+            if choice.kind == "call":
+                if await self._hello(room, choice):
+                    await self.store.record_delivery(room, begin, True)
+                    return {"text": choice.picture.line, "ok": True, "code": None, "via": "call"}
+                if not choice.prefs["pictures"]:  # no picture topics for this friend: the ordinary message
+                    await self.store.topic_failed(choice.topic_id)
+                    made = await self.agent.proactive_message(room)
+                    if not made:
+                        return {"text": None, "ok": False, "code": None}
+                    return await self._send(room, begin, *made)
+            picture = choice.picture
+            text, meta = await self.agent.proactive_message(room, topic=picture)
+            result = await self._send(room, begin, text, {**meta, "topic": picture.key}, app_text=picture.preview,
+                                      picture=picture)
+        except Exception:
+            try:
+                await self.store.topic_failed(choice.topic_id)
+            except Exception as e:
+                log.warning("topic_error %s", type(e).__name__)
+            raise
+        if result["ok"]:
+            await self.store.topic_sent(choice.topic_id, result["via"])
+            log.info("topic_sent kind=text via=%s picture=%s", result["via"], picture.key)
+        else:
+            await self.store.topic_failed(choice.topic_id)
+            log.info("topic_failed via=%s", result["via"])
+        return result
+
+    async def _hello(self, room, choice) -> bool:
+        """Ring the friend's phones without a promise (SPEC-266). False when nothing rang."""
+        p = choice.picture
+        ring = await self.store.hello_add(room["friend_id"], choice.call["caller"], p.title, f"{p.line} {p.ask}",
+                                          p.key if choice.prefs["pictures"] else None, HELLO_ANSWER)
+        if ring is None:  # another ring of this friend is ringing right now
+            log.info("hello_ring devices=0 reason=ringing")
+            return False
+        accepted = await self.app.ring(choice.call["devices"], ring["id"], reason="hello", line=p.preview)
+        if not accepted:
+            await self.store.ring_update(ring["id"], failed=True)
+            log.info("hello_ring devices=0 reason=fcm")
+            return False
+        await self.store.ring_update(ring["id"], devices=accepted)
+        await self.store.topic_call(choice.topic_id, ring["id"])
+        log.info("hello_ring devices=%d picture=%s", accepted, p.key)
+        return True
 
     async def still_current(self, room, begin, discord=True):
         if discord and not self.client.available:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 import struct
 import time
 import uuid
@@ -13,7 +14,7 @@ from memory_tools import TranscriptRecorder,execute_tool
 from hangup import Consent
 from call_search import queries as search_queries
 
-BUILD='20261115-ring'
+BUILD='20261117-hello'
 FRAME=struct.Struct('!4sIIIII')
 # Marong ends a call only when the friend asked (hangup.Consent). Gemini can
 # send toolCall before the last goodbye audio, or say goodbye only after the
@@ -34,6 +35,8 @@ OUTPUT_RATE=24000
 # once, on the connection that answered the ring. It is not a turn of the friend's and is never recorded.
 RING_ANSWERED_TEXT='(전화 연결됨)'
 RING_CLAIM_S=1
+# The picture a hello call carries (docs/04-functional-spec/call-first.md SPEC-268): served by the bot under /chat/.
+TOPIC_KEY=re.compile(r'v[0-9]{1,3}/[a-z0-9-]{1,40}')
 
 
 class LiveSession:
@@ -58,7 +61,8 @@ class LiveSession:
         self.search=search;self.searches=0;self.search_live=False;self.planned_reconnect=False
         self.activity_at=0.;self.turn_done_at=None;self.turn_started_at=0.;self.playback_end=0.
         # ring: the ring id the page was opened with (/?ring=), or None. ring_info: the promise this call answers.
-        self.ring_id=ring;self.ring_info=None;self.ring_greet=False
+        # ring_topic: the picture card of a hello call, sent once with the first 'ready' (SPEC-268, SPEC-269).
+        self.ring_id=ring;self.ring_info=None;self.ring_greet=False;self.ring_topic=None
 
     def log_transport(self,mode,reason):
         self.d['audioPath']=mode
@@ -235,13 +239,17 @@ class LiveSession:
         if not got:
             if self.ring_id:self.d['ring']='none';print('ring_not_answered',flush=True)
             return
-        at=got['created_at']
-        self.ring_info={'title':got['title'],'say':got['say'],'at':at}
+        at=got['created_at'];reason='hello' if got.get('reason')=='hello' else 'promise'
+        self.ring_info={'title':got['title'],'say':got['say'],'at':at,'reason':reason}
         self.d['ring']='answered' if got['fresh'] else 'again'
         if got['fresh']:
             # A new Gemini session that carries the promise: never resume a handle left from before the ring.
             self.ring_greet=True;self.handle=None;self.pending.clear();self.resume.clear()
-            print('ring_answered',f"wait_s={int(got['waited'].total_seconds())}",flush=True)
+            topic,title=got.get('topic'),got['title']
+            if reason=='hello' and isinstance(topic,str) and TOPIC_KEY.fullmatch(topic) and 1<=len(title or '')<=20:
+                self.ring_topic={'picture':f'/chat/topics/{topic}.webp','title':title}
+            print('ring_answered',f"wait_s={int(got['waited'].total_seconds())}",f'reason={reason}',
+                  f'topic={int(self.ring_topic is not None)}',flush=True)
 
     async def watch_revision(self):
         while not self.stop.is_set():
@@ -298,9 +306,13 @@ class LiveSession:
                             if self.handle:self.handle=None;self.pending.clear()
                             raise ConnectionError('setup_rejected')
                         self.ready=True;delay=1
-                        await self.emit({'type':'ready','resumed':bool(self.handle) or self.logical_resumed,'callId':self.call_id,
+                        ready={'type':'ready','resumed':bool(self.handle) or self.logical_resumed,'callId':self.call_id,
                             'build':BUILD,'audioFormat':2,'epoch':self.epoch,'audioTransport':self.entry_transport or ('webrtc' if self.rtc else 'pcm'),'memoryConnected':bool(self.p and self.segment),
-                            'ring':bool(self.ring_info)})
+                            'ring':bool(self.ring_info)}
+                        # The picture card only with the answer that makes her speak first, never on a reconnect.
+                        if self.ring_greet and self.ring_topic:ready['topic']=self.ring_topic
+                        self.ring_topic=None
+                        await self.emit(ready)
                         self.logical_resumed=True
                         if self.ring_greet:
                             # The friend just answered Marong's call: she speaks first (SPEC-137), only this once.

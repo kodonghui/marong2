@@ -3,10 +3,12 @@ tests of the Marong app (docs/app-chat.md TC-135, docs/app-ring.md TC-147).
 
     python tools/fcm_test_send.py KEY_FILE proactive|reply|reminder|missed_call TEXT < fid.txt
     python tools/fcm_test_send.py KEY_FILE ring [RING_ID] < fid.txt
+    python tools/fcm_test_send.py KEY_FILE hello LINE < fid.txt
 
 The FID comes on standard input, so it stays out of the command line and the shell history. The message is the one the
 bot sends for that kind (channel, time to live, the page a tap opens; a ring is data only, with a new ring id unless
-one is given to send the same ring again). It prints the send result (ok, gone, auth, failed) and, for a ring, the
+one is given to send the same ring again; a hello ring is a call Marong places without a promise, with its preview
+line, docs/04-functional-spec/call-first.md SPEC-267). It prints the send result (ok, gone, auth, failed) and, for a ring, the
 ring id; never the FID, the text, the key or a token. Send only to your own test device, with made-up text.
 """
 import asyncio
@@ -27,12 +29,14 @@ KINDS = {  # kind: (channel, ttl_s, open path), as discord_dm.py, app_chat.py an
 
 
 async def main(argv: list[str]) -> int:
-    if len(argv) < 2 or argv[1] not in (*KINDS, "ring") or (argv[1] != "ring" and len(argv) < 3):
-        print("\n".join(line.strip() for line in __doc__.strip().splitlines()[3:5]), file=sys.stderr)
+    if len(argv) < 2 or argv[1] not in (*KINDS, "ring", "hello") or (argv[1] != "ring" and len(argv) < 3):
+        print("\n".join(line.strip() for line in __doc__.strip().splitlines()[3:6]), file=sys.stderr)
         return 2
     key, kind = Path(argv[0]), argv[1]
     ring_id = None
-    if kind == "ring":
+    if kind == "hello":
+        ring_id = str(uuid.uuid4())
+    elif kind == "ring":
         try:
             ring_id = str(uuid.UUID(argv[2])) if len(argv) > 2 else str(uuid.uuid4())
         except ValueError:
@@ -46,7 +50,7 @@ async def main(argv: list[str]) -> int:
     try:
         if ring_id:
             print(f"ring {ring_id}")
-            message = fcm.ring(fid, ring_id)
+            message = fcm.ring(fid, ring_id, "hello", " ".join(argv[2:])) if kind == "hello" else fcm.ring(fid, ring_id)
         else:
             channel, ttl_s, open_path = KINDS[kind]
             message = fcm.notice(fid, kind, " ".join(argv[2:]), channel=channel, ttl_s=ttl_s, open_path=open_path)

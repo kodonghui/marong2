@@ -63,6 +63,35 @@ public class PushLinksTest {
     }
 
     @Test
+    public void aHelloRingShowsItsLineOnlyWithinTheRules() {
+        assertTrue(PushLinks.isHello("hello"));
+        assertFalse(PushLinks.isHello("promise"));
+        assertFalse("an unknown reason is a promise ring", PushLinks.isHello("HELLO"));
+        assertFalse(PushLinks.isHello(null));
+        assertEquals("나 털모자 샀다!", PushLinks.ringLine("hello", "  나 털모자 샀다!  "));
+        assertEquals("가".repeat(30), PushLinks.ringLine("hello", "가".repeat(30)));
+        assertEquals("emoji count as one", "눈사람 ⛄".repeat(5), PushLinks.ringLine("hello", "눈사람 ⛄".repeat(5)));
+        assertNull("31 characters", PushLinks.ringLine("hello", "가".repeat(31)));
+        assertNull(PushLinks.ringLine("hello", "두 줄\n이에요"));
+        assertNull(PushLinks.ringLine("hello", "   "));
+        assertNull(PushLinks.ringLine("hello", null));
+        assertNull("a promise ring has no line", PushLinks.ringLine("promise", "나 털모자 샀다!"));
+        assertNull(PushLinks.ringLine(null, "나 털모자 샀다!"));
+    }
+
+    @Test
+    public void theCallNotificationSaysWhichCallItIs() {
+        String promise = "약속한 전화예요";
+        String hello = "마롱이가 먼저 걸었어요";
+        assertEquals("마롱이가 먼저 걸었어요 · 나 털모자 샀다!", PushLinks.ringText("hello", "나 털모자 샀다!", promise, hello));
+        assertEquals(hello, PushLinks.ringText("hello", null, promise, hello));
+        assertEquals(hello, PushLinks.ringText("hello", "가".repeat(31), promise, hello));
+        assertEquals(promise, PushLinks.ringText("promise", "나 털모자 샀다!", promise, hello));
+        assertEquals(promise, PushLinks.ringText(null, null, promise, hello));
+        assertEquals(promise, PushLinks.ringText("later", null, promise, hello));
+    }
+
+    @Test
     public void aRingOlderThanFiveMinutesIsDropped() {
         assertTrue(PushLinks.isFresh(NOW, NOW));
         assertTrue(PushLinks.isFresh(NOW - 5 * 60_000L, NOW));

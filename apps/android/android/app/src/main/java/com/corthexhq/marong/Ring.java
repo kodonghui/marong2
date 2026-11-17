@@ -20,13 +20,17 @@ import com.getcapacitor.Logger;
 /**
  * Marong's own call ringing on this phone (docs/app-ring.md SPEC-132 to SPEC-134): a call-style
  * notification with the phone's ringtone, a full-screen ring screen when the phone is locked or
- * asleep, 받기 that opens the call page with the ring and 거절 that only stops the ring.
+ * asleep, 받기 that opens the call page with the ring and 거절 that only stops the ring. From 0.2.2 a
+ * hello call (reason "hello", docs/04-functional-spec/call-first.md SPEC-267) says '마롱이가 먼저
+ * 걸었어요' and its preview line instead of '약속한 전화예요'.
  */
 final class Ring {
 
     static final String ACTION_ANSWER = "com.corthexhq.marong.action.ANSWER_RING";
     static final String EXTRA_RING_ID = "ringId";
     static final String EXTRA_SHOWN_AT = "shownAt";
+    static final String EXTRA_REASON = "reason";
+    static final String EXTRA_LINE = "line";
     /** How long the phone rings; the server's answer window is 5 minutes. */
     static final long RING_MS = 45_000L;
 
@@ -35,8 +39,8 @@ final class Ring {
 
     private Ring() {}
 
-    /** A ring message from FCM (data only: kind "ring", ringId, v). Returns quickly (SPEC-132). */
-    static void receive(Context context, String ringId, long sentTimeMs) {
+    /** A ring message from FCM (data only: kind "ring", ringId, v, reason, line). Returns quickly (SPEC-132). */
+    static void receive(Context context, String ringId, long sentTimeMs, String reason, String line) {
         if (!PushLinks.isRingId(ringId)) {
             Logger.info(TAG, "ring_dropped reason=bad_id");
             return;
@@ -53,7 +57,8 @@ final class Ring {
             Logger.info(TAG, "ring_dropped reason=in_call");
             return;
         }
-        show(context, ringId);
+        String kind = PushLinks.isHello(reason) ? "hello" : "promise";
+        show(context, ringId, kind, PushLinks.ringLine(kind, line));
     }
 
     /** The phone or another app is in a call (SPEC-132). */
@@ -66,7 +71,7 @@ final class Ring {
         return mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION;
     }
 
-    private static void show(Context context, String ringId) {
+    private static void show(Context context, String ringId, String reason, String line) {
         Channels.ensure(context);
         long shownAt = System.currentTimeMillis();
         int code = ringId.hashCode();
@@ -82,6 +87,8 @@ final class Ring {
         Intent screen = new Intent(context, RingActivity.class)
             .putExtra(EXTRA_RING_ID, ringId)
             .putExtra(EXTRA_SHOWN_AT, shownAt)
+            .putExtra(EXTRA_REASON, reason)
+            .putExtra(EXTRA_LINE, line)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_USER_ACTION);
         PendingIntent fullScreen = PendingIntent.getActivity(context, code, screen, immutable);
 
@@ -96,7 +103,9 @@ final class Ring {
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, Channels.RING)
             .setSmallIcon(R.drawable.ic_stat_marong)
             .setColor(ContextCompat.getColor(context, R.color.marong_accent))
-            .setContentText(context.getString(R.string.ring_text))
+            .setContentText(
+                PushLinks.ringText(reason, line, context.getString(R.string.ring_text), context.getString(R.string.ring_hello_text))
+            )
             .setStyle(NotificationCompat.CallStyle.forIncomingCall(marong, decline, answer))
             .addPerson(marong)
             .setCategory(NotificationCompat.CATEGORY_CALL)
@@ -120,7 +129,7 @@ final class Ring {
 
         try {
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification);
-            Logger.info(TAG, "ring_shown");
+            Logger.info(TAG, "ring_shown reason=" + reason);
         } catch (SecurityException | IllegalArgumentException e) {
             // No notification permission, or Android refused the call style: the server's
             // missed-call note follows after the answer window.

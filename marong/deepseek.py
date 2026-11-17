@@ -20,7 +20,8 @@
 - 안 될 때: 무료 중계라 느리고 가끔 502 가 난다(11/15 컨테이너에서 짧은 답 7~17초, 502 뒤 다시 보내 41초). 그래서 DeepSeek
   한 번 부르기는 MARONG_DEEPSEEK_TIMEOUT_S(기본 30초)까지만 기다린다. 첫 요청(도구 결과를 이어 붙이기 전)이 오류·시간 초과면
   다시 보내지 않고 바로 Claude 가 같은 요청으로 대신 답한다(MARONG_DEEPSEEK_FALLBACK=off 면 안 함, 그 답의 meta.model 은
-  Claude 모델, meta.fallback=deepseek). 도구 결과를 이어 보내는 중이면 429·5xx 에 한 번만 다시 보낸다.
+  Claude 모델, meta.fallback=deepseek). 다만 '바쁨'(429·503)은 금방 돌아오니 첫 요청도 한 번 더 보내 본다. 도구 결과를
+  이어 보내는 중이면 429·5xx 에 한 번만 다시 보낸다.
   DeepSeek 가 내용 때문에 거절하면(content_filter, 400 'risk') Claude 처럼 refusal 로 돌려준다.
 - 로그(marong.deepseek)에는 상태 코드, 토큰 수, 걸린 시간, 검색 횟수만 남긴다. 대화 글·검색어·주소·키는 남기지 않는다.
 """
@@ -46,6 +47,7 @@ EFFORTS = ("", "off", "low", "medium", "high")  # "" = 모델 기본(스스로 �
 MAX_OUTPUT = 65536      # 중계가 알려 준 최대 출력(11/15 /v1/models)
 ROUNDS = 4              # create 한 번 안에서 DeepSeek 를 부르는 횟수 상한(Claude 가 대신 찾은 결과를 넣고 다시 부름)
 RETRY_WAIT_S = 2
+BUSY = (429, 503)       # '바쁨'은 금방 돌아와서 Claude 로 넘기기 전에 한 번 더 물어봄(2026-11-16 503 세 번이 Claude 대체 답이 됨)
 TIMEOUT_S = 30.0        # DeepSeek 한 번 부르기를 기다리는 최대 시간(넘으면 첫 요청은 Claude 가 대신 답함)
 DIGEST_CHARS = 3000     # Claude 가 찾은 결과 글을 DeepSeek 에 돌려줄 때 최대 글자 수
 RESULT_LINKS = 8        # 그 글 끝에 붙이는 검색 결과(제목 — 주소) 수
@@ -287,7 +289,7 @@ class DeepSeekLLM:
                 error = DeepSeekError(resp.status_code, resp.text)
                 if resp.status_code not in (429, 500, 502, 503, 504):
                     raise error
-            if retry and attempt == 1 and deadline - loop.time() > RETRY_WAIT_S + 5:
+            if attempt == 1 and deadline - loop.time() > RETRY_WAIT_S + 5 and (retry or error.status_code in BUSY):
                 log.warning("deepseek retry after %s", brief(error))
                 await asyncio.sleep(RETRY_WAIT_S)
                 continue

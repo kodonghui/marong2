@@ -5,6 +5,7 @@ from .app_store import AppStore
 from .google_calendar import GoogleStore
 from .schedules import ScheduleStore
 from .store import Store
+from .topic_store import TopicStore
 
 SNOWFLAKE = re.compile(r"[1-9][0-9]{16,19}\Z")
 
@@ -82,7 +83,7 @@ SELECT d.*, f.name, true AS is_channel, d.last_incoming_at AS last_said,
 """
 
 
-class DiscordStore(AppStore, GoogleStore, ScheduleStore, Store):
+class DiscordStore(AppStore, TopicStore, GoogleStore, ScheduleStore, Store):
     def _reply_rooms(self, room: str) -> str:
         # A DM: the friend's own DM and their verified private Kakao 1:1 room. No memory_room traversal: it would pull
         # in linked Kakao group chats. A channel of the private server ('discord-ch:'): that channel alone, never a DM.
@@ -106,6 +107,10 @@ class DiscordStore(AppStore, GoogleStore, ScheduleStore, Store):
     def _reply_embedding_filter(self) -> str:
         # Legacy summaries may combine the direct and linked group rooms. A channel's own summaries are its own.
         return "AND (e.source_type='message' OR e.room_key LIKE 'discord-dm:%%' OR e.room_key LIKE 'discord-ch:%%') "
+
+    def _summary_keyword_filter(self) -> str:
+        # The same rule for summaries found by words (keyword_hits): only DM and channel summaries.
+        return "AND (s.room_key LIKE 'discord-dm:%%' OR s.room_key LIKE 'discord-ch:%%') "
 
     async def channel_friends(self) -> list[str]:
         """Names of the friends linked to Marong on Discord: who Marong talks with in the private server's channels."""

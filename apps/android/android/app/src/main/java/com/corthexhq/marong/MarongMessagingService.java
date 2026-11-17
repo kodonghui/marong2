@@ -36,7 +36,7 @@ public class MarongMessagingService extends FirebaseMessagingService {
     public void onMessageReceived(@NonNull RemoteMessage message) {
         Map<String, String> data = message.getData();
         if ("ring".equals(data.get("kind"))) {
-            Ring.receive(this, data.get("ringId"), message.getSentTime());
+            Ring.receive(this, data.get("ringId"), message.getSentTime(), data.get("reason"), data.get("line"));
             return;
         }
         RemoteMessage.Notification notification = message.getNotification();

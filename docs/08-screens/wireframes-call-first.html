@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>선 전화·그림 화두 와이어프레임</title>
+<style>
+  /* 08단계 와이어프레임: 회색, 시스템 글꼴, 구조만. 색·간격 값은 09단계 토큰에서 와요. */
+  :root { --ink: #222; --mid: #777; --soft: #bbb; --fill: #e6e6e6; --paper: #fff; --page: #f3f3f3; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, sans-serif; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .note { color: var(--mid); margin: 0 0 16px; max-width: 900px; }
+  section { margin: 0 0 28px; }
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  .pair { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+  .frame { background: var(--paper); border: 1px solid var(--soft); border-radius: 18px; overflow: hidden; position: relative; }
+  .w360 { width: 360px; } .w430 { width: 430px; }
+  .cap { font-size: 12px; color: var(--mid); margin: 4px 0 0; }
+  .top { height: 52px; border-bottom: 1px solid var(--fill); display: flex; align-items: center; padding: 0 16px; gap: 8px; font-weight: 600; }
+  .dot { width: 30px; height: 30px; border-radius: 50%; background: var(--fill); flex: none; }
+  .list { padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+  .row { display: flex; gap: 8px; align-items: flex-start; }
+  .body { display: flex; flex-direction: column; gap: 6px; max-width: calc(100% - 38px); }
+  .pic { width: 240px; height: 240px; border-radius: 16px; border: 1px solid var(--soft); background: repeating-linear-gradient(45deg, #f5f5f5 0 8px, #ececec 8px 16px); display: grid; place-items: center; color: var(--mid); font-size: 12px; }
+  .pic.wait { background: var(--fill); border-color: var(--fill); color: transparent; }
+  .bubble { border: 1px solid var(--soft); border-radius: 4px 18px 18px 18px; padding: 10px 14px; white-space: pre-line; }
+  .meta { font-size: 12px; color: var(--mid); display: flex; gap: 8px; align-items: center; }
+  .tag { border: 1px solid var(--soft); border-radius: 8px; padding: 0 7px; }
+  .me { align-self: flex-end; border-radius: 18px 4px 18px 18px; background: var(--fill); }
+  .input { border-top: 1px solid var(--fill); padding: 10px 16px; display: flex; gap: 8px; }
+  .input span { flex: 1; height: 44px; border: 1px solid var(--soft); border-radius: 22px; }
+  .input b { width: 44px; height: 44px; border-radius: 50%; background: var(--fill); }
+  .call { height: 600px; display: flex; flex-direction: column; align-items: center; padding: 24px 16px; }
+  .face { width: 248px; height: 248px; border-radius: 50%; background: var(--fill); display: grid; place-items: center; color: var(--mid); margin-top: 40px; }
+  .status { margin-top: 16px; color: var(--mid); text-align: center; }
+  .controls { margin-top: auto; display: flex; gap: 40px; }
+  .controls i { width: 64px; height: 64px; border-radius: 50%; border: 1px solid var(--soft); display: grid; place-items: center; font-style: normal; font-size: 12px; color: var(--mid); }
+  .controls i.end { width: 88px; height: 88px; background: var(--fill); }
+  .face.pic-in { position: relative; background: repeating-linear-gradient(45deg, #f5f5f5 0 8px, #ececec 8px 16px); border: 1px solid var(--soft); }
+  .face .chip { position: absolute; left: 50%; bottom: 0; transform: translate(-50%, 50%); border: 1px solid var(--soft); background: var(--paper); border-radius: 999px; padding: 2px 14px; color: var(--ink); font-weight: 600; }
+  .face .x { position: absolute; right: 0; top: 0; width: 48px; height: 48px; border-radius: 50%; border: 1px solid var(--soft); background: var(--paper); display: grid; place-items: center; color: var(--mid); }
+  .card { position: absolute; left: 50%; top: 210px; transform: translateX(-50%); width: 232px; border: 1px solid var(--soft); border-radius: 24px; background: var(--paper); padding: 16px; box-shadow: 0 6px 18px rgba(0,0,0,.12); }
+  .card .pic { width: 200px; height: 200px; }
+  .card .title { margin-top: 8px; text-align: center; font-weight: 600; }
+  .card .close { position: absolute; right: 4px; top: 4px; width: 48px; height: 48px; display: grid; place-items: center; color: var(--mid); }
+  .ring { height: 600px; background: #4a4a4a; color: #fff; display: flex; flex-direction: column; align-items: center; padding: 64px 24px 48px; text-align: center; }
+  .ring .face { margin-top: 0; width: 168px; height: 168px; background: #6a6a6a; color: #ddd; }
+  .ring .name { font-size: 22px; margin-top: 24px; font-weight: 600; }
+  .ring .why { margin-top: 6px; color: #ddd; }
+  .ring .line { margin-top: 8px; color: #fff; max-width: 280px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .ring .btns { margin-top: auto; display: flex; gap: 96px; }
+  .ring .btns i { width: 72px; height: 72px; border-radius: 50%; border: 2px solid #ddd; display: grid; place-items: center; font-style: normal; font-size: 13px; }
+  .shade { background: #5a5a5a; padding: 16px; height: 230px; }
+  .noti { background: var(--paper); border-radius: 18px; padding: 12px 14px; display: grid; grid-template-columns: 24px 1fr; gap: 4px 10px; }
+  .noti .ico { width: 24px; height: 24px; border-radius: 50%; background: var(--fill); grid-row: span 2; }
+  .noti .app { font-size: 12px; color: var(--mid); }
+  .noti .t { font-weight: 600; }
+  .noti .b { grid-column: 2; }
+  .noti .acts { grid-column: 2; display: flex; gap: 24px; margin-top: 6px; color: var(--mid); font-size: 13px; }
+  .banner { margin: 0 16px; padding: 10px 14px; border: 1px dashed var(--soft); border-radius: 12px; color: var(--ink); }
+</style>
+</head>
+<body>
+<h1>선 전화·그림 화두 와이어프레임 (08단계)</h1>
+<p class="note">정의: <code>docs/08-screens/call-first.md</code>, <code>SCR-002.md</code>(#topic-card). 각 상태를 360px과 430px 두 폭으로 그려요. 회색과 시스템 글꼴로 구조만 보이고, 색·글꼴·크기 값은 09단계 목업과 토큰에서 정해요. 그린 때: 2026-11-16 23:52(한국 시각), SCR-002#topic-card는 09단계 추천 A에 맞춰 2026-11-17 00:06에 고침.</p>
+<div id="out"></div>
+<script>
+  const chatTop = '<div class="top"><span class="dot"></span>마롱이</div>';
+  const chatInput = '<div class="input"><span></span><b></b></div>';
+  const msg = (inner, text, tag, time) => `<div class="row"><span class="dot"></span><div class="body">${inner}<p class="bubble" style="margin:0">${text}</p><p class="meta" style="margin:0"><span class="tag">${tag}</span><time>${time}</time></p></div></div>`;
+  const pic = '<div class="pic" role="img" aria-label="그림: picture.alt">그림 240×240</div>';
+  const frames = [
+    ['SCR-002#topic-card', '통화 중 얼굴 원이 그림으로(15초, 누르면 얼굴로). 09 추천 A', w => `<div class="call"><div class="face pic-in">그림 248(원으로 잘림)<span class="chip">털모자</span><span class="x" aria-label="그림 닫기">✕</span></div><p class="status" style="margin-top:28px">(마롱이가 화두로 먼저 말하는 중)</p><div class="controls"><i>음소거</i><i class="end">끊기</i></div></div>`],
+    ['SCR-107#picture', '그림 화두 글: 그림 위, 글 아래, 태그 먼저 톡', w => chatTop + `<div class="list">${msg(pic, '나 닭꼬치 먹고 있어 🍢\n\n넌 뭐 먹었어?', '먼저 톡', '19:42')}</div>` + chatInput],
+    ['SCR-107#picture-loading', '그림 자리에 같은 크기 빈 칸, 글은 먼저 보임', w => chatTop + `<div class="list">${msg('<div class="pic wait" aria-hidden="true"></div>', '나 닭꼬치 먹고 있어 🍢\n\n넌 뭐 먹었어?', '먼저 톡', '19:42')}</div>` + chatInput],
+    ['SCR-107#picture-missing', '그림을 못 받음(404·오류): 칸이 사라지고 글만', w => chatTop + `<div class="list">${msg('', '나 닭꼬치 먹고 있어 🍢\n\n넌 뭐 먹었어?', '먼저 톡', '19:42')}</div>` + chatInput],
+    ['SCR-107#hello', '못 받은 선 전화 뒤의 말: 태그 먼저 건 전화', w => chatTop + `<div class="list">${msg(pic, '전화했는데 바빴나 봐!\n\n나 털모자 샀다! 🧶\n\n어때, 잘 어울려?', '먼저 건 전화', '20:17')}<p class="bubble me" style="margin:0">미안 씻고 있었어 ㅋㅋ</p></div>` + chatInput],
+    ['SCR-108#picture-topic', '앱 알림(마롱이 톡): 미리보기 한 줄만', w => `<div class="shade"><div class="noti"><span class="ico"></span><span class="app">마롱이 · 마롱이 톡 · 지금</span><span class="t">마롱이</span><span class="b">나 닭꼬치 먹는 중 🍢</span></div></div>`],
+    ['SCR-108#hello-missed', '못 받은 선 전화 알림, 누르면 글 대화', w => `<div class="shade"><div class="noti"><span class="ico"></span><span class="app">마롱이 · 마롱이 톡 · 지금</span><span class="t">마롱이</span><span class="b">전화했는데 바빴나 봐! 📞</span></div></div>`],
+    ['SCR-110#hello', '벨 화면(잠금 화면 위): 마롱이가 먼저 걸었어요 + 한 줄', w => `<div class="ring"><div class="face">얼굴 01</div><p class="name" style="margin:24px 0 0">마롱이</p><p class="why" style="margin:6px 0 0">마롱이가 먼저 걸었어요</p><p class="line" style="margin:8px 0 0">나 털모자 샀다!</p><div class="btns"><i>거절</i><i>받기</i></div></div>`],
+    ['SCR-110#hello-no-line', 'line이 없거나 규칙 밖: 둘째 줄까지만', w => `<div class="ring"><div class="face">얼굴 01</div><p class="name" style="margin:24px 0 0">마롱이</p><p class="why" style="margin:6px 0 0">마롱이가 먼저 걸었어요</p><div class="btns"><i>거절</i><i>받기</i></div></div>`],
+    ['SCR-111#hello', '위에 뜨는 전화 알림(받기·거절)', w => `<div class="shade"><div class="noti"><span class="ico"></span><span class="app">마롱이 · 마롱이 전화 · 지금</span><span class="t">마롱이</span><span class="b">마롱이가 먼저 걸었어요 · 나 털모자 샀다!</span><span class="acts"><span>거절</span><span>받기</span></span></div></div>`],
+    ['SCR-101 벨 시간 지남', '앱 창 안 통화 화면: 바뀐 안내 한 줄', w => `<div class="call"><div class="face">마롱이 얼굴 248</div><p class="banner" style="margin:16px 0 0">벨이 울린 지 오래돼서 보통 전화로 이어졌어.</p><div class="controls"><i>음소거</i><i class="end">끊기</i></div></div>`],
+  ];
+  const out = document.getElementById('out');
+  for (const [id, cap, draw] of frames) {
+    const sec = document.createElement('section');
+    sec.innerHTML = `<h2>${id}</h2><div class="pair">` + [360, 430].map(w => `<div><div class="frame w${w}">${draw(w)}</div><p class="cap">${w}px · ${cap}</p></div>`).join('') + '</div>';
+    out.append(sec);
+  }
+</script>
+</body>
+</html>

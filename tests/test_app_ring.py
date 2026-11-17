@@ -66,6 +66,10 @@ async def tool_checks(db, store, settings):
     at = (now + timedelta(hours=2)).replace(microsecond=0).isoformat()
     ok("언제 전화할지 시각이 필요해" in check_add({"title": "면접 전화", "event_at": at, "call": True}, TZ, now, True),
        "a call needs remind_at")
+    soon = check_add({"title": "전화", "remind_at": now.replace(microsecond=0).isoformat(), "call": True}, TZ,
+                     now + timedelta(seconds=40), True)
+    ok(soon.action == "call" and soon.remind_at == now + timedelta(seconds=40) and "지금 시각" in CALL_GUIDE,
+       "'call me now' rings at once")
     ok(check_add({"title": "면접", "remind_at": at, "call": True}, TZ, now).action == "remind",
        "without the ring setting call is ignored")
     out, action = await run_tool(store, "schedule_add", {"title": "밤 전화", "remind_at": at, "call": True,
@@ -168,7 +172,8 @@ async def ring_checks(db, store, settings, logs):
     ring = rings(db, sid)
     ok(len(ring) == 1 and ring[0][1:] == ("app", "ringing", 1, 300), ring)
     bell = sender.sent[before:]
-    ok(len(bell) == 1 and bell[0] == {"fid": FID, "data": {"kind": "ring", "ringId": ring[0][0], "v": "1"},
+    ok(len(bell) == 1 and bell[0] == {"fid": FID, "data": {"kind": "ring", "ringId": ring[0][0], "v": "1",
+                                                           "reason": "promise"},
                                       "android": {"priority": "HIGH", "ttl": "45s"}}, bell)
     ok("벨 약속" not in json.dumps(bell, ensure_ascii=False) and "면접" not in json.dumps(bell, ensure_ascii=False),
        "TC-139 the ring carries no title, words or time")
@@ -289,8 +294,8 @@ async def claim_checks(db, reminders, sender):
         call_a = new_call()
         ok(await calls.claim_ring(other, call_a, ring) is None, "another caller cannot take it")
         got = await calls.claim_ring(p, call_a, ring)
-        ok(got and got["fresh"] and str(got["id"]) == ring and got["title"] == "받을 약속" and got["say"] == "잘 잤어?",
-           got)
+        ok(got and got["fresh"] and str(got["id"]) == ring and got["title"] == "받을 약속" and got["say"] == "잘 잤어?"
+           and got["reason"] == "promise" and got["topic"] is None, got)
         segment = await calls.start_segment(p, call_a, str(uuid.uuid4()), "gemini-fixture")
         turn = await calls.save_turn(p, call_a, segment, "answer", "assistant", "약속한 전화야! 잘 잤어?", True, False)
         again = await calls.claim_ring(p, call_a, ring)
@@ -301,6 +306,19 @@ async def claim_checks(db, reminders, sender):
         ok(db.admin("SELECT status, call_id::text FROM marong.app_rings WHERE id = %s", (ring,))[0]
            == ("answered", call_a), "answered by the first call")
         end(call_b)
+        clear_rings(db)
+
+        # A hello call (docs/04-functional-spec/call-first.md SPEC-268): its reason and picture reach the call server.
+        hello = await reminders.store.hello_add(2, caller, "털모자", "나 털모자 샀다! 어때?", "v1/winter-hat",
+                                                timedelta(minutes=5))
+        call_h = new_call()
+        got = await calls.claim_ring(p, call_h, hello["id"])
+        ok(got and got["fresh"] and got["reason"] == "hello" and got["topic"] == "v1/winter-hat"
+           and got["title"] == "털모자" and got["say"] == "나 털모자 샀다! 어때?", got)
+        again = await calls.claim_ring(p, call_h, hello["id"])
+        ok(again and again["fresh"] is False and again["reason"] == "hello" and again["topic"] == "v1/winter-hat",
+           "a hello call reconnecting keeps its reason and picture")
+        end(call_h)
         clear_rings(db)
 
         sid = promise(db, "링 id 없는 약속")
@@ -342,7 +360,8 @@ async def claim_checks(db, reminders, sender):
         call_d = new_call()
         ok(await calls.claim_ring(p, call_d, ring) is None, "after the answer window it is an ordinary call")
         end(call_d)
-        print("PASS TC-141 claim_ring as the call server: ring id or latest, other caller, once, reconnect, window; "
+        print("PASS TC-141 claim_ring as the call server: ring id or latest, other caller, once, reconnect, window, "
+              "reason and picture of a hello call; "
               f"TC-144 answered rings never missed, answer/miss race has one winner ({', '.join(sorted(outcomes))})")
         return ring, turn
     finally:

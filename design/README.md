@@ -78,7 +78,7 @@
 | 알림 조각 | 아래에 뜨는 `text` 바탕·`bg` 글 상자 | `radius.md` |
 | 안내 화면 | 가운데 얼굴(152px, `face-disc` 바탕) + 제목 + 글 + 버튼 + 추적 id(`caption`). 빈 상태·권한·오류 | `size.face-small`, `font-size.title` |
 | 마롱이 얼굴 | 통화 중 248px, 통화 홈 200px, 끝난 화면·안내 152px. 쓰임은 [`marong-face/README.md`](marong-face/README.md), 그림은 꾸밈이라 `alt=""` | `size.face-*` |
-| 그림 화두 카드·말풍선 | 통화 중 얼굴 원 자리에 그림 15초, 글 대화 말 위 그림 240px(CTX-020, PR #27의 `design/call-first-candidates.md`) | `size.topic-picture`, `size.face-call`, `panel-shadow` |
+| 그림 화두 카드·말풍선 | 통화 중 얼굴 원 자리에 그림 15초, 글 대화 말 위 그림 240px(CTX-020, `design/call-first-candidates.md`) | `size.topic-picture`, `size.face-call`, `panel-shadow` |
 | 메뉴 상태 줄 | 글 대화 메뉴(SCR-109)의 '알림'·'약속 전화'·'자동 업데이트' 줄. 줄 글 + 필요할 때 '켜기'류 두 번째 버튼(누르는 높이 44px 이상, 원본은 `chat.css`) | `surface`, `line` |
 | 듣기 시험 | "3 / 10"과 문장 점, 소리 줄(▶·■, 흐른 시간 막대), 점수 버튼 48px 다섯 개 한 줄, '마롱이 같다' | `size.touch-min`, `radius.full` |
 
@@ -103,12 +103,12 @@
 | --- | --- | --- | --- | --- |
 | SCR-001\~005 | 통화 홈, 통화 중, 지난 통화, 통화 상세, 마롱이 기억 | `docs/08-screens/SCR-001`\~`005.md` | 통화 캔버스 [마롱이 통화 화면 설계](https://claude.ai/artifact/FDFCuk2xc8JE8SCUuh7hL2). SCR-001#budget과 SCR-002 그림 카드는 공통 캔버스 | 통화 |
 | SCR-101\~106 | 앱 통화 화면, 연결 못 함, Access 로그인, 통화 중 알림, 마이크 안내, 아이콘 | `docs/android-app.md` | 없음(앱 0.2에서 만듦) | 앱 |
-| SCR-107\~109, 112 | 글 대화, 앱 알림, 알림 상태(글 대화 메뉴), 글 대화 창 | `docs/app-chat.md`. CTX-020 상태는 `docs/08-screens/call-first.md`, CTX-021 줄은 `docs/08-screens/app-update.md`(둘 다 PR #27) | 공통 캔버스(그림 말풍선, 자동 업데이트 줄) | 글 대화 |
+| SCR-107\~109, 112 | 글 대화, 앱 알림, 알림 상태(글 대화 메뉴), 글 대화 창 | `docs/app-chat.md`. CTX-020 상태는 `docs/08-screens/call-first.md`, CTX-021 줄은 `docs/08-screens/app-update.md` | 공통 캔버스(그림 말풍선, 자동 업데이트 줄) | 글 대화 |
 | SCR-110\~111 | 벨 화면, 전화 알림 | `docs/app-ring.md`, `docs/08-screens/call-first.md` | 공통 캔버스(먼저 건 전화) | 앱 벨 |
 | SCR-113\~118 | 일기장 한 날, 말로 고치기, 다시 그리기, 달력, 숨긴 일기, 내 모습 카드 | `docs/08-screens/SCR-113`\~`118.md` | 공통 캔버스 'A · SCR-11x' | 일기(CTX-007) |
 | SCR-119 | 듣기 시험 | `docs/08-screens/SCR-119.md` | 공통 캔버스 | 통화 비용 |
 | SCR-120\~129 | 성향 맞춤·맞춤형 지침·선톡 화면(설계 중) | 그 스레드 PR | 받으면 공통 캔버스 | 성향 맞춤(CTX-008\~) |
-| SCR-130 | 앱 새 버전 알림(안드로이드가 그림) | `docs/08-screens/app-update.md`(PR #27) | 공통 캔버스 참고 한 장 | 앱 업데이트(CTX-021) |
+| SCR-130 | 앱 새 버전 알림(안드로이드가 그림) | `docs/08-screens/app-update.md` | 공통 캔버스 참고 한 장 | 앱 업데이트(CTX-021) |
 | SCR-131\~139 | 앱 업데이트 몫으로 남김 | | | CTX-021 |
 | SCR-140\~ | 다음 범위. 쓰기 전에 이 스레드에 받아요 | | | |
 

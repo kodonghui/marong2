@@ -88,6 +88,17 @@ class FcmTestSendTest(unittest.TestCase):
         new = out.split("\n")[0].split(" ")[1]
         self.assertEqual((code, str(uuid.UUID(new)), sent[0]["data"]["ringId"]), (0, new, new))
 
+    def test_hello_ring_carries_its_line(self):
+        line = "나 털모자 샀다! 🧶"
+        code, out, _, sent = self.run_tool("hello", *line.split(" "))
+        new = out.split("\n")[0].split(" ")[1]
+        self.assertEqual((code, out), (0, f"ring {new}\nhello ok\n"))
+        self.assertEqual(sent, [fcm.ring(FID, new, "hello", line)])
+        self.assertEqual((sent[0]["data"]["reason"], sent[0]["data"]["line"]), ("hello", line))
+        self.assertNotIn("notification", sent[0])
+        code, out, _, sent = self.run_tool("hello", "x" * 31)  # longer than the ring line: the ring goes without it
+        self.assertEqual((code, sent[0]["data"]["reason"], "line" in sent[0]["data"]), (0, "hello", False))
+
     def test_failures_and_wrong_input(self):
         code, out, _, _ = self.run_tool("proactive", "x", status=404)
         self.assertEqual((code, out), (1, "proactive gone\n"))
@@ -97,7 +108,7 @@ class FcmTestSendTest(unittest.TestCase):
         code, _, err, sent = self.run_tool("ring", "not-a-uuid")
         self.assertEqual((code, sent), (2, []))
         self.assertIn("not a UUID", err)
-        for args in (("hello", "x"), ("proactive",), ()):
+        for args in (("hello",), ("call", "x"), ("proactive",), ()):
             with self.subTest(args=args):
                 code, _, err, sent = self.run_tool(*args)
                 self.assertEqual((code, sent), (2, []))

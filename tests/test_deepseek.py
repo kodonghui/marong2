@@ -198,6 +198,22 @@ async def create_checks():
            and resp.content[0].text == "클로드가 대신 답함", (failure, len(relay.requests)))
         await ds.close()
 
+    # 'Busy' (503, 429) comes back at once: the first request asks DeepSeek once more before Claude (2026-11-16: three
+    # 503s became Claude answers). Busy twice: Claude answers the same request.
+    for steps, by_deepseek in ((((503, '{"error":{"message":"The model is busy. Retry shortly."}}'), chat("다시 물어서 답함")), True),
+                               (((429, "slow down"), chat("다시 물어서 답함")), True),
+                               (((503, "busy"), (503, "busy")), False)):
+        relay = Relay(*steps)
+        claude = ScriptedLLM(lambda b: message([text("클로드가 대신 답함")]))
+        ds = llm(relay, claude)
+        resp = await ds.create(body(), 60)
+        if by_deepseek:
+            ok(len(relay.requests) == 2 and not claude.bodies and resp.served_model is None
+               and resp.content[0].text == "다시 물어서 답함", (steps[0], len(relay.requests)))
+        else:
+            ok(len(relay.requests) == 2 and len(claude.bodies) == 1 and resp.served_model == CLAUDE, len(relay.requests))
+        await ds.close()
+
     # A slow relay is cut at the DeepSeek time limit, then Claude answers.
     async def slow(request):
         await asyncio.sleep(10)

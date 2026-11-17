@@ -58,7 +58,7 @@ FID_A, FID_B = "fidA" + "x" * 30, "fidB" + "y" * 30
 CHAIN = ("marong/call/migrations/003_transport_reporting.sql", "marong/call/migrations/004_transcript_reporting.sql",
          "marong/call/migrations/005_discord_voice.sql", "marong/call/migrations/006_discord_shared_callers.sql",
          "marong/migrations/013_google_calendar.sql", "marong/migrations/014_app_chat.sql",
-         "marong/migrations/015_app_ring.sql")
+         "marong/migrations/015_app_ring.sql", "marong/migrations/018_call_first.sql")
 KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 WRONG_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 JWK = {**json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(KEY.public_key())), "kid": "k1", "alg": "RS256", "use": "sig"}
@@ -73,7 +73,7 @@ def ok(cond, what):
 
 
 def prepare(db):
-    """test_discord_dm's friends and DM links (현경 is a call friend), then the whole migration chain up to 015."""
+    """test_discord_dm's friends and DM links (현경 is a call friend), then the whole migration chain up to 018."""
     prepare_dm(db)
     with psycopg.connect(db.admin_url, autocommit=True) as conn:
         for name in CHAIN:
@@ -235,7 +235,16 @@ async def fcm_checks():
 
     ring = fcm_module.ring("g" * 20, "6f1c1d2e-3b4a-4c5d-8e9f-0a1b2c3d4e5f")
     ok("notification" not in ring and ring["data"] == {"kind": "ring", "ringId": "6f1c1d2e-3b4a-4c5d-8e9f-0a1b2c3d4e5f",
-                                                       "v": "1"} and ring["android"]["ttl"] == "45s", ring)
+                                                       "v": "1", "reason": "promise"}
+       and ring["android"]["ttl"] == "45s", ring)
+    # A hello call (docs/04-functional-spec/call-first.md 3.4): reason hello and the preview line, 1~30, one line.
+    ring = fcm_module.ring("g" * 20, "6f1c1d2e-3b4a-4c5d-8e9f-0a1b2c3d4e5f", "hello", " 나 털모자 샀다! ")
+    ok(ring["data"] == {"kind": "ring", "ringId": "6f1c1d2e-3b4a-4c5d-8e9f-0a1b2c3d4e5f", "v": "1",
+                        "reason": "hello", "line": "나 털모자 샀다!"}, ring)
+    for line in ("가" * 31, "한 줄\n두 줄", "", None):
+        ok("line" not in fcm_module.ring("g" * 20, "x", "hello", line)["data"], f"no line: {line!r}")
+    ok(fcm_module.ring("g" * 20, "x", "odd", "줄")["data"]["reason"] == "promise"
+       and "line" not in fcm_module.ring("g" * 20, "x", "promise", "줄")["data"], "only hello calls carry a line")
     ok(fcm_module.preview("가" * 130) == "가" * 119 + "…" and fcm_module.preview("가" * 120) == "가" * 120, "preview")
     with tempfile.TemporaryDirectory() as tmp:
         ok(fcm_module.FCM.from_credentials(None) is None and fcm_module.FCM.from_credentials(tmp) is None,

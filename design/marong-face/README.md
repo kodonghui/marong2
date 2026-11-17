@@ -21,7 +21,7 @@
 | --- | --- | --- | --- |
 | 01 | `marongi-01-neutral.png` | `01-neutral.webp` | 기본 얼굴, talk의 입 닫음 칸. 입 닫음과 눈 뜸 칸도 이 그림 |
 | 02 | `marongi-02-big-laugh.png` | `02-big-laugh.webp` | 느낌 `laugh` |
-| 03 | `marongi-03-listening.png` | `03-listening.webp` | 현경님이 말하는 중 |
+| 03 | `marongi-03-listening.png` | `03-listening.webp` | 쓰지 않음. 두 눈 높이가 달라 삐뚤어져 보여서 2026-11-16 통화 화면에서 뺐어요(동희님 요청). 현경님이 말할 때도 01 |
 | 04 | `marongi-04-thinking.png` | `04-thinking.webp` | 현경님 말이 끝나고 마롱이 소리가 아직일 때 |
 | 05 | `marongi-05-excited.png` | `05-excited.webp` | 느낌 `excited` |
 | 06 | `marongi-06-sad.png` | `06-sad.webp` | 느낌 `sad`, 예산·오류 상태 |

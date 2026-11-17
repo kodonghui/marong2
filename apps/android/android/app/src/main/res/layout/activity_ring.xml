@@ -37,12 +37,28 @@
             android:textStyle="bold" />
 
         <TextView
+            android:id="@+id/ring_kind"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:text="@string/ring_text"
             android:textColor="@color/ring_text_soft"
             android:textSize="18sp" />
+
+        <!-- SCR-110#hello: a hello call's preview line, up to two lines, broken between words. -->
+        <TextView
+            android:id="@+id/ring_line"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:lineBreakWordStyle="phrase"
+            android:maxLines="2"
+            android:textColor="@color/ring_text"
+            android:textSize="18sp"
+            android:visibility="gone"
+            tools:targetApi="33" />
 
         <Space
             android:layout_width="match_parent"

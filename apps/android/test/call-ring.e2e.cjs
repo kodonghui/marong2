@@ -6,7 +6,7 @@ const { describe, it, before, after, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { startCallSite } = require('./support/call-site.cjs');
+const { startCallSite, REPO } = require('./support/call-site.cjs');
 
 let chromium = null;
 try {
@@ -17,6 +17,9 @@ try {
 
 const PHONE = { viewport: { width: 412, height: 915 }, deviceScaleFactor: 1, isMobile: true, hasTouch: true, locale: 'ko-KR' };
 const RING = '6f1c1d2e-3b4a-4c5d-8e9f-0a1b2c3d4e5f';
+// A hello call's first 'ready' (docs/04-functional-spec/call-first.md SPEC-268) and a WebP to stand in for its picture.
+const HELLO = { ring: true, topic: { picture: '/chat/topics/v1/winter-hat.webp', title: '털모자' } };
+const PICTURE = { '/chat/topics/v1/winter-hat.webp': path.join(REPO, 'marong', 'call', 'static', 'face', 'v1', '05-excited.webp') };
 const PAGE_SCRIPT = path.join(__dirname, '..', 'android', 'app', 'src', 'main', 'assets', 'marong_page.js');
 // Capacitor's bridge as the page script sees it: it records the app calls and has no phone to report.
 const BRIDGE = `window.__native = [];
@@ -51,10 +54,10 @@ describe('call page: Marong\'s own call and the chat link', { skip }, () => {
     await browser?.close();
   });
 
-  async function open(options, address = '/', init = '', { idle = false, app = false } = {}) {
+  async function open(options, address = '/', init = '', { idle = false, app = false, device = {} } = {}) {
     const site = await startCallSite(options);
     sites.push(site);
-    const context = await browser.newContext(PHONE);
+    const context = await browser.newContext({ ...PHONE, ...device });
     contexts.push(context);
     await context.addInitScript(STATUSES + init);
     if (app) {
@@ -105,14 +108,15 @@ describe('call page: Marong\'s own call and the chat link', { skip }, () => {
     assert.equal(await page.textContent('#headline'), '마롱이가 건 전화예요');
     assert.equal(await page.getAttribute('#start', 'aria-label'), '마롱이 전화 받기');
     assert.equal(await page.textContent('#start .button-label'), '받기');
-    assert.equal(await page.textContent('#status'), '마롱이가 약속한 전화를 걸었어. 받기를 누르면 바로 이어져.');
+    assert.equal(await page.textContent('#status'), '마롱이가 전화를 걸었어. 받기를 누르면 바로 이어져.');
     assert.equal(site.upgrades.length, 0, 'nothing starts by itself in a browser');
     await shot(page, 'call-ring-offer');
     await page.click('#start');
     await inCall(page);
     const url = await socketURL(site);
     assert.ok(url.includes(`&ring=${RING}`), url);
-    assert.ok(!(await page.evaluate(() => window.__statuses)).includes('약속 시간이 지나서 보통 전화로 이어졌어.'));
+    assert.ok(!(await page.evaluate(() => window.__statuses)).includes('벨이 울린 지 오래돼서 보통 전화로 이어졌어.'));
+    assert.equal(await page.evaluate(() => document.body.classList.contains('topic-on')), false, 'no picture without a topic');
   });
 
   it('TC-145: inside the app (the page script\'s autoAnswer) the ring answers itself', async () => {
@@ -136,8 +140,102 @@ describe('call page: Marong\'s own call and the chat link', { skip }, () => {
     const { site, page } = await open({}, `/?ring=${RING}`);
     await page.click('#start');
     await inCall(page);
-    await page.waitForFunction(() => window.__statuses.includes('약속 시간이 지나서 보통 전화로 이어졌어.'));
+    await page.waitForFunction(() => window.__statuses.includes('벨이 울린 지 오래돼서 보통 전화로 이어졌어.'));
     assert.ok((await socketURL(site)).includes(`&ring=${RING}`));
+  });
+
+  const topicOn = (page) => page.waitForFunction(() => document.body.classList.contains('topic-on'));
+  const topicOff = (page) => page.evaluate(() => !document.body.classList.contains('topic-on'));
+
+  /** Nothing of the call is covered: the center of each button hits the button itself. */
+  async function controlsFree(page) {
+    for (const id of ['mute', 'stop']) {
+      const free = await page.evaluate((name) => {
+        const button = document.getElementById(name), box = button.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return !button.hidden && button.contains(hit);
+      }, id);
+      assert.ok(free, `${id} is not covered`);
+    }
+  }
+
+  it('SPEC-269: a hello call shows its picture in the face circle for 15 seconds, then her face', async () => {
+    const { page } = await open({ ready: HELLO, topics: PICTURE }, `/?ring=${RING}`);
+    await page.click('#start');
+    await inCall(page);
+    await topicOn(page);
+    const shownAt = Date.now();
+    assert.equal(await page.getAttribute('#topic-picture', 'src'), HELLO.topic.picture);
+    assert.equal(await page.getAttribute('#topic-picture', 'alt'), '털모자', 'the title is the picture\'s text');
+    assert.equal(await page.isHidden('#face'), true);
+    assert.equal(await page.textContent('#topic-title'), '털모자');
+    assert.equal(await page.getAttribute('#topic-close', 'aria-label'), '그림 닫기');
+    const close = await page.locator('#topic-close').boundingBox();
+    assert.ok(close.width >= 48 && close.height >= 48, `close ${close.width}x${close.height}`);
+    // Measured together: the circle grows into its call size with a transition.
+    const fills = await page.evaluate(() => {
+      const circle = document.querySelector('.face-disc').getBoundingClientRect();
+      const picture = document.getElementById('topic-picture').getBoundingClientRect();
+      return Math.abs(picture.width - circle.width) < 1 && Math.abs(picture.height - circle.height) < 1;
+    });
+    assert.ok(fills, 'the picture fills the circle');
+    await controlsFree(page);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+    await shot(page, 'call-topic-card');
+    await page.waitForFunction(() => !document.body.classList.contains('topic-on'), null, { timeout: 20000 });
+    const shownFor = Date.now() - shownAt;
+    assert.ok(shownFor >= 14000 && shownFor < 17000, `the picture stayed ${shownFor} ms`);
+    assert.equal(await page.isVisible('#face'), true, 'her face is back');
+    assert.equal(await page.isHidden('#topic-close'), true);
+    assert.ok(await page.evaluate(() => document.body.classList.contains('in-call')), 'the call goes on');
+  });
+
+  it('SPEC-269: 그림 닫기 or a tap on the picture brings her face back at once', async () => {
+    for (const target of ['#topic-close', '#topic-picture', '#topic-title']) {
+      const { page } = await open({ ready: HELLO, topics: PICTURE }, `/?ring=${RING}`);
+      await page.click('#start');
+      await inCall(page);
+      await topicOn(page);
+      await page.click(target);
+      assert.ok(await topicOff(page), `${target} closes the picture`);
+      assert.equal(await page.isVisible('#face'), true);
+      assert.ok(await page.evaluate(() => document.body.classList.contains('in-call')), 'and the call goes on');
+    }
+  });
+
+  it('SPEC-269: a picture that does not load, or a picture address of another shape, shows nothing', async () => {
+    const shapes = [{ picture: '/chat/topics/v1/no-such-picture.webp', title: '없는 그림' },
+      { picture: 'https://example.com/x.webp', title: '바깥' }, { picture: '/chat/topics/v1/winter-hat.webp', title: '' }];
+    for (const topic of shapes) {
+      const { site, page } = await open({ ready: { ring: true, topic }, topics: PICTURE }, `/?ring=${RING}`);
+      await page.click('#start');
+      await inCall(page);
+      await page.waitForTimeout(800);
+      assert.ok(await topicOff(page), JSON.stringify(topic));
+      assert.equal(await page.isVisible('#face'), true);
+      assert.ok(!site.requests.some((line) => line.includes('example.com')), 'nothing outside the site was asked');
+    }
+  });
+
+  it('SPEC-269: at 360 and 430 px the card fits, covers no button, and shows without movement under reduced motion', async () => {
+    for (const [width, height] of [[360, 740], [430, 932]]) {
+      for (const motion of ['no-preference', 'reduce']) {
+        const { page } = await open({ ready: HELLO, topics: PICTURE }, `/?ring=${RING}`, '',
+          { device: { viewport: { width, height }, reducedMotion: motion } });
+        await page.click('#start');
+        await inCall(page);
+        await topicOn(page);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, `${width}px`);
+        for (const id of ['#topic-close', '#topic-title']) {
+          const box = await page.locator(id).boundingBox();
+          assert.ok(box.x >= 0 && box.x + box.width <= width, `${id} inside ${width}px`);
+        }
+        await controlsFree(page);
+        const animation = await page.evaluate(() => getComputedStyle(document.getElementById('topic-picture')).animationName);
+        assert.equal(animation === 'none', motion === 'reduce', `${motion}: ${animation}`);
+        if (motion === 'no-preference') await shot(page, `call-topic-card-${width}`);
+      }
+    }
   });
 
   it('TC-145: a ring value that is not a UUID is dropped', async () => {
