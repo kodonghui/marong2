@@ -5,7 +5,7 @@
 ## GPT 인계
 
 - 목표: 친구가 마롱이와 나눈 하루 얘기(1:1 글 대화와 통화 자막)가 다음 날 아침 마롱이 시점의 그림일기 한 장으로 오고, 친구는 일기장에서 넘겨 보고 말로 고치고 다시 그리고 도장을 찍어요. 함께 통화 비용을 턴마다 세서 월 예산을 넘기 전에 막고, 설정 실험과 듣기 시험으로 통화 값을 줄일 근거를 모아요. 동희님 2026-11-16 15:57 KST 연구 요청과 "설계까지 해보자", 방향 고르기 2026-11-16 21:44 KST 결정 카드 'A 그림일기장'(D22, [도메인 설계](../01-domain/domain.md)).
-- 시작 조건: 화면 작업(TASK-152\~155, TASK-158의 SCR-001#budget 화면, TASK-304의 듣기 시험 페이지)은 09 토큰 얼리기 뒤예요. 얼리기는 다른 스레드의 화면이 다 모인 뒤라 늦어질 수 있어요(2026-11-17 14:37 KST 동희님 "있으면 기다리고"). 나머지(봇·서버·API·도구)는 토큰을 쓰지 않아서 PR #25가 합쳐진 뒤 바로 시작해도 돼요.
+- 시작 조건: 모두 바로 시작해도 돼요. 화면 작업(TASK-152\~155, TASK-158의 SCR-001#budget 화면, TASK-304의 듣기 시험 페이지)이 기다리던 09 토큰 얼리기는 2026-11-17 17:27 KST 동희님 '모두 승인'(D67)으로 끝났어요(토큰 103개 그대로).
 - 시작: PR #25가 `main`에 합쳐졌으면 `main`에서, 아니면 브랜치 `claude/project-thread-7y5bt4`의 머리(설계 끝 커밋 `3516c86` 이후 문서만 더한 커밋)에 그때의 `main`을 합친 뒤 새 브랜치 `codex/diary-call-cost`. PR #25는 `main` 2a473ae에서 갈라졌어요.
 - 읽을 것: 기능 명세 두 개의 1절(공통 규칙), 2절 표의 SPEC-150\~183, 3절(자세한 규칙), 5절(AI-6\~10 호출), 계약 다섯 개의 API-107·108\~126과 `components.x-corthex.errors`, 마이그레이션 세 개, 화면 정의 SCR-113\~119와 SCR-001의 #budget, [design/README.md](../../design/README.md) 1\~4·8절, 시험 계획 TC-159\~179. 목업은 캔버스 [마롱이 화면 설계](https://claude.ai/artifact/CC154gunovJS3tqa8XkpZ9)의 `A1xx-*`·`Main`·`A-*`(일기, SCR-119 포함)와 `A001-budget` 대지예요(비공개라 동희님이 공유해 줘야 열려요. 못 열면 화면 정의와 design/README.md만으로 만들어요). 이 밖의 문서는 읽지 않아도 돼요.
 - 용어: 이 목록과 시험 계획의 '버전'은 기능 명세·ERD·계약의 '판'(일기 글의 revision, TBL-107·`revision`)이고, '단어'는 명세의 '낱말'이에요. AI 지침 버전(`diary-v1`)은 따로 적었어요.
@@ -69,8 +69,8 @@ cd apps/android && npm test && npm run test:browser   # 일기장·듣기 시험
 | TASK-302 | 관리 명령과 시트: `call-cost [YYYY-MM]`·`--switch`, `call-price add`, `call-tuning …`, `bash deploy/ovh.sh call-admin …`, `call.session_report`와 '통화 세션' 탭 칸 | SPEC-180, SPEC-181 | `tools/vertex_live/cost_admin.py`, `tools/report.py`, `tools/sheet.gs` | TASK-157, TASK-300 | GPT | 0.75 | TC-177 통과 |
 | TASK-303 | 통화 중 기억 자동 시험: `memory_bench.py --tuning <이름> [--runs 3]`, 지어낸 대본 소리(`tools/vertex_live/bench/`), 4분·8분 맞힌 비율과 1분당 비용 | SPEC-182 | `tools/vertex_live/memory_bench.py`, `bench/` | TASK-300 | GPT | 1 | TC-178의 기억 시험 줄이 가짜 연결로 통과. 진짜 연결로 돌리는 건 동희님이 실험 이름을 정해 줄 때만(한 번에 10분 안) |
 | TASK-304 | 듣기 시험: 문장 10개 고정 파일, `tools/listen_test.py make`(임의 id, 정답표는 서버 파일에만), `marong/app_listen.py`(API-121\~123), 화면 SCR-119 `/chat/listen/` | SPEC-183, SCR-119 | API-121, API-122, API-123, TBL-114, `marong/app_chat_static/listen/` | TASK-138, TASK-146 | GPT | 1.25 | TC-178의 듣기 줄 통과 |
-| TASK-305 | 서버 반영: 백업, 마이그레이션 016·017(봇 DB)·007(통화 DB), 파일, 설정(`MARONG_DIARY`는 꺼 둔 채), 대화·통화 없을 때 재시작, 로그 5분 확인, 되돌리기 스크립트 | 명세 1절 | 서버 | TASK-139\~159, TASK-300\~304 | GPT | 0.5 | 반영 뒤 실제 주소의 API-108이 `enabled=false`, `/api/me`에 예산 상태, `call-cost` 출력, 로그 오류 0, 되돌리기 경로를 PR에 적음 |
-| TASK-306 | 실제 폰·운영 확인: 동희님이 고른 친구에 `diary on` 뒤 첫 주(명세 7.2), 갤럭시·아이폰(7.3), 통화 첫 2주(call-cost 7.2) | REQ-175, REQ-176, 명세 7절 | 폰, 운영 | TASK-305 | GPT(동희님이 폰·청구서 확인) | 2주 관찰 | TC-179 결과 기록. 다르면 버그로 기록 |
+| TASK-305 | 서버 반영: 백업, 마이그레이션 016·017(봇 DB)·007(통화 DB), 파일, 설정(`MARONG_DIARY`는 꺼 둔 채), 대화·통화 없을 때 재시작, 로그 5분 확인, 되돌리기 스크립트 | SPEC-150, SPEC-172, 명세 1절 | 서버 | TASK-139\~159, TASK-300\~304 | GPT | 0.5 | 반영 뒤 실제 주소의 API-108이 `enabled=false`, `/api/me`에 예산 상태, `call-cost` 출력, 로그 오류 0, 되돌리기 경로를 PR에 적음 |
+| TASK-306 | 실제 폰·운영 확인: 동희님이 고른 친구에 `diary on` 뒤 첫 주(명세 7.2), 갤럭시·아이폰(7.3), 통화 첫 2주(call-cost 7.2) | REQ-175, REQ-176, SPEC-151, SPEC-157, 명세 7절 | 폰, 운영 | TASK-305 | GPT(동희님이 폰·청구서 확인) | 2주 관찰 | TC-179 결과 기록. 다르면 버그로 기록 |
 
 ## 확인
 

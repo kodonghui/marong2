@@ -169,9 +169,16 @@
       "updated": "2026-11-17T08:19:55+00:00"
     },
     "09-mockup": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "따로 목업 없음: 공통 캔버스에 SCR-109 줄·SCR-130 알림 대지. 공통 토큰 얼리기 때 함께 확인",
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "프로젝트 채팅 '아니 얼마나 더 남았어 설계? 나한테 확인하는 단계만 남은거야? 모두 승인이야'(2026-11-17 17:27:13 KST, D67). 남은 확인 단계를 모두 승인함: 공통 09 토큰 얼리기(design/base.tokens.json 103개 그대로)",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJVsU16GXHgrv9AYR6fstwBT",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "없음. 토큰 값을 바꾸려면 설계 PR과 동희님 확인",
       "checks": [
         {
           "level": "info",
@@ -179,7 +186,7 @@
           "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T05:49:16+00:00"
+      "updated": "2026-11-17T08:29:14+00:00"
     },
     "10-wbs": {
       "state": "done",

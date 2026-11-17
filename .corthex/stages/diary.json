@@ -122,15 +122,21 @@
       "updated": "2026-11-17T08:19:56+00:00"
     },
     "09-mockup": {
-      "state": "in_progress",
+      "state": "done",
       "checkpoints": [
         {
           "approved": "방향 A 그림일기장 선택(설계 스레드 결정 카드 '일기장 목업을 어느 방향으로 그릴까요?', 21:44 KST). 토큰 얼리기는 아직",
           "by": "프로젝트 주인",
           "date": "2026-11-16"
+        },
+        {
+          "approved": "프로젝트 채팅 '아니 얼마나 더 남았어 설계? 나한테 확인하는 단계만 남은거야? 모두 승인이야'(2026-11-17 17:27:13 KST, D67). 남은 확인 단계를 모두 승인함: 공통 09 토큰 얼리기(design/base.tokens.json 103개 그대로)",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJVsU16GXHgrv9AYR6fstwBT",
+          "date": "2026-11-17"
         }
       ],
-      "next": "[공통] 토큰 얼리기: 동희님 11/17 14:37 '앞으로 나올 화면설계 있으면 기다리고'에 따라 반려동물 서비스 화면(SCR-140~149)까지 공통 캔버스에 합친 뒤 한 번 여쭘. 공통 기준 design/README.md",
+      "next": "없음. 토큰 값을 바꾸려면 설계 PR과 동희님 확인",
       "checks": [
         {
           "level": "info",
@@ -138,7 +144,7 @@
           "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T05:49:16+00:00"
+      "updated": "2026-11-17T08:29:14+00:00"
     },
     "10-wbs": {
       "state": "done",
