@@ -31,10 +31,10 @@
 | TC-249 | 같이 출발 뒤 딥시크 오류 | SPEC-191 예외 | auto(`tests/test_deepseek.py`) | 딥시크 21초에 502, Claude 진행 중 | Claude 답 하나, Claude 호출 1번(두 번 띄우지 않음) | not run |
 | TC-250 | 같이 출발하지 않는 경우 | SPEC-191 전제·예외 | auto(`tests/test_deepseek.py`) | (가) 도구 결과 뒤 이어 보내는 요청 (나) `MARONG_DEEPSEEK_HEDGE_S=0` (다) HEDGE_S가 `timeout_s` 이상 (라) 딥시크가 웹 검색을 대신 찾는 중 | (가)(나)(라) 지금 동작과 같음(Claude 호출은 지금 대신 답하기 규칙대로만) (다) 시작 로그에 끔 | not run |
 | TC-251 | 딥시크 내용 거절이 먼저 | SPEC-191 예외 | auto(`tests/test_deepseek.py`) | 같이 출발 뒤 딥시크가 400 risk로 먼저 끝남 | 지금처럼 거절 답 | not run |
-| TC-252 | 로그에 대화 글이 없음 | 공통 규칙 3 | auto(시험 중 로그 모음) | TC-230\~251을 돌리며 남은 로그를 모음 | 선톡 글, 친구 말, 일정 제목, 키가 없음. 결과 이름·개수·짧은 방 키뿐 | not run |
-| TC-253 | 지금 시험 그대로 통과 | 모든 SPEC | auto | `tests/test_proactive.py`, `test_discord_dm.py`, `test_schedules.py`, `test_deepseek.py`, `test_llm.py`, `test_app_chat.py`, `test_dm_help.py`, `test_app_ring.py`, `test_topics.py`, `test_check.py` | 모두 통과. 기대값을 새 규칙에 맞게 고친 체크(예: 하루 12번·7\~24시)는 PR 설명에 줄마다 이유 | not run |
+| TC-252 | 로그에 대화 글이 없음 | SPEC-184\~191(명세 1절 3번) | auto(시험 중 로그 모음) | TC-230\~251을 돌리며 남은 로그를 모음 | 선톡 글, 친구 말, 일정 제목, 키가 없음. 결과 이름·개수·짧은 방 키뿐 | not run |
+| TC-253 | 지금 시험 그대로 통과 | SPEC-184\~191 | auto | `tests/test_proactive.py`, `test_discord_dm.py`, `test_schedules.py`, `test_deepseek.py`, `test_llm.py`, `test_app_chat.py`, `test_dm_help.py`, `test_app_ring.py`, `test_topics.py`, `test_check.py` | 모두 통과. 기대값을 새 규칙에 맞게 고친 체크(예: 하루 12번·7\~24시)는 PR 설명에 줄마다 이유 | not run |
 | TC-254 | 반영 뒤 7일 숫자 | REQ-202\~212, 명세 5절 | server, manual | 반영 7일 뒤 서버 DB·로그를 읽어 명세 5절 표를 채움(숫자만, 글 없음). 현경님 폰은 동희님이 물어봄 | 하루 선톡 3 이하, 22\~08시 0, 같은 소재 되풀이 거의 0, 종일 일정마다 아침 알림, 늦은 답 중앙 30초 안(REQ-212), 지문 0 | not run |
-| TC-255 | 되돌리기 | 반영(WBS TASK-209) | server | 반영 전 되돌리기 스크립트를 마른 실행(`--dry-run`)으로 돌림 | 바꿀 파일 목록과 다시 시작할 서비스가 나오고 아무것도 바뀌지 않음 | not run |
+| TC-255 | 되돌리기 | SPEC-184\~191, TASK-209 | server | 반영 전 되돌리기 스크립트를 마른 실행(`--dry-run`)으로 돌림 | 바꿀 파일 목록과 다시 시작할 서비스가 나오고 아무것도 바뀌지 않음 | not run |
 
 해당 없음: 접근(새 입구 없음, 방 범위 규칙 그대로), 입력·대상·API 응답(API 바뀜 없음), 화면 상태(화면 없음), 동시성(칸 잡기 `claim_slot`·방 잠금은 그대로이고 지금 시험이 덮음), 레드팀(새 도구·새 대화 입구가 없음. 1\~4단계에서 함).
 
