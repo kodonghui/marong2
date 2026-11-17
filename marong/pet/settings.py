@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import psycopg
 from psycopg.conninfo import conninfo_to_dict
@@ -73,10 +74,26 @@ def _positive(env, key, default=None):
     return value
 
 
+def _origin(raw):
+    try:
+        parsed = urlsplit(raw)
+        local = parsed.hostname in ("localhost", "127.0.0.1", "::1")
+        if ((parsed.scheme != "https" and not (parsed.scheme == "http" and local))
+                or not parsed.hostname or parsed.username is not None or parsed.password is not None
+                or parsed.path not in ("", "/") or parsed.query or parsed.fragment
+                or (parsed.port is not None and parsed.port < 1)):
+            raise ValueError
+    except ValueError:
+        raise SettingsError("PET_ORIGIN is invalid") from None
+    return raw.rstrip("/")
+
+
 @dataclass(frozen=True)
 class Settings:
     db: str = field(repr=False)
     port: int
+    origin: str
+    media_dir: Path
     signup: str
     budget_krw: int
     krw_per_usd: int
@@ -110,8 +127,10 @@ class Settings:
             raise SettingsError("PET_DATABASE_URL is invalid") from None
         if parsed.get("dbname") != "marong_pet" or parsed.get("user") != "marong_pet":
             raise SettingsError("PET_DATABASE_URL must select the separate pet database and role")
-        port = _positive(env, "PET_PORT", "8799")
+        port = _positive(env, "PET_PORT", "8797")
         if not 1024 <= port <= 65535:
             raise SettingsError("PET_PORT is outside the allowed range")
-        return cls(db, port, signup, budget, rate, models["PET_VISION_MODEL"], models["PET_IMAGE_MODEL"],
+        origin = _origin(env.get("PET_ORIGIN", f"http://127.0.0.1:{port}"))
+        media_dir = Path(env.get("PET_MEDIA_DIR", "/var/lib/marong-pet/media"))
+        return cls(db, port, origin, media_dir, signup, budget, rate, models["PET_VISION_MODEL"], models["PET_IMAGE_MODEL"],
                    models["PET_IMAGE_FALLBACK_MODEL"], models["PET_CHAT_MODEL"], models["PET_DIARY_MODEL"], prices)

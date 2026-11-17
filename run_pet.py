@@ -10,19 +10,21 @@ from aiohttp import web
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
+from marong.pet.auth import AuthConfig, register as register_auth
+from marong.pet.cost import Budget
+from marong.pet.http import CONFIG, POOL, guard, read_media
 from marong.pet.settings import Settings, SettingsError
 
 log = logging.getLogger("pet")
-POOL = web.AppKey("pet_database", AsyncConnectionPool)
-CONFIG = web.AppKey("pet_settings", Settings)
+BUDGET = web.AppKey("pet_budget", Budget)
 
 
 async def health(_request):
     return web.json_response({"ok": True}, headers={"Cache-Control": "no-store"})
 
 
-def make_app(settings: Settings) -> web.Application:
-    app = web.Application()
+def make_app(settings: Settings, *, auth_config=None) -> web.Application:
+    app = web.Application(middlewares=[guard])
     app[CONFIG] = settings
 
     async def database(app):
@@ -38,12 +40,15 @@ def make_app(settings: Settings) -> web.Application:
                 if not (await cursor.fetchone())["ready"]:
                     raise SettingsError("the separate pet database is not initialized")
             app[POOL] = pool
+            app[BUDGET] = Budget(pool, settings)
             yield
         finally:
             await pool.close()
 
     app.cleanup_ctx.append(database)
     app.router.add_get("/healthz", health, allow_head=False)
+    app.router.add_get("/api/media/{id}", read_media, allow_head=False)
+    register_auth(app, auth_config if auth_config is not None else AuthConfig.read(os.environ))
     return app
 
 
