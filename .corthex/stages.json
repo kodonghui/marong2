@@ -21,9 +21,14 @@
           "level": "info",
           "message": "CTX-021 앱 자동 업데이트 한 번에 초안(docs/01-domain/app-update.md): TERM-092~100, D40(동희님 11/17 12:18 '좀 자동 업데이트 되게 못하나'). 체크포인트 1~3 대기, 추천안으로 02 진행",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "성향 1~4단계 도메인 CTX-008~013·TERM-040~079(docs/01-domain/persona.md, PR #30). 8절 질문 1~4는 추천안으로 썼고 구현 전 2차 논의에서 확인",
+          "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T03:32:16+00:00"
+      "updated": "2026-11-17T04:36:00+00:00"
     },
     "02-prd": {
       "state": "in_progress",
@@ -49,9 +54,14 @@
           "level": "info",
           "message": "성향 0단계 고침 REQ-202~212(docs/02-prd/persona.md, PR #30). D24로 바로 반영이라 범위 동결은 1~4단계와 함께 2차 논의에서",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "성향 1~4단계 REQ-213~259(47개, 모두 proposed). REQ 범위 202~259를 다 씀",
+          "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T03:55:12+00:00"
+      "updated": "2026-11-17T04:36:00+00:00"
     },
     "03-user-flow": {
       "state": "in_progress",
@@ -72,9 +82,14 @@
           "level": "info",
           "message": "CTX-021 흐름 FL-146 릴리스 올리기, FL-147 앱 업데이트, FL-148 사용자 확인 업데이트",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "성향 1~4단계 FL-124~139. 기능 Must REQ 모두 흐름에 있음, Mermaid 16개 Chromium mermaid.parse 통과",
+          "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T03:40:07+00:00"
+      "updated": "2026-11-17T04:36:01+00:00"
     },
     "04-functional-spec": {
       "state": "in_progress",
@@ -100,9 +115,14 @@
           "level": "info",
           "message": "성향 0단계 SPEC-184~191·AI-11·AI-12(docs/04-functional-spec/persona.md, PR #30). 새 FL 없음(나가는 경로는 그대로)",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "성향 1~4단계 SPEC-192~242(51개)와 AI-13~19. 기능 REQ-213~258 모두 SPEC 행에 연결, 표 칸 수·용어 검사·Mermaid 통과. 숫자 출발값은 [새 제안]으로 표시해 2차 논의에서 봄",
+          "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T03:55:12+00:00"
+      "updated": "2026-11-17T04:36:01+00:00"
     },
     "05-erd": {
       "state": "in_progress",
