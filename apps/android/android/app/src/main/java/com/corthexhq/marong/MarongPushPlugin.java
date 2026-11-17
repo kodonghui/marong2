@@ -29,7 +29,7 @@ public class MarongPushPlugin extends Plugin {
         PushEvents.attach(this);
     }
 
-    /** What the page reports to the server with PUT /chat/api/devices/{installId} (API-105). */
+    /** Device-report fields and app-only settings used in the chat menu. */
     @PluginMethod
     public void state(PluginCall call) {
         Context context = getContext();
@@ -47,6 +47,9 @@ public class MarongPushPlugin extends Plugin {
         // phones may hold back a sleeping app's messages.
         result.put("fullScreenSettings", Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE);
         result.put("samsung", "samsung".equalsIgnoreCase(Build.MANUFACTURER));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            result.put("installUpdates", context.getPackageManager().canRequestPackageInstalls());
+        }
         call.resolve(result);
     }
 
@@ -97,6 +100,17 @@ public class MarongPushPlugin extends Plugin {
         }
         Context context = getContext();
         open(call, new Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).setData(Uri.fromParts("package", context.getPackageName(), null)));
+    }
+
+    @PluginMethod
+    public void openInstallSettings(PluginCall call) {
+        Context context = getContext();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            open(call, new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
+                .setData(Uri.fromParts("package", context.getPackageName(), null)));
+        } else {
+            open(call, appDetails(context));
+        }
     }
 
     /** FCM gave or took this installation's id: the page sends a new device report. */

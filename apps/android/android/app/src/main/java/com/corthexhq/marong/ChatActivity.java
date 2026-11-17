@@ -76,6 +76,12 @@ public class ChatActivity extends BridgeActivity {
      * call window sets them.
      */
     @SuppressWarnings("deprecation") // The JSON constructor is the one way to start from the app's own file.
+    @Override
+    public void onStart() {
+        super.onStart();
+        AppUpdateJob.check(this);
+    }
+
     private CapConfig chatConfig() {
         try (InputStream in = getAssets().open("capacitor.config.json")) {
             JSONObject json = new JSONObject(readAll(in));

@@ -32,6 +32,8 @@ android {
                 storePassword keystoreProperties['storePassword']
                 keyAlias keystoreProperties['keyAlias']
                 keyPassword keystoreProperties['keyPassword']
+                // Keep a META-INF signature entry for the release publisher's structural check.
+                enableV1Signing = true
             }
         }
     }

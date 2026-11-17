@@ -66,6 +66,12 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
+    public void onStart() {
+        super.onStart();
+        AppUpdateJob.check(this);
+    }
+
+    @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         if (creating) {

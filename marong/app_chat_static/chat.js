@@ -541,7 +541,22 @@ const RING = {
 
 const bridgeCan = (name) => Boolean(window.__marongApp && typeof window.__marongApp[name] === 'function');
 
+const updateRow = document.createElement('div');
+updateRow.className = 'menu-update';
+updateRow.hidden = true;
+const updateText = document.createElement('p');
+const updateButton = document.createElement('button');
+updateButton.type = 'button';
+updateButton.className = 'text-button';
+updateButton.textContent = '켜기';
+updateRow.append(updateText, updateButton);
+ui.menu.append(updateRow);
+
 function showMenu() {
+  const permission = inApp() ? app.device?.installUpdates : undefined;
+  updateRow.hidden = typeof permission !== 'boolean';
+  updateText.textContent = permission ? '자동 업데이트: 켜짐' : '자동 업데이트: 꺼짐 · 켜 두면 새 버전이 저절로 깔려';
+  updateButton.hidden = permission !== false || !bridgeCan('openInstallSettings');
   const me = app.me;
   if (!me) return;
   const why = me.delivery.reason;
@@ -601,6 +616,10 @@ $('menu-ring-settings').addEventListener('click', () => {
 });
 $('menu-full-screen').addEventListener('click', () => {
   try { window.__marongApp.openFullScreenSettings(); } catch { /* old app */ }
+});
+updateButton.addEventListener('click', () => {
+  if (!bridgeCan('openInstallSettings')) return;
+  void Promise.resolve(window.__marongApp.openInstallSettings()).catch(() => {});
 });
 // The app reported a changed phone (back from Android's settings): show the new state.
 window.addEventListener('marongdevice', () => { if (!ui.menu.hidden) refreshMenu(); });
