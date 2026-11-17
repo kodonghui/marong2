@@ -2,11 +2,12 @@
 
 import asyncio
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 import re
+from uuid import uuid4
 
-from .friend_card import friend_lock
+from .friend_card import KST, FriendCards, ModelRun, friend_lock
 
 log = logging.getLogger("marong.safety")
 WEAK = re.compile(r"죽고\s*싶|사라지고\s*싶|다\s*그만하고\s*싶|없어지고\s*싶|살기\s*싫")
@@ -61,11 +62,15 @@ class Decision:
 
 
 class Safety:
-    def __init__(self, store, classify):
+    def __init__(self, store, classify, *, model=None):
         self.store = store
         self.classify = classify
+        self.model = model
 
-    async def _classify(self, mode, rows):
+    async def _classify(self, mode, rows, friend):
+        began = asyncio.get_running_loop().time()
+        sent_at = datetime.now(timezone.utc)
+        outcome, error_code = "ok", None
         try:
             result = await asyncio.wait_for(self.classify(mode, rows[-6:]), 5)
             allowed = ("yes", "no") if mode == "signal" else ("now", "not_now", "unknown")
@@ -73,8 +78,19 @@ class Safety:
                 raise ValueError("invalid safety response")
             return result
         except Exception as error:
+            outcome = "timeout" if isinstance(error, TimeoutError) else "error"
+            error_code = type(error).__name__
             log.warning("crisis_judge_error mode=%s error=%s", mode, type(error).__name__)
             return "no" if mode == "signal" else "unknown"
+        finally:
+            if self.model:
+                try:
+                    await asyncio.wait_for(FriendCards(self.store).record_run(ModelRun(
+                        "crisis_judge", uuid4().hex, self.model, "safety-v1", sent_at, outcome,
+                        friend_id=friend, total_ms=round((asyncio.get_running_loop().time()-began)*1000),
+                        error_code=error_code)), .5)
+                except Exception as error:
+                    log.warning("crisis_audit_error %s", type(error).__name__)
 
     async def active(self, friend, at):
         return await self.store._all(
@@ -83,10 +99,47 @@ class Safety:
             ORDER BY kind DESC""", (friend, at),
         )
 
+    async def recent(self, friend, room, message_id, at):
+        rows = await self.store._all("""SELECT m.content FROM marong.messages m
+            JOIN marong.people p USING(user_key) WHERE p.friend_id=%s AND m.room_key=%s
+            AND m.role='user' AND m.id<%s AND m.created_at>=%s AND NOT (m.meta ? 'image')
+            ORDER BY m.id DESC LIMIT 5""", (friend, room, message_id, at-timedelta(minutes=30)))
+        return [row["content"] for row in reversed(rows)]
+
+    async def proactive(self, friend, at):
+        states = await self.active(friend, at)
+        if not states:
+            return "normal", None
+        if any(row["kind"] == "body" for row in states):
+            return "blocked", None
+        state = states[0]
+        today = at.astimezone(KST).date()
+        if state["care_sent_at"] or today != state["opened_at"].astimezone(KST).date()+timedelta(days=1):
+            return "blocked", None
+        start = at.astimezone(KST).replace(hour=0, minute=0, second=0, microsecond=0)
+        said = await self.store._one("""SELECT EXISTS (
+            SELECT 1 FROM marong.messages m JOIN marong.people p USING(user_key)
+            WHERE p.friend_id=%s AND m.role='user' AND m.created_at>=%s
+            UNION ALL SELECT 1 FROM call.calls c JOIN call.callers caller ON caller.id=c.caller_id
+            WHERE caller.friend_id=%s AND c.started_at>=%s) AS spoke""", (friend, start, friend, start))
+        return ("blocked", None) if said["spoke"] else ("care", state["id"])
+
+    async def claim_care(self, friend, id, at):
+        async with friend_lock(self.store.pool, friend) as conn:
+            cur = await conn.execute("""UPDATE marong.safety_states SET care_sent_at=%s
+                WHERE id=%s AND friend_id=%s AND kind='crisis' AND closed_at IS NULL AND care_sent_at IS NULL
+                RETURNING id""", (at, id, friend))
+            return await cur.fetchone() is not None
+
+    async def failed_care(self, friend, id, at):
+        async with friend_lock(self.store.pool, friend) as conn:
+            await conn.execute("""UPDATE marong.safety_states SET care_sent_at=NULL
+                WHERE id=%s AND friend_id=%s AND care_sent_at=%s AND closed_at IS NULL""", (id, friend, at))
+
     async def apply(self, friend, text, nearby, at, *, via="text"):
         recent = [*nearby[-5:], text]
         signal = judge(text, nearby)
-        if signal == "weak" and await self._classify("signal", recent) != "yes":
+        if signal == "weak" and await self._classify("signal", recent, friend) != "yes":
             signal = None
         kind = "crisis" if signal else "body" if BODY.search(text) else None
         states = await self.active(friend, at)
@@ -95,8 +148,12 @@ class Safety:
             signal, kind = "plan", "crisis"
         answer = None
         if crisis and crisis["asked_at"] and crisis["answer"] is None and not signal:
-            answer = "not_now" if NO.search(text) else "now" if YES.search(text) else await self._classify("answer", recent)
+            answer = "not_now" if NO.search(text) else "now" if YES.search(text) else await self._classify("answer", recent, friend)
         async with friend_lock(self.store.pool, friend) as conn:
+            if not kind:
+                await conn.execute("""UPDATE marong.safety_states SET closed_at=%s,close_reason='calm'
+                    WHERE friend_id=%s AND kind='crisis' AND closed_at IS NULL AND care_sent_at<%s""",
+                    (at, friend, at))
             await conn.execute("""UPDATE marong.safety_states
                 SET closed_at=%s,close_reason=CASE WHEN kind='crisis' THEN 'quiet_3d' ELSE 'quiet_7d' END
                 WHERE friend_id=%s AND closed_at IS NULL

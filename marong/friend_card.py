@@ -70,6 +70,8 @@ def choices(card):
         return (("yes", "맞아"), ("edit", "고칠래"))
     if card["kind"] == "ask_support":
         return (("listen", "일단 들어 줘"), ("solve", "같이 방법 찾자"))
+    if card["kind"] == "card_proposal":
+        return (("yes", "응"), ("no", "아니"))
     return ()
 
 
@@ -80,6 +82,16 @@ def text_choice(step, text):
         if value in (str(index), label):
             return option
     return None
+
+
+def proposal_text(row):
+    field, value = row["field"], row["value"]
+    if field == "lead":
+        labels = {"follow": "따라갈게", "lead": "네가 이끌어 줘"}
+    else:
+        step = next(index for index, question in enumerate(QUESTIONS, 1) if question[0] == field)
+        labels = dict(question_choices(step))
+    return f"요즘 {labels[value]} 쪽이 더 좋은 것 같은데, 기본을 그걸로 바꿀까?"
 
 
 class CardError(Exception):
@@ -247,7 +259,7 @@ class FriendCards:
                 (friend, room, at + timedelta(hours=24), at))
             return await cur.fetchone(), card_sentence(current)
 
-    async def answer_draft(self, friend, card_id, value, *, via, at):
+    async def answer_draft(self, friend, card_id, value, *, via, at, publish_message=False):
         async with friend_lock(self.store.pool, friend) as conn:
             cur = await conn.execute("""SELECT * FROM marong.chat_cards WHERE friend_id=%s AND id=%s
                 AND kind='card_draft'""", (friend, card_id))
@@ -280,14 +292,84 @@ class FriendCards:
                 current = await current.fetchone()
                 values = {key: current[key] for key in ("support", "advice", "honesty", "lead")}
                 sentence = card_sentence(await self._set(conn, friend, values, "draft", "friend"))
+            if publish_message and sentence:
+                await self._publish_answer(conn, row["room_key"], sentence)
             return {"card": row, "effect": effect, "applied": True, "sentence": sentence}
 
     async def answer_card(self, friend, card, value, **kwargs):
+        if card["kind"] == "card_proposal":
+            return await self.answer_proposal(friend, card["id"], value, via=kwargs["via"], at=kwargs["at"],
+                                              publish_message=kwargs.get("publish_message", False))
         if card["kind"] == "card_draft":
-            return await self.answer_draft(friend, card["id"], value, via=kwargs["via"], at=kwargs["at"])
+            return await self.answer_draft(friend, card["id"], value, via=kwargs["via"], at=kwargs["at"],
+                                           publish_message=kwargs.get("publish_message", False))
         if card["kind"] == "ask_support":
             return await self.answer_support(friend, card["id"], value, via=kwargs["via"], at=kwargs["at"])
         return await self.answer_question(friend, card["id"], value, **kwargs)
+
+    async def proposal(self, friend, room, at):
+        async with friend_lock(self.store.pool, friend) as conn:
+            expired = await conn.execute("""UPDATE marong.chat_cards SET status='expired'
+                WHERE friend_id=%s AND kind='card_proposal' AND status='open' AND expires_at<=%s
+                RETURNING field,created_at""", (friend, at))
+            for old in await expired.fetchall():
+                await conn.execute("""UPDATE marong.preference_signals SET closed_at=%s,closed_by='expired'
+                    WHERE friend_id=%s AND field=%s AND closed_at IS NULL""",
+                    (at, friend, old["field"]))
+            current = await conn.execute("SELECT * FROM marong.friend_cards WHERE friend_id=%s AND state='set'", (friend,))
+            card = await current.fetchone()
+            if not card:
+                return None
+            opened = await conn.execute("""SELECT 1 FROM marong.chat_cards WHERE friend_id=%s
+                AND kind='card_proposal' AND status='open'""", (friend,))
+            if await opened.fetchone():
+                return None
+            cur = await conn.execute("""SELECT field,value,count(*) AS n FROM marong.preference_signals s
+                WHERE friend_id=%s AND closed_at IS NULL
+                AND NOT EXISTS (SELECT 1 FROM marong.chat_cards c WHERE c.friend_id=s.friend_id
+                    AND c.kind='card_proposal' AND c.field=s.field AND c.value=s.value AND c.created_at>%s)
+                GROUP BY field,value HAVING count(*)>=3 AND count(DISTINCT day)>=2
+                ORDER BY count(*) DESC,field,value""", (friend, at-timedelta(days=7)))
+            selected = next((row for row in await cur.fetchall() if card[row["field"]] != row["value"]), None)
+            if not selected:
+                return None
+            cur = await conn.execute("""INSERT INTO marong.chat_cards
+                (friend_id,kind,field,value,room_key,expires_at,created_at)
+                VALUES (%s,'card_proposal',%s,%s,%s,%s,%s) RETURNING *""",
+                (friend, selected["field"], selected["value"], room, at+timedelta(hours=24), at))
+            return await cur.fetchone()
+
+    async def open_choice(self, friend, room, at):
+        return await self.store._one("""SELECT * FROM marong.chat_cards WHERE friend_id=%s AND room_key=%s
+            AND kind IN ('card_draft','card_proposal') AND status='open' AND expires_at>%s
+            ORDER BY created_at LIMIT 1""", (friend, room, at))
+
+    async def answer_proposal(self, friend, id, value, *, via, at, publish_message=False):
+        async with friend_lock(self.store.pool, friend) as conn:
+            cur = await conn.execute("SELECT * FROM marong.chat_cards WHERE id=%s AND friend_id=%s AND kind='card_proposal'",
+                                     (id, friend))
+            row = await cur.fetchone()
+            if not row:
+                raise CardError("card_not_found")
+            if value not in ("yes", "no") or via not in ("screen", "text", "button"):
+                raise CardError("invalid_input")
+            effect = "proposal_accepted" if value == "yes" else "proposal_declined"
+            if row["status"] == "answered" and row["answer"] == value:
+                return {"card": row, "effect": effect, "applied": False}
+            if row["status"] != "open" or row["expires_at"] <= at:
+                raise CardError("card_closed")
+            cur = await conn.execute("""UPDATE marong.chat_cards SET status='answered',answer=%s,answered_via=%s,
+                answered_at=%s WHERE id=%s RETURNING *""", (value, via, at, id))
+            row = await cur.fetchone()
+            sentence = None
+            if value == "yes":
+                sentence = card_sentence(await self._set(conn, friend, {row["field"]: row["value"]}, "proposal", "friend"))
+            if publish_message and sentence:
+                await self._publish_answer(conn, row["room_key"], sentence)
+            await conn.execute("""UPDATE marong.preference_signals SET closed_at=%s,closed_by=%s
+                WHERE friend_id=%s AND field=%s AND closed_at IS NULL""",
+                (at, "accepted" if value == "yes" else "declined", friend, row["field"]))
+            return {"card": row, "effect": effect, "applied": True, "sentence": sentence}
 
     async def ask_support(self, friend, room, at):
         async with friend_lock(self.store.pool, friend) as conn:
@@ -331,7 +413,7 @@ class FriendCards:
             """SELECT id FROM marong.chat_cards WHERE friend_id=%s AND room_key=%s
             AND kind='ask_support' AND status='open' AND expires_at>%s""", (friend, room, at),
         )
-        values = {"1": "listen", "일단 들어 줘": "listen", "일단 들어줘": "listen",
+        values = {"1": "listen", "그냥 들어": "listen", "그냥 들어줘": "listen", "일단 들어 줘": "listen", "일단 들어줘": "listen",
                   "2": "solve", "같이 방법 찾자": "solve"}
         value = values.get(text.strip())
         if row and value:
@@ -403,7 +485,15 @@ class FriendCards:
                 )
                 answers = {QUESTIONS[item["step"] - 1][0]: item["answer"] for item in await rows.fetchall()}
                 await self._set(conn, friend, answers, "questions", "friend")
-            return await self._question_result(conn, card, applied=True)
+            result = await self._question_result(conn, card, applied=True)
+            if publish_message and result.get("sentence"):
+                await self._publish_answer(conn, room, result["sentence"])
+            return result
+
+    @staticmethod
+    async def _publish_answer(conn, room, text):
+        await conn.execute("""INSERT INTO marong.messages(room_key,role,content,meta)
+            VALUES (%s,'assistant',%s,'{"transport":"app","delivered":true}')""", (room, text))
 
     @staticmethod
     async def _question_result(conn, card, *, applied):

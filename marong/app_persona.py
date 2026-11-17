@@ -148,6 +148,8 @@ class AppPersona:
         model = agent.s.anthropic_model
         try:
             parsed = await interpret(agent.llm, model, text)
+            if parsed["reasons"] & {"capability", "other_friend"}:
+                raise InterpretationError("copy_requires_design")
             reviewed = check_style(parsed["understood"], code_only=True)
             parsed["understood"] = reviewed.text
             if re.search(r"[ㅋㅎ]+|(?<![가-힣])야[!,.?\s]", parsed["understood"]):
@@ -188,7 +190,7 @@ class AppPersona:
         now = datetime.now(timezone.utc)
         try:
             row = await self.cards.store._one("""SELECT id,kind FROM marong.chat_cards
-                WHERE friend_id=%s AND id=%s AND kind IN ('card_question','card_draft','ask_support')""", (who["friend_id"], id))
+                WHERE friend_id=%s AND id=%s AND kind IN ('card_question','card_draft','ask_support','card_proposal')""", (who["friend_id"], id))
             if not row:
                 raise CardError("card_not_found")
             result = await self.cards.answer_card(who["friend_id"], row, body["value"], room=who["room_key"],
@@ -209,7 +211,7 @@ class AppPersona:
             return messages
         cards = await self.cards.store._all(
             """SELECT * FROM marong.chat_cards WHERE friend_id=%s AND room_key=%s
-            AND kind IN ('card_question','card_draft','ask_support') AND message_id=ANY(%s::bigint[])""",
+            AND kind IN ('card_question','card_draft','ask_support','card_proposal') AND message_id=ANY(%s::bigint[])""",
             (who["friend_id"], who["room_key"], [row["id"] for row in rows]),
         )
         by_id = {row["message_id"]: row for row in cards}

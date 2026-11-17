@@ -219,7 +219,8 @@ def question_view(row):
         return None
     view = discord.ui.View(timeout=None)
     for value, label in choices(row):
-        step = row["step"] if row["kind"] == "card_question" else "support" if row["kind"] == "ask_support" else "draft"
+        kinds = {"ask_support": "support", "card_draft": "draft", "card_proposal": "proposal"}
+        step = row["step"] if row["kind"] == "card_question" else kinds[row["kind"]]
         custom_id = f"card:{step}:{value}:{row['id']}"
         view.add_item(discord.ui.Button(label=label, custom_id=custom_id))
     return view
@@ -655,7 +656,7 @@ class DiscordDM(discord.Client):
         key = (event.data or {}).get("custom_id")
         if not isinstance(key, str) or not key.startswith("card:"):
             return
-        parts = re.fullmatch(r"card:([1-3]|draft|support):([a-z_]{1,20}):([1-9][0-9]{0,17})", key)
+        parts = re.fullmatch(r"card:([1-3]|draft|support|proposal):([a-z_]{1,20}):([1-9][0-9]{0,17})", key)
         cards = getattr(self.agent, "friend_cards", None)
         if not parts or not cards or event.guild is not None:
             return
@@ -1092,6 +1093,8 @@ class DiscordProactive(Proactive):
         return count
 
     async def deliver(self, room, dry=False, *, send_until=None):
+        if getattr(self.agent, "safety", None):
+            room = {**room, "persona_dry": dry}
         empty = {"text": None, "ok": False, "code": None}
         now = self.clock()
         planned = self.plan(room, now)
@@ -1106,7 +1109,7 @@ class DiscordProactive(Proactive):
         begin = planned[0]
         if not dry and not await self.store.claim_slot(room, begin):
             return empty
-        if self.topics is not None and not dry:
+        if self.topics is not None and not dry and not room.get("persona_care"):
             choice = None
             try:
                 choice = await self.topics.choose(room, now, self._slot(room, now)[1])
@@ -1120,7 +1123,13 @@ class DiscordProactive(Proactive):
         text, meta = made
         if dry:
             return {**empty, "text": text}
-        return await self._send(room, begin, text, meta)
+        result = {**empty}
+        try:
+            result = await self._send(room, begin, text, meta)
+            return result
+        finally:
+            if getattr(self.agent, "safety", None):
+                await self.agent.proactive_result(room, result.get("ok", False))
 
     async def _send(self, room, begin, text, meta, *, app_text=None, picture=None):
         """Send a proactive turn's text by the D18 path and keep it: the app only when the friend has a phone for it;

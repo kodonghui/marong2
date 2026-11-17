@@ -1,9 +1,10 @@
 """Scoped storage and tool auditing for TC-257, TC-278, and TC-279."""
 
 import asyncio
+import json
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 import sys
 from pathlib import Path
 
@@ -229,6 +230,38 @@ async def scenario(db, store):
     support_values = (await cards.read(support_friend))["card"]
     assert support_values["want"] == "listen" and support_values["want_until"] == now+timedelta(hours=24)
     assert await cards.support_text(support_friend, "fixture-room-a", "2", now) is None
+
+    proposal_friend, = db.admin("INSERT INTO marong.friends(name) VALUES ('fixture-proposal') RETURNING id")[0]
+    await cards.set(proposal_friend, {"support": "solve"}, source="screen")
+    for offset in range(3):
+        await cards.signal(proposal_friend, "support", "listen", source="want", at=now-timedelta(days=offset))
+    proposals = await asyncio.gather(cards.proposal(proposal_friend, "fixture-room-a", now),
+                                     cards.proposal(proposal_friend, "fixture-room-b", now))
+    assert sum(value is not None for value in proposals) == 1
+    proposal = next(value for value in proposals if value)
+    assert proposal["field"] == "support" and proposal["value"] == "listen"
+    picked = await cards.answer_proposal(proposal_friend, proposal["id"], "yes", via="screen", at=now,
+                                         publish_message=True)
+    assert picked["effect"] == "proposal_accepted" and picked["sentence"]
+    assert not (await cards.answer_proposal(proposal_friend, proposal["id"], "yes", via="text", at=now))["applied"]
+    assert not await cards.open_signals(proposal_friend, "support")
+    assert (await cards.read(proposal_friend))["card"]["support"] == "listen"
+    assert await cards.proposal(proposal_friend, "fixture-room-a", now+timedelta(minutes=1)) is None
+
+    handler.llm = SimpleNamespace(create_once=AsyncMock(return_value=SimpleNamespace(
+        stop_reason="end_turn", content=[SimpleNamespace(type="text", text=json.dumps({
+            "understood": "짧게 반응할게.", "hard_rules": [], "out_of_scope": [],
+        }, ensure_ascii=False))])))
+    command = Incoming("fixture-room-a", "fixture-onboard", "")
+    command.card_actor = new_friend
+    saved, meta = await handler._instruction_reply(command, "앞으로 이렇게 대해 줘: 짧게 답해 줘")
+    assert saved == "이렇게 이해했어: 짧게 반응할게." and meta["custom_instruction"] == "saved"
+    assert (await cards.read(new_friend))["instruction"]["via"] == "chat"
+    command.is_channel = False
+    assert (await handler._instruction_reply(command, "앞으로 이렇게 대해 줘: 짧게 답해 줘"))[0] == "그건 우리 둘이 있을 때 말해 줘"
+    command.is_channel = True
+    await handler._instruction_reply(command, "앞으로 이렇게 대해 줘:")
+    assert (await cards.read(new_friend))["instruction"]["text"] is None
 
 
 async def run(db):
