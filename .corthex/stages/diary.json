@@ -4,45 +4,101 @@
   "part": "diary",
   "stages": {
     "01-domain": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "체크포인트 3: CTX-007 마롱이의 일기 맥락 표·규칙·맥락 지도(docs/01-domain/domain.md). 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
-      "updated": "2026-11-17T05:49:16+00:00"
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "프로젝트 채팅 '모두 승인'(2026-11-17 17:18:41 KST). NEXUS 체크포인트 요청 다섯 개(반려동물 01과 예전 기능 넷 묶음)에 대한 답. 이 기능의 요청 nc_t46wrw290575는 설계 01~08·10·12를 한 번에 확인하고 통과하면 모두 이 통과로 기록한다고 적음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ4NaazQu3QW45S1NaoCm9d6",
+          "date": "2026-11-17"
+        },
+        {
+          "approved": "NEXUS에서 통과(2026-11-17 17:19:20 KST, 체크포인트 요청 nc_t46wrw290575). 같은 때 프로젝트 채팅 '모두 승인'(17:18:41 KST)",
+          "by": "the maintainer",
+          "nexus": "nk_n3e01py2bmqk",
+          "where": "https://nexus.corthex-hq.com/overview/marong/diary/01-domain#nk_n3e01py2bmqk",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "없음. 요청에 적은 허브 경고는 정리 PR에서 고침. 바뀌면 설계 PR로",
+      "updated": "2026-11-17T08:21:59+00:00"
     },
     "02-prd": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "확인 질문 3개(REQ-139 04:00, 일기 글 Anthropic, REQ-155 도장 날짜만)는 D63(2026-11-17 15:15 KST)으로 추천안대로 정해짐. 체크포인트는 NEXUS에서 요청",
-      "updated": "2026-11-17T07:45:55+00:00"
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "프로젝트 채팅 '모두 승인'(2026-11-17 17:18:41 KST). NEXUS 체크포인트 요청 다섯 개(반려동물 01과 예전 기능 넷 묶음)에 대한 답. 이 기능의 요청 nc_t46wrw290575는 설계 01~08·10·12를 한 번에 확인하고 통과하면 모두 이 통과로 기록한다고 적음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ4NaazQu3QW45S1NaoCm9d6",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "없음. 요청에 적은 허브 경고는 정리 PR에서 고침. 바뀌면 설계 PR로",
+      "updated": "2026-11-17T08:19:55+00:00"
     },
     "03-user-flow": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "체크포인트: FL-114~119의 주 경로와 실패 경로. 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
-      "updated": "2026-11-17T05:49:16+00:00"
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "프로젝트 채팅 '모두 승인'(2026-11-17 17:18:41 KST). NEXUS 체크포인트 요청 다섯 개(반려동물 01과 예전 기능 넷 묶음)에 대한 답. 이 기능의 요청 nc_t46wrw290575는 설계 01~08·10·12를 한 번에 확인하고 통과하면 모두 이 통과로 기록한다고 적음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ4NaazQu3QW45S1NaoCm9d6",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "없음. 요청에 적은 허브 경고는 정리 PR에서 고침. 바뀌면 설계 PR로",
+      "updated": "2026-11-17T08:19:55+00:00"
     },
     "04-functional-spec": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "확인 질문 3개(REQ-139 04:00, 일기 글 Anthropic, REQ-155 도장 날짜만)는 D63(2026-11-17 15:15 KST)으로 추천안대로 정해짐. 체크포인트는 NEXUS에서 요청",
-      "updated": "2026-11-17T07:45:55+00:00"
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "프로젝트 채팅 '모두 승인'(2026-11-17 17:18:41 KST). NEXUS 체크포인트 요청 다섯 개(반려동물 01과 예전 기능 넷 묶음)에 대한 답. 이 기능의 요청 nc_t46wrw290575는 설계 01~08·10·12를 한 번에 확인하고 통과하면 모두 이 통과로 기록한다고 적음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ4NaazQu3QW45S1NaoCm9d6",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "없음. 요청에 적은 허브 경고는 정리 PR에서 고침. 바뀌면 설계 PR로",
+      "updated": "2026-11-17T08:19:55+00:00"
     },
     "05-erd": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "스키마 동결: 016_diary.sql TBL-103~109. 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
-      "updated": "2026-11-17T05:49:16+00:00"
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "프로젝트 채팅 '모두 승인'(2026-11-17 17:18:41 KST). NEXUS 체크포인트 요청 다섯 개(반려동물 01과 예전 기능 넷 묶음)에 대한 답. 이 기능의 요청 nc_t46wrw290575는 설계 01~08·10·12를 한 번에 확인하고 통과하면 모두 이 통과로 기록한다고 적음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ4NaazQu3QW45S1NaoCm9d6",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "없음. 요청에 적은 허브 경고는 정리 PR에서 고침. 바뀌면 설계 PR로",
+      "updated": "2026-11-17T08:19:55+00:00"
     },
     "06-api": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "계약 검토: api/diary.openapi.yaml API-108~120의 응답(깨지는 변경 없음). 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
-      "updated": "2026-11-17T05:49:16+00:00"
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "프로젝트 채팅 '모두 승인'(2026-11-17 17:18:41 KST). NEXUS 체크포인트 요청 다섯 개(반려동물 01과 예전 기능 넷 묶음)에 대한 답. 이 기능의 요청 nc_t46wrw290575는 설계 01~08·10·12를 한 번에 확인하고 통과하면 모두 이 통과로 기록한다고 적음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ4NaazQu3QW45S1NaoCm9d6",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "없음. 요청에 적은 허브 경고는 정리 PR에서 고침. 바뀌면 설계 PR로",
+      "updated": "2026-11-17T08:19:55+00:00"
     },
     "07-sitemap": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "내비게이션 구조 합의: 일기장 한 페이지와 그 위 칸 다섯(SCR-114~118), 글 대화 머리 일기장 버튼. 공통 사이트맵(sitemap.yaml)은 이 기록이 맡음. 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "프로젝트 채팅 '모두 승인'(2026-11-17 17:18:41 KST). NEXUS 체크포인트 요청 다섯 개(반려동물 01과 예전 기능 넷 묶음)에 대한 답. 이 기능의 요청 nc_t46wrw290575는 설계 01~08·10·12를 한 번에 확인하고 통과하면 모두 이 통과로 기록한다고 적음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ4NaazQu3QW45S1NaoCm9d6",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "없음. 요청에 적은 허브 경고는 정리 PR에서 고침. 바뀌면 설계 PR로",
       "checks": [
         {
           "level": "info",
@@ -50,24 +106,37 @@
           "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T05:49:16+00:00"
+      "updated": "2026-11-17T08:19:55+00:00"
     },
     "08-screen-states": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "화면 정의 승인: SCR-113~118 상태와 와이어프레임 https://claude.ai/artifact/SnzgPx64NHhxgcxpa3HRho. 동희님 확인 대기. 확인 질문은 설계 스레드가 모아 한 번에 여쭘",
-      "updated": "2026-11-17T05:49:16+00:00"
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "프로젝트 채팅 '모두 승인'(2026-11-17 17:18:41 KST). NEXUS 체크포인트 요청 다섯 개(반려동물 01과 예전 기능 넷 묶음)에 대한 답. 이 기능의 요청 nc_t46wrw290575는 설계 01~08·10·12를 한 번에 확인하고 통과하면 모두 이 통과로 기록한다고 적음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ4NaazQu3QW45S1NaoCm9d6",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "없음. 요청에 적은 허브 경고는 정리 PR에서 고침. 바뀌면 설계 PR로",
+      "updated": "2026-11-17T08:19:56+00:00"
     },
     "09-mockup": {
-      "state": "in_progress",
+      "state": "done",
       "checkpoints": [
         {
           "approved": "방향 A 그림일기장 선택(설계 스레드 결정 카드 '일기장 목업을 어느 방향으로 그릴까요?', 21:44 KST). 토큰 얼리기는 아직",
           "by": "프로젝트 주인",
           "date": "2026-11-16"
+        },
+        {
+          "approved": "프로젝트 채팅 '아니 얼마나 더 남았어 설계? 나한테 확인하는 단계만 남은거야? 모두 승인이야'(2026-11-17 17:27:13 KST, D67). 남은 확인 단계를 모두 승인함: 공통 09 토큰 얼리기(design/base.tokens.json 103개 그대로)",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJVsU16GXHgrv9AYR6fstwBT",
+          "date": "2026-11-17"
         }
       ],
-      "next": "[공통] 토큰 얼리기: 동희님 11/17 14:37 '앞으로 나올 화면설계 있으면 기다리고'에 따라 반려동물 서비스 화면(SCR-140~149)까지 공통 캔버스에 합친 뒤 한 번 여쭘. 공통 기준 design/README.md",
+      "next": "없음. 토큰 값을 바꾸려면 설계 PR과 동희님 확인",
       "checks": [
         {
           "level": "info",
@@ -75,19 +144,33 @@
           "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T05:49:16+00:00"
+      "updated": "2026-11-17T08:29:14+00:00"
     },
     "10-wbs": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "GPT 인계 docs/10-wbs/diary-call-cost.md(TASK-137~155). PR #25 합친 뒤 봇·서버·API는 바로, 화면 작업(TASK-152~155)은 토큰 얼리기 뒤",
-      "updated": "2026-11-17T05:49:16+00:00"
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "프로젝트 채팅 '모두 승인'(2026-11-17 17:18:41 KST). NEXUS 체크포인트 요청 다섯 개(반려동물 01과 예전 기능 넷 묶음)에 대한 답. 이 기능의 요청 nc_t46wrw290575는 설계 01~08·10·12를 한 번에 확인하고 통과하면 모두 이 통과로 기록한다고 적음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ4NaazQu3QW45S1NaoCm9d6",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "없음. GPT가 인계 절대로 구현. 요청에 적은 허브 경고는 정리 PR에서 고침",
+      "updated": "2026-11-17T08:19:56+00:00"
     },
     "12-qa": {
       "state": "in_progress",
-      "checkpoints": [],
-      "next": "시험 계획 TC-159~172(docs/12-qa/diary-call-cost.md). 시험 코드·실행은 GPT",
-      "updated": "2026-11-17T05:49:16+00:00"
+      "checkpoints": [
+        {
+          "approved": "프로젝트 채팅 '모두 승인'(2026-11-17 17:18:41 KST). NEXUS 체크포인트 요청 다섯 개(반려동물 01과 예전 기능 넷 묶음)에 대한 답. 이 기능의 요청 nc_t46wrw290575는 설계 01~08·10·12를 한 번에 확인하고 통과하면 모두 이 통과로 기록한다고 적음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ4NaazQu3QW45S1NaoCm9d6",
+          "date": "2026-11-17"
+        }
+      ],
+      "next": "시험 계획 승인됨. 시험 계획 TC-159~172(docs/12-qa/diary-call-cost.md). 시험 코드·실행은 GPT",
+      "updated": "2026-11-17T08:19:56+00:00"
     }
   }
 }

@@ -1,6 +1,6 @@
 # 마롱이 웹 화면 목록(07단계 원본). 보기는 sitemap.md 에 이 파일에서 그려요.
 # 통화 웹앱(SCR-001~005)과, 봇의 글 대화 서버가 /chat/ 아래로 내보내는 일기장(SCR-113~118)·듣기 시험(SCR-119)·성향 맞춤(SCR-120~122)이 있어요.
-# SCR-113~119는 2026-11-16, SCR-120~122는 2026-11-17 설계예요(아직 만들지 않음, SCR-120~122는 성향 맞춤 스레드 PR #30의 docs/08-screens/persona.md 1절에서 옮김). 앱 창과 글 대화 화면(SCR-101~112)은 docs/android-app.md, docs/app-chat.md, docs/app-ring.md 에 있어서 여기 다시 적지 않아요.
+# SCR-113~119는 2026-11-16, SCR-120~122는 2026-11-17 설계예요(아직 만들지 않음, SCR-120~122는 성향 맞춤 스레드 PR #30의 docs/08-screens/persona.md 1절에서 옮김). 앱 화면 가운데 08 화면 정의가 있는 것(SCR-101, SCR-107~112, SCR-130)은 아래 '안드로이드 앱' 절에 적어요(2026-11-17 더함). SCR-102~106(앱 창의 연결 실패·로그인·권한 안내 등)은 docs/android-app.md에만 있어요.
 # 마롱이 화면 전체의 번호표(어느 번호를 어느 맥락이 쓰는지, SCR-120~ 범위 포함)와 토큰·부품 기준은 design/README.md 에 있어요(2026-11-17).
 # 앱 자동 업데이트(CTX-021, 2026-11-17)는 웹 화면이 없어요: 앱 글 대화 메뉴 SCR-109의 '자동 업데이트' 줄(FL-148, TERM-092·097)과 안드로이드 알림 SCR-130(FL-148, TERM-095·098). 정의 docs/08-screens/app-update.md.
 #   화면이 없는 흐름 FL-146(서버 명령)·FL-147(조용히 일어남), 화면이 없는 용어 TERM-093·094·096·099·100.
@@ -13,7 +13,7 @@
   access: 허용된 Google 계정(통화하는 친구)
   status: active
   flows: [FL-001, FL-002, FL-006, FL-007, FL-008, FL-009, FL-121]
-  terms: [CTX-002, CTX-006, TERM-001, TERM-003, TERM-014, TERM-018]
+  terms: [CTX-002, CTX-006, TERM-001, TERM-003, TERM-014, TERM-018, TERM-167]
   children:
     - id: SCR-002
       name: 통화 중
@@ -26,9 +26,9 @@
       # 통화 중(SCR-002)에 선 전화 그림 카드가 떠요(FL-142). 앱 화면은 그 문서에 있어요: 벨 화면 SCR-110과 전화 알림 SCR-111(docs/app-ring.md)은
       # '마롱이가 먼저 걸었어요'(FL-142·143), 앱 알림 SCR-108과 글 대화 SCR-107·글 대화 창 SCR-112(docs/app-chat.md)는 그림 말풍선과 '먼저 건 전화' 태그(FL-141·143·144).
       # 디스코드 DM의 그림 첨부는 디스코드 화면이에요. FL-140(화두 고르기)은 서버 판단, FL-145(그림 세트)는 관리 도구라 화면이 없어요.
-      # without a screen: TERM-081(약속 전화, 앱 벨 화면들에 이미 있음), TERM-082(화두, 그림 화두 글과 선 전화 통화로만 보임), TERM-084(그림 세트, 저장소 폴더),
-      # TERM-085(검수, 서버 밖), TERM-086(화두 시각, 서버가 셈), TERM-087(선 전화 시간대)·TERM-090(선 전화 설정, 말과 관리 도구로만 바꿈),
-      # TERM-088(화두 답)·TERM-089(간격 늘리기, 서버 기록과 계산), TERM-091(알림 미리보기 한 줄, 앱 알림 SCR-108·전화 알림 SCR-111의 글)
+      # without a screen: TERM-082(화두, 그림 화두 글과 선 전화 통화로만 보임), TERM-084(그림 세트, 저장소 폴더),
+      # without a screen: TERM-085(검수, 서버 밖), TERM-086(화두 시각, 서버가 셈), TERM-087(선 전화 시간대)·TERM-090(선 전화 설정, 말과 관리 도구로만 바꿈),
+      # without a screen: TERM-088(화두 답)·TERM-089(간격 늘리기, 서버 기록과 계산)
     - id: SCR-003
       name: 지난 통화
       path: /calls
@@ -138,6 +138,69 @@
       status: active
       flows: [FL-135]
       terms: [CTX-011, TERM-063, TERM-064, TERM-066, TERM-071, TERM-072, TERM-073]
+
+# 안드로이드 앱(2026-11-17 더함). 화면 정의는 docs/08-screens/call-first.md(SCR-101·107·108·110·111·112)와 docs/08-screens/app-update.md(SCR-109·130)에 있고,
+# 처음 설계는 docs/android-app.md·docs/app-chat.md·docs/app-ring.md예요. 경로 앞의 `app:`은 앱 안이라는 뜻이에요: 웹을 띄우는 창은 그 창 이름, 네이티브 화면은 Activity 이름, 알림은 알림 채널이에요.
+# 글 대화(SCR-107)는 웹 주소 /chat/이고, 앱에서는 글 대화 창(SCR-112) 안에서 열려요. 통화 화면(SCR-101)은 앱 창 안에서 통화 웹(SCR-001·002)을 띄워요.
+# without a screen: TERM-161(방)·TERM-162(친구)·TERM-164(요약)·TERM-165(메모)·TERM-166(공유 메모), 카톡·디스코드 대화와 서버 안
+# without a screen: TERM-169(앱 기기, 서버 기록), TERM-170(서명한 APK, 올리기 도구), TERM-171(앱 화면 상태, 앱이 셈)
+- id: SCR-107
+  name: 글 대화
+  path: /chat/
+  access: 허용된 Google 계정(통화하는 친구, 마롱이 친구에 묶임)
+  status: active
+  flows: [FL-141, FL-143, FL-144]
+  terms: [CTX-001, CTX-020, TERM-163, TERM-080, TERM-083]
+  children:
+    - id: SCR-109
+      name: 알림 상태(글 대화 메뉴)
+      path: /chat/#menu
+      access: 허용된 Google 계정(통화하는 친구, 마롱이 친구에 묶임)
+      status: active
+      flows: [FL-148]
+      terms: [CTX-021, TERM-092, TERM-097]
+- id: SCR-112
+  name: 글 대화 창(앱)
+  path: app:ChatActivity
+  access: 마롱이 앱을 깐 폰(로그인은 웹과 같은 Access)
+  status: active
+  flows: [FL-141, FL-143]
+  terms: [CTX-001, TERM-163]
+- id: SCR-101
+  name: 통화 화면(앱 창)
+  path: app:MainActivity
+  access: 마롱이 앱을 깐 폰(로그인은 웹과 같은 Access)
+  status: active
+  flows: [FL-142]
+  terms: [CTX-002, CTX-020, TERM-001, TERM-080, TERM-083]
+- id: SCR-110
+  name: 벨 화면
+  path: app:RingActivity
+  access: 마롱이 앱을 깐 폰
+  status: active
+  flows: [FL-142, FL-143]
+  terms: [CTX-020, TERM-168, TERM-080, TERM-081, TERM-091]
+- id: SCR-111
+  name: 전화 알림
+  path: app:notification/ring
+  access: 마롱이 앱을 깐 폰
+  status: active
+  flows: [FL-142, FL-143]
+  terms: [CTX-020, TERM-168, TERM-091]
+- id: SCR-108
+  name: 앱 알림
+  path: app:notification/talk
+  access: 마롱이 앱을 깐 폰
+  status: active
+  flows: [FL-141, FL-143]
+  terms: [CTX-020, TERM-083, TERM-091]
+- id: SCR-130
+  name: 앱 업데이트 알림
+  path: app:notification/update
+  access: 마롱이 앱을 깐 폰
+  status: active
+  flows: [FL-148]
+  terms: [CTX-021, TERM-172, TERM-095, TERM-098]
 
 # 반려동물 서비스(CTX-022~025, 2026-11-17 설계, 아직 만들지 않음). 친구용 마롱이와 다른 공개 서비스예요: 새 프로세스 run_pet.py가 내보내는 모바일 웹(PWA)이고,
 # Cloudflare Access 없이 카카오·구글 로그인으로 들어와요(SPEC-310, 368). 화면 정의는 docs/08-screens/pet.md, API는 api/pet.openapi.yaml(API-150~210)이에요.
