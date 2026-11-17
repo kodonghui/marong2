@@ -63,11 +63,13 @@ async def run(db):
         await store.add_message("fixture-safe-report", "user", "다른 친구가 말한 시험 자료", user_key="fixture-other-user")
         await store.add_message("fixture-other-room", "user", "다른 방의 시험 자료", user_key="fixture-safe-user")
         await store.add_message("fixture-safe-report", "assistant", "fixture-response-marker", reply_to=user)
+        await store.add_message("fixture-safe-report", "assistant", "fixture-care-marker", meta={"persona_care": 1})
         latest = await store.add_message("fixture-safe-report", "user", "일반적인 시험 이야기", user_key="fixture-safe-user")
         assert await safety.recent(1, "fixture-safe-report", latest, datetime.now(timezone.utc)) == [marker]
         with psycopg.connect(db.app_url, row_factory=dict_row) as conn:
             output = fetch(conn, now-timedelta(days=1), now+timedelta(days=1), False)
-        assert not any(marker in row["content"] or "fixture-response-marker" in row["content"] for row in output["messages"])
+        assert not any(marker in row["content"] or row["content"] in ("fixture-response-marker", "fixture-care-marker")
+                       for row in output["messages"])
         assert any("일반적인 시험 이야기" == row["content"] for row in output["messages"])
 
         care_friend, = db.admin("INSERT INTO marong.friends(name) VALUES ('fixture-care') RETURNING id")[0]

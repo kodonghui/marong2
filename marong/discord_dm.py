@@ -1185,7 +1185,11 @@ class DiscordProactive(Proactive):
                         return {"text": None, "ok": False, "code": None}
                     return await self._send(room, begin, *made)
             picture = choice.picture
-            text, meta = await self.agent.proactive_message(room, topic=picture)
+            made = await self.agent.proactive_message(room, topic=picture)
+            if made is None:
+                await self.store.topic_failed(choice.topic_id)
+                return {"text": None, "ok": False, "code": None}
+            text, meta = made
             result = await self._send(room, begin, text, {**meta, "topic": picture.key}, app_text=picture.preview,
                                       picture=picture)
         except Exception:

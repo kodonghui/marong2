@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/vertex_live"))
 from call_memory import MemoryStore, Principal
+from call_safety import CallSafety
 
 from marong.agent import Agent, Incoming
 from marong.friend_card import CardError, FriendCards, KST, ModelRun, card_sentence, question_choices, text_choice
@@ -192,6 +193,15 @@ async def scenario(db, store):
             prefix = await voice.friend_instruction(Principal(caller, 1, "fixture"))
         assert "아주 짧게 답할게." in prefix and "시험 지침" not in prefix and "친구 규칙" in prefix
         assert await voice.friend_instruction(Principal(caller, 1, "fixture")) == ""
+        call, _ = await voice.start_call(Principal(caller, 1, "fixture"), "00000000-0000-4000-8000-000000000001", "fixture", "fixture")
+        bridge = CallSafety(voice, Principal(caller, 1, "fixture"), call, AsyncMock(), "fixture")
+        assert await bridge.caption("fixture-partial", "user", "약 모아 놨어", False) is None
+        prompt = await bridge.caption("fixture-signal", "user", "약 모아 놨어", True)
+        assert "109" in prompt
+        await bridge.caption("fixture-answer", "assistant", "같이 있을게. 자살예방 상담전화 109", True)
+        assert await bridge.caption("fixture-signal", "user", "약 모아 놨어", True) is None
+        assert await bridge.caption("fixture-next", "user", "고마워", True) == ""
+        await voice.finish(Principal(caller, 1, "fixture"), call, True)
     finally:
         await voice.close()
 

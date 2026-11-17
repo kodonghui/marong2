@@ -368,6 +368,7 @@ class Agent:
             if "raise" in parsed["reasons"]:
                 asked, _ = await self.store.add_request(msg.user_key, msg.room_key, "proactive_more", "", "")
                 if asked == "ok":
+                    msg.owner_asked = True
                     lines.append("선톡 늘리는 건 동희한테 남겨 뒀어")
             return "\n".join(lines), {"custom_instruction": "saved"}
         except Exception as error:
@@ -384,7 +385,7 @@ class Agent:
             except Exception as error:
                 log.warning("instruction_audit_error %s", type(error).__name__)
 
-    async def _review_reply(self, msg, person, reply, text, deadline):
+    async def _review_reply(self, msg, person, reply, text, deadline, *, proactive=False, recent=()):
         data = await asyncio.wait_for(self.friend_cards.read(msg.card_actor, private=msg.is_channel), .5)
         rules = data["rules"]
         decision = getattr(msg, "safety_decision", None)
@@ -394,7 +395,8 @@ class Agent:
                   "difficult": bool(decision or difficult(text)),
                   "safety_again": bool(decision and decision.mark is None),
                   "counsel_allowed": bool(GENTLE_COUNSEL.search(text) or decision and decision.mark in ("109", "119", "body")),
-                  "polite": bool(data["instruction"] and data["instruction"]["polite"])}
+                  "polite": bool(data["instruction"] and data["instruction"]["polite"]),
+                  "owner_asked": bool(getattr(msg, "owner_asked", False)), "recent": recent}
         review = style_check(reply, **kwargs)
         original = review
         remaining = deadline - asyncio.get_running_loop().time() if deadline else self.s.llm_timeout_s
@@ -434,7 +436,7 @@ class Agent:
                         fallback="fallback_text" if review.issues else None)), .5)
                 except Exception as error:
                     log.warning("rewrite_audit_error %s", type(error).__name__)
-        value = style_fallback(review) if review.issues else review.text
+        value = style_fallback(review, proactive=proactive) if review.issues else review.text
         log.info("check kind=reply items=%s fixed=%s rewrote=%s fallback=%s",
                  ",".join(original.issues), ",".join(original.fixed), int(rewrote), int(bool(review.issues)))
         return value, {"persona_check": {"items": list(original.issues), "fixed": list(original.fixed),
@@ -1157,6 +1159,8 @@ class Agent:
             log.error("db_error %s", brief(e))
             return {**result, "content": "저장소 오류로 남기지 못했어.", "is_error": True}
         log.info("ask_owner user=%s kind=%s outcome=%s", short_key(msg.user_key), kind, outcome)
+        if outcome == "ok":
+            msg.owner_asked = True
         if kind.startswith("proactive_"):
             texts = {
                 "ok": "동희에게 남겼어. 선톡(마롱이가 먼저 말 거는 것)을 바꾸는 건 동희가 정해서 아직은 그대로야. 바꾼 척하지 말고 "
@@ -1248,6 +1252,13 @@ class Agent:
         if not text:
             log.info("proactive_skipped room=%s reason=stage_only", short_key(room_key))
             return self._topic_fallback(topic, memory) if topic is not None else None
+        if self.friend_cards and room.get("friend_id"):
+            msg.card_actor = room["friend_id"]
+            text, checked = await self._review_reply(msg, room, text, PROACTIVE_TRIGGER, end,
+                proactive=True, recent=tuple(old["content"] for old in said))
+            meta.update(checked)
+            if not text:
+                return None
         if topic is not None:
             text, fixed = topic_text(None if text == EMPTY_FALLBACK else text, topic)
             if fixed:

@@ -33,6 +33,8 @@ from marong.safety import owner_private
 
 
 def report_private(row):
+    if (row.get("meta") or {}).get("persona_care") is not None:
+        return True
     return any(owner_private(value) for key, value in row.items()
                if key in ("content", "text", "close_content", "summary", "detail") and isinstance(value, str))
 
@@ -225,8 +227,13 @@ def fetch(c, start: datetime, until: datetime, vectors: bool = True) -> dict:
     }
     # Safety-state information and its content never enter the research export (SPEC-211).
     blocked = {row["id"] for row in data["messages"] if report_private(row)}
+    replies = [row["reply_to"] for row in data["messages"] if row["reply_to"]]
+    reply_sources = c.execute("SELECT id,content FROM marong.messages WHERE id=ANY(%s)", (replies,)).fetchall()
+    blocked.update(row["id"] for row in reply_sources if report_private(row))
     blocked.update(row["id"] for row in data["messages"] if row["reply_to"] in blocked)
     data["messages"] = [row for row in data["messages"] if row["id"] not in blocked]
+    for row in data["messages"]:
+        row["meta"] = {key: value for key, value in (row["meta"] or {}).items() if key != "persona_check"}
     for key in ("embeddings", "summaries", "notes", "shared"):
         data[key] = [row for row in data[key] if not report_private(row)
                      and not (key == "embeddings" and row["source_type"] == "message" and row["source_id"] in blocked)]
