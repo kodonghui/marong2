@@ -6,6 +6,21 @@ from pathlib import Path
 EFFORTS = ("", "low", "medium", "high", "xhigh", "max")
 CACHE_TTLS = ("5m", "1h")  # Claude 프롬프트 캐시 수명. 둘뿐이고(24시간은 없음) 읽을 때마다 처음부터 다시 셈
 PER_DAY_MAX = 48  # 방 하나의 하루 선톡 수 상한(admin schedule·ask_owner 의 per_day). schema.sql 의 rooms.proactive_per_day CHECK 와 같게
+PROACTIVE_CAP = 3          # D24: 방별 설정이 더 커도 하루 세 칸까지
+PROACTIVE_AWAKE = (8, 22)  # 한국 시각 22시부터 다음 날 8시까지 쉼
+
+
+def proactive_schedule(start: int | None, end: int | None, per_day: int | None,
+                       default_hours: tuple[int, int] = PROACTIVE_AWAKE,
+                       default_per_day: int = PROACTIVE_CAP) -> tuple[tuple[int, int], int]:
+    """실제로 쓰는 ((시작 시, 끝 시), 하루 횟수)."""
+    hours = (default_hours[0] if start is None else start, default_hours[1] if end is None else end)
+    if not 0 <= hours[0] < hours[1] <= 24:
+        hours = default_hours
+    hours = (max(hours[0], PROACTIVE_AWAKE[0]), min(hours[1], PROACTIVE_AWAKE[1]))
+    if hours[0] >= hours[1]:
+        hours = PROACTIVE_AWAKE
+    return hours, max(1, min(per_day or default_per_day, PROACTIVE_CAP))
 
 
 def load_dotenv(path: str = ".env") -> None:

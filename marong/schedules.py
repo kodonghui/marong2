@@ -34,6 +34,7 @@ RETRY = timedelta(minutes=1)
 FAILURES_MAX = 3
 DATE_ONLY = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
 LATE_PREFIX = "앗 좀 늦었다 미안 🙏\n"
+ALL_DAY_REMIND_HOUR = 9
 
 SCHEDULE_ADD_TOOL = {
     "name": "schedule_add",
@@ -42,15 +43,16 @@ SCHEDULE_ADD_TOOL = {
         "3시에 알려 줘', '10분 뒤에 깨워 줘', '6시에 퇴근하니까 그때 톡해 줘') 저장한다. remind_at 이 있으면 그때 마롱이가 이 "
         "디스코드 DM으로 say 를 먼저 보낸다. 시각은 '지금 상황'의 지금 시각(한국 시간)을 기준으로 계산해 "
         "'2026-11-16T15:00:00+09:00'처럼 쓴다. 날짜나 시각이 애매하면('저녁에', '나중에', '그쯤') 저장하지 말고 하나만 짧게 "
-        "물어본다. 일정만 말하고 알림은 부탁하지 않았으면 remind_at 없이 저장한다(기억만). '이 친구 일정'에 이미 같은 게 "
-        "있으면 저장하지 않는다."
+        "물어본다. 시각이 있는 일정에서 알림을 부탁하지 않았으면 remind_at 없이 기억만 한다. 날짜만 있는 종일 일정은 "
+        "그날 아침 9시에 먼저 말을 건다. '이 친구 일정'에 이미 같은 게 있으면 저장하지 않는다."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "title": {"type": "string", "description": f"무엇인지 짧게 1~{TITLE_MAX}자(예: 토익 시험, 엄마한테 전화, 약 먹기)"},
             "event_at": {"type": "string",
-                         "description": "그 일이 있는 때. 시각을 모르면 날짜만 'YYYY-MM-DD'(종일). 알림만이면 빼."},
+                         "description": "그 일이 있는 때. 시각을 모르면 날짜만 'YYYY-MM-DD'(종일). 알림만이면 빼. "
+                                        "날짜만 쓴 종일 일정은 remind_at 이 없어도 그날 아침 9시에 마롱이가 먼저 말을 걸어."},
             "remind_at": {"type": "string",
                           "description": "마롱이가 DM으로 먼저 말할 때(시각까지). 알림을 부탁하지 않았으면 빼."},
             "repeat": {"type": "string", "enum": list(REPEATS),
@@ -58,7 +60,8 @@ SCHEDULE_ADD_TOOL = {
                                       "반복이면 remind_at 은 첫 알림 때이고 event_at 은 빼."},
             "say": {"type": "string",
                     "description": f"remind_at 에 보낼 말. 마롱이 말투로 한두 문장, {SAY_MAX}자 안쪽(예: '3시야! 토익 원서 "
-                                   "접수 잊지 마 📝'). '야'로 시작하지 마. 연락해 달라는 부탁이면 말을 거는 말로. 반복이면 매번 보내도 어울리게."},
+                                    "접수 잊지 마 📝'). '야'로 시작하지 마. 연락해 달라는 부탁이면 말을 거는 말로. 반복이면 매번 보내도 어울리게. "
+                                    "종일 일정이면 그날 아침에 건넬 말로(예: '오늘 토익 날이지? 긴장 풀고 잘 보고 와 📝')."},
         },
         "required": ["title"],
         "additionalProperties": False,
@@ -124,7 +127,7 @@ def schedule_guide(ring: bool = False) -> str:
 GUIDE = """# 일정과 알림
 - 친구가 일정을 알려 주거나 정한 때 알려 달라고, 깨워 달라고, 연락해 달라고 하면 schedule_add 로 저장해. 그때가 되면 마롱이가 이 DM으로 먼저 말해.
 - schedule_add 가 저장했다고 돌려줬을 때만 '응 내일 3시에 톡할게!'처럼 짧게 확인해. 도구를 안 불렀거나 실패했으면 맞춰 뒀다고 하지 마.
-- 날짜나 시각이 애매하면 저장하기 전에 하나만 짧게 물어봐. 일정만 말했으면 알림 없이 기억만 하고, 알림이 있으면 좋겠다 싶으면 '전날 밤에 알려 줄까?'처럼 한 번만 물어봐.
+- 날짜나 시각이 애매하면 저장하기 전에 하나만 짧게 물어봐. 시각이 있는 일정만 말했으면 알림 없이 기억만 하고, 알림이 있으면 좋겠다 싶으면 '전날 밤에 알려 줄까?'처럼 한 번만 물어봐. 날짜만 있는 종일 일정은 그날 아침 9시에 마롱이가 먼저 말을 걸어(say 에 그날 아침 말을 써).
 - 깨워 달라는 부탁이면 디스코드 알림이라 휴대폰 소리를 켜 둬야 들린다고 한 번만 말해 줘. 휴대폰 알람이나 다른 앱을 맞춰 준다고 하지 마."""
 
 
@@ -227,6 +230,10 @@ def check_add(inp: dict, tz: ZoneInfo, now: datetime, ring: bool = False) -> New
             return "remind_at 이 이미 지난 때야. 지금 시각을 보고 다시 계산해."
         elif remind_at < now:
             remind_at = now  # 답을 쓰는 사이 지나감: 곧바로 보냄
+    elif event_at is not None and all_day and repeat == "none" and not call:
+        morning = event_at.replace(hour=ALL_DAY_REMIND_HOUR)
+        if morning >= now:
+            remind_at = morning
     return NewSchedule(title, event_at, all_day, remind_at, repeat, anchor, say, "call" if call else "remind")
 
 
@@ -279,7 +286,9 @@ def reminder_text(row: dict, tz: ZoneInfo, late: timedelta) -> str:
     """알림 때 보낼 말: 마롱이가 저장할 때 써 둔 말(없으면 짧은 기본 말). 늦었으면 앞에 미안하다는 말."""
     say = row["say"]
     if not say:
-        if row["event_at"] is not None and not row["all_day"]:
+        if row["all_day"]:
+            say = f"오늘 {row['title']} 있는 날이야 📅"
+        elif row["event_at"] is not None:
             say = f"⏰ {row['title']} ({row['event_at'].astimezone(tz):%H:%M})"
         else:
             say = f"⏰ {row['title']}"

@@ -209,6 +209,10 @@ def clear(db):
     db.admin("UPDATE marong.app_rings SET created_at = now() - interval '2 days'")
     db.admin("UPDATE call.calls SET started_at = now() - interval '2 days'")  # no call within six hours
     db.admin("DELETE FROM marong.topic_prefs")
+    # Transport cases represent separate weeks. Keep previous fixture sends outside W2/W3's windows.
+    db.admin("UPDATE marong.messages SET created_at = now() - interval '8 days' "
+             "WHERE room_key = %s AND created_at > now() - interval '8 days' "
+             "AND (meta->>'proactive' = 'true' OR meta->>'hello' = 'true')", (HK_ROOM,))
 
 
 def say(db, role, content, when, meta=None):
@@ -404,9 +408,17 @@ async def proactive_checks(db, store, settings, folder, logs):
     ok(len(llm.bodies) == calls + 1 and "# 오늘 꺼낼 화두" in prompt and picture.scene in prompt
        and picture.alt in prompt, "AI-20: the topic part with the set's own words")
 
-    # a second turn the same day: an ordinary proactive message
+    # A second turn the same day waits for a reply even if the next slot has arrived.
+    later = min(now + timedelta(hours=4), at(TODAY, 21, 59))
+    sent, before, calls = len(channel.sent), len(sender.sent), len(llm.bodies)
+    result = await turn(later)
+    ok(not result["ok"] and len(topic_rows(db)) == 1 and len(channel.sent) == sent
+       and len(sender.sent) == before and len(llm.bodies) == calls, "W2 applies to picture and call selection")
+    # Simulate a reply after the first send, with enough quiet time for the next turn.
+    db.admin("UPDATE marong.messages SET created_at=now()-interval '6 hours' WHERE room_key=%s "
+             "AND meta->>'proactive'='true' AND created_at>now()-interval '2 hours'", (HK_ROOM,))
     before = len(sender.sent)
-    result = await turn(now + timedelta(minutes=40))
+    result = await turn(later)
     content, meta = last_message(db)
     ok(result["ok"] and "topic" not in meta and len(topic_rows(db)) == 1
        and sender.sent[-1]["notification"]["body"] == "오늘 뭐 했어?", "SPEC-263: one topic a day")
@@ -415,12 +427,15 @@ async def proactive_checks(db, store, settings, folder, logs):
     # every phone fails: Discord, with the picture on the first message only
     sender.answers.append("failed")
     sent = len(channel.sent)
+    say(db, "assistant", "나 산책 나왔어!\n\n너는 오늘 뭐 했어?", datetime.now(TZ) - timedelta(hours=6),
+        {"proactive": True, "delivered": True})
     answers.append(message([text("나 산책 나왔어!\n\n너는 오늘 뭐 했어?")]))
     result = await turn(now)
     rows = topic_rows(db)
     ok(result["ok"] and rows[0][2:5] == ("text", "sent", "discord")
        and channel.sent[sent:] == ["나 산책 나왔어!", "너는 오늘 뭐 했어?"]
-       and channel.files[sent:] == [f"marong-{rows[0][1].split('/')[1]}.webp", None], (rows, channel.files[sent:]))
+       and channel.files[sent:] == [f"marong-{rows[0][1].split('/')[1]}.webp", None],
+       "picture topics still send their reviewed topic even if the text overlaps")
     content, meta = last_message(db)
     ok(meta["transport"] == "discord" and meta["topic"] == rows[0][1] and meta["parts"] == [2, 2], meta)
     clear(db)
@@ -445,7 +460,8 @@ async def proactive_checks(db, store, settings, folder, logs):
 
     # TASK-162 the model times out, refuses, says nothing, too much: the picture's fixed text
     for answer in ([TimeoutError("fixture")], [message([text("못 해")], stop_reason="refusal")],
-                   [message([text("")])] * 2, [message([text("가" * 401 + "?")])]):
+                   [message([text("")])] * 2, [message([text("가" * 401 + "?")])],
+                   [message([text("(조용히 기다립니다)")])]):
         answers.extend(answer)  # an empty answer is asked once more (Agent.ask)
         before = len(sender.sent)
         result = await turn(now)
@@ -471,6 +487,15 @@ async def proactive_checks(db, store, settings, folder, logs):
     db.admin("UPDATE marong.app_devices SET app_version = '0.2.2' WHERE install_id = %s", (INSTALL,))
     t = await topic_time(True)
     now = t + timedelta(minutes=1)
+    db.admin("UPDATE marong.discord_dm_links SET last_incoming_at=now()-interval '1 day', "
+             "opted_in_at=now()-interval '1 day' WHERE discord_user_id=%s", (HK,))
+    waiting = say(db, "assistant", "답을 기다리는 시험 선톡", datetime.now(TZ) - timedelta(hours=12),
+                  {"proactive": True, "delivered": True})
+    before = len(sender.sent)
+    ok(await turn_plan(now).step(now) == 0 and len(sender.sent) == before and not topic_rows(db)
+       and not db.admin("SELECT 1 FROM marong.app_rings WHERE reason = 'hello'"),
+       "W2 neither the picture nor the scheduled hello call is sent before 21 hours")
+    db.admin("UPDATE marong.messages SET created_at=now()-interval '8 days' WHERE id=%s", (waiting,))
     before, sent = len(sender.sent), len(channel.sent)
     result = await turn(now)
     rows = topic_rows(db)
@@ -501,6 +526,7 @@ async def proactive_checks(db, store, settings, folder, logs):
     ok(content == picture.missed() and meta["hello"] and meta["missed"] and meta["ring"] == ring[0][0]
        and meta["topic"] == picture.key and "proactive" not in meta and meta["transport"] == "app", meta)
     ok(await reminders.sweep_rings() == 0, "once")
+    ok((await store.proactive_rooms(HK_ROOM))[0]["unanswered"] == 1, "W2 the missed hello note counts once")
     ok(db.admin("SELECT status FROM marong.app_rings WHERE id = %s", (ring[0][0],))[0][0] == "missed"
        and await store.hello_last(2) is not None, "the ring is missed")
     clear(db)
@@ -589,8 +615,8 @@ async def proactive_checks(db, store, settings, folder, logs):
     plan = turn_plan(t - timedelta(minutes=5))
     room = (await store.proactive_rooms(HK_ROOM))[0]
     await plan._topic_round(t - timedelta(minutes=5))
-    ok(plan.plan(room, t - timedelta(minutes=5)) is None and plan.plan(room, t) == (at(TODAY, 7), 1.0)
-       and plan.plan(room, t + timedelta(minutes=9)) == (at(TODAY, 7), 1.0), "SPEC-263 ②: wait for the topic time")
+    ok(plan.plan(room, t - timedelta(minutes=5)) is None and plan.plan(room, t) == (at(TODAY, 8), 1.0)
+       and plan.plan(room, t + timedelta(minutes=9)) == (at(TODAY, 8), 1.0), "SPEC-263 ②: wait in the capped slot")
     plain = DiscordProactive(settings, store, agent, client, clock=lambda: t, rng=lambda: 0, app=push)
     ok(plain.plan(room, t - timedelta(minutes=5))[1] < 1, "without topics: as before")
     db.admin("INSERT INTO marong.topic_sends(friend_id, day, picture, kind, status) VALUES (2, %s, 'v1/all-day', "

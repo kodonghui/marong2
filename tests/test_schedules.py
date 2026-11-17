@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "tests"), str(ROOT / "tools/vertex_live")]
 from fakes import FakeEmbeddings, ScriptedLLM, message, text, tool_use  # noqa: E402
 from marong.config import load_settings  # noqa: E402
-from marong.discord_dm import DiscordAgent, DiscordReminders  # noqa: E402
+from marong.discord_dm import DiscordAgent, DiscordProactive, DiscordReminders  # noqa: E402
 from marong.discord_store import DiscordStore  # noqa: E402
 from marong.schedules import (LATE_PREFIX, NewSchedule, check_add, describe, occurrence, parse_when,  # noqa: E402
                               reminder_text, schedule_lines)
@@ -83,6 +83,19 @@ def pure_checks():
     ok(item.title == "토익 원서 접수" and item.remind_at == now, "just-passed reminder goes now")
     item = check_add({"title": "현경 생일", "event_at": "2026-11-15"}, TZ, now)
     ok(item.all_day and item.remind_at is None, "today's all-day event may be remembered")
+    all_day = {"title": "도서관 행사", "event_at": "2026-11-15"}
+    morning = k(2026, 11, 15, 9)
+    for hour, expected in ((8, morning), (9, morning), (10, None)):
+        item = check_add(all_day, TZ, k(2026, 11, 15, hour))
+        ok(item.all_day and item.remind_at == expected, f"W4 all-day event at {hour}:00")
+    item = check_add({**all_day, "remind_at": iso(k(2026, 11, 15, 18))}, TZ, now)
+    ok(item.remind_at == k(2026, 11, 15, 18), "W4 a requested time wins")
+    item = check_add({**all_day, "event_at": "2026-11-15T19:00"}, TZ, now)
+    ok(not item.all_day and item.remind_at is None, "W4 timed events stay as before")
+    out = check_add({**all_day, "repeat": "weekly"}, TZ, k(2026, 11, 15, 8))
+    ok(isinstance(out, str) and "반복 알림은" in out, "W4 a recurring reminder still needs time")
+    out = check_add({**all_day, "call": True}, TZ, k(2026, 11, 15, 8), ring=True)
+    ok(isinstance(out, str) and "언제 전화할지 시각이 필요해" in out, "W4 a call still needs explicit time")
     item = check_add({"title": "약", "repeat": "daily", "remind_at": iso(k(2026, 11, 15, 8)),
                       "event_at": "2026-11-20"}, TZ, now)
     ok(item.anchor == k(2026, 11, 15, 8) and item.remind_at == k(2026, 11, 16, 8) and item.event_at is None,
@@ -97,6 +110,7 @@ def pure_checks():
     ok(reminder_text({**row, "say": "내일 시험!"}, TZ, timedelta(minutes=30)) == LATE_PREFIX + "내일 시험!", "late")
     row = {**row, "id": 3, "event_at": k(2027, 1, 2), "all_day": True, "remind_at": None}
     ok(describe(row, TZ, now) == "#3 2027/1/2(토) 종일 토익 시험", describe(row, TZ, now))
+    ok(reminder_text(row, TZ, timedelta(0)) == "오늘 토익 시험 있는 날이야 📅", "W4 default text")
     row = {**row, "id": 4, "event_at": None, "all_day": False, "repeat": "weekly", "repeat_anchor": k(2026, 11, 17, 19),
            "remind_at": k(2026, 11, 17, 19), "title": "운동"}
     ok(describe(row, TZ, now) == "#4 매주 화요일 19:00 알림: 운동 (다음 11/17(화) 19:00)", describe(row, TZ, now))
@@ -144,7 +158,7 @@ async def flow_checks(db):
         s = situation(first)
         ok("# 일정과 알림" in s and "## 이 친구 일정" in s and "- 아직 없어." in s, "guide and empty list")
         ok("ask_owner" not in s and "선톡 끔" not in s, "no Kakao owner-request lines in DM")
-        ok("하루 36번까지 먼저 말을 걸어" in s and "7~24시" in s, "actual DM proactive state")
+        ok("하루 3번까지 먼저 말을 걸어" in s and "8~22시" in s, "W1 cap and quiet hours in the DM prompt")
         ok("선톡과 상관없이" in s, "reminders work regardless of proactive")
         ok("동희에게 대신 전하거나 남길 수 없어" in s and "다른 친구에게 하지 않게" not in s, "no pretend notes to the owner")
         ok(client.channels[DM_HK].sent[-1] == "응 내일 3시에 톡할게!", "reply sent")
@@ -206,7 +220,10 @@ async def flow_checks(db):
         respond, results = schedule_reply("schedule_add", {"title": "토익 시험", "event_at": exam}, "오 기억할게!")
         llm.fn = respond
         await client.on_message(event(client, HK, DM_HK, 107, f"{exam}에 토익 시험이야"))
-        ok("알림 없이 기억만" in results[0]["content"], results)
+        ok("그때 이 DM으로 먼저 말할게" in results[0]["content"], results)
+        planned = db.admin("SELECT event_at, remind_at FROM marong.schedules WHERE title='토익 시험'")[0]
+        ok(planned[0].astimezone(TZ).date().isoformat() == exam and planned[1] - planned[0] == timedelta(hours=9),
+           "W4 store the default 09:00 KST reminder")
         pill = (now - timedelta(hours=3)).replace(second=0, microsecond=0)  # first time already passed today
         daily = f"매일 {pill:%H:%M} 알림: 약 먹기"
         respond, results = schedule_reply("schedule_add", {
@@ -264,6 +281,7 @@ async def delivery_checks(db, hk_first):
         client = Client(agent, store)
         hk = client.channels[DM_HK]
         reminders = DiscordReminders(settings, store, agent, client)
+        proactive = DiscordProactive(settings, store, agent, client)
 
         def due(schedule_id, ago):
             db.admin("UPDATE marong.schedules SET remind_at=now()-%s WHERE id=%s", (ago, schedule_id))
@@ -271,9 +289,14 @@ async def delivery_checks(db, hk_first):
         # A due one-off reminder goes once, is recorded and finishes. The saved line began with '야', which friends
         # asked Marong not to use; it is dropped when sending (style.tidy).
         due(hk_first, timedelta(seconds=5))
+        for i in range(3):
+            await store.add_message(f"discord-dm:{HK}", "assistant", f"시험용 선톡 {i+1}",
+                                    meta={"proactive": True, "delivered": True})
+        ok(await proactive.daily_count(timedelta(days=1)) == 3, "W4 three proactives before the reminder")
         before = len(hk.sent)
         ok(await reminders.step() == 1 and hk.sent[before:] == ["3시야! 토익 원서 접수 잊지 마 📝"], hk.sent)
         ok(await reminders.step() == 0 and len(hk.sent) == before + 1, "sent only once")
+        ok(await proactive.daily_count(timedelta(days=1)) == 3, "W4 reminders do not consume proactive slots")
         status, count = db.admin("SELECT status, sent_count FROM marong.schedules WHERE id=%s", (hk_first,))[0]
         ok(status == "done" and count == 1, (status, count))
         saved = db.admin("SELECT content, meta FROM marong.messages WHERE room_key=%s ORDER BY id DESC LIMIT 1",
