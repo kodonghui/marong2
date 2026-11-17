@@ -19,14 +19,14 @@
 
 ## 작업 패키지
 
-2026-11-17 12:44 KST에 각 브랜치와 스레드에서 읽은 상태이고, 앱 두 줄은 12:49 KST(PR #27 `c6d90fb`), 성향 두 줄은 12:54 KST(PR #30 `57e73a8`), 일기·화면 두 줄은 13:01 KST(PR #25 `f189124`)에 고쳤어요. 13:29 KST에 동희님이 결정 카드에서 'PR #27·#29 둘 다 합치기'를 골라 PR #27이 `main`에 합쳐졌고(`4c74b02`), 그에 맞춰 13:3x KST에 다시 고쳤어요. '시작 가능'은 인계 절이 있고, 구현 전 사람 체크포인트를 통과했다는 뜻이에요. **지금 시작 가능: 앱 스스로 업데이트(선 전화 0.2.2 서명 포함), 성향 0단계 고침.** 둘은 고치는 파일이 겹치지 않아 따로 해도 돼요. 각 스레드가 인계 절을 쓰면 이 표를 고쳐요.
+2026-11-17 12:44 KST에 각 브랜치와 스레드에서 읽은 상태이고, 앱 두 줄은 12:49 KST(PR #27 `c6d90fb`), 성향 두 줄은 12:54 KST(PR #30 `57e73a8`), 일기·화면 두 줄은 13:01 KST(PR #25 `f189124`)에 고쳤어요. 13:29 KST에 동희님이 결정 카드에서 'PR #27·#29 둘 다 합치기'를 골라 PR #27이 `main`에 합쳐졌고(`4c74b02`), 그에 맞춰 13:3x KST에 다시 고쳤어요. 일기·화면 두 줄은 13:40 KST에 PR #25 안에서(브랜치 머리 `64e9a9e`, `main` `8c69367`을 합침) PR #25가 합쳐진 뒤의 모습으로 미리 고쳤어요. '시작 가능'은 인계 절이 있고, 구현 전 사람 체크포인트를 통과했다는 뜻이에요. **지금 시작 가능: 앱 스스로 업데이트(선 전화 0.2.2 서명 포함), 성향 0단계 고침.** 둘은 고치는 파일이 겹치지 않아 따로 해도 돼요. 각 스레드가 인계 절을 쓰면 이 표를 고쳐요.
 
 | 작업 패키지 | 설계 스레드 | 브랜치·PR | 설계 상태 | WBS 파일 | GPT 시작 조건 |
 | --- | --- | --- | --- | --- | --- |
 | 선 전화·그림 화두(CTX-020) | 앱 백그라운드 전화·표정·먼저 걸기 고치기 | `main`(PR #27 합침, 2026-11-17 13:29 KST, `4c74b02`) | 01~11 끝(규칙 전에 Claude가 구현, 2026-11-17 01:22~01:30 KST 서버 반영). 남은 것: TASK-176 서명 APK 0.2.2(앱 스스로 업데이트의 TASK-192가 같이 함), 12 실제 폰 TC-180~184 | [call-first.md](https://github.com/kodonghui/marong2/blob/main/docs/10-wbs/call-first.md#gpt-인계) | 인계 절 있음. 따로 시작하지 않고 앱 스스로 업데이트와 함께 |
 | 앱 스스로 업데이트(CTX-021) | 같은 스레드 | `main`(`4c74b02`), 새 브랜치 `codex/app-self-update` | 01~10과 12 시험 계획(TC-200~229) 끝, TASK-179~193 Owner GPT(서명은 `GPT(동희님 노트북)`) | [app-update.md](https://github.com/kodonghui/marong2/blob/main/docs/10-wbs/app-update.md#gpt-인계) | **시작 가능**(`main` 머리에서). 확인 질문 3개(REQ-319·324·325)는 인계 절대로 추천안으로 구현하고, 동희님 답이 다르면 설계 스레드가 명세를 먼저 고쳐 알려요 |
-| 마롱이의 일기·통화 비용(CTX-007, CTX-002·006 바꿈) | 마롱이의 일기 설계하기 | `claude/project-thread-7y5bt4`(`f189124`), PR #25(초안), 새 브랜치 `codex/diary-call-cost` | 01~10과 12 시험 계획 끝. TASK-137~159·300~306(30개, Owner GPT), TC-159~179. 09는 A 그림일기장. 마이그레이션 016·017·통화 007은 서버에 넣지 않음. 먼저 TASK-137(실계정 확인, 동희님 준비물, 1달러 이하). 통화 비용(TASK-156~159, 300~306)은 일기와 따로 시작 가능 | [diary-call-cost.md](https://github.com/kodonghui/marong2/blob/claude/project-thread-7y5bt4/docs/10-wbs/diary-call-cost.md#gpt-인계) | 인계 절 있음. 09 토큰 얼리기(사람 체크포인트)와 PR #25 합치기 뒤. 합치기 전이면 브랜치 머리에 `main`을 합친 뒤 시작 |
-| 화면 공통 기준·목업 한 벌 | 마롱이의 일기 설계하기 | PR #25(`design/README.md`) | 토큰 101개, 캔버스 버전 13에 대지 108장(선 전화·앱 자동 업데이트 화면 합침) | 구현 패키지 아님 | 화면이 있는 패키지의 앞 조건. 토큰과 `sitemap.yaml`은 이 스레드만 고침 |
+| 마롱이의 일기·통화 비용(CTX-007, CTX-002·006 바꿈) | 마롱이의 일기 설계하기 | `main`(PR #25 합침), 새 브랜치 `codex/diary-call-cost` | 01~10과 12 시험 계획 끝. TASK-137~159·300~306(30개, Owner GPT), TC-159~179. 09는 A 그림일기장. 마이그레이션 016·017·통화 007은 서버에 넣지 않음. 먼저 TASK-137(실계정 확인, 동희님 준비물, 1달러 이하). 통화 비용(TASK-156~159, 300~306)은 일기와 따로 시작 가능 | [diary-call-cost.md](https://github.com/kodonghui/marong2/blob/main/docs/10-wbs/diary-call-cost.md#gpt-인계) | 인계 절 있음. 09 토큰 얼리기(사람 체크포인트) 뒤, `main` 머리에서 |
+| 화면 공통 기준·목업 한 벌 | 마롱이의 일기 설계하기 | `main`(PR #25 합침, [`design/README.md`](https://github.com/kodonghui/marong2/blob/main/design/README.md)) | 토큰 101개, 캔버스 버전 13에 대지 108장(선 전화·앱 자동 업데이트 화면 합침) | 구현 패키지 아님 | 화면이 있는 패키지의 앞 조건. 토큰과 `sitemap.yaml`은 이 스레드만 고침 |
 | 성향 맞춤·선톡 0단계 고침 | 마롱이 성향 맞춤·선톡 고치고 설계하기 | 설계 문서는 `claude/project-thread-spqkcm`(0단계 인계 `57e73a8`), PR #30(초안). 코드는 `main` 머리에서 새 브랜치 `codex/persona-stage0` | 02·04·10·12 씀(REQ-202~212, SPEC-184~191, AI-11·12, TASK-200~210, TC-230~255). DB 바뀜 없음, 새 설정 `MARONG_DEEPSEEK_HEDGE_S`(기본 20). 참고 패치(미완성, `main` `a5a138b` 위)는 프로젝트 파일 `marong-persona-research-20261116/stage0/` | [persona-stage0.md](https://github.com/kodonghui/marong2/blob/claude/project-thread-spqkcm/docs/10-wbs/persona-stage0.md#gpt-인계) | **시작 가능**(PR #27이 `main`에 합쳐져 조건 충족). 반영은 D24와 11/15 상시 허락으로 |
 | 성향 맞춤·선톡·부탁·맞춤형 지침 1~4단계(CTX-008~) | 같은 스레드 | PR #30에 이어 씀 | 01·02·03 쓰는 중(CTX-008~013, TERM-040~079, REQ-213~259, FL-124~139, `4aac602`). TASK-211·TC-256부터 | (쓸 예정) | 10과 인계 절, 구현 전 2차 논의 |
 | 통화 엔진 바꾸기 | 한국어 통화 엔진 조합 실험하기 | PR #26(측정 도구, 합치지 않음) | 연구 중. 지금 추천은 Gemini Live 유지, Han Aim(ElevenLabs Flash) 첫 소리 측정이 남음 | 없음 | 연구 결론과 동희님 결정 뒤 설계 |
@@ -77,7 +77,7 @@ TASK 표는 corthex 10단계 형식 그대로 쓰고, Owner는 `GPT`(서명 키�
 | `marong/agent.py`, `marong/discord_store.py`, `tools/report.py` | 선 전화, 성향, 일기 | 같은 순서 |
 | `apps/android/` | 선 전화 0.2.2, 앱 스스로 업데이트 | 한 APK(0.2.2, versionCode 5)로 함께 빌드·서명 |
 | `design/base.tokens.json`, `docs/07-sitemap/sitemap.yaml` | 화면이 있는 모든 패키지 | 일기 스레드만 씀. 새 토큰·SCR은 그 스레드에 제안 |
-| `.corthex/project.json`, `.corthex/stages.json` | PR #25, PR #27(합쳐짐), PR #30 | 나중에 합치는 쪽이 `main`에 있는 기록과 단계마다 `next`·`checks`를 둘 다 남김 |
+| `.corthex/project.json`, `.corthex/stages.json` | PR #25·PR #27(합쳐짐), PR #30 | 나중에 합치는 쪽이 `main`에 있는 기록과 단계마다 `next`·`checks`를 둘 다 남김 |
 
 ## 추천 구현 순서
 
@@ -86,6 +86,6 @@ TASK 표는 corthex 10단계 형식 그대로 쓰고, Owner는 `GPT`(서명 키�
 1. PR #27을 `main`에 합치기: 끝(2026-11-17 13:29 KST, `4c74b02`).
 2. 앱 스스로 업데이트와 0.2.2 서명 APK(현경님 폰에 손으로 까는 마지막 버전).
 3. 성향 0단계 고침(D24가 바로 반영을 허락함).
-4. 마롱이의 일기·통화 비용(토큰 얼리기와 PR #25 합치기 뒤. 통화 비용 쪽은 일기와 따로 먼저 해도 됨).
+4. 마롱이의 일기·통화 비용(09 토큰 얼리기 뒤, PR #25는 합쳐짐. 통화 비용 쪽은 일기와 따로 먼저 해도 됨).
 5. 성향 1~4단계(2차 논의 뒤).
 6. 통화 엔진 바꾸기(연구 결론 뒤, 바꾸기로 하면).
