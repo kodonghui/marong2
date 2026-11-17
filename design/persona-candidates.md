@@ -3,6 +3,7 @@
 2026-11-17 설계. 지금 상태: 성향 맞춤 화면 네 개(SCR-120~123)를 두 안씩 그렸어요. 방향은 구현 전 2차 논의에서 동희님이 골라요(아래 '결정'). 새 토큰은 없어요.
 
 - 목업: 프로젝트 파일 `persona-mockup-20261117/`의 `mock.html`(대지 12개를 한 페이지에)과 `png/`(같은 대지 12장, 2배 해상도). 같은 폴더에 회색 와이어프레임도 있어요.
+- 공통 캔버스: 일기 스레드가 [화면 캔버스](https://claude.ai/artifact/CC154gunovJS3tqa8XkpZ9) 버전 16에 같은 대지 12장을 A줄·B줄로 올렸어요. 이름은 `C008-<A|B>-<SCR>-<상태>-<day|night>`이고, 방향이 정해지면 고르지 않은 줄은 맨 아래 비교 칸으로 옮겨요.
 - 화면 정의(08단계): [persona.md](../docs/08-screens/persona.md), [SCR-120](../docs/08-screens/SCR-120.md), [SCR-121](../docs/08-screens/SCR-121.md), [SCR-122](../docs/08-screens/SCR-122.md), [SCR-123](../docs/08-screens/SCR-123.md). 회색 와이어프레임: [wireframes-persona.html](../docs/08-screens/wireframes-persona.html)(상태 37개 × 360·430px). 목업과 정의가 다르면 정의가 맞아요.
 
 ## 그린 방법
@@ -10,7 +11,7 @@
 화면 공통 기준(PR #25의 `design/README.md`, `base.tokens.json`)의 토큰 값으로 HTML 대지를 새로 그리고, Chromium(Playwright)에서 Noto Sans KR 400·600·700으로 찍었어요. 지금 글 대화 화면(`chat.css`) 위에 얹은 그림은 아니에요.
 
 - 색: `color.a` 밤하늘과 `color.b` 군밤 크림. 크기: `size.touch-min` 48px, `size.button` 52px, `radius.md`·`radius.full`, `space.xs`~`space.lg`, `font-size.caption`·`font-size.body`.
-- 토큰에 없는 몇 값은 지금 `chat.css`의 숫자를 그대로 썼어요: 말풍선 글 15px과 모서리 18px, 작은 모서리 12px, 약속 문장 17px. 방향을 고르면 이 값들을 토큰에 맞추거나 일기 스레드에 토큰으로 제안해요.
+- 토큰에 없는 몇 값은 그릴 때 `chat.css`의 숫자를 그대로 썼어요: 말풍선 글 15px과 모서리 18px, 작은 모서리 12px, 약속 문장 17px, 글 대화 머리 버튼 48px. 2026-11-17 일기 스레드와 맞춘 기준은 이래요(PR #25 `design/README.md` 3·4절): 말풍선은 새 토큰 `font-size.bubble` 15px·`radius.bubble` 18px, 새 페이지의 글 버튼·띠는 `radius.sm`(12px 대신), 약속 문장은 `font-size.body` 16px 굵게 600(17px 대신), 글 대화 머리 '나' 버튼은 같은 줄 버튼처럼 44px. 그림은 바꾸지 않았고, 구현은 화면 정의와 이 기준을 따라요.
 - 얼굴은 통화 화면의 `marong/call/static/face/v1/01-neutral.webp`예요.
 - 예시 글(떡볶이, 면접 결과 나오는 날, 동아리 MT 같은 것)은 화면을 보이려고 지은 것이고 실제 친구 대화나 기억이 아니에요.
 - 대지 이름은 `후보-SCR번호-상태-테마`예요. 폭은 모두 360px이고, 430px은 와이어프레임으로 봤어요.
@@ -71,7 +72,7 @@
 
 ## 토큰
 
-넣은 것 없어요. 쓴 토큰은 '그린 방법'에 적었어요. B의 아래 칸은 기존 `scrim`·`panel-shadow`·`radius.lg`로 그렸지만, B를 고르면 부품 정의가 따로 필요해요.
+이 화면들 때문에 넣은 것은 없어요. 일기 스레드가 말풍선 토큰 `font-size.bubble`·`radius.bubble`을 공통 기준에 더했고(2026-11-17, PR #25 `c2b2c38`, 토큰 103개), 이 화면도 그것을 써요. 쓴 토큰은 '그린 방법'에 적었어요. B의 아래 칸은 기존 `scrim`·`panel-shadow`·`radius.lg`로 그렸지만, B를 고르면 부품 정의가 따로 필요해요.
 
 ## 확인한 것과 못 한 것
 
