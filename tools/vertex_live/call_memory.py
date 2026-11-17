@@ -263,13 +263,18 @@ class MemoryStore:
         return await self.one("""SELECT t.* FROM call.live_tunings t WHERE name=COALESCE((
             SELECT value #>> '{}' FROM call.settings WHERE key='live_tuning'),%s)""", (BASE,))
 
-    async def start_segment(self,p,call_id,client_id,model,*,tuning=None):
+    async def start_segment(self,p,call_id,client_id,model,*,tuning=None,handoff_from=None):
         segment=str(uuid.uuid4())
         async with self.pool.connection() as c,c.transaction():
             await self._owned(c,p,call_id)
-            await c.execute("UPDATE call.segments SET state='closed',closed_at=now(),close_reason='connection_lost' WHERE call_id=%s AND state<>'closed'",(call_id,))
+            if handoff_from:
+                changed=await c.execute("""UPDATE call.segments SET state='closed',closed_at=now(),close_reason='handoff'
+                    WHERE call_id=%s AND id=%s AND state='open'""",(call_id,handoff_from))
+                if changed.rowcount!=1:raise ValueError('handoff_segment_changed')
+            else:
+                await c.execute("UPDATE call.segments SET state='closed',closed_at=now(),close_reason='connection_lost' WHERE call_id=%s AND state<>'closed'",(call_id,))
             await c.execute("""INSERT INTO call.segments(id,call_id,mode,client_id,state,provider,provider_model,provider_ready_at)
-                VALUES(%s,%s,'reconnect',%s,'open','vertex',%s,now())""",(segment,call_id,client_id,model))
+                VALUES(%s,%s,%s,%s,'open','vertex',%s,now())""",(segment,call_id,'handoff' if handoff_from else 'reconnect',client_id,model))
             if tuning:
                 await c.execute("UPDATE call.segments SET tuning=%s WHERE id=%s", (tuning,segment))
         return segment

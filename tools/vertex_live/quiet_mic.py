@@ -8,6 +8,14 @@ from sys import byteorder
 CHUNK = 640  # 320 signed 16-bit samples at 16 kHz
 
 
+def level(pcm):
+    samples = array("h")
+    samples.frombytes(pcm)
+    if byteorder == "big":
+        samples.byteswap()
+    return sqrt(sum(value * value for value in samples) / len(samples)) / 32768 if samples else 0.0
+
+
 class QuietMic:
     def __init__(self, threshold):
         self.threshold = float(threshold)
@@ -33,11 +41,7 @@ class QuietMic:
         complete = len(self.pending) // CHUNK * CHUNK
         for offset in range(0, complete, CHUNK):
             frame = bytes(self.pending[offset:offset + CHUNK])
-            samples = array("h")
-            samples.frombytes(frame)
-            if byteorder == "big":
-                samples.byteswap()
-            loud = sqrt(sum(value * value for value in samples) / len(samples)) / 32768 >= self.threshold
+            loud = level(frame) >= self.threshold
             if self.open:
                 self.quiet = 0 if loud else self.quiet + 1
                 self.sent_ms += 20

@@ -186,9 +186,11 @@ class Meter:
         if len(self.queue) == self.queue.maxlen:
             self.ledger.count("usage_dropped", self.entrypoint, self.queue[0].received)
             self.dropped += 1
-        self.queue.append(TurnUsage(self.seq, received, values, count, missing, fixed))
+        turn = TurnUsage(self.seq, received, values, count, missing, fixed)
+        self.queue.append(turn)
         self.missing += missing
         self.fixed += fixed
+        return turn
 
     def close(self):
         self.closed.set()

@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
 from pg import ROOT, TestDB
 
 from call_memory import MemoryStore, Principal
-from call_usage import QUEUE_SIZE, Meter, decode
+from call_usage import QUEUE_SIZE, Ledger, Meter, decode
 from call_tuning import parse_tuning
 from quiet_mic import QuietMic
 from cost_admin import cli, run as run_admin
@@ -262,6 +262,82 @@ async def check_admission():
     print("TC-174 fake web WebSocket cutoff, Discord 429 and Discord resumption")
 
 
+async def check_handoff():
+    from test_hangup import Browser, HTTP, Store, Upstream, check_setup, until
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    import live_session
+    server = await check_setup()
+    tuning = parse_tuning("fixture-handoff", ["text_handoff=on", "max_output_tokens=768"])
+
+    class Warm(Upstream):
+        def __init__(self, pending):
+            super().__init__()
+            self.pending = pending
+            self.closed = False
+
+        async def receive(self, timeout=None):
+            await self.pending.wait()
+            return await super().receive(timeout)
+
+        async def __aexit__(self, *_):
+            self.closed = True
+
+    async def try_swap(speech):
+        gate = asyncio.Event()
+        old = Upstream()
+        candidate = Warm(gate)
+        connections = iter((old, candidate))
+        store = Store()
+        store.live_usage = Ledger(store)
+        store.live_usage.mode = AsyncMock(return_value="turn")
+        store.live_usage.store_batch = AsyncMock()
+        store.monthly_cost = SimpleNamespace(status=AsyncMock(return_value="ok"))
+        store.tuning = AsyncMock(return_value=tuning)
+        store.seed = AsyncMock(return_value='{"current_call":[]}')
+        store.start_segment = AsyncMock(side_effect=("segment-1", "segment-2"))
+        store.claim_ring = AsyncMock(return_value=None)
+        browser = Browser()
+        session = live_session.LiveSession(browser, "fixture", store, SimpleNamespace(revision=0), server.setup,
+            AsyncMock(return_value={}), {}, {}, "fixture", MODEL, "fixture", str(uuid4()))
+        with patch.object(live_session, "ClientSession", lambda **_: HTTP(next(connections))), patch.object(
+            live_session, "SEARCH_CUT_SLACK_S", .1
+        ):
+            task = asyncio.create_task(session.run())
+            try:
+                await until(lambda: browser.kinds().count("ready") == 1)
+                await old.queue.put({"serverContent": {"turnComplete": True}, "usageMetadata": metadata(8000)})
+                await until(lambda: bool(candidate.sent))
+                setup = candidate.sent[0][1]["setup"]
+                assert "handle" not in setup["sessionResumption"]
+                assert setup["systemInstruction"]["parts"][-1]["text"] == "이어지는 통화"
+                assert store.start_segment.await_count == 1
+                browser.mic()
+                await until(lambda: any("realtimeInput" in item for _, item in old.sent))
+                if speech:
+                    await old.queue.put({"serverContent": {"speechState": "SPEECH"}})
+                    await until(lambda: session.activity_at > (session.turn_done_at or 0))
+                gate.set()
+                if speech:
+                    await until(lambda: candidate.closed)
+                    assert store.start_segment.await_count == 1 and browser.kinds().count("ready") == 1
+                    browser.mic()
+                    await until(lambda: len(old.microphone_after(0)) == 2)
+                else:
+                    await until(lambda: browser.kinds().count("ready") == 2)
+                    await until(lambda: bool(candidate.microphone_after(0)))
+                    assert store.start_segment.await_args.kwargs["handoff_from"] == "segment-1"
+                    assert "reconnecting" not in browser.kinds()
+            finally:
+                browser.say({"type": "stop"})
+                await asyncio.wait_for(task, 4)
+                await store.live_usage.close()
+
+    await try_swap(False)
+    await try_swap(True)
+    print("TC-176 fake handoff kept former connection through setup, preserved speech, and sent the lead-in")
+
+
 def main():
     db = TestDB()
     try:
@@ -278,6 +354,7 @@ def main():
     check_quiet()
     asyncio.run(check_budget_end())
     asyncio.run(check_admission())
+    asyncio.run(check_handoff())
 
 
 if __name__ == "__main__":

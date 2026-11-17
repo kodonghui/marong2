@@ -8,13 +8,15 @@ import struct
 import time
 import uuid
 from collections import deque
+from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from aiohttp import ClientSession,ClientTimeout,WSMsgType
 from memory_tools import TranscriptRecorder,execute_tool
 from hangup import Consent
 from call_search import queries as search_queries
-from quiet_mic import QuietMic
+from quiet_mic import QuietMic, level
 
 BUILD='20261117-hello'
 FRAME=struct.Struct('!4sIIIII')
@@ -42,6 +44,17 @@ RING_CLAIM_S=1
 TOPIC_KEY=re.compile(r'v[0-9]{1,3}/[a-z0-9-]{1,40}')
 
 
+@dataclass
+class Handoff:
+    stack: AsyncExitStack
+    upstream: object
+    segment: str
+    tuning: dict
+    search: str | None
+    lead_in: bytes
+    usage_mode: str
+
+
 class LiveSession:
     def __init__(self,ws,owner,store,principal,setup,headers,resume,diagnostics,location,model,voice,client_id,*,entry_transport=None,hangup=False,search=None,ring=None):
         self.ws=ws;self.owner=owner;self.store=store;self.p=principal;self.setup=setup;self.headers=headers
@@ -55,6 +68,10 @@ class LiveSession:
         self.legacy_pcm=False
         self.rtc=None
         self.quiet_mic=None
+        self.tuning=None
+        self.prepared=None
+        self.input_history=deque()
+        self.input_loud_at=0.
         self.entry_transport=entry_transport
         self.pcm_forced=False;self.connection_id=str(uuid.uuid4());self.transport_log=[]
         # The client ends the call on a 'hangup' message: the web page asks with
@@ -156,6 +173,11 @@ class LiveSession:
                     if len(msg.data)>32000 or len(msg.data)%2 or len(msg.data)>allowance:continue
                     allowance-=len(msg.data)
                     if not self.ready:continue
+                    if self.tuning and self.tuning['text_handoff']:
+                        self.input_history.append((now,msg.data))
+                        while self.input_history and now-self.input_history[0][0]>1:
+                            self.input_history.popleft()
+                        if level(msg.data)>=float(self.tuning['quiet_rms']):self.input_loud_at=now
                     while self.audio and (now-self.audio[0][0]>.4 or len(self.audio)>=10):
                         self.audio.popleft();self.d['inputDroppedFrames']=self.d.get('inputDroppedFrames',0)+1
                     self.audio.append((now,msg.data));self.available.set()
@@ -223,6 +245,9 @@ class LiveSession:
             for task in running:task.cancel()
             for task in list(self.tasks):task.cancel()
             await asyncio.gather(*running,*list(self.tasks),return_exceptions=True)
+            if self.prepared:
+                await self.prepared.stack.aclose()
+                self.prepared=None
             await self.recorder.close()
             if self.store and self.p:
                 try:await asyncio.wait_for(self.flush_transport(),4)
@@ -282,86 +307,125 @@ class LiveSession:
             and not self.in_turn and self.controls.empty() and not (self.rtc and self.rtc.queued_ms()>0)
             and all(task.done() for task in tool_tasks.values()))
 
+    async def open_provider(self,stack,handle,seed,memory,tuning,mode,*,ring=None,timeout=20,handoff=False):
+        url=f'wss://{self.location}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent'
+        http=await stack.enter_async_context(ClientSession(timeout=ClientTimeout(total=None,connect=15)))
+        upstream=await stack.enter_async_context(http.ws_connect(
+            url,headers=await self.headers(),max_msg_size=2_000_000,heartbeat=20))
+        options={'hangup':self.hangup}
+        if mode:options['search']=mode
+        if ring:options['ring']=ring
+        if tuning:options['tuning']=tuning
+        if handoff:options['handoff']=True
+        await upstream.send_json(self.setup(handle,seed,memory,**options))
+        first=await upstream.receive(timeout=timeout)
+        if first.type not in (WSMsgType.TEXT,WSMsgType.BINARY) or 'setupComplete' not in json.loads(first.data):
+            raise ConnectionError('setup_rejected')
+        return upstream
+
+    def configure_mic(self,tuning):
+        self.tuning=tuning
+        if not tuning or not tuning['text_handoff']:
+            self.input_history.clear()
+        if tuning and tuning['web_quiet_mic'] and self.entry_transport!='discord':
+            if self.quiet_mic is None:self.quiet_mic=QuietMic(tuning['quiet_rms'])
+            else:self.quiet_mic.threshold=float(tuning['quiet_rms'])
+        else:self.quiet_mic=None
+
+    async def ready_message(self):
+        self.ready=True
+        ready={'type':'ready','resumed':bool(self.handle) or self.logical_resumed,'callId':self.call_id,
+            'build':BUILD,'audioFormat':2,'epoch':self.epoch,'audioTransport':self.entry_transport or ('webrtc' if self.rtc else 'pcm'),
+            'memoryConnected':bool(self.p and self.segment),'ring':bool(self.ring_info)}
+        if self.ring_greet and self.ring_topic:ready['topic']=self.ring_topic
+        self.ring_topic=None
+        await self.emit(ready)
+        self.logical_resumed=True
+        if self.ring_greet:
+            self.ring_greet=False
+            await self.controls.put({'clientContent':{'turns':[{'role':'user','parts':[{'text':RING_ANSWERED_TEXT}]}],'turnComplete':True}})
+            self.available.set()
+
+    async def run_provider(self,upstream,ledger,usage_mode,tuning,lead_in):
+        if not usage_mode or not self.segment:
+            await self.provider(upstream)
+            return
+        entrypoint='discord' if self.entry_transport=='discord' else 'web'
+        async def check_budget():
+            if not self.stop.is_set() and self.hanging_up is None and self.segment==meter.segment:
+                state=await self.store.monthly_cost.status(entrypoint)
+                if (state=='hard_stop' and not self.stop.is_set() and self.hanging_up is None
+                        and self.segment==meter.segment):
+                    self.begin_budget_goodbye()
+        meter=ledger.meter(self.call_id,self.segment,entrypoint,self.model,usage_mode,self.searches,
+                           tuning=tuning['name'] if tuning else None,after_flush=check_budget)
+        try:await self.provider(upstream,meter,lead_in=lead_in)
+        finally:
+            meter.close()
+            if self.quiet_mic:
+                try:await asyncio.wait_for(self.store.record_mic(meter.segment,*self.quiet_mic.counts()),.4)
+                except Exception:self.d['micCountsFailed']=True
+
     async def google_loop(self):
         delay=1
         while not self.stop.is_set():
-            self.ready=False;self.audio.clear();self.epoch+=1;self.in_turn=False;self.offset=0;self.sequence=0
+            if not self.prepared:self.ready=False
+            self.epoch+=1;self.in_turn=False;self.offset=0;self.sequence=0
             await self.emit({'type':'audio_reset','epoch':self.epoch})
             if self.reset.is_set():
+                if self.prepared:
+                    await self.prepared.stack.aclose();self.prepared=None
                 self.handle=None;self.pending.clear();self.resume.clear();self.recorder.parts.clear();self.reset.clear()
                 if self.store and self.p:self.revision=await self.store.revision(self.p)
-            seed='';self.segment=None;tuning=None
             ledger=getattr(self.store,'live_usage',None)
-            usage_mode=await ledger.mode() if ledger else None
-            if usage_mode and self.p:
-                try:tuning=await asyncio.wait_for(self.store.tuning(),.4)
-                except Exception:print('call_tuning_fallback',flush=True)
-            if tuning and tuning['web_quiet_mic'] and self.entry_transport!='discord':
-                if self.quiet_mic is None:self.quiet_mic=QuietMic(tuning['quiet_rms'])
-                else:self.quiet_mic.threshold=float(tuning['quiet_rms'])
-            else:self.quiet_mic=None
-            if self.store and self.p:
-                try:
-                    segment_options={'tuning':tuning['name']} if tuning else {}
-                    memory_options={'memory_limit':tuning['seed_call_memories']} if tuning else {}
-                    self.segment=await asyncio.wait_for(self.store.start_segment(self.p,self.call_id,self.client_id,self.model,**segment_options),3)
-                    seed=await asyncio.wait_for(self.store.seed(self.p,self.call_id,**memory_options),1)
-                    self.d['memoryConnected']=True
-                except Exception:self.d['memoryConnected']=False
+            usage_mode=self.prepared.usage_mode if self.prepared else await ledger.mode() if ledger else None
+            lead_in=b''
             try:
-                url=f'wss://{self.location}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent'
-                async with ClientSession(timeout=ClientTimeout(total=None,connect=15)) as http:
-                    async with http.ws_connect(url,headers=await self.headers(),max_msg_size=2_000_000,heartbeat=20) as upstream:
-                        mode=self.search_mode();self.search_live=mode=='on'
-                        options={'hangup':self.hangup}
-                        if mode:options['search']=mode
-                        if self.ring_info:options['ring']=self.ring_info
-                        if tuning:options['tuning']=tuning
-                        await upstream.send_json(self.setup(self.handle,seed,bool(self.p and self.segment),**options))
-                        first=await upstream.receive(timeout=20)
-                        if first.type not in (WSMsgType.TEXT,WSMsgType.BINARY) or 'setupComplete' not in json.loads(first.data):
-                            if self.handle:self.handle=None;self.pending.clear()
-                            raise ConnectionError('setup_rejected')
-                        self.ready=True;delay=1
-                        ready={'type':'ready','resumed':bool(self.handle) or self.logical_resumed,'callId':self.call_id,
-                            'build':BUILD,'audioFormat':2,'epoch':self.epoch,'audioTransport':self.entry_transport or ('webrtc' if self.rtc else 'pcm'),'memoryConnected':bool(self.p and self.segment),
-                            'ring':bool(self.ring_info)}
-                        # The picture card only with the answer that makes her speak first, never on a reconnect.
-                        if self.ring_greet and self.ring_topic:ready['topic']=self.ring_topic
-                        self.ring_topic=None
-                        await self.emit(ready)
-                        self.logical_resumed=True
-                        if self.ring_greet:
-                            # The friend just answered Marong's call: she speaks first (SPEC-137), only this once.
-                            self.ring_greet=False
-                            await self.controls.put({'clientContent':{'turns':[{'role':'user','parts':[{'text':RING_ANSWERED_TEXT}]}],'turnComplete':True}})
-                            self.available.set()
-                        if usage_mode and self.segment:
-                            entrypoint='discord' if self.entry_transport=='discord' else 'web'
-                            async def check_budget():
-                                if not self.stop.is_set() and self.hanging_up is None:
-                                    state=await self.store.monthly_cost.status(entrypoint)
-                                    if state=='hard_stop' and not self.stop.is_set() and self.hanging_up is None:
-                                        self.begin_budget_goodbye()
-                            meter=ledger.meter(self.call_id,self.segment,entrypoint,self.model,usage_mode,self.searches,
-                                               tuning=tuning['name'] if tuning else None,after_flush=check_budget)
-                            try:await self.provider(upstream,meter)
-                            finally:
-                                meter.close()
-                                if self.quiet_mic:
-                                    try:await asyncio.wait_for(self.store.record_mic(self.segment,*self.quiet_mic.counts()),.4)
-                                    except Exception:self.d['micCountsFailed']=True
-                        else:
-                            await self.provider(upstream)
+                async with AsyncExitStack() as stack:
+                    if self.prepared:
+                        warmed=self.prepared
+                        self.prepared=None
+                        await stack.enter_async_context(warmed.stack)
+                        self.segment,tuning,mode=warmed.segment,warmed.tuning,warmed.search
+                        self.handle=None;self.pending.clear();self.resume.clear()
+                        self.turn_done_at=None;self.playback_end=0
+                        upstream=warmed.upstream
+                        lead_in=warmed.lead_in
+                        usage_mode=warmed.usage_mode
+                    else:
+                        self.audio.clear()
+                        seed='';self.segment=None;tuning=None
+                        if usage_mode and self.p:
+                            try:tuning=await asyncio.wait_for(self.store.tuning(),.4)
+                            except Exception:print('call_tuning_fallback',flush=True)
+                        if self.store and self.p:
+                            try:
+                                segment_options={'tuning':tuning['name']} if tuning else {}
+                                memory_options={'memory_limit':tuning['seed_call_memories']} if tuning else {}
+                                self.segment=await asyncio.wait_for(self.store.start_segment(
+                                    self.p,self.call_id,self.client_id,self.model,**segment_options),3)
+                                seed=await asyncio.wait_for(self.store.seed(self.p,self.call_id,**memory_options),1)
+                                self.d['memoryConnected']=True
+                            except Exception:self.d['memoryConnected']=False
+                        mode=self.search_mode()
+                        try:
+                            upstream=await self.open_provider(stack,self.handle,seed,bool(self.p and self.segment),
+                                                              tuning,mode,ring=self.ring_info)
+                        except ConnectionError as error:
+                            if str(error)=='setup_rejected' and self.handle:self.handle=None;self.pending.clear()
+                            raise
+                    self.search_live=mode=='on'
+                    self.configure_mic(tuning)
+                    await self.ready_message();delay=1
+                    await self.run_provider(upstream,ledger,usage_mode,tuning,lead_in)
             except asyncio.CancelledError:raise
             except Exception as error:
                 print('connection_retry',type(error).__name__,flush=True)
-            self.ready=False
+            if not self.prepared:self.ready=False
             if self.close_reason=='budget_hard_stop':
                 self.stop.set();return
-            if self.reset.is_set():continue
+            if self.reset.is_set() or self.prepared:continue
             if self.planned_reconnect:
-                # Searches spent: resume at once with a setup without search, no 'reconnecting' notice.
                 self.planned_reconnect=False;continue
             if not self.stop.is_set() and not self.ws.closed:
                 self.d['providerReconnects']=self.d.get('providerReconnects',0)+1
@@ -369,6 +433,26 @@ class LiveSession:
                 try:await asyncio.wait_for(self.stop.wait(),delay)
                 except TimeoutError:pass
                 delay=min(30,delay*2)
+
+    async def prepare_handoff(self,quiet,usage_mode):
+        """Keep the former provider running until the new one is ready and the quiet interval still holds."""
+        async with AsyncExitStack() as stack:
+            tuning=await asyncio.wait_for(self.store.tuning(),.4)
+            if not tuning:return False
+            seed=await asyncio.wait_for(self.store.seed(self.p,self.call_id,
+                memory_limit=tuning['seed_call_memories'],history_chars=tuning['handoff_chars']),1)
+            mode=self.search_mode()
+            if not quiet():return False
+            upstream=await asyncio.wait_for(self.open_provider(stack,None,seed,True,tuning,mode,timeout=10,handoff=True),10)
+            if not quiet():return False
+            replacement=await asyncio.wait_for(self.store.start_segment(self.p,self.call_id,self.client_id,self.model,
+                tuning=tuning['name'],handoff_from=self.segment),1)
+            now=time.monotonic()
+            lead=b''.join(frame for at,frame in self.input_history if now-at<=1)[-32000:]
+            self.audio.clear()
+            self.prepared=Handoff(stack.pop_all(),upstream,replacement,tuning,mode,lead,usage_mode)
+            self.d['textHandoffs']=self.d.get('textHandoffs',0)+1
+            return True
 
     async def end_call_requested(self):
         """Answer Gemini's end_call. Only the friend's own words in this call allow it."""
@@ -426,8 +510,10 @@ class LiveSession:
         except TimeoutError:
             self.d['hangupServerEnded']=True;self.explicit=True;self.stop.set()
 
-    async def provider(self,upstream,meter=None):
+    async def provider(self,upstream,meter=None,*,lead_in=b''):
         sequence=0;last_audio=None;tool_tasks={};speaking=False;go_away=False;audio_finished=False;turn_queries=set()
+        threshold=self.tuning['handoff_tokens'] if self.tuning and self.tuning['text_handoff'] else None
+        last_input=0
         async def send(payload,remember=True):
             nonlocal sequence
             sequence+=1
@@ -439,6 +525,9 @@ class LiveSession:
         replay=[p for _,at,p in self.pending if time.monotonic()-at<.5] if self.handle else []
         self.pending.clear()
         for payload in replay:await send(payload)
+        if lead_in:
+            await send({'realtimeInput':{'audio':{'mimeType':'audio/pcm;rate=16000',
+                                                  'data':base64.b64encode(lead_in).decode()}}})
 
         async def sender():
             while True:
@@ -472,7 +561,7 @@ class LiveSession:
             await send({'toolResponse':{'functionResponses':[{'id':identifier,'name':name,'response':result}]}})
 
         async def receiver():
-            nonlocal last_audio,speaking,go_away,audio_finished
+            nonlocal last_audio,speaking,go_away,audio_finished,last_input
             async for msg in upstream:
                 if msg.type not in (WSMsgType.TEXT,WSMsgType.BINARY):return
                 data=json.loads(msg.data)
@@ -515,7 +604,10 @@ class LiveSession:
                     self.recorder.boundary('user')
                 fresh=[q for q in search_queries(content) if q not in turn_queries]
                 if fresh:turn_queries.update(fresh);self.searched(len(fresh))
-                if received:meter.receive(usage,self.searches,received)
+                if received:
+                    turn=meter.receive(usage,self.searches,received)
+                    if turn and threshold:
+                        last_input=sum(turn.values[:4])
                 if content.get('generationComplete') and self.in_turn and not audio_finished:
                     audio_finished=True;await self.emit({'type':'audio_end','epoch':self.epoch,'turn':self.turn})
                 if content.get('turnComplete'):
@@ -543,8 +635,24 @@ class LiveSession:
                     self.planned_reconnect=True;self.d['searchReconnects']=self.d.get('searchReconnects',0)+1
                     print('search_reconnect',flush=True);return
 
+        async def handoff_cut():
+            def quiet():
+                return bool(self.hanging_up is None and not self.stop.is_set() and not self.reset.is_set()
+                    and self.turn_done_at is not None and self.turn_done_at>=max(self.input_loud_at,self.activity_at)
+                    and time.monotonic()>=self.playback_end and not self.in_turn and self.controls.empty()
+                    and not (self.rtc and self.rtc.queued_ms()>0) and all(task.done() for task in tool_tasks.values()))
+            while True:
+                await asyncio.sleep(.25)
+                if last_input<=threshold or not quiet():continue
+                try:
+                    if await self.prepare_handoff(quiet,meter.mode):return
+                except Exception as error:
+                    print('handoff_retry',type(error).__name__,flush=True)
+                await asyncio.sleep(30)
+
         tasks=[asyncio.create_task(sender()),asyncio.create_task(receiver()),asyncio.create_task(self.stop.wait()),asyncio.create_task(self.reset.wait())]
         if self.search:tasks.append(asyncio.create_task(search_cut()))
+        if threshold and meter:tasks.append(asyncio.create_task(handoff_cut()))
         try:
             done,_=await asyncio.wait(tasks,return_when=asyncio.FIRST_COMPLETED)
             for task in done:task.result()
