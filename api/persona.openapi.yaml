@@ -1,0 +1,1729 @@
+# 마롱이 성향 맞춤·친구 기억 API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/persona.md(SPEC-192~242), DB: marong/migrations/019_persona.sql(TBL-115~124, TBL-127~134), 표 설명: docs/05-erd/persona.md
+openapi: 3.1.0
+info:
+  title: 마롱이 성향 맞춤·친구 기억 API
+  version: 0.1.0-draft
+  description: |-
+    앱과 브라우저의 친구 약속 화면(SCR-120), 맞춤형 지침 화면(SCR-121), '마롱이가 기억하는 나'(SCR-122), 글 대화 안 고르기 카드(SCR-123)가 디스코드 DM 봇의 글 대화 서버와 주고받는 계약이에요. 원본은 이 파일이고 코드는 이 파일을 따라가요(06단계). 글 대화 API(`api/app-chat.openapi.yaml`)와 같은 서버(127.0.0.1:8796)·같은 로그인이고, 새 모듈 `marong/app_persona.py`가 `/chat/persona/` 아래를 맡아요. 터널 규칙·Access·앱은 바꾸지 않아요.
+
+    - 로그인은 글 대화와 같아요. 봇이 `Cf-Access-Jwt-Assertion`을 다시 확인하고 이메일 해시로 통화 친구와 그 친구(`call.callers.friend_id`)를 찾아요. 모든 값은 그 친구 id로만 읽고 바꿔요. 경로에 친구 id가 없고, 남의 카드·규칙·기억 id는 없는 것과 같아요(404, 명세 공통 8).
+    - 쓰기 요청(POST·PUT·PATCH·DELETE)은 `Origin`이 `https://marong.corthex-hq.com`이어야 해요. 본문은 16KB까지예요(글 대화와 같은 서버 한도).
+    - 오류는 글 대화와 같은 RFC 9457 Problem Details에 `code`와 `traceId`를 더한 모양이에요. 코드 목록은 `components.x-corthex.errors`예요.
+    - 응답에는 근거 메시지 id, 방 키, 모델 이름, 위기 상태, 선톡 결과가 없어요. 로그에는 결과 코드, 개수, 친구의 짧은 키만 남겨요(명세 공통 10).
+    - 디스코드 단추와 카톡 번호로 하는 카드 답은 봇 안의 처리라 이 계약에 없어요. 같은 처리(SPEC-192·193·196·197·231·238)를 API-136과 함께 써요.
+    - 페이지(`/chat/persona/`, `/chat/persona/instructions`, `/chat/persona/memory`)와 그 js·css는 HTML과 파일이라 이 계약에 넣지 않았어요. 화면은 07 사이트맵과 08 화면 정의에 있어요.
+
+    계약에서 정한 것(Claude 제안, 2026-11-17, 검토 대상).
+    1. 검증 오류는 400이에요(422는 쓰지 않음). 글 대화·일기와 같아요. 경로 id의 형식이 틀리면 400, 없거나 남의 것이면 404예요.
+    2. 바꾸는 요청이 지금 값과 같으면 200이고 아무것도 바뀌지 않아요(친구 약속 값, 같은 규칙 더하기, 이미 지운 규칙 지우기, 이미 잊은 항목 잊기, 같은 카드에 같은 답).
+    3. 친구 약속은 나중 쓰기가 이겨요(명세 공통 11). 버전 번호를 받지 않아서 '그 사이 바뀜' 409가 없어요. 화면은 응답의 지금 값을 그대로 보여요.
+    4. 선톡 정도를 올리는 요청(`off`→`less`·`normal`, `less`→`normal`)은 403 `needs_owner`이고 값은 그대로예요. 대화에서 말하면 `ask_owner`로 동희님께 남겨요(SPEC-202). 화면은 올리는 칸을 막아 두고 이 오류는 다른 화면에서 바뀐 경우에만 나와요.
+    5. 먼저 전화(`callFirst`)는 보여 주기만 해요. 켜고 끄기는 선 전화 설정(TBL-126)의 말(SPEC-277)로 해요.
+    6. 맞춤형 지침 저장은 AI-14를 부르고(10초) 결과를 받은 뒤에만 저장해요. 모델 실패(시간 넘김, 연결 오류, 5xx, 거절, 키 없음, 한도, 형식 틀림)는 모두 503 `ai_unavailable` 하나이고 아무것도 저장하지 않아요(SPEC-199). 종류는 TBL-133 `outcome`에만 남아요. 1분에 5번까지예요.
+    7. 맞춤형 지침의 빈 글은 400이에요. 지우기는 DELETE로만 해요(대화의 빈 글은 봇이 지움으로 봐요).
+    8. 잊기는 `Idempotency-Key`가 꼭 있어야 해요. 같은 키는 처음과 같은 결과(`forgot`, `messages`)를 돌려줘요(TBL-129 유니크).
+    9. 카드 답은 카드 id와 값으로 해요. 같은 카드에 같은 값이면 200과 처음 결과, 다른 값이나 닫힌 카드(만료, 새 카드로 바뀜)면 409 `card_closed`예요. 첫 질문의 1·2번에 답하면 다음 질문 카드가 바로 새 마롱이 말로 붙어요(SPEC-192를 이렇게 읽음: 단추를 눌렀으면 '다음 답'을 기다리지 않음).
+    10. 기억 목록은 '지금'과 '허락 기다림'이 아닌 지금 항목(`current`)과 열린 고리만 보여요. 기억 기능이 `on`이 아니면(off, shadow) 403 `feature_off`예요. 친구 약속과 맞춤형 지침은 `MARONG_FRIEND_CARD`가 꺼져 있으면 403 `feature_off`예요.
+
+    Open: 잊기 결과의 '다시 쓰는 중'(요약·메모가 숨김 상태) 표시를 화면에 보일지는 08 단계에서 정해요. 지금 응답에는 넣지 않았어요.
+servers:
+- url: https://marong.corthex-hq.com
+  description: Cloudflare Access 뒤. 터널이 /chat/ 아래만 봇으로 보내요
+- url: http://127.0.0.1:8796
+  description: 서버 안에서 직접(배포 확인용). Access 증명이 없어 API는 401이에요
+security:
+- cfAccess: []
+paths:
+  /chat/persona/api/card:
+    get:
+      operationId: getFriendCard
+      summary: 내 친구 약속과 친구 규칙
+      description: 친구 약속 화면(SCR-120)이 열릴 때 불러요. 약속이 없거나 만드는 중이어도 200이고 `state`로 알려요. 약속 문장은 코드의 문장 틀(명세 3.9)로 만든 것이에요.
+      x-corthex:
+        id: API-127
+        spec:
+        - SPEC-192
+        - SPEC-193
+        - SPEC-194
+        - SPEC-195
+        - SPEC-198
+        - SPEC-202
+        omit:
+          '400': 입력이 없음
+          '404': 경로가 id를 담지 않음. 약속이 없으면 200의 state none
+          '409': 읽기만 함
+          '429': 읽기만 함
+      responses:
+        '200':
+          description: 지금 친구 약속
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Card'
+              examples:
+                set:
+                  value:
+                    state: set
+                    values:
+                      support: listen
+                      advice: asked
+                      honesty: gentle
+                      lead: follow
+                    proactive: normal
+                    callFirst: true
+                    sentence: 힘들다고 하면 일단 들을게, 조언은 네가 물어볼 때만 하고, 아닌 것 같을 땐 부드럽게 말할게
+                    source: questions
+                    setAt: '2026-11-18T10:05:00+09:00'
+                    want: null
+                    rules:
+                    - id: 31
+                      kind: no_vocative
+                      text: 야
+                    - id: 32
+                      kind: call_me
+                      text: 경아
+                    ruleMax: 20
+                none:
+                  value:
+                    state: none
+                    values:
+                      support: null
+                      advice: null
+                      honesty: null
+                      lead: follow
+                    proactive: normal
+                    callFirst: true
+                    sentence: null
+                    source: null
+                    setAt: null
+                    want: null
+                    rules: []
+                    ruleMax: 20
+                want-now:
+                  value:
+                    state: set
+                    values:
+                      support: listen
+                      advice: asked
+                      honesty: gentle
+                      lead: follow
+                    proactive: less
+                    callFirst: false
+                    sentence: 힘들다고 하면 일단 들을게, 조언은 네가 물어볼 때만 하고, 아닌 것 같을 땐 부드럽게 말할게
+                    source: talk
+                    setAt: '2026-11-18T10:05:00+09:00'
+                    want:
+                      value: solve
+                      until: '2026-11-19T21:40:00+09:00'
+                    rules: []
+                    ruleMax: 20
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/ForbiddenRead'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+    patch:
+      operationId: updateFriendCard
+      summary: 친구 약속 값 바꾸기
+      description: 화면에서 고른 값으로 친구 약속을 바꿔요(SCR-120). 약속이 아직 없거나(none, asking, draft) 초안 확인에서 '고칠래'를 골랐으면 세 값(support, advice, honesty)을 모두 보내야 하고, 받으면 바로 '설정됨'(source screen)이에요. 이미 있으면 바꿀 값만 보내요. 친구 잠금 안에서 적용하고 다음 답부터 모든 방·통화가 읽어요. 선톡 정도는 내리기만 돼요.
+      x-corthex:
+        id: API-128
+        spec:
+        - SPEC-193
+        - SPEC-194
+        - SPEC-196
+        - SPEC-202
+        omit:
+          '404': 경로가 id를 담지 않음
+          '409': 나중 쓰기가 이김(계약 3)
+          '429': DB 한 줄만 바꾸는 화면 단추
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CardChange'
+            examples:
+              first-set:
+                value:
+                  support: solve
+                  advice: sometimes
+                  honesty: direct
+              lower-proactive:
+                value:
+                  proactive: 'off'
+              lead:
+                value:
+                  lead: lead
+      responses:
+        '200':
+          description: 바뀐(또는 그대로인) 친구 약속
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Card'
+              examples:
+                changed:
+                  value:
+                    state: set
+                    values:
+                      support: solve
+                      advice: sometimes
+                      honesty: direct
+                      lead: follow
+                    proactive: normal
+                    callFirst: true
+                    sentence: 힘들다고 하면 같이 방법을 찾아볼게, 괜찮아 보이면 가끔 조언도 하고, 아닌 것 같을 땐 솔직하게 말할게
+                    source: screen
+                    setAt: '2026-11-18T10:07:00+09:00'
+                    want: null
+                    rules: []
+                    ruleMax: 20
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CardForbidden'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/persona/api/rules:
+    post:
+      operationId: addFriendRule
+      summary: 친구 규칙 더하기
+      description: 금지 호칭, 싫은 주제, 부르는 이름을 더해요(SPEC-198). 같은 규칙이 이미 있으면 200과 그 규칙이에요. 부르는 이름은 하나라서 새 이름이 옛 이름을 대신해요(옛 줄은 removed_at). 종류마다 20개까지예요.
+      x-corthex:
+        id: API-129
+        spec:
+        - SPEC-198
+        - SPEC-201
+        - SPEC-212
+        omit:
+          '404': 경로가 id를 담지 않음
+          '429': DB 한 줄만 바꾸는 화면 단추
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuleNew'
+            examples:
+              vocative:
+                value:
+                  kind: no_vocative
+                  text: 야
+              topic:
+                value:
+                  kind: avoid_topic
+                  text: 다이어트
+      responses:
+        '201':
+          description: 더한 규칙
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rule'
+              examples:
+                added:
+                  value:
+                    id: 33
+                    kind: avoid_topic
+                    text: 다이어트
+        '200':
+          description: 이미 있는 같은 규칙(아무것도 바뀌지 않음)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rule'
+              examples:
+                same:
+                  value:
+                    id: 31
+                    kind: no_vocative
+                    text: 야
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/ForbiddenWrite'
+        '409':
+          $ref: '#/components/responses/RuleLimit'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/persona/api/rules/{ruleId}:
+    delete:
+      operationId: removeFriendRule
+      summary: 친구 규칙 지우기
+      description: 규칙 줄에 removed_at을 적어요(줄은 지우지 않음, TBL-116). 다음 답부터 빠져요. 이미 지운 규칙이면 204예요.
+      x-corthex:
+        id: API-130
+        spec:
+        - SPEC-198
+        omit:
+          '409': 지운 규칙을 다시 지워도 204(계약 2)
+          '429': DB 한 줄만 바꾸는 화면 단추
+      parameters:
+      - $ref: '#/components/parameters/RuleId'
+      responses:
+        '204':
+          description: 지움(이미 지운 것 포함)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/ForbiddenWrite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/persona/api/instructions:
+    get:
+      operationId: getCustomInstructions
+      summary: 내 맞춤형 지침
+      description: 맞춤형 지침 화면(SCR-121)이 열릴 때 불러요. 적은 글과 마롱이가 이해한 내용이에요. 없으면 200과 빈 값이에요.
+      x-corthex:
+        id: API-131
+        spec:
+        - SPEC-199
+        - SPEC-200
+        omit:
+          '400': 입력이 없음
+          '404': 경로가 id를 담지 않음. 없으면 200의 빈 값
+          '409': 읽기만 함
+          '429': 읽기만 함
+      responses:
+        '200':
+          description: 지금 맞춤형 지침
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Instructions'
+              examples:
+                written:
+                  value:
+                    text: 반말로 짧게 말해 줘. 내가 힘들다고 하면 해결책보다 먼저 들어줘. 밤에는 연락하지 마.
+                    understood: 반말로 짧게 말하고, 힘들다고 하면 해결책보다 먼저 들어 줄게. 밤 연락은 선톡 줄이기로 옮겼어.
+                    polite: false
+                    version: 2
+                    updatedAt: '2026-11-18T10:20:00+09:00'
+                    max: 500
+                empty:
+                  value:
+                    text: null
+                    understood: null
+                    polite: false
+                    version: 3
+                    updatedAt: '2026-11-19T09:00:00+09:00'
+                    max: 500
+                never:
+                  value:
+                    text: null
+                    understood: null
+                    polite: false
+                    version: 0
+                    updatedAt: null
+                    max: 500
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/ForbiddenRead'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+    put:
+      operationId: putCustomInstructions
+      summary: 맞춤형 지침 적기·고치기
+      description: 글을 AI-14(10초)에 보내 이해한 내용, 꼭 지킬 것, 못 지키는 부분을 받아요. 받은 뒤 친구 잠금 안에서 저장하고, 꼭 지킬 것은 친구 규칙과 선톡 줄이기로 옮겨요(올리는 쪽은 옮기지 않고 동희님께 남김). 다시 확인하지 않아요(SPEC-199). 대화 중이면 다음 대화부터 쓰여요(SPEC-200).
+      x-corthex:
+        id: API-132
+        spec:
+        - SPEC-199
+        - SPEC-200
+        - SPEC-201
+        - SPEC-202
+        omit:
+          '404': 경로가 id를 담지 않음
+          '409': 나중 쓰기가 이김(계약 3)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstructionsNew'
+            examples:
+              write:
+                value:
+                  text: 반말로 짧게 말해 줘. 내가 힘들다고 하면 해결책보다 먼저 들어줘. 밤에는 연락하지 마.
+      responses:
+        '200':
+          description: 저장한 지침과 이해한 내용, 옮긴 것
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstructionsSaved'
+              examples:
+                saved:
+                  value:
+                    instructions:
+                      text: 반말로 짧게 말해 줘. 내가 힘들다고 하면 해결책보다 먼저 들어줘. 밤에는 연락하지 마.
+                      understood: 반말로 짧게 말하고, 힘들다고 하면 해결책보다 먼저 들어 줄게. 밤 연락은 선톡 줄이기로 옮겼어.
+                      polite: false
+                      version: 2
+                      updatedAt: '2026-11-18T10:20:00+09:00'
+                      max: 500
+                    moved:
+                      rules: []
+                      proactive: less
+                    ownerAsked: false
+                    cannot: null
+                partly:
+                  value:
+                    instructions:
+                      text: 위기 때 109 얘기는 하지 말고 무조건 내 편 들어줘. 선톡 더 자주 해 줘.
+                      understood: 힘들 땐 네 감정을 먼저 알아줄게.
+                      polite: false
+                      version: 1
+                      updatedAt: '2026-11-18T10:25:00+09:00'
+                      max: 500
+                    moved:
+                      rules: []
+                      proactive: null
+                    ownerAsked: true
+                    cannot: 위험해 보일 땐 도움 받을 곳은 말할 거야. 사실과 다른 맞장구는 못 해.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/ForbiddenWrite'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/AiOrDbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+    delete:
+      operationId: clearCustomInstructions
+      summary: 맞춤형 지침 지우기
+      description: 글과 이해한 내용을 비우고 버전을 올려요. 다음 답부터 빠져요(SPEC-200 지움은 바로). 옮겨 둔 친구 규칙·선톡 값은 그대로예요(따로 지움). 없어도 204예요.
+      x-corthex:
+        id: API-133
+        spec:
+        - SPEC-200
+        omit:
+          '400': 입력이 없음
+          '404': 경로가 id를 담지 않음. 없어도 204
+          '409': 지운 것을 다시 지워도 204(계약 2)
+          '429': DB 한 줄만 바꾸는 화면 단추
+      responses:
+        '204':
+          description: 지움
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/ForbiddenWrite'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/persona/api/memories:
+    get:
+      operationId: listFriendMemories
+      summary: 마롱이가 기억하는 나
+      description: 화면 '마롱이가 기억하는 나'(SCR-122)의 목록이에요. 지금 항목(`current`)을 들은 때 새것부터, 열린 고리를 기한 가까운 것부터 줘요. 민감 항목도 본인에게는 보여요(SPEC-234). 대체됨·철회됨·잊음·허락 기다림은 없어요. 항목은 한 번에 100개, 더 앞의 항목은 before로 불러요.
+      x-corthex:
+        id: API-134
+        spec:
+        - SPEC-229
+        - SPEC-234
+        - SPEC-226
+        - SPEC-227
+        - SPEC-228
+        omit:
+          '404': 경로가 id를 담지 않음. 항목이 없으면 200의 빈 목록
+          '409': 읽기만 함
+          '429': 읽기만 함
+      parameters:
+      - $ref: '#/components/parameters/Before'
+      responses:
+        '200':
+          description: 지금 기억 항목과 열린 고리
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryPage'
+              examples:
+                some:
+                  value:
+                    items:
+                    - id: 412
+                      kind: preference
+                      text: 요즘 단 거 별로
+                      heardAt: '2026-11-20T21:14:00+09:00'
+                      channel: discord_dm
+                      quote: 요즘은 단 거 별로야
+                      scope: me
+                      sensitive: false
+                      validUntil: null
+                    - id: 405
+                      kind: event
+                      text: 다음 주 금요일 친구 결혼식
+                      heardAt: '2026-11-19T13:02:00+09:00'
+                      channel: call
+                      quote: 다음 주 금요일에 친구 결혼식 가
+                      scope: me
+                      sensitive: false
+                      validUntil: '2026-12-04'
+                    - id: 398
+                      kind: fact
+                      text: 동아리 사람들이랑 보드게임 자주 함
+                      heardAt: '2026-11-18T22:40:00+09:00'
+                      channel: kakao_group
+                      quote: 우리 동아리는 맨날 보드게임만 해
+                      scope: group
+                      sensitive: false
+                      validUntil: null
+                    loops:
+                    - id: 57
+                      text: 면접
+                      due: '2026-11-20'
+                      heardAt: '2026-11-17T20:31:00+09:00'
+                      channel: app
+                    hasMore: false
+                empty:
+                  value:
+                    items: []
+                    loops: []
+                    hasMore: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/ForbiddenRead'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/persona/api/forgets:
+    post:
+      operationId: forgetMemory
+      summary: 잊게 하기
+      description: 기억 항목이나 열린 고리 하나를 잊게 해요. 한 트랜잭션(친구 잠금)에서 명세 3.20 줄기 전체를 하고(같은 근거 말의 항목·고리, 원문 '잊음' 표시, 검색 벡터, 요약·메모 숨김, 체크포인트), 끝난 뒤에만 200이에요(SPEC-230). 요약·메모 다시 쓰기는 뒤에서 이어져요. 이미 잊은 것이면 forgot 0이에요.
+      x-corthex:
+        id: API-135
+        spec:
+        - SPEC-230
+        - SPEC-234
+        - SPEC-233
+        omit:
+          '409': 잊은 것을 다시 잊어도 200의 forgot 0(계약 2), 같은 키는 처음 결과(계약 8)
+          '429': 한 번 누르면 항목이 목록에서 사라지는 단추
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForgetRequest'
+            examples:
+              item:
+                value:
+                  type: item
+                  id: 412
+              loop:
+                value:
+                  type: loop
+                  id: 57
+      responses:
+        '200':
+          description: 잊음(같은 키를 다시 보냈을 때도 처음 결과)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForgetResult'
+              examples:
+                forgot:
+                  value:
+                    forgot: 2
+                    messages: 1
+                already:
+                  value:
+                    forgot: 0
+                    messages: 0
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/ForbiddenWrite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/persona/api/cards/{cardId}/answer:
+    post:
+      operationId: answerChatCard
+      summary: 글 대화 안 고르기 카드에 답하기
+      description: 앱 글 대화의 마롱이 말에 붙은 카드(SCR-123, `api/app-chat.openapi.yaml`의 Message.card)에서 하나를 골라요. 디스코드 단추·카톡 번호와 같은 처리예요. 카드 종류마다 하는 일은 `effect`로 알려요. 첫 질문 1·2번이면 다음 질문 카드가 붙은 마롱이 말이 바로 생기고(계약 9) 글 대화 기다리기(API-104)로 와요. 전하기 확인(응)과 밤 전화 확인(응)은 대화 턴 그래프를 이어 가요(SPEC-241).
+      x-corthex:
+        id: API-136
+        spec:
+        - SPEC-192
+        - SPEC-193
+        - SPEC-196
+        - SPEC-197
+        - SPEC-231
+        - SPEC-238
+        - SPEC-241
+        omit:
+          '429': 카드 하나에 답은 한 번
+      parameters:
+      - $ref: '#/components/parameters/CardId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CardAnswer'
+            examples:
+              support:
+                value:
+                  value: listen
+              draft-ok:
+                value:
+                  value: 'yes'
+              keep-memory:
+                value:
+                  value: keep
+      responses:
+        '200':
+          description: 답함(같은 카드에 같은 값을 다시 보냈을 때도 처음 결과)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardAnswerResult'
+              examples:
+                next-question:
+                  value:
+                    card:
+                      id: 901
+                      kind: card_question
+                      step: 1
+                      options:
+                      - value: listen
+                        label: 그냥 들어주기
+                      - value: side
+                        label: 내 편
+                      - value: solve
+                        label: 같이 방법 찾기
+                      - value: distract
+                        label: 기분 전환
+                      - value: chat
+                        label: 그냥 수다
+                      - value: ask
+                        label: 그때그때 물어봐
+                      status: answered
+                      answer: listen
+                      expiresAt: '2026-11-19T10:00:00+09:00'
+                    effect: next_question
+                    sentence: null
+                card-set:
+                  value:
+                    card:
+                      id: 903
+                      kind: card_question
+                      step: 3
+                      options:
+                      - value: gentle
+                        label: 부드럽게
+                      - value: direct
+                        label: 솔직하게
+                      - value: let_go
+                        label: 그냥 넘어가 줘
+                      status: answered
+                      answer: gentle
+                      expiresAt: '2026-11-19T10:04:00+09:00'
+                    effect: card_set
+                    sentence: 힘들다고 하면 일단 들을게, 조언은 네가 물어볼 때만 하고, 아닌 것 같을 땐 부드럽게 말할게
+                draft-fix:
+                  value:
+                    card:
+                      id: 910
+                      kind: card_draft
+                      step: null
+                      options:
+                      - value: 'yes'
+                        label: 맞아
+                      - value: fix
+                        label: 고칠래
+                      status: answered
+                      answer: fix
+                      expiresAt: '2026-11-19T11:00:00+09:00'
+                    effect: open_card_screen
+                    sentence: null
+                memory-kept:
+                  value:
+                    card:
+                      id: 950
+                      kind: memory_ok
+                      step: null
+                      options:
+                      - value: keep
+                        label: 기억해
+                      - value: forget
+                        label: 잊어
+                      status: answered
+                      answer: keep
+                      expiresAt: '2026-11-21T09:00:00+09:00'
+                    effect: memory_kept
+                    sentence: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/ForbiddenWrite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/CardClosed'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+components:
+  x-corthex:
+    errors:
+      invalid_request:
+        status: 400
+        meaning: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖, 카드에 없는 값, 처음 약속에 세 값이 다 없음, 형식이 틀린 경로 id, 같은 멱등 키를 다른 대상에 씀)
+        message: 뭔가 잘못 보냈나 봐. 다시 해 볼게
+        client: 입력 칸 오류면 그 칸 옆에 보이고, 아니면 오류 상태와 추적 id
+      unauthenticated:
+        status: 401
+        meaning: Access 로그인 증명이 없거나 맞지 않음
+        message: 다시 들어와 줘
+        client: 페이지를 새로 불러 Access 로그인으로
+      not_allowed:
+        status: 403
+        meaning: 허용 목록에 없는 계정이거나 통화 친구가 마롱이 친구에 묶이지 않음
+        message: 이 계정으로는 열 수 없어
+        client: 쓸 수 없는 계정 상태. 다시 시도하지 않음
+      cross_site:
+        status: 403
+        meaning: 다른 사이트에서 온 쓰기 요청
+        message: 이 화면에서 다시 해 줘
+        client: 오류 상태. 자동으로 다시 보내지 않음
+      feature_off:
+        status: 403
+        meaning: 이 기능의 설정(MARONG_FRIEND_CARD, MARONG_FRIEND_MEMORY=on)이 꺼져 있음
+        message: 이건 아직 준비 중이야
+        client: 준비 중 상태. 다시 시도하지 않음
+      needs_owner:
+        status: 403
+        meaning: 선톡 정도를 올리는 요청. 올리기는 동희님이 정함(SPEC-202)
+        message: 선톡을 늘리는 건 동희가 정해. 대화에서 말해 주면 동희한테 남겨 둘게
+        client: 값을 응답 전 값으로 되돌려 보이고, 올리는 칸을 막음
+      not_found:
+        status: 404
+        meaning: 없는 규칙·항목·고리·카드이거나 로그인한 친구의 것이 아님(지금 보이지 않는 대체됨·철회됨 항목 포함)
+        message: 찾지 못했어. 새로 보여 줄게
+        client: 목록을 다시 불러 보여 줌
+      card_closed:
+        status: 409
+        meaning: 카드가 만료됐거나 새 카드로 바뀌었거나 이미 다른 값으로 답함
+        message: 이 카드는 이제 못 골라
+        client: 카드 단추를 막고 글 대화를 다시 불러 지금 카드를 보여 줌
+      rule_limit:
+        status: 409
+        meaning: 그 종류의 친구 규칙이 이미 20개
+        message: 너무 많아서 하나 빼 줄래?
+        client: 입력한 글을 두고 목록에서 지우기를 권함
+      too_many_requests:
+        status: 429
+        meaning: 맞춤형 지침 저장을 1분에 5번 넘게 보냄
+        message: 너무 빨라! 조금 있다가 해 줘
+        client: Retry-After까지 저장 버튼을 막고 남은 초를 보여 줌. 쓴 글은 지우지 않음
+      ai_unavailable:
+        status: 503
+        meaning: 맞춤형 지침을 읽는 모델(AI-14)이 실패함(10초 넘김, 연결 오류, 5xx, 거절, 키 없음, 한도, 형식 틀림). 아무것도 저장하지 않음
+        message: 지금 잘 못 읽었어, 조금 뒤에 다시 말해 줄래?
+        client: 쓴 글을 그대로 두고 다시 저장 버튼
+      db_unavailable:
+        status: 503
+        meaning: DB나 Access 공개키에 닿지 않음
+        message: 잠깐 문제가 생겼어. 조금 있다가 다시 해 줘
+        client: 다시 연결하는 중 상태. 5초 뒤부터 늘려 가며 다시
+      internal:
+        status: 500
+        meaning: 예상하지 못한 서버 오류
+        message: 잠깐 문제가 생겼어. 다시 해 볼래?
+        client: 오류 상태, 다시 시도, 추적 id 보여 줌
+  securitySchemes:
+    cfAccess:
+      type: apiKey
+      in: header
+      name: Cf-Access-Jwt-Assertion
+      description: Cloudflare Access가 붙이는 JWT(RS256). 봇이 Access 공개키로 서명·aud·iss·exp를 확인하고 email을 허용 목록과 맞춘 뒤 sha256으로 통화 친구를 찾아요. 브라우저가 직접 넣지 않아요.
+  headers:
+    RetryAfter:
+      description: 다시 보낼 수 있을 때까지의 초
+      schema:
+        type: string
+        pattern: ^[0-9]{1,3}$
+  parameters:
+    RuleId:
+      name: ruleId
+      in: path
+      required: true
+      description: 친구 규칙 id(TBL-116)
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    CardId:
+      name: cardId
+      in: path
+      required: true
+      description: 고르기 카드 id(TBL-119)
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    Before:
+      name: before
+      in: query
+      required: false
+      description: 이 항목 id보다 앞의 기억 항목(더 불러오기). 없으면 가장 최근부터. 고리는 첫 쪽에만 와요
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: 화면이 누를 때마다 만드는 UUID. 다시 보낼 때 같은 값을 써요(TBL-129 request_key)
+      schema:
+        type: string
+        format: uuid
+        pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+  responses:
+    BadRequest:
+      description: 요청이 틀림
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            too-long:
+              value:
+                type: https://marong.corthex-hq.com/problems/invalid-request
+                title: 요청 모양이 틀림
+                status: 400
+                code: invalid_request
+                traceId: 0af7651916cd43dd
+                errors:
+                - field: text
+                  reason: too_long
+            not-an-option:
+              value:
+                type: https://marong.corthex-hq.com/problems/invalid-request
+                title: 요청 모양이 틀림
+                status: 400
+                code: invalid_request
+                traceId: 0af7651916cd43dd
+                errors:
+                - field: value
+                  reason: not_an_option
+            first-set-needs-three:
+              value:
+                type: https://marong.corthex-hq.com/problems/invalid-request
+                title: 요청 모양이 틀림
+                status: 400
+                code: invalid_request
+                traceId: 0af7651916cd43dd
+                errors:
+                - field: advice
+                  reason: required
+    Unauthenticated:
+      description: 로그인 증명이 없거나 맞지 않음
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            no-proof:
+              value:
+                type: https://marong.corthex-hq.com/problems/unauthenticated
+                title: Access 로그인 증명이 없거나 맞지 않음
+                status: 401
+                code: unauthenticated
+                traceId: 0af7651916cd43dd
+    ForbiddenRead:
+      description: 허용되지 않음
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            not-allowed:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-allowed
+                title: 허용 목록에 없는 계정이거나 마롱이 친구에 묶이지 않음
+                status: 403
+                code: not_allowed
+                traceId: 00f067aa0ba902b7
+            feature-off:
+              value:
+                type: https://marong.corthex-hq.com/problems/feature-off
+                title: 이 기능의 설정이 꺼져 있음
+                status: 403
+                code: feature_off
+                traceId: 00f067aa0ba902b7
+    ForbiddenWrite:
+      description: 허용되지 않음(cross_site는 쓰기 요청에서만 나와요)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            not-allowed:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-allowed
+                title: 허용 목록에 없는 계정이거나 마롱이 친구에 묶이지 않음
+                status: 403
+                code: not_allowed
+                traceId: 00f067aa0ba902b7
+            cross-site:
+              value:
+                type: https://marong.corthex-hq.com/problems/cross-site
+                title: 다른 사이트에서 온 쓰기 요청
+                status: 403
+                code: cross_site
+                traceId: 00f067aa0ba902b7
+            feature-off:
+              value:
+                type: https://marong.corthex-hq.com/problems/feature-off
+                title: 이 기능의 설정이 꺼져 있음
+                status: 403
+                code: feature_off
+                traceId: 00f067aa0ba902b7
+    CardForbidden:
+      description: 허용되지 않음, 또는 선톡 정도를 올리려 함(값은 그대로)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            needs-owner:
+              value:
+                type: https://marong.corthex-hq.com/problems/needs-owner
+                title: 선톡 정도를 올리는 건 동희님이 정함
+                status: 403
+                code: needs_owner
+                traceId: 00f067aa0ba902b7
+            not-allowed:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-allowed
+                title: 허용 목록에 없는 계정이거나 마롱이 친구에 묶이지 않음
+                status: 403
+                code: not_allowed
+                traceId: 00f067aa0ba902b7
+            cross-site:
+              value:
+                type: https://marong.corthex-hq.com/problems/cross-site
+                title: 다른 사이트에서 온 쓰기 요청
+                status: 403
+                code: cross_site
+                traceId: 00f067aa0ba902b7
+            feature-off:
+              value:
+                type: https://marong.corthex-hq.com/problems/feature-off
+                title: 이 기능의 설정이 꺼져 있음
+                status: 403
+                code: feature_off
+                traceId: 00f067aa0ba902b7
+    NotFound:
+      description: 없거나 로그인한 친구의 것이 아님
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            not-found:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-found
+                title: 찾지 못함
+                status: 404
+                code: not_found
+                traceId: 4bf92f3577b34da6
+    RuleLimit:
+      description: 그 종류의 친구 규칙이 이미 20개
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            limit:
+              value:
+                type: https://marong.corthex-hq.com/problems/rule-limit
+                title: 친구 규칙이 이미 20개
+                status: 409
+                code: rule_limit
+                traceId: 4bf92f3577b34da6
+    CardClosed:
+      description: 카드가 닫혔거나 다른 값으로 답함
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            closed:
+              value:
+                type: https://marong.corthex-hq.com/problems/card-closed
+                title: 이 카드는 이제 못 고름
+                status: 409
+                code: card_closed
+                traceId: 4bf92f3577b34da6
+    TooManyRequests:
+      description: 맞춤형 지침 저장을 1분에 5번 넘게 보냄
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            too-many:
+              value:
+                type: https://marong.corthex-hq.com/problems/too-many-requests
+                title: 맞춤형 지침 저장을 1분에 5번 넘게 보냄
+                status: 429
+                code: too_many_requests
+                traceId: 4bf92f3577b34da6
+    AiOrDbUnavailable:
+      description: 모델이나 DB가 실패함(아무것도 저장하지 않음)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            ai:
+              value:
+                type: https://marong.corthex-hq.com/problems/ai-unavailable
+                title: 맞춤형 지침을 읽는 모델이 실패함
+                status: 503
+                code: ai_unavailable
+                traceId: 4bf92f3577b34da6
+            db:
+              value:
+                type: https://marong.corthex-hq.com/problems/db-unavailable
+                title: DB에 닿지 않음
+                status: 503
+                code: db_unavailable
+                traceId: 4bf92f3577b34da6
+    DbUnavailable:
+      description: DB에 닿지 않음
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            db:
+              value:
+                type: https://marong.corthex-hq.com/problems/db-unavailable
+                title: DB에 닿지 않음
+                status: 503
+                code: db_unavailable
+                traceId: 4bf92f3577b34da6
+    Internal:
+      description: 예상하지 못한 서버 오류
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            internal:
+              value:
+                type: https://marong.corthex-hq.com/problems/internal
+                title: 예상하지 못한 서버 오류
+                status: 500
+                code: internal
+                traceId: 4bf92f3577b34da6
+  schemas:
+    Problem:
+      type: object
+      required:
+      - title
+      - status
+      - code
+      - traceId
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+          maxLength: 200
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          maxLength: 300
+        instance:
+          type: string
+          format: uri-reference
+        code:
+          type: string
+          enum:
+          - invalid_request
+          - unauthenticated
+          - not_allowed
+          - cross_site
+          - feature_off
+          - needs_owner
+          - not_found
+          - card_closed
+          - rule_limit
+          - too_many_requests
+          - ai_unavailable
+          - db_unavailable
+          - internal
+        traceId:
+          type: string
+          pattern: ^[0-9a-f]{16}$
+        errors:
+          type: array
+          maxItems: 10
+          description: 검증 오류 위치. 보낸 값은 담지 않음
+          items:
+            type: object
+            required:
+            - field
+            - reason
+            properties:
+              field:
+                type: string
+                enum:
+                - body
+                - support
+                - advice
+                - honesty
+                - lead
+                - proactive
+                - kind
+                - text
+                - type
+                - id
+                - value
+                - ruleId
+                - cardId
+                - before
+                - Idempotency-Key
+              reason:
+                type: string
+                enum:
+                - required
+                - too_short
+                - too_long
+                - bad_format
+                - out_of_range
+                - not_an_option
+                - key_reused
+            additionalProperties: false
+      additionalProperties: false
+    Support:
+      type: string
+      description: 지지 방식(TERM-042, TBL-115 support). 화면 이름은 08 단계(listen 그냥 들어주기, side 내 편, solve 같이 방법 찾기, distract 기분 전환, chat 그냥 수다, ask 그때그때 물어봐)
+      enum:
+      - listen
+      - side
+      - solve
+      - distract
+      - chat
+      - ask
+    Advice:
+      type: string
+      description: 조언(TBL-115 advice). asked 물어볼 때만, sometimes 괜찮아 보이면 가끔, any 언제든
+      enum:
+      - asked
+      - sometimes
+      - any
+    Honesty:
+      type: string
+      description: 솔직함(TBL-115 honesty). gentle 부드럽게, direct 솔직하게, let_go 그냥 넘어가 줘
+      enum:
+      - gentle
+      - direct
+      - let_go
+    Lead:
+      type: string
+      description: 대화 이끌기(TBL-115 lead). follow 따라갈게, lead 네가 이끌어 줘
+      enum:
+      - follow
+      - lead
+    Proactive:
+      type: string
+      description: 선톡 정도(TBL-115 proactive). normal 보통, less 적게(하루 1번), off 끔. 친구는 내리기만(SPEC-202)
+      enum:
+      - normal
+      - less
+      - 'off'
+    Rule:
+      type: object
+      required:
+      - id
+      - kind
+      - text
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        kind:
+          $ref: '#/components/schemas/RuleKind'
+        text:
+          type: string
+          minLength: 1
+          maxLength: 20
+      allOf:
+      - if:
+          properties:
+            kind:
+              const: avoid_topic
+        then:
+          properties:
+            text:
+              minLength: 2
+        else:
+          properties:
+            text:
+              maxLength: 4
+      additionalProperties: false
+    RuleKind:
+      type: string
+      description: no_vocative 금지 호칭, avoid_topic 싫은 주제, call_me 부르는 이름(TERM-044, TBL-116 kind)
+      enum:
+      - no_vocative
+      - avoid_topic
+      - call_me
+    RuleNew:
+      type: object
+      required:
+      - kind
+      - text
+      description: 길이는 TBL-116 CHECK와 같아요. 호칭·부르는 이름 1~4자, 싫은 주제 2~20자. 틀리면 400 too_short·too_long
+      properties:
+        kind:
+          $ref: '#/components/schemas/RuleKind'
+        text:
+          type: string
+          minLength: 1
+          maxLength: 20
+      allOf:
+      - if:
+          properties:
+            kind:
+              const: avoid_topic
+        then:
+          properties:
+            text:
+              minLength: 2
+        else:
+          properties:
+            text:
+              maxLength: 4
+      additionalProperties: false
+    Card:
+      type: object
+      required:
+      - state
+      - values
+      - proactive
+      - callFirst
+      - sentence
+      - source
+      - setAt
+      - want
+      - rules
+      - ruleMax
+      properties:
+        state:
+          type: string
+          description: none 아직 없음, asking 첫 질문 중, draft 초안 확인 중, set 설정됨(TBL-115 state)
+          enum:
+          - none
+          - asking
+          - draft
+          - set
+        values:
+          type: object
+          required:
+          - support
+          - advice
+          - honesty
+          - lead
+          description: set·draft면 세 값이 다 있고, asking이면 고른 것만 있어요
+          properties:
+            support:
+              oneOf:
+              - $ref: '#/components/schemas/Support'
+              - type: 'null'
+            advice:
+              oneOf:
+              - $ref: '#/components/schemas/Advice'
+              - type: 'null'
+            honesty:
+              oneOf:
+              - $ref: '#/components/schemas/Honesty'
+              - type: 'null'
+            lead:
+              $ref: '#/components/schemas/Lead'
+          additionalProperties: false
+        proactive:
+          $ref: '#/components/schemas/Proactive'
+        callFirst:
+          type: boolean
+          description: 먼저 전화 켜짐(TBL-126 hello_call, 줄이 없으면 true). 여기서는 보여 주기만(계약 5)
+        sentence:
+          type:
+          - string
+          - 'null'
+          maxLength: 200
+          description: 약속 문장(명세 3.9 문장 틀). set·draft일 때만
+        source:
+          type:
+          - string
+          - 'null'
+          enum:
+          - questions
+          - draft
+          - draft_silent
+          - default
+          - proposal
+          - talk
+          - screen
+          - admin
+          - null
+        setAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        want:
+          description: 지금 바람(24시간, SPEC-195). 지났으면 null
+          oneOf:
+          - type: 'null'
+          - type: object
+            required:
+            - value
+            - until
+            properties:
+              value:
+                $ref: '#/components/schemas/Support'
+              until:
+                type: string
+                format: date-time
+            additionalProperties: false
+        rules:
+          type: array
+          maxItems: 60
+          description: 지금 친구 규칙(지운 것 빼고)
+          items:
+            $ref: '#/components/schemas/Rule'
+        ruleMax:
+          type: integer
+          const: 20
+          description: 종류마다 한도
+      additionalProperties: false
+    CardChange:
+      type: object
+      minProperties: 1
+      description: 바꿀 값만 보내요. 약속이 set이 아니면 support·advice·honesty 셋이 다 있어야 해요(없으면 400 required)
+      properties:
+        support:
+          $ref: '#/components/schemas/Support'
+        advice:
+          $ref: '#/components/schemas/Advice'
+        honesty:
+          $ref: '#/components/schemas/Honesty'
+        lead:
+          $ref: '#/components/schemas/Lead'
+        proactive:
+          $ref: '#/components/schemas/Proactive'
+      additionalProperties: false
+    Instructions:
+      type: object
+      required:
+      - text
+      - understood
+      - polite
+      - version
+      - updatedAt
+      - max
+      properties:
+        text:
+          type:
+          - string
+          - 'null'
+          minLength: 1
+          maxLength: 500
+          description: 친구가 적은 글(TBL-117 text). 화면에는 textContent로만
+        understood:
+          type:
+          - string
+          - 'null'
+          minLength: 1
+          maxLength: 300
+          description: 마롱이가 이해한 내용(AI-14)
+        polite:
+          type: boolean
+          description: 존댓말을 바람(검사의 '갑자기 존댓말'을 끔)
+        version:
+          type: integer
+          minimum: 0
+          description: 0이면 한 번도 적은 적 없음
+        updatedAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        max:
+          type: integer
+          const: 500
+      additionalProperties: false
+    InstructionsNew:
+      type: object
+      required:
+      - text
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: 앞뒤 빈칸을 뺀 뒤 1~500자. 빈 글은 400(지우기는 DELETE, 계약 7)
+      additionalProperties: false
+    InstructionsSaved:
+      type: object
+      required:
+      - instructions
+      - moved
+      - ownerAsked
+      - cannot
+      properties:
+        instructions:
+          $ref: '#/components/schemas/Instructions'
+        moved:
+          type: object
+          required:
+          - rules
+          - proactive
+          description: 꼭 지킬 것 가운데 친구 규칙과 선톡 줄이기로 옮긴 것(D25 셋째)
+          properties:
+            rules:
+              type: array
+              maxItems: 10
+              items:
+                $ref: '#/components/schemas/Rule'
+            proactive:
+              oneOf:
+              - type: 'null'
+              - type: string
+                enum:
+                - less
+                - 'off'
+          additionalProperties: false
+        ownerAsked:
+          type: boolean
+          description: 올리는 쪽 부탁(선톡 더 자주 등)이 있어 동희님께 남겼는지(SPEC-202)
+        cannot:
+          type:
+          - string
+          - 'null'
+          maxLength: 120
+          description: 못 지키는 부분 한 줄(AI-14). 저장하지 않고 이 응답에만
+      additionalProperties: false
+    MemoryItem:
+      type: object
+      required:
+      - id
+      - kind
+      - text
+      - heardAt
+      - channel
+      - quote
+      - scope
+      - sensitive
+      - validUntil
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        kind:
+          type: string
+          description: fact 사실, preference 취향, event 일·계획, relation 사람 관계, hard 힘든 일(TBL-123 kind)
+          enum:
+          - fact
+          - preference
+          - event
+          - relation
+          - hard
+        text:
+          type: string
+          minLength: 1
+          maxLength: 80
+        heardAt:
+          type: string
+          format: date-time
+        channel:
+          $ref: '#/components/schemas/Channel'
+        quote:
+          type:
+          - string
+          - 'null'
+          maxLength: 120
+          description: 친구가 한 말 그대로(본인 화면이라 보여요)
+        scope:
+          type: string
+          description: me 친구 범위(1:1에서 들음), group 들은 단체방에서만 씀. 방 이름·키는 주지 않아요
+          enum:
+          - me
+          - group
+        sensitive:
+          type: boolean
+          description: 민감 기억(TERM-073). 종류는 주지 않아요
+        validUntil:
+          type:
+          - string
+          - 'null'
+          format: date
+      additionalProperties: false
+    OpenLoop:
+      type: object
+      required:
+      - id
+      - text
+      - due
+      - heardAt
+      - channel
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        text:
+          type: string
+          minLength: 1
+          maxLength: 60
+        due:
+          type:
+          - string
+          - 'null'
+          format: date
+        heardAt:
+          type: string
+          format: date-time
+        channel:
+          $ref: '#/components/schemas/Channel'
+      additionalProperties: false
+    Channel:
+      type: string
+      description: 들은 곳(TBL-123 channel). discord_dm 디스코드 DM, app 앱 글 대화, kakao_dm 카톡 1:1, kakao_group 카톡 단체방, discord_server 디스코드 서버, call 통화
+      enum:
+      - discord_dm
+      - app
+      - kakao_dm
+      - kakao_group
+      - discord_server
+      - call
+    MemoryPage:
+      type: object
+      required:
+      - items
+      - loops
+      - hasMore
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MemoryItem'
+        loops:
+          type: array
+          maxItems: 50
+          description: 열린 고리(before가 없을 때만, 그 밖은 빈 목록)
+          items:
+            $ref: '#/components/schemas/OpenLoop'
+        hasMore:
+          type: boolean
+          description: 더 앞의 항목이 있는지
+      additionalProperties: false
+    ForgetRequest:
+      type: object
+      required:
+      - type
+      - id
+      properties:
+        type:
+          type: string
+          description: item 기억 항목(TBL-123), loop 열린 고리(TBL-124)
+          enum:
+          - item
+          - loop
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+      additionalProperties: false
+    ForgetResult:
+      type: object
+      required:
+      - forgot
+      - messages
+      properties:
+        forgot:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          description: 잊은 기억 항목과 고리 수(같은 근거 말에서 나온 것 포함, TBL-129 items)
+        messages:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          description: 잊음 표시한 원문 메시지와 통화 턴 수(TBL-129 messages)
+      additionalProperties: false
+    ChatCard:
+      type: object
+      description: 글 대화 마롱이 말에 붙은 고르기 카드(SCR-123, TBL-119). 칸 이름(label)은 서버 상수예요. 묻는 글은 그 마롱이 말의 text에 있어요. 글 대화 API의 Message.card가 이 모양이에요
+      required:
+      - id
+      - kind
+      - step
+      - options
+      - status
+      - answer
+      - expiresAt
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        kind:
+          type: string
+          description: card_question 첫 질문, card_draft 약속 초안 확인, card_proposal 약속 바꾸기 제안, ask_support 지지 방식 묻기, memory_ok 민감 기억 허락, relay_confirm 전하기 확인, call_confirm 밤 전화 확인
+          enum:
+          - card_question
+          - card_draft
+          - card_proposal
+          - ask_support
+          - memory_ok
+          - relay_confirm
+          - call_confirm
+        step:
+          type:
+          - integer
+          - 'null'
+          minimum: 1
+          maximum: 3
+          description: 첫 질문이면 1~3
+        options:
+          type: array
+          minItems: 2
+          maxItems: 6
+          items:
+            type: object
+            required:
+            - value
+            - label
+            properties:
+              value:
+                type: string
+                pattern: ^[a-z_]{1,20}$
+              label:
+                type: string
+                minLength: 1
+                maxLength: 20
+            additionalProperties: false
+        status:
+          type: string
+          enum:
+          - open
+          - answered
+          - expired
+          - replaced
+        answer:
+          type:
+          - string
+          - 'null'
+          pattern: ^[a-z_]{1,20}$
+        expiresAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    CardAnswer:
+      type: object
+      required:
+      - value
+      properties:
+        value:
+          type: string
+          pattern: ^[a-z_]{1,20}$
+          description: 카드 options의 value 하나. 아니면 400 not_an_option
+      additionalProperties: false
+    CardAnswerResult:
+      type: object
+      required:
+      - card
+      - effect
+      - sentence
+      properties:
+        card:
+          $ref: '#/components/schemas/ChatCard'
+        effect:
+          type: string
+          description: |-
+            next_question 다음 첫 질문 카드가 새 마롱이 말로 붙음 | card_set 친구 약속이 만들어짐(sentence 있음) | open_card_screen 화면이 SCR-120을 엶(초안 '고칠래') |
+            proposal_accepted 제안대로 바뀜(sentence 있음) | proposal_declined 그대로, 쌓인 신호 닫음 | want_set 지금 바람 적음(지지 방식 묻기) |
+            memory_kept 민감 기억을 지금 항목으로 | memory_forgotten 그 자리에서 잊음(SPEC-230) | relay_queued 전할 말을 보낼 표에 넣음 | relay_cancelled 전하지 않음 |
+            call_placed 밤 전화를 검 | call_cancelled 걸지 않음
+          enum:
+          - next_question
+          - card_set
+          - open_card_screen
+          - proposal_accepted
+          - proposal_declined
+          - want_set
+          - memory_kept
+          - memory_forgotten
+          - relay_queued
+          - relay_cancelled
+          - call_placed
+          - call_cancelled
+        sentence:
+          type:
+          - string
+          - 'null'
+          maxLength: 200
+          description: card_set·proposal_accepted일 때 새 약속 문장
+      additionalProperties: false

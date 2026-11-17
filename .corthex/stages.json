@@ -148,14 +148,19 @@
           "level": "info",
           "message": "persona 1~4단계 05 초안: 019_persona.sql TBL-115~124·127~133(17개 표, talk_graph 스키마), docs/05-erd/persona.md. 시험 DB 두 번 적용·제약 시험 76개 통과. 2차 논의 질문 3개",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "persona 05 고침: 06 계약이 도구 호출 기록을 요구해 TBL-134 persona_tool_calls를 더함(18개 표, TBL-115~124·127~134). 시험 DB 다시 두 번 적용, 제약·권한 시험 81개 통과",
+          "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T04:51:23+00:00"
+      "updated": "2026-11-17T05:04:23+00:00"
     },
     "06-api": {
       "state": "in_progress",
       "checkpoints": [],
-      "next": "체크포인트(계약 검토, 응답별): 선 전화·그림 화두 API-140, 글 대화 Message picture·hello, FCM 벨 reason·line, 통화 ready.topic 확인 대기. 그다음 07 사이트맵",
+      "next": "체크포인트(계약 검토, 응답별) 두 가지: 선 전화·그림 화두 API-140, 글 대화 Message picture·hello, FCM 벨 reason·line, 통화 ready.topic 확인 대기(전부터). persona API-127~136과 app-chat 0.4.0 card는 2차 논의에서 확인. 그다음 07 사이트맵",
       "checks": [
         {
           "level": "info",
@@ -176,9 +181,19 @@
           "level": "info",
           "message": "CTX-021 계약 api/app-update.openapi.yaml: API-141 GET /chat/api/app/release(200·204·401·403·500·503), API-142 GET /chat/app/{file}(200·401·403·404 no_release·500·503). openapi-spec-validator 통과, 예시 19개가 스키마에 맞음. 깨지는 변경 없음",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "persona 1~4단계 06 초안: api/persona.openapi.yaml API-127~136(친구 약속·친구 규칙·맞춤형 지침·기억 목록·잊기·카드 답), 오류 코드 13개, 계약 결정 10개. openapi-spec-validator 통과, 예시 116개가 스키마에 맞음, 응답 표 빠짐 없음, Prism mock이 10개 연산을 띄움, Schemathesis 10개 연산 실행(mock이 증명을 안 봐서 ST401만 실패: mock 한계)",
+          "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "app-chat.openapi.yaml 0.4.0-draft: Message.card(persona ChatCard 파일 간 참조)를 더함. 새 칸이라 깨지는 변경 아님. 예시 56개 통과, Prism에서 참조가 풀림. 같은 파일의 default 응답 없음·409 omit 없음은 전부터 있던 것",
+          "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T03:42:26+00:00"
+      "updated": "2026-11-17T05:04:29+00:00"
     },
     "07-sitemap": {
       "state": "in_progress",
