@@ -3,6 +3,7 @@
   "title": "마롱이",
   "team": false,
   "language": "ko",
+  "on_nexus": true,
   "parts": [
     "call-first",
     "app-update",
@@ -17,74 +18,74 @@
   },
   "stages": {
     "01-domain": {
-      "human": "github",
+      "human": "nexus",
       "source": "docs/01-domain/",
       "truth": "source",
-      "note": "2026-11-12 통화 기능을 기존 제품에 더하는 일이라 이벤트 스토밍 보드 없이 한 번에 초안으로 씀. 사람 보기는 Miro 보드 대신 GitHub PR(Claude 선택, 동희님 기본 규칙 '제품 명세는 제품 Git, Notion은 의도·결정과 링크'에 맞춤). 2026-11-16 마롱이의 일기(CTX-007)와 Gemini 길 통화 비용(CTX-002·006 변경)을 같은 방식으로 더함: 한 번에 초안, 바뀌는 맥락만 새로 그림, 체크포인트는 9단계 뒤 한 번(사용자님이 매번 묻지 말라고 해서 추천안으로 이어 가고 확인 질문은 한 번에 모아 드림). 2026-11-17 마롱이 설계를 한 스레드로 모으면서(동희님 14:40 '한 군데서 설계 시켜') 기능마다 parts로 나눔: call-first, app-update, diary, call-cost, persona, pet. 단계 기록은 .corthex/stages/<part>.json이고, 단계 원본 파일 이름이 part 이름으로 시작하면 그 part에 붙음(domain.md는 통화·일기·통화 비용을 함께 담아 프로젝트 전체 그림)."
+      "note": "2026-11-12 통화 기능을 기존 제품에 더하는 일이라 이벤트 스토밍 보드 없이 한 번에 초안으로 씀. 사람 보기는 Miro 보드 대신 GitHub PR(Claude 선택, 동희님 기본 규칙 '제품 명세는 제품 Git, Notion은 의도·결정과 링크'에 맞춤). 2026-11-16 마롱이의 일기(CTX-007)와 Gemini 길 통화 비용(CTX-002·006 변경)을 같은 방식으로 더함: 한 번에 초안, 바뀌는 맥락만 새로 그림, 체크포인트는 9단계 뒤 한 번(사용자님이 매번 묻지 말라고 해서 추천안으로 이어 가고 확인 질문은 한 번에 모아 드림). 2026-11-17 마롱이 설계를 한 스레드로 모으면서(동희님 14:40 '한 군데서 설계 시켜') 기능마다 parts로 나눔: call-first, app-update, diary, call-cost, persona, pet. 단계 기록은 .corthex/stages/<part>.json이고, 단계 원본 파일 이름이 part 이름으로 시작하면 그 part에 붙음(domain.md는 통화·일기·통화 비용을 함께 담아 프로젝트 전체 그림). 2026-11-17 16:33 KST 동희님 \"앞으로 단계는 NEXUS 화면 기준으로 보여 주고, 체크포인트는 NEXUS에서 요청해 주세요\"에 따라 사람 보기를 NEXUS(기본 브랜치를 그림)로 바꿈."
     },
     "02-prd": {
-      "human": "github",
+      "human": "nexus",
       "source": "docs/02-prd/",
       "truth": "source",
-      "note": "기본 사람 보기는 Notion DB 행이지만 같은 명세를 Notion에 한 번 더 만들지 않으려고 GitHub PR에서 봄. Notion 설계 문서 행은 요약·결정·링크만 가짐(2026-11-12, Claude 선택, 동희님이 바꿀 수 있음). 2026-11-16 기능마다 파일을 나누려고 source를 폴더로 바꿈(requirements.md 통화, diary.md 마롱이의 일기, call-cost.md 통화 비용)."
+      "note": "기본 사람 보기는 Notion DB 행이지만 같은 명세를 Notion에 한 번 더 만들지 않으려고 GitHub PR에서 봄. Notion 설계 문서 행은 요약·결정·링크만 가짐(2026-11-12, Claude 선택, 동희님이 바꿀 수 있음). 2026-11-16 기능마다 파일을 나누려고 source를 폴더로 바꿈(requirements.md 통화, diary.md 마롱이의 일기, call-cost.md 통화 비용). 2026-11-17 16:33 KST 동희님 \"앞으로 단계는 NEXUS 화면 기준으로 보여 주고, 체크포인트는 NEXUS에서 요청해 주세요\"에 따라 사람 보기를 NEXUS(기본 브랜치를 그림)로 바꿈."
     },
     "03-user-flow": {
-      "human": "github",
+      "human": "nexus",
       "source": "docs/03-user-flow/",
       "truth": "source",
-      "note": "Mermaid 흐름을 GitHub에서 그림으로 봄. 02-prd와 같은 이유(2026-11-12)."
+      "note": "Mermaid 흐름을 GitHub에서 그림으로 봄. 02-prd와 같은 이유(2026-11-12). 2026-11-17 16:33 KST 동희님 \"앞으로 단계는 NEXUS 화면 기준으로 보여 주고, 체크포인트는 NEXUS에서 요청해 주세요\"에 따라 사람 보기를 NEXUS(기본 브랜치를 그림)로 바꿈."
     },
     "04-functional-spec": {
-      "human": "github",
+      "human": "nexus",
       "source": "docs/04-functional-spec/",
       "truth": "source",
-      "note": "02-prd와 같은 이유(2026-11-12). 2026-11-16 기능마다 파일을 나누려고 source를 폴더로 바꿈(spec.md 통화, diary.md 마롱이의 일기, call-cost.md 통화 비용)."
+      "note": "02-prd와 같은 이유(2026-11-12). 2026-11-16 기능마다 파일을 나누려고 source를 폴더로 바꿈(spec.md 통화, diary.md 마롱이의 일기, call-cost.md 통화 비용). 2026-11-17 16:33 KST 동희님 \"앞으로 단계는 NEXUS 화면 기준으로 보여 주고, 체크포인트는 NEXUS에서 요청해 주세요\"에 따라 사람 보기를 NEXUS(기본 브랜치를 그림)로 바꿈."
     },
     "05-erd": {
-      "human": "github",
+      "human": "nexus",
       "link": "docs/05-erd/erd.md",
       "source": "marong/",
       "truth": "source",
-      "note": "카톡 마롱이 표(marong/schema.sql)는 그대로 두고 통화 표는 같은 DB의 call 스키마에 둠. ERD Editor는 이 작업 환경에서 쓸 수 없어 Mermaid erDiagram(docs/05-erd/erd.md)으로 봄(2026-11-12). 2026-11-16 source를 파일 하나에서 `marong/` 폴더로 바꿈: 카톡 표(marong/schema.sql), 통화 표(marong/call/schema.sql)와 두 곳의 마이그레이션을 함께 읽어야 일기 표(016·017)와 통화 비용 표(통화 007)의 TBL이 hub에 잡혀서. 그 폴더에서 hub가 읽는 파일은 SQL뿐임."
+      "note": "카톡 마롱이 표(marong/schema.sql)는 그대로 두고 통화 표는 같은 DB의 call 스키마에 둠. ERD Editor는 이 작업 환경에서 쓸 수 없어 Mermaid erDiagram(docs/05-erd/erd.md)으로 봄(2026-11-12). 2026-11-16 source를 파일 하나에서 `marong/` 폴더로 바꿈: 카톡 표(marong/schema.sql), 통화 표(marong/call/schema.sql)와 두 곳의 마이그레이션을 함께 읽어야 일기 표(016·017)와 통화 비용 표(통화 007)의 TBL이 hub에 잡혀서. 그 폴더에서 hub가 읽는 파일은 SQL뿐임. 2026-11-17 16:33 KST 동희님 \"앞으로 단계는 NEXUS 화면 기준으로 보여 주고, 체크포인트는 NEXUS에서 요청해 주세요\"에 따라 사람 보기를 NEXUS(기본 브랜치를 그림)로 바꿈."
     },
     "06-api": {
-      "human": "swagger-ui",
+      "human": "nexus",
       "source": "api/",
       "truth": "source",
-      "note": "2026-11-16 source를 파일 하나(api/openapi.yaml)에서 `api/` 폴더로 바꿈: 서버마다 계약 파일이 따로라서. openapi.yaml(처음 통화 설계, OpenAI 길, API-001~012), app-chat.openapi.yaml(글 대화, API-101~106), diary.openapi.yaml(일기, API-108~120), listen-test.openapi.yaml(듣기 시험, API-121~123), call-live.openapi.yaml(지금 통화 서버 Gemini 길, API-124·API-107), discord-relay.openapi.yaml(디스코드 음성 중계, API-125~126). 사람이 보는 곳은 Swagger UI 그대로이고 파일마다 열어요."
+      "note": "2026-11-16 source를 파일 하나(api/openapi.yaml)에서 `api/` 폴더로 바꿈: 서버마다 계약 파일이 따로라서. openapi.yaml(처음 통화 설계, OpenAI 길, API-001~012), app-chat.openapi.yaml(글 대화, API-101~106), diary.openapi.yaml(일기, API-108~120), listen-test.openapi.yaml(듣기 시험, API-121~123), call-live.openapi.yaml(지금 통화 서버 Gemini 길, API-124·API-107), discord-relay.openapi.yaml(디스코드 음성 중계, API-125~126). 사람이 보는 곳은 Swagger UI 그대로이고 파일마다 열어요. 2026-11-17 16:33 KST 동희님 \"앞으로 단계는 NEXUS 화면 기준으로 보여 주고, 체크포인트는 NEXUS에서 요청해 주세요\"에 따라 사람 보기를 NEXUS(기본 브랜치를 그림)로 바꿈."
     },
     "07-sitemap": {
-      "human": "github",
+      "human": "nexus",
       "link": "docs/07-sitemap/sitemap.md",
       "source": "docs/07-sitemap/sitemap.yaml",
       "truth": "source",
-      "note": "화면이 다섯 개뿐이라 보드·목록·슬라이드 세 보기를 sitemap.md 한 파일에 Mermaid와 표로 그림(2026-11-12)."
+      "note": "화면이 다섯 개뿐이라 보드·목록·슬라이드 세 보기를 sitemap.md 한 파일에 Mermaid와 표로 그림(2026-11-12). 2026-11-17 16:33 KST 동희님 \"앞으로 단계는 NEXUS 화면 기준으로 보여 주고, 체크포인트는 NEXUS에서 요청해 주세요\"에 따라 사람 보기를 NEXUS(기본 브랜치를 그림)로 바꿈."
     },
     "08-screen-states": {
       "human": "artifact",
-      "link": "https://claude.ai/artifact/FDFCuk2xc8JE8SCUuh7hL2",
+      "link": "https://claude.ai/artifact/CC154gunovJS3tqa8XkpZ9",
       "source": "docs/08-screens/",
       "truth": "source",
-      "note": "와이어프레임은 기본 경로(docs/08-screens/wireframes.html) 대신 Claude 디자인 캔버스 '마롱이 통화 화면 설계'의 '와이어프레임' 페이지에 그림(상태 38개, 폭 360px·430px). 09 목업 후보와 한 링크로 봄. 캔버스 파일은 Git에 넣지 않으며, 화면과 상태의 원본은 docs/08-screens/의 정의(2026-11-12). 마롱이의 일기·듣기 시험(SCR-113~119)과 통화 홈 예산 상태의 와이어프레임은 저장소 docs/08-screens/wireframes-diary.html을 올린 아티팩트 '마롱이의 일기 와이어프레임'(https://claude.ai/artifact/SnzgPx64NHhxgcxpa3HRho, 상태 68개, 360px·430px)에 그림(2026-11-16)."
+      "note": "와이어프레임은 기본 경로(docs/08-screens/wireframes.html) 대신 Claude 디자인 캔버스 '마롱이 통화 화면 설계'의 '와이어프레임' 페이지에 그림(상태 38개, 폭 360px·430px). 09 목업 후보와 한 링크로 봄. 캔버스 파일은 Git에 넣지 않으며, 화면과 상태의 원본은 docs/08-screens/의 정의(2026-11-12). 마롱이의 일기·듣기 시험(SCR-113~119)과 통화 홈 예산 상태의 와이어프레임은 저장소 docs/08-screens/wireframes-diary.html을 올린 아티팩트 '마롱이의 일기 와이어프레임'(https://claude.ai/artifact/SnzgPx64NHhxgcxpa3HRho, 상태 68개, 360px·430px)에 그림(2026-11-16). 2026-11-17 16:33 KST 동희님 \"앞으로 단계는 NEXUS 화면 기준으로 보여 주고, 체크포인트는 NEXUS에서 요청해 주세요\"에 따라 사람 보기를 NEXUS(기본 브랜치를 그림)로 바꿈. 누를 수 있는 와이어프레임·목업은 공통 캔버스(이 link, design/README.md)에서 보고 고치며, NEXUS도 이 단계를 보여 줌."
     },
     "09-mockup": {
       "human": "artifact",
-      "link": "https://claude.ai/artifact/FDFCuk2xc8JE8SCUuh7hL2",
+      "link": "https://claude.ai/artifact/CC154gunovJS3tqa8XkpZ9",
       "source": "design/base.tokens.json",
       "truth": "source",
-      "note": "같은 캔버스의 '목업 후보' 페이지. 통화 홈·통화 중 화면만 두 안(A 밤하늘, B 군밤 크림). 방향은 현경님이 첫 시험 전에 고르고, 고른 쪽만 토큰에 남김(2026-11-12). 마롱이의 일기 화면의 목업 후보는 새 디자인 캔버스 '마롱이의 일기 화면 설계'(https://claude.ai/artifact/CC154gunovJS3tqa8XkpZ9)에 그림(2026-11-16)."
+      "note": "같은 캔버스의 '목업 후보' 페이지. 통화 홈·통화 중 화면만 두 안(A 밤하늘, B 군밤 크림). 방향은 현경님이 첫 시험 전에 고르고, 고른 쪽만 토큰에 남김(2026-11-12). 마롱이의 일기 화면의 목업 후보는 새 디자인 캔버스 '마롱이의 일기 화면 설계'(https://claude.ai/artifact/CC154gunovJS3tqa8XkpZ9)에 그림(2026-11-16). 2026-11-17 16:33 KST 동희님 \"앞으로 단계는 NEXUS 화면 기준으로 보여 주고, 체크포인트는 NEXUS에서 요청해 주세요\"에 따라 사람 보기를 NEXUS(기본 브랜치를 그림)로 바꿈. 누를 수 있는 와이어프레임·목업은 공통 캔버스(이 link, design/README.md)에서 보고 고치며, NEXUS도 이 단계를 보여 줌."
     },
     "10-wbs": {
-      "human": "github",
+      "human": "nexus",
       "source": "docs/10-wbs/",
       "truth": "source",
-      "note": "2026-11-17 작업 패키지마다 docs/10-wbs/<패키지>.md(맨 위 'GPT 인계' 절, D60)와 README.md 인계 목록. 기본 사람 보기는 GitHub Projects 보드지만 02~04와 같은 이유로 PR에서 봄(Claude 선택, 동희님이 바꿀 수 있음)."
+      "note": "2026-11-17 작업 패키지마다 docs/10-wbs/<패키지>.md(맨 위 'GPT 인계' 절, D60)와 README.md 인계 목록. 기본 사람 보기는 GitHub Projects 보드지만 02~04와 같은 이유로 PR에서 봄(Claude 선택, 동희님이 바꿀 수 있음). 2026-11-17 16:33 KST 동희님 \"앞으로 단계는 NEXUS 화면 기준으로 보여 주고, 체크포인트는 NEXUS에서 요청해 주세요\"에 따라 사람 보기를 NEXUS(기본 브랜치를 그림)로 바꿈."
     },
     "12-qa": {
-      "human": "github",
+      "human": "nexus",
       "source": "docs/12-qa/",
       "truth": "source",
-      "note": "2026-11-17 작업 패키지마다 docs/12-qa/<패키지>.md 시험 계획(TC). 시험을 돌리는 쪽은 GPT, 결과는 PR 설명과 이 파일의 Last result(Claude 선택, 동희님이 바꿀 수 있음)."
+      "note": "2026-11-17 작업 패키지마다 docs/12-qa/<패키지>.md 시험 계획(TC). 시험을 돌리는 쪽은 GPT, 결과는 PR 설명과 이 파일의 Last result(Claude 선택, 동희님이 바꿀 수 있음). 2026-11-17 16:33 KST 동희님 \"앞으로 단계는 NEXUS 화면 기준으로 보여 주고, 체크포인트는 NEXUS에서 요청해 주세요\"에 따라 사람 보기를 NEXUS(기본 브랜치를 그림)로 바꿈."
     },
     "13-presentation": {
       "skip": true,
