@@ -83,7 +83,8 @@ paths:
     get:
       operationId: authCallback
       summary: 로그인 돌아옴
-      description: 회원이면 회원 세션과 `/`로, 처음이면 가입 대기 세션(30분)과 `/signup`으로 보내요. 쿠키 `pet_session`(HttpOnly, Secure, SameSite=Lax).
+      description: 회원이면 회원 세션과 `/`로, 처음이면 가입 대기 세션(30분)과 `/signup`으로 보내요. 쿠키 `pet_session`(HttpOnly, Secure, SameSite=Lax). 실패도 302이고 세션 없이 `/?loginError=auth_state`(`state`
+        다름·만료) 또는 `/?loginError=auth_provider`(공급자 오류·토큰 확인 실패)로 보내요. 화면 글은 `components.x-corthex.errors`의 그 코드예요.
       parameters:
       - name: provider
         in: path
@@ -111,6 +112,7 @@ paths:
         spec:
         - SPEC-310
         omit:
+          '400': 브라우저가 여는 주소라 실패도 302예요(`/?loginError=auth_state`·`auth_provider`, SPEC-310)
           '401': 로그인 전에 부름
           '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
           '404': 경로가 id를 담지 않음
@@ -123,26 +125,6 @@ paths:
               schema:
                 type: string
                 maxLength: 2000
-        '400':
-          description: '`auth_state` · `invalid_input`'
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-              examples:
-                auth_state:
-                  $ref: '#/components/examples/auth_state'
-                invalid_input:
-                  $ref: '#/components/examples/invalid_input'
-        '502':
-          description: '`auth_provider`'
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-              examples:
-                auth_provider:
-                  $ref: '#/components/examples/auth_provider'
         default:
           $ref: '#/components/responses/ServerError'
   /api/auth/logout:
@@ -706,7 +688,6 @@ paths:
         spec:
         - SPEC-315
         omit:
-          '404': 경로가 id를 담지 않음
           '409': 상태와 부딪히지 않음
       responses:
         '201':
@@ -725,6 +706,8 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '429':
           description: '`rate_limited`'
           content:
@@ -799,8 +782,11 @@ paths:
                     template: null
                     preview: null
                     candidates: []
+                    chosenId: null
                     regenerationsLeft: 2
                     failure: null
+                    priceKrw: 5900
+                    petId: null
                     createdAt: '2026-11-17T06:40:00Z'
                     expiresAt: '2026-12-17T06:40:00Z'
         '400':
@@ -895,8 +881,11 @@ paths:
                       template: null
                       preview: null
                       candidates: []
+                      chosenId: null
                       regenerationsLeft: 2
                       failure: null
+                      priceKrw: 5900
+                      petId: null
                       createdAt: '2026-11-17T06:40:00Z'
                       expiresAt: '2026-12-17T06:40:00Z'
         '401':
@@ -955,8 +944,11 @@ paths:
                     template: null
                     preview: null
                     candidates: []
+                    chosenId: null
                     regenerationsLeft: 2
                     failure: null
+                    priceKrw: 5900
+                    petId: null
                     createdAt: '2026-11-17T06:40:00Z'
                     expiresAt: '2026-12-17T06:40:00Z'
         '400':
@@ -1024,8 +1016,11 @@ paths:
                     template: null
                     preview: null
                     candidates: []
+                    chosenId: null
                     regenerationsLeft: 2
                     failure: null
+                    priceKrw: 5900
+                    petId: null
                     createdAt: '2026-11-17T06:40:00Z'
                     expiresAt: '2026-12-17T06:40:00Z'
         '400':
@@ -1094,8 +1089,11 @@ paths:
                     template: dog_small
                     preview: null
                     candidates: []
+                    chosenId: null
                     regenerationsLeft: 2
                     failure: null
+                    priceKrw: 5900
+                    petId: null
                     createdAt: '2026-11-17T06:40:00Z'
                     expiresAt: '2026-12-17T06:40:00Z'
         '400':
@@ -1164,8 +1162,11 @@ paths:
                     template: dog_small
                     preview: null
                     candidates: []
+                    chosenId: null
                     regenerationsLeft: 2
                     failure: null
+                    priceKrw: 5900
+                    petId: null
                     createdAt: '2026-11-17T06:40:00Z'
                     expiresAt: '2026-12-17T06:40:00Z'
         '400':
@@ -1354,8 +1355,11 @@ paths:
                     template: dog_small
                     preview: null
                     candidates: []
+                    chosenId: null
                     regenerationsLeft: 1
                     failure: null
+                    priceKrw: 5900
+                    petId: null
                     createdAt: '2026-11-17T06:40:00Z'
                     expiresAt: '2026-12-17T06:40:00Z'
         '400':
@@ -1445,8 +1449,11 @@ paths:
                     template: dog_small
                     preview: null
                     candidates: []
+                    chosenId: null
                     regenerationsLeft: 2
                     failure: null
+                    priceKrw: 5900
+                    petId: null
                     createdAt: '2026-11-17T06:40:00Z'
                     expiresAt: '2026-12-17T06:40:00Z'
         '400':
@@ -3328,6 +3335,10 @@ paths:
                     percent: 60
                     resetsAt: '2026-11-17T19:00:00Z'
                     plan: free
+                    recharge:
+                      halfKrw: 1500
+                      fullKrw: 2900
+                      leftToday: 3
         '401':
           $ref: '#/components/responses/Unauthenticated'
         default:
@@ -3375,8 +3386,6 @@ paths:
         - SPEC-355
         - SPEC-358
         - SPEC-359
-        omit:
-          '404': 경로가 id를 담지 않음
       responses:
         '201':
           description: 성공
@@ -3409,6 +3418,8 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           description: '`payments_off` · `identity_required` · `already_owned` · `already_subscribed` · `quota_full` · `recharge_limit`'
           content:
@@ -4333,8 +4344,11 @@ components:
       - template
       - preview
       - candidates
+      - chosenId
       - regenerationsLeft
       - failure
+      - priceKrw
+      - petId
       - createdAt
       - expiresAt
       properties:
@@ -4419,6 +4433,23 @@ components:
             - preview_failed
             - candidates_failed
             - expired
+          - type: 'null'
+        chosenId:
+          oneOf:
+          - type: string
+            format: uuid
+            description: 고른 정면 그림 후보 id(`chosen` 뒤)
+          - type: 'null'
+        priceKrw:
+          type: integer
+          minimum: 0
+          maximum: 100000
+          description: 캐릭터 만들기 원화 총액(부가세 포함, 결제 전 화면에 보임, SPEC-355)
+        petId:
+          oneOf:
+          - type: string
+            format: uuid
+            description: '`done`이면 생긴 아이 id'
           - type: 'null'
         createdAt:
           type: string
@@ -5022,6 +5053,7 @@ components:
       - percent
       - resetsAt
       - plan
+      - recharge
       properties:
         percent:
           type: integer
@@ -5036,6 +5068,27 @@ components:
           enum:
           - free
           - subscription
+        recharge:
+          type: object
+          additionalProperties: false
+          required:
+          - halfKrw
+          - fullKrw
+          - leftToday
+          description: 충전권 값(원화 총액)과 오늘 더 살 수 있는 장 수(SPEC-358)
+          properties:
+            halfKrw:
+              type: integer
+              minimum: 0
+              maximum: 100000
+            fullKrw:
+              type: integer
+              minimum: 0
+              maximum: 100000
+            leftToday:
+              type: integer
+              minimum: 0
+              maximum: 3
     Order:
       type: object
       additionalProperties: false
@@ -5159,11 +5212,10 @@ components:
           - canceling
           - ended
         priceKrw:
-          oneOf:
-          - type: integer
-            minimum: 1
-            maximum: 100000
-          - type: 'null'
+          type: integer
+          minimum: 1
+          maximum: 100000
+          description: 월 값(원화 총액). 구독이 없을 때도 지금 값을 줘요
         periodEnd:
           oneOf:
           - type: string
@@ -5352,22 +5404,6 @@ components:
         detail: 콩이가 잠들었어요. 새벽 4시에 깨요.
         traceId: 4bf92f3577b34da6a3ce929d0e0e4736
         wakesAt: '2026-11-17T19:00:00Z'
-    auth_provider:
-      value:
-        type: https://pet.example.com/problems/auth-provider
-        title: 로그인 공급자 오류나 id_token 확인 실패
-        status: 502
-        code: auth_provider
-        detail: 로그인을 마치지 못했어요. 다시 해 주세요.
-        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
-    auth_state:
-      value:
-        type: https://pet.example.com/problems/auth-state
-        title: 로그인 state·nonce가 다르거나 10분이 지남
-        status: 400
-        code: auth_state
-        detail: 로그인을 마치지 못했어요. 다시 해 주세요.
-        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
     bad_signature:
       value:
         type: https://pet.example.com/problems/bad-signature
