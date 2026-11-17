@@ -31,6 +31,22 @@ SENTENCE = {
                 "let_go": "웬만한 건 그냥 넘어갈게"},
 }
 RULE_LENGTH = {"no_vocative": (1, 4), "avoid_topic": (2, 20), "call_me": (1, 4)}
+CARD_UPDATE = {
+    "name": "card_update",
+    "description": "지금 바람, 친구 규칙 또는 대화를 이끌 방법을 친구가 직접 말했을 때 적는 도구야.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "op": {"enum": ["want", "rule_add", "rule_remove", "lead", "proactive_lower", "call_first_off"]},
+            "quote": {"type": "string", "minLength": 1, "maxLength": 2000},
+            "kind": {"enum": list(RULE_LENGTH)},
+            "value": {"enum": [*OPTIONS["support"], *OPTIONS["lead"], *OPTIONS["proactive"]]},
+            "text": {"type": "string", "minLength": 1, "maxLength": 20},
+        },
+        "required": ["op", "quote"],
+        "additionalProperties": False,
+    },
+}
 
 
 def card_sentence(row):
@@ -45,6 +61,16 @@ def card_sentence(row):
 def question_choices(step):
     field, _, labels = QUESTIONS[step - 1]
     return tuple(zip(OPTIONS[field], labels, strict=True))
+
+
+def choices(card):
+    if card["kind"] == "card_question":
+        return question_choices(card["step"])
+    if card["kind"] == "card_draft":
+        return (("yes", "맞아"), ("edit", "고칠래"))
+    if card["kind"] == "ask_support":
+        return (("listen", "일단 들어 줘"), ("solve", "같이 방법 찾자"))
+    return ()
 
 
 def text_choice(step, text):
@@ -103,7 +129,7 @@ class FriendCards:
     def __init__(self, store):
         self.store = store
 
-    async def read(self, friend, *, private=True):
+    async def read(self, friend, *, private=True, include_call_first=True):
         async with self.store.pool.connection() as conn, conn.transaction():
             await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             cur = await conn.execute(
@@ -116,17 +142,44 @@ class FriendCards:
                 cur = await conn.execute("SELECT * FROM marong.friend_cards WHERE friend_id=%s", (friend,))
                 card = await cur.fetchone()
                 cur = await conn.execute(
-                    "SELECT text,understood,polite,version,via FROM marong.custom_instructions WHERE friend_id=%s",
+                    "SELECT text,understood,polite,version,via,updated_at FROM marong.custom_instructions WHERE friend_id=%s",
                     (friend,),
                 )
                 instruction = await cur.fetchone()
-        return {"card": card, "rules": rules, "instruction": instruction}
+            call_first = None
+            if private and include_call_first:
+                cur = await conn.execute("SELECT hello_call FROM marong.topic_prefs WHERE friend_id=%s", (friend,))
+                call_first = (await cur.fetchone() or {}).get("hello_call", True)
+        return {"card": card, "rules": rules, "instruction": instruction, "call_first": call_first}
 
     async def set(self, friend, changes, *, source, by="friend"):
         if not changes or any(k not in OPTIONS or value not in OPTIONS[k] for k, value in changes.items()):
             raise ValueError("invalid card value")
         async with friend_lock(self.store.pool, friend) as conn:
             return await self._set(conn, friend, changes, source, by)
+
+    async def update_from_screen(self, friend, changes):
+        if not changes or any(k not in OPTIONS or v not in OPTIONS[k] for k, v in changes.items()):
+            raise CardError("invalid_request")
+        async with friend_lock(self.store.pool, friend) as conn:
+            current = await conn.execute("SELECT state,proactive FROM marong.friend_cards WHERE friend_id=%s", (friend,))
+            row = await current.fetchone() or {}
+            if row.get("state") != "set" and any(key not in changes for key, _, _ in QUESTIONS):
+                raise CardError("requires_three")
+            old = row.get("proactive") or "normal"
+            new = changes.get("proactive", old)
+            if OPTIONS["proactive"].index(new) < OPTIONS["proactive"].index(old):
+                raise CardError("needs_owner")
+            await self._set(conn, friend, changes, "screen", "friend")
+            await conn.execute("""UPDATE marong.chat_cards SET status='replaced'
+                WHERE friend_id=%s AND status='open' AND kind IN ('card_question','card_draft')""", (friend,))
+
+    async def get_rule(self, friend, rule_id):
+        row = await self.store._one(
+            """SELECT id,kind,text FROM marong.friend_rules WHERE friend_id=%s AND id=%s""",
+            (friend, rule_id),
+        )
+        return row
 
     @staticmethod
     async def _set(conn, friend, changes, source, by):
@@ -150,7 +203,7 @@ class FriendCards:
         )
         return await row.fetchone()
 
-    async def first_question(self, friend, room, at):
+    async def first_question(self, friend, room, at, *, before_message=None):
         """Start atomically once the transport decides this is an eligible direct reply."""
         async with friend_lock(self.store.pool, friend) as conn:
             last = await conn.execute(
@@ -160,7 +213,130 @@ class FriendCards:
             )
             if await last.fetchone():
                 return None
+            if before_message:
+                prepared = await conn.execute(
+                    "SELECT 1 FROM marong.persona_ai_runs WHERE friend_id=%s AND kind='card_draft' LIMIT 1", (friend,))
+                attempted = await prepared.fetchone()
+                history = await conn.execute(
+                    """SELECT 1 FROM marong.messages m JOIN marong.people p USING(user_key)
+                    JOIN marong.rooms r USING(room_key)
+                    WHERE p.friend_id=%s AND m.id<%s AND m.role='user' AND r.is_channel
+                    UNION ALL SELECT 1 FROM call.calls c JOIN call.callers a ON a.id=c.caller_id
+                    WHERE a.friend_id=%s LIMIT 1""", (friend, before_message, friend),
+                )
+                if await history.fetchone() and not attempted:
+                    return None
+            await conn.execute("""INSERT INTO marong.friend_cards(friend_id,state,asking_since)
+                VALUES (%s,'asking',%s) ON CONFLICT(friend_id) DO UPDATE SET
+                state='asking',asking_since=EXCLUDED.asking_since,updated_at=now(),updated_by='system'
+                WHERE marong.friend_cards.state='none'""", (friend, at))
             return await self._publish_question(conn, friend, room, 1, at, at + timedelta(hours=24))
+
+    async def draft_card(self, friend, room, at):
+        async with friend_lock(self.store.pool, friend) as conn:
+            cur = await conn.execute("SELECT * FROM marong.friend_cards WHERE friend_id=%s AND state='draft'", (friend,))
+            current = await cur.fetchone()
+            if not current or not card_sentence(current):
+                return None
+            cur = await conn.execute("""SELECT 1 FROM marong.chat_cards
+                WHERE friend_id=%s AND kind='card_draft' LIMIT 1""", (friend,))
+            if await cur.fetchone():
+                return None
+            cur = await conn.execute("""INSERT INTO marong.chat_cards(friend_id,kind,room_key,expires_at,created_at)
+                VALUES (%s,'card_draft',%s,%s,%s) RETURNING *""",
+                (friend, room, at + timedelta(hours=24), at))
+            return await cur.fetchone(), card_sentence(current)
+
+    async def answer_draft(self, friend, card_id, value, *, via, at):
+        async with friend_lock(self.store.pool, friend) as conn:
+            cur = await conn.execute("""SELECT * FROM marong.chat_cards WHERE friend_id=%s AND id=%s
+                AND kind='card_draft'""", (friend, card_id))
+            row = await cur.fetchone()
+            if not row:
+                raise CardError("card_not_found")
+            if value not in dict(choices(row)) or via not in ("button", "screen", "text"):
+                raise CardError("invalid_input")
+            effect = "card_set" if value == "yes" else "open_card_screen"
+            if row["status"] == "answered" and row["answer"] == value:
+                previous = await conn.execute("SELECT content FROM marong.messages WHERE id=%s", (row["message_id"],))
+                original = await previous.fetchone()
+                prefix = "내가 본 너는 이래: "
+                ending = " 맞아? 고칠래?"
+                sentence = None
+                if original and prefix in original["content"] and original["content"].endswith(ending):
+                    sentence = original["content"].split(prefix, 1)[1][:-len(ending)]
+                if sentence is None and value == "yes":
+                    previous = await conn.execute("SELECT * FROM marong.friend_cards WHERE friend_id=%s", (friend,))
+                    sentence = card_sentence(await previous.fetchone())
+                return {"card": row, "effect": effect, "applied": False, "sentence": sentence}
+            if row["status"] != "open" or row["expires_at"] <= at:
+                raise CardError("card_closed")
+            cur = await conn.execute("""UPDATE marong.chat_cards SET status='answered',answer=%s,
+                answered_via=%s,answered_at=%s WHERE id=%s RETURNING *""", (value, via, at, row["id"]))
+            row = await cur.fetchone()
+            sentence = None
+            if value == "yes":
+                current = await conn.execute("SELECT * FROM marong.friend_cards WHERE friend_id=%s", (friend,))
+                current = await current.fetchone()
+                values = {key: current[key] for key in ("support", "advice", "honesty", "lead")}
+                sentence = card_sentence(await self._set(conn, friend, values, "draft", "friend"))
+            return {"card": row, "effect": effect, "applied": True, "sentence": sentence}
+
+    async def answer_card(self, friend, card, value, **kwargs):
+        if card["kind"] == "card_draft":
+            return await self.answer_draft(friend, card["id"], value, via=kwargs["via"], at=kwargs["at"])
+        if card["kind"] == "ask_support":
+            return await self.answer_support(friend, card["id"], value, via=kwargs["via"], at=kwargs["at"])
+        return await self.answer_question(friend, card["id"], value, **kwargs)
+
+    async def ask_support(self, friend, room, at):
+        async with friend_lock(self.store.pool, friend) as conn:
+            current = await conn.execute("SELECT * FROM marong.friend_cards WHERE friend_id=%s", (friend,))
+            current = await current.fetchone()
+            if not current or current["support"] != "ask" or current["want_until"] and current["want_until"] > at:
+                return None
+            cur = await conn.execute("""SELECT 1 FROM marong.chat_cards WHERE friend_id=%s AND kind='ask_support'
+                AND created_at>%s LIMIT 1""", (friend, at-timedelta(hours=6)))
+            if await cur.fetchone():
+                return None
+            await conn.execute("""UPDATE marong.chat_cards SET status='replaced'
+                WHERE friend_id=%s AND kind='ask_support' AND status='open'""", (friend,))
+            cur = await conn.execute("""INSERT INTO marong.chat_cards(friend_id,kind,room_key,expires_at,created_at)
+                VALUES (%s,'ask_support',%s,%s,%s) RETURNING *""", (friend, room, at+timedelta(hours=24), at))
+            return await cur.fetchone()
+
+    async def answer_support(self, friend, id, value, *, via, at):
+        async with friend_lock(self.store.pool, friend) as conn:
+            cur = await conn.execute("SELECT * FROM marong.chat_cards WHERE id=%s AND friend_id=%s AND kind='ask_support'",
+                                     (id, friend))
+            row = await cur.fetchone()
+            if not row:
+                raise CardError("card_not_found")
+            if value not in dict(choices(row)) or via not in ("screen", "text", "button"):
+                raise CardError("invalid_input")
+            if row["status"] == "answered" and row["answer"] == value:
+                return {"card": row, "effect": "want_set", "applied": False}
+            if row["status"] != "open" or row["expires_at"] <= at:
+                raise CardError("card_closed")
+            cur = await conn.execute("""UPDATE marong.chat_cards SET status='answered',answer=%s,answered_via=%s,
+                answered_at=%s WHERE id=%s RETURNING *""", (value, via, at, id))
+            row = await cur.fetchone()
+            await conn.execute("""UPDATE marong.friend_cards SET want=%s,want_until=%s,updated_at=now(),
+                updated_by='friend' WHERE friend_id=%s""", (value, at+timedelta(hours=24), friend))
+            await self._signal(conn, friend, "support", value, at.astimezone(KST).date(), "ask_support", None, None)
+            return {"card": row, "effect": "want_set", "applied": True}
+
+    async def support_text(self, friend, room, text, at):
+        row = await self.store._one(
+            """SELECT id FROM marong.chat_cards WHERE friend_id=%s AND room_key=%s
+            AND kind='ask_support' AND status='open' AND expires_at>%s""", (friend, room, at),
+        )
+        values = {"1": "listen", "일단 들어 줘": "listen", "일단 들어줘": "listen",
+                  "2": "solve", "같이 방법 찾자": "solve"}
+        value = values.get(text.strip())
+        if row and value:
+            return await self.answer_support(friend, row["id"], value, via="text", at=at)
+        return None
 
     async def open_question(self, friend, room, at):
         return await self.store._one(
@@ -179,7 +355,15 @@ class FriendCards:
             )
             return upd.rowcount == 1
 
-    async def answer_question(self, friend, card_id, value, *, room, via, at):
+    async def shown_today(self, friend, card, since):
+        row = await self.store._one(
+            """SELECT count(*) AS n FROM marong.messages m JOIN marong.chat_cards c ON c.room_key=m.room_key
+            WHERE c.friend_id=%s AND c.id=%s AND m.role='assistant' AND m.created_at>=%s
+            AND m.meta->>'persona_question'=c.id::text AND m.meta->>'delivered'='true'""", (friend, card, since),
+        )
+        return row["n"]
+
+    async def answer_question(self, friend, card_id, value, *, room, via, at, publish_message=False):
         async with friend_lock(self.store.pool, friend) as conn:
             cursor = await conn.execute(
                 """SELECT * FROM marong.chat_cards WHERE id=%s AND friend_id=%s AND kind='card_question'""",
@@ -203,7 +387,15 @@ class FriendCards:
             )
             card = await picked.fetchone()
             if card["step"] < 3:
-                await self._publish_question(conn, friend, room, card["step"] + 1, at, card["expires_at"])
+                upcoming = await self._publish_question(conn, friend, room, card["step"] + 1, at, card["expires_at"])
+                if publish_message:
+                    cur = await conn.execute(
+                        """INSERT INTO marong.messages(room_key,role,content,meta)
+                        VALUES (%s,'assistant',%s,'{"transport":"app","delivered":true}') RETURNING id""",
+                        (room, QUESTIONS[card["step"]][1]),
+                    )
+                    await conn.execute("UPDATE marong.chat_cards SET message_id=%s WHERE id=%s",
+                                       ((await cur.fetchone())["id"], upcoming["id"]))
             else:
                 rows = await conn.execute(
                     """SELECT step,answer FROM marong.chat_cards WHERE friend_id=%s AND kind='card_question'
@@ -234,17 +426,33 @@ class FriendCards:
         """Apply the fallback when the original 24-hour deadline expires."""
         async with friend_lock(self.store.pool, friend) as conn:
             expiring = await conn.execute(
-                """UPDATE marong.chat_cards SET status='expired' WHERE friend_id=%s AND kind='card_question'
-                AND status='open' AND expires_at<=%s RETURNING id,room_key""", (friend, at),
+                """UPDATE marong.chat_cards SET status='expired' WHERE friend_id=%s
+                AND kind IN ('card_question','card_draft') AND status='open' AND expires_at<=%s
+                RETURNING id,room_key,kind""", (friend, at),
             )
             timed_out = await expiring.fetchone()
             if not timed_out:
                 return None
-            current = await conn.execute("SELECT state FROM marong.friend_cards WHERE friend_id=%s", (friend,))
-            if (await current.fetchone() or {}).get("state") == "set":
+            current = await conn.execute("SELECT * FROM marong.friend_cards WHERE friend_id=%s", (friend,))
+            current = await current.fetchone() or {}
+            if current.get("state") == "set":
                 return None
-            await self._set(conn, friend, DEFAULT_CARD, "default", "system")
+            if timed_out["kind"] == "card_draft":
+                values = {key: current[key] for key in ("support", "advice", "honesty", "lead")}
+                await self._set(conn, friend, values, "draft_silent", "system")
+            else:
+                await self._set(conn, friend, DEFAULT_CARD, "default", "system")
             return timed_out
+
+    async def pending_notice(self, friend):
+        row = await self.store._one("""SELECT source FROM marong.friend_cards WHERE friend_id=%s
+            AND state='set' AND source IN ('default','draft_silent') AND notice_sent_at IS NULL""", (friend,))
+        return row["source"] if row else None
+
+    async def notice_delivered(self, friend):
+        async with friend_lock(self.store.pool, friend) as conn:
+            await conn.execute("""UPDATE marong.friend_cards SET notice_sent_at=COALESCE(notice_sent_at,now())
+                WHERE friend_id=%s AND source IN ('default','draft_silent')""", (friend,))
 
     @staticmethod
     def _rule(kind, text):
@@ -283,11 +491,24 @@ class FriendCards:
         )
         return ToolResult("ok", target_type="rule", target_id=(await cur.fetchone())["id"]), True
 
+    async def draft(self, friend, values, at):
+        """Keep a generated card as a draft until the friend confirms it."""
+        if set(values) != {"support", "advice", "honesty", "lead"} or any(
+            value not in OPTIONS[key] for key, value in values.items()
+        ):
+            raise CardError("invalid_request")
+        async with friend_lock(self.store.pool, friend) as conn:
+            await conn.execute("""INSERT INTO marong.friend_cards
+                (friend_id,state,support,advice,honesty,lead,source,asking_since,updated_by)
+                VALUES (%s,'draft',%s,%s,%s,%s,'draft',%s,'system')
+                ON CONFLICT(friend_id) DO NOTHING""",
+                (friend, values["support"], values["advice"], values["honesty"], values["lead"], at))
+
     async def remove_rule(self, friend, rule_id):
         async with friend_lock(self.store.pool, friend) as conn:
             cur = await conn.execute(
-                """UPDATE marong.friend_rules SET removed_at=now()
-                WHERE friend_id=%s AND id=%s AND removed_at IS NULL RETURNING id""", (friend, rule_id),
+                """UPDATE marong.friend_rules SET removed_at=COALESCE(removed_at,now())
+                WHERE friend_id=%s AND id=%s RETURNING id""", (friend, rule_id),
             )
             return await cur.fetchone() is not None
 
@@ -300,7 +521,11 @@ class FriendCards:
         else:
             text, understood = text.strip(), understood.strip()
         async with friend_lock(self.store.pool, friend) as conn:
-            cur = await conn.execute(
+            return await self._write_instruction(conn, friend, text, understood, polite, via)
+
+    @staticmethod
+    async def _write_instruction(conn, friend, text, understood, polite, via):
+        cur = await conn.execute(
                 """INSERT INTO marong.custom_instructions AS current(friend_id,text,understood,polite,via)
                 VALUES (%s,%s,%s,%s,%s) ON CONFLICT(friend_id) DO UPDATE SET
                   text=EXCLUDED.text,understood=EXCLUDED.understood,polite=EXCLUDED.polite,via=EXCLUDED.via,
@@ -308,12 +533,40 @@ class FriendCards:
                 WHERE (current.text,current.understood,current.polite,current.via) IS DISTINCT FROM
                       (EXCLUDED.text,EXCLUDED.understood,EXCLUDED.polite,EXCLUDED.via)
                 RETURNING version""", (friend, text, understood, polite, via),
-            )
-            row = await cur.fetchone()
-            if row:
-                return row["version"]
-            cur = await conn.execute("SELECT version FROM marong.custom_instructions WHERE friend_id=%s", (friend,))
-            return (await cur.fetchone())["version"]
+        )
+        row = await cur.fetchone()
+        if row:
+            return row["version"]
+        cur = await conn.execute("SELECT version FROM marong.custom_instructions WHERE friend_id=%s", (friend,))
+        return (await cur.fetchone())["version"]
+
+    async def save_interpretation(self, friend, text, interpretation, *, via):
+        async with friend_lock(self.store.pool, friend) as conn:
+            rules = []
+            for kind, rule in interpretation["rules"]:
+                applied, added = await self._add_rule(conn, friend, kind, rule, "instruction")
+                if applied.outcome != "ok":
+                    raise CardError("rule_limit")
+                if added:
+                    rules.append({"id": applied.target_id, "kind": kind, "text": rule})
+            proactive = interpretation["proactive"]
+            moved = None
+            if proactive:
+                await conn.execute("INSERT INTO marong.friend_cards(friend_id) VALUES (%s) ON CONFLICT DO NOTHING",
+                                   (friend,))
+                cursor = await conn.execute("SELECT proactive FROM marong.friend_cards WHERE friend_id=%s", (friend,))
+                old = (await cursor.fetchone())["proactive"]
+                if OPTIONS["proactive"].index(proactive) > OPTIONS["proactive"].index(old):
+                    await conn.execute("""UPDATE marong.friend_cards SET proactive=%s,updated_at=now(),
+                        updated_by='friend' WHERE friend_id=%s""", (proactive, friend))
+                    moved = proactive
+            if interpretation["turn_off"]:
+                await conn.execute("""INSERT INTO marong.topic_prefs(friend_id,hello_call) VALUES (%s,false)
+                    ON CONFLICT(friend_id) DO UPDATE SET hello_call=false,updated_at=now(),updated_by='friend'""",
+                    (friend,))
+            await self._write_instruction(conn, friend, text, interpretation["understood"],
+                                          interpretation["polite"], via)
+            return {"rules": rules, "proactive": moved}
 
     @staticmethod
     async def _signal(conn, friend, field, value, day, source, message_id, turn_id):
@@ -412,6 +665,15 @@ class FriendCards:
             row = await cur.fetchone()
             return ToolResult("ok", target_type="rule", target_id=row["id"]) if row else ToolResult("none_matched")
         value = args.get("value")
+        if operation == "proactive_lower" and value in OPTIONS["proactive"]:
+            await conn.execute("""INSERT INTO marong.friend_cards(friend_id,proactive) VALUES (%s,%s)
+                ON CONFLICT(friend_id) DO UPDATE SET proactive=EXCLUDED.proactive,updated_at=now(),updated_by='friend'""",
+                (friend, value))
+            return ToolResult("ok", target_type="card", target_id=friend)
+        if operation == "call_first_off":
+            await conn.execute("""INSERT INTO marong.topic_prefs(friend_id,hello_call) VALUES (%s,false)
+                ON CONFLICT(friend_id) DO UPDATE SET hello_call=false,updated_at=now(),updated_by='friend'""", (friend,))
+            return ToolResult("ok", target_type="card", target_id=friend)
         if operation == "want" and value in OPTIONS["support"]:
             now = datetime.now(KST)
             await conn.execute(
@@ -429,3 +691,20 @@ class FriendCards:
             )
             return ToolResult("ok", target_type="card", target_id=friend)
         return ToolResult("invalid", "not_known")
+
+    async def proactive_allowed(self, friend, at):
+        data = await self.read(friend)
+        row = data["card"] or {}
+        if row.get("proactive") == "off" or row.get("quiet_until") and row["quiet_until"] > at:
+            return False
+        if row.get("proactive") != "less":
+            return True
+        day = at.astimezone(KST).replace(hour=0, minute=0, second=0, microsecond=0)
+        count = await self.store._one(
+            """WITH owned AS (SELECT DISTINCT m.room_key FROM marong.messages m JOIN marong.people p USING(user_key)
+                JOIN marong.rooms r USING(room_key) WHERE p.friend_id=%s AND r.is_channel)
+            SELECT count(*) AS n FROM marong.messages m WHERE m.room_key IN (SELECT room_key FROM owned)
+            AND m.meta->>'proactive'='true'
+            AND m.meta->>'delivered'='true' AND m.created_at>=%s""", (friend, day),
+        )
+        return count["n"] < 1

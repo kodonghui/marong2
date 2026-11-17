@@ -2,8 +2,17 @@
 
 import asyncio
 from datetime import datetime, timedelta
+from types import SimpleNamespace
+from unittest.mock import patch
+import sys
+from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/vertex_live"))
+from call_memory import MemoryStore, Principal
+
+from marong.agent import Agent, Incoming
 from marong.friend_card import CardError, FriendCards, KST, ModelRun, card_sentence, question_choices, text_choice
+from marong.persona_prompt import FriendPrompt, append_prefix
 from marong.store import Store
 from pg import TestDB
 from test_persona_schema import prepare
@@ -67,8 +76,39 @@ async def scenario(db, store):
     assert (await cards.read(1, private=False))["instruction"] is None
     assert (await cards.read(1, private=False))["card"] is None
     assert (await cards.read(1, private=False))["rules"]
+    system = [{"type": "text", "text": "고정 지침", "cache_control": {"type": "ephemeral"}},
+              {"type": "text", "text": "지금 상황"}]
+    now_value = [0.]
+    prompt = FriendPrompt(clock=lambda: now_value[0])
+    private = await cards.read(1)
+    blocks = append_prefix(system, prompt.build(1, "fixture-room-a", private, private=True))
+    assert len(blocks) == 3 and blocks[0]["text"] == "고정 지침" and blocks[2]["text"] == "지금 상황"
+    assert "cache_control" not in blocks[0] and blocks[1]["cache_control"] == system[0]["cache_control"]
+    assert rewrite in blocks[1]["text"] and original not in blocks[1]["text"]
+    assert blocks[1]["text"].index("친구 약속") < blocks[1]["text"].index("친구 규칙") < blocks[1]["text"].index(rewrite)
+    group = prompt.build(1, "fixture-group", private, private=False)
+    assert "친구 규칙" in group and "친구 약속" not in group and rewrite not in group
+    changed = {**private, "instruction": {**private["instruction"], "understood": "시험 변경"}}
+    now_value[0] = 60.
+    assert "시험 변경" not in prompt.build(1, "fixture-room-a", changed, private=True)
+    now_value[0] += 1800.
+    assert "시험 변경" in prompt.build(1, "fixture-room-a", changed, private=True)
     assert await cards.write_instruction(1, None) == 2
-    assert (await cards.read(1))["instruction"]["text"] is None
+    removed = await cards.read(1)
+    assert removed["instruction"]["text"] is None
+    assert "시험 변경" not in prompt.build(1, "fixture-room-a", removed, private=True)
+
+    agent = Agent(None, store, None, None)
+    agent.friend_cards = cards
+    msg = SimpleNamespace(card_actor=1, card_message=mid, room_key="fixture-room-a")
+    tool = SimpleNamespace(id="fixture-tool", name="card_update",
+                           input={"quote": args["quote"], "op": "want", "value": "distract"})
+    assert agent._card_tools(msg)[0]["name"] == "card_update"
+    assert not (await agent._run_tool(tool, msg))["is_error"]
+    assert (await cards.read(1))["card"]["want"] == "distract"
+    msg.card_actor = 2
+    assert (await agent._run_tool(tool, msg))["is_error"]
+    assert (await cards.read(2))["card"] is None
 
     now = datetime(2026, 11, 17, 23, 45, tzinfo=KST)
     for day in (now, now + timedelta(days=1), now + timedelta(days=2)):
@@ -130,6 +170,65 @@ async def scenario(db, store):
     assert (fallback["support"], fallback["advice"], fallback["honesty"], fallback["source"]) == (
         "ask", "asked", "gentle", "default",
     )
+    person, = db.admin("INSERT INTO marong.friends(name) VALUES ('fixture-draft') RETURNING id")[0]
+    await cards.draft(person, {"support": "listen", "advice": "asked", "honesty": "gentle", "lead": "follow"}, now)
+    preview, sentence = await cards.draft_card(person, "fixture-room-a", now)
+    assert sentence and not await cards.draft_card(person, "fixture-room-a", now)
+    result = await cards.answer_draft(person, preview["id"], "yes", via="button", at=now)
+    assert result["applied"] and result["effect"] == "card_set" and result["sentence"] == sentence
+    assert not (await cards.answer_draft(person, preview["id"], "yes", via="screen", at=now))["applied"]
+
+    await cards.set(1, {"proactive": "off"}, source="talk")
+    assert not await cards.proactive_allowed(1, now)
+    await cards.set(1, {"proactive": "normal"}, source="talk")
+    assert await cards.proactive_allowed(1, now)
+    await cards.write_instruction(1, "시험 지침", "아주 짧게 답할게.", via="screen")
+    caller, = db.admin("INSERT INTO call.callers(friend_id) VALUES (1) RETURNING id")[0]
+    voice = MemoryStore(db.admin_url.replace("postgres:@", "marong_call@", 1))
+    await voice.open()
+    try:
+        with patch.dict("os.environ", {"MARONG_FRIEND_CARD": "on"}):
+            prefix = await voice.friend_instruction(Principal(caller, 1, "fixture"))
+        assert "아주 짧게 답할게." in prefix and "시험 지침" not in prefix and "친구 규칙" in prefix
+        assert await voice.friend_instruction(Principal(caller, 1, "fixture")) == ""
+    finally:
+        await voice.close()
+
+    new_friend, = db.admin("INSERT INTO marong.friends(name) VALUES ('fixture-onboard') RETURNING id")[0]
+    db.admin("INSERT INTO marong.people(user_key,friend_id) VALUES ('fixture-onboard',%s)", (new_friend,))
+    delivery = []
+
+    class Reply(Agent):
+        async def _reply(self, *_args, **_kwargs):
+            return "같이 얘기하자.", {}
+
+    settings = SimpleNamespace(llm_timeout_s=20, reply_wait_s=0, group_triggers=(), llm_max_tokens=200,
+                               anthropic_model="fixture")
+    handler = Reply(settings, store, None, None)
+    handler.friend_cards = cards
+
+    async def send(value):
+        delivery.append(value)
+        return True
+
+    await handler.handle(Incoming("fixture-room-a", "fixture-onboard", "안녕"), send)
+    assert len(delivery) == 1 and "힘들 때 나한테 제일 바라는 건?" in delivery[0] and "1. 그냥 들어주기" in delivery[0]
+    q = await cards.open_question(new_friend, "fixture-room-a", datetime.now(KST))
+    assert q and q["message_id"]
+    await handler.handle(Incoming("fixture-room-a", "fixture-onboard", "1"), send)
+    q = await cards.open_question(new_friend, "fixture-room-a", datetime.now(KST))
+    assert q["step"] == 2 and "조언은 언제 해 줄까?" in delivery[-1]
+
+    support_friend, = db.admin("INSERT INTO marong.friends(name) VALUES ('fixture-support') RETURNING id")[0]
+    await cards.set(support_friend, {"support": "ask"}, source="screen")
+    support = await cards.ask_support(support_friend, "fixture-room-a", now)
+    assert support and await cards.support_text(support_friend, "fixture-room-b", "1", now) is None
+    assert await cards.support_text(support_friend, "fixture-room-a", "7", now) is None
+    picked = await cards.support_text(support_friend, "fixture-room-a", "일단 들어 줘", now)
+    assert picked["applied"] and picked["effect"] == "want_set"
+    support_values = (await cards.read(support_friend))["card"]
+    assert support_values["want"] == "listen" and support_values["want_until"] == now+timedelta(hours=24)
+    assert await cards.support_text(support_friend, "fixture-room-a", "2", now) is None
 
 
 async def run(db):

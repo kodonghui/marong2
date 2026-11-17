@@ -29,6 +29,12 @@ from psycopg.rows import dict_row
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from marong.safety import owner_private
+
+
+def report_private(row):
+    return any(owner_private(value) for key, value in row.items()
+               if key in ("content", "text", "close_content", "summary", "detail") and isinstance(value, str))
 
 from marong.config import load_dotenv  # noqa: E402
 
@@ -128,8 +134,9 @@ def call_transcripts(c, start, until):
     """Saved ASR/output text, including drafts, through the filtered read-only view."""
     if not c.execute("SELECT to_regclass('call.transcript_report') AS report").fetchone()['report']:
         return []
-    return c.execute("""SELECT * FROM call.transcript_report
+    records = c.execute("""SELECT * FROM call.transcript_report
         WHERE started_at >= %s AND started_at < %s ORDER BY started_at,id""", (start, until)).fetchall()
+    return [row for row in records if not report_private(row)]
 
 
 def rung_calls(c, call_ids) -> set:
@@ -216,6 +223,15 @@ def fetch(c, start: datetime, until: datetime, vectors: bool = True) -> dict:
             "FROM marong.requests q LEFT JOIN marong.rooms r ON r.room_key = q.room_key "
             "LEFT JOIN marong.people p ON p.user_key = q.user_key ORDER BY q.id DESC").fetchall(),
     }
+    # Safety-state information and its content never enter the research export (SPEC-211).
+    blocked = {row["id"] for row in data["messages"] if report_private(row)}
+    blocked.update(row["id"] for row in data["messages"] if row["reply_to"] in blocked)
+    data["messages"] = [row for row in data["messages"] if row["id"] not in blocked]
+    for key in ("embeddings", "summaries", "notes", "shared"):
+        data[key] = [row for row in data[key] if not report_private(row)
+                     and not (key == "embeddings" and row["source_type"] == "message" and row["source_id"] in blocked)]
+    data["latest_shared"] = {id: row for id, row in data["latest_shared"].items() if not report_private(row)}
+    data["requests"] = [row for row in data["requests"] if not owner_private(json.dumps(row["detail"], ensure_ascii=False))]
     # 답에 넣은(또는 찾고 안 넣은) 예전 기억과 친구가 한 말은 기간 밖일 수 있어서 따로 읽음
     msg_ids, sum_ids = set(), set()
     for m in data["messages"]:
@@ -229,6 +245,8 @@ def fetch(c, start: datetime, until: datetime, vectors: bool = True) -> dict:
         "LEFT JOIN marong.people p ON p.user_key = m.user_key WHERE m.id = ANY(%s)", (sorted(msg_ids),)).fetchall()}
     data["ref_summaries"] = {r["id"]: r for r in c.execute(
         "SELECT id, content FROM marong.summaries WHERE id = ANY(%s)", (sorted(sum_ids),)).fetchall()}
+    data["ref_messages"] = {id: row for id, row in data["ref_messages"].items() if not report_private(row)}
+    data["ref_summaries"] = {id: row for id, row in data["ref_summaries"].items() if not report_private(row)}
     room_keys = sorted({x["room_key"] for k in ("messages", "embeddings", "summaries", "notes") for x in data[k]})
     data["rooms"] = {r["room_key"]: r for r in c.execute(
         "SELECT room_key, is_channel FROM marong.rooms WHERE room_key = ANY(%s)", (room_keys,)).fetchall()}
