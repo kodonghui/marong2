@@ -187,7 +187,8 @@ async function startChatSite({ waitMs = 1500 } = {}) {
           || (state.marks && shownRead !== null && state.read !== shownRead)) finish();
       };
       const timer = setTimeout(finish, waitMs);
-      req.on('close', () => { if (!done) { done = true; waiters.delete(check); clearTimeout(timer); state.openWaits--; } });
+      // A completed IncomingMessage emits close while this long-poll response is still open.
+      res.on('close', () => { if (!done) { done = true; waiters.delete(check); clearTimeout(timer); state.openWaits--; } });
       waiters.add(check);
       check();
       return;

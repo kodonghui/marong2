@@ -367,7 +367,8 @@ async function waitLoop() {
       app.waitControl = control;
       const guard = setTimeout(() => control.abort(), 40_000);
       const began = Date.now();
-      const r = await api(`/messages/wait?after=${app.last}&typing=${app.typing ? 1 : 0}&read=${app.read}`,
+      const after = app.last;
+      const r = await api(`/messages/wait?after=${after}&typing=${app.typing ? 1 : 0}&read=${app.read}`,
         {signal: control.signal});
       clearTimeout(guard);
       app.waitControl = null;
@@ -380,7 +381,8 @@ async function waitLoop() {
         setTyping(r.body.typing);
         setRead(r.body);
         // Nothing new at once: another open screen took this wait over. Do not take it straight back.
-        if (!added && app.typing === typing && app.read === read && Date.now() - began < 1_000) await sleep(3_000);
+        const echoedNewMessage = r.body.messages.some(message => message.id > after);
+        if (!added && !echoedNewMessage && app.typing === typing && app.read === read && Date.now() - began < 1_000) await sleep(3_000);
         continue;
       }
       if (!handle(r)) break;

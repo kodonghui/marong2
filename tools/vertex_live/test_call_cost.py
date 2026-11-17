@@ -143,7 +143,15 @@ async def monthly(db, store):
         return await run_admin(store, parser.parse_args(words), at)
 
     assert (await admin("call-cost", "2040-12"))["cost_usd"]["total"] == Decimal("15.80")
-    assert (await admin("call-cost", "--switch"))["days"] == 14
+    switch = await admin("call-cost", "--switch")
+    assert switch["days"] == 14
+    assert switch["groups"][0]["grouping"] == 3
+    assert switch["groups"][0]["minutes"] == 20
+    assert switch["projected_month_minutes"] == Decimal("44.29")
+    switch = await run_admin(store, parser.parse_args(["call-cost", "--switch"]), at+timedelta(seconds=1))
+    assert switch["cost_usd"]["total"] == Decimal("15.80")
+    assert switch["usd_per_minute"] == Decimal(".79")
+    assert switch["projected_month_usd"] == Decimal("34.985714")
     assert await admin("call-tuning", "add", "fixture-t2", "max_output_tokens=512") == {"added": "fixture-t2"}
     assert await admin("call-tuning", "use", "fixture-t2") == {"active": "fixture-t2"}
     assert (await store.tuning())["max_output_tokens"] == 512

@@ -13,17 +13,19 @@ import psycopg
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from call_cost import STATE, bounds
+from call_cost import MONTH, STATE, bounds
 from call_memory import MemoryStore
 from call_tuning import parse_tuning
 
 PRICE_FIELDS = ("text_in", "audio_in", "image_in", "text_out", "audio_out", "search_per_1000",
                 "search_free_per_month", "checked_on", "source")
-GROUPS = """SELECT entrypoint,tuning,count(DISTINCT call_id) AS calls,sum(seconds)/60 AS minutes,
+GROUPS = """SELECT entrypoint,tuning,grouping(entrypoint,tuning) AS grouping,
+    count(DISTINCT call_id) AS calls,sum(seconds)/60 AS minutes,
     sum(usd) AS usd,sum(audio_in_tokens) AS audio,
     sum(unpriced_rows) AS unpriced
     FROM call.segment_costs WHERE opened_at>=%s AND opened_at<%s
-    GROUP BY GROUPING SETS ((),(entrypoint),(tuning))"""
+    GROUP BY GROUPING SETS ((),(entrypoint),(tuning))
+    ORDER BY grouping DESC,entrypoint NULLS FIRST,tuning NULLS FIRST"""
 
 
 def cli():
@@ -89,10 +91,14 @@ async def report(store, args, now):
         groups.append({**row, "minutes": round(minutes, 2), "usd_per_minute": usd / Decimal(minutes) if minutes else None,
                        "audio_tokens_per_minute": round((row["audio"] or 0) / minutes) if minutes else None})
     if args.switch:
-        total = groups[0]
+        total = next(group for group in groups if group["grouping"] == 3)
         factor = Decimal(monthrange(now.year, now.month)[1]) / 14
-        return {"days": 14, "groups": groups, "projected_month_minutes": Decimal(total["minutes"]) * factor,
-                "projected_month_segment_usd": (total["usd"] or 0) * factor,
+        costs = await period_cost(store, low, high)
+        return {"days": 14, "groups": groups, "cost_usd": costs,
+                "usd_per_minute": costs["total"] / Decimal(str(total["minutes"])) if total["minutes"] else None,
+                "projected_month_minutes": round(Decimal(str(total["minutes"])) * factor, 2),
+                "projected_month_usd": round(costs["total"] * factor, 6),
+                "projected_month_segment_usd": round((total["usd"] or 0) * factor, 6),
                 "credit_checked_on": await setting(store, "credit_checked_on")}
     current = await store.monthly_cost.report(at, fresh=True)
     budget = Decimal(str(await setting(store, "monthly_budget_usd", 150)))
@@ -105,6 +111,21 @@ async def report(store, args, now):
     return {"month": f"{at:%Y-%m}", "state": state, "budget_usd": budget, "percent": round(fraction * 100),
             "checked_on": checked, "recheck_prices": checked is not None and (now.date() - checked).days >= 90,
             "cost_usd": current, "groups": groups, "counters": counters}
+
+
+async def period_cost(store, low, high):
+    """Subtract month-to-date totals so earlier searches consume the same monthly free allowance."""
+    total = {}
+    cursor = low
+    while cursor < high:
+        start, end = bounds(cursor)
+        stop = min(end, high)
+        upper = await store.one(MONTH, (start, stop))
+        lower = await store.one(MONTH, (start, cursor))
+        for key, value in upper.items():
+            total[key] = total.get(key, 0) + value - lower[key]
+        cursor = stop
+    return total
 
 
 async def add_price(store, args, now):
