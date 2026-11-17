@@ -4,7 +4,7 @@ import re
 from .app_store import AppStore
 from .google_calendar import GoogleStore
 from .schedules import ScheduleStore
-from .store import Store
+from .store import PROACTIVE_MESSAGE, Store
 from .topic_store import TopicStore
 
 SNOWFLAKE = re.compile(r"[1-9][0-9]{16,19}\Z")
@@ -70,15 +70,26 @@ def bind_dm(conn, discord_user_id: str, friend_id: int, per_day: int, start: int
             raise ValueError("An existing Discord identity cannot be reassigned")
 
 
-DM_STATE = """
+DM_STATE = f"""
 SELECT d.*, f.name, true AS is_channel, d.last_incoming_at AS last_said,
        now()-greatest(d.last_incoming_at,d.opted_in_at) AS quiet_for,
-       now()-d.last_attempt_at AS sent_ago
+       now()-greatest(d.last_attempt_at, unanswered.last_sent) AS sent_ago,
+       unanswered.n AS unanswered
   FROM marong.discord_dm_links d
   JOIN marong.people p ON p.user_key=d.user_key AND p.friend_id=d.friend_id
   JOIN marong.friends f ON f.id=d.friend_id
   JOIN marong.rooms r ON r.room_key=d.room_key AND r.is_channel AND r.memory_room IS NULL
   JOIN call.kakao_guards g ON g.room_key=d.room_key AND g.friend_id=d.friend_id
+  CROSS JOIN LATERAL (
+      SELECT count(*) AS n, max(m.created_at) AS last_sent
+        FROM marong.messages m
+       WHERE m.room_key=d.room_key AND m.role='assistant' AND m.meta->>'delivered'='true'
+         AND {PROACTIVE_MESSAGE}
+         AND m.created_at > greatest(d.last_incoming_at, d.opted_in_at, (
+             SELECT max(c.started_at) FROM call.calls c JOIN call.callers k ON k.id=c.caller_id
+              WHERE k.friend_id=d.friend_id
+         ))
+  ) unanswered
  WHERE g.message_floor=0 AND g.note_floor=0 AND g.summary_floor=0
 """
 

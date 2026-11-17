@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from unittest.mock import patch
 from contextlib import redirect_stdout
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -50,6 +51,14 @@ def situation(body) -> str:
     return body["system"][-1]["text"]
 
 
+def fixture_greeting(name: str, number: int) -> str:
+    sample = f"{name} 선톡 {number} 🌰"
+    if number <= 2:
+        return sample
+    # Distinct text for the transport fixtures that send many times to the same room.
+    return sample + " " + "".join(chr(ord("가") + number * 8 + i) for i in range(8))
+
+
 def respond(body):
     """가짜 Claude: 선톡 만들기, 선톡 끄기·켜기·횟수 도구, 보통 답."""
     last = body["messages"][-1]
@@ -63,7 +72,9 @@ def respond(body):
         name = sit.split("- 친구: ")[1].splitlines()[0] if "- 친구: " in sit else "안녕"
         if MODE["proactive"] == "multi":
             return message([text(f"{name} 첫 말\n\n두 번째 말 🌰\n\n\n세 번째 말?")])
-        return message([text(f"{name} 선톡 {len(SENT) + 1} 🌰")])
+        if "line" in MODE:
+            return message([text(MODE["line"])])
+        return message([text(fixture_greeting(name, len(SENT) + 1))])
     if isinstance(last["content"], list):  # 도구 결과를 받은 뒤
         return message([text("알겠어 👌")])
     said = last["content"].splitlines()[-1]
@@ -132,7 +143,7 @@ async def main():
     from marong.agent import Agent, Incoming
     from marong.config import load_settings
     from marong.kakao import send_message, skill_text
-    from marong.proactive import Proactive, parts, schedule, slot
+    from marong.proactive import Proactive, backoff, parts, schedule, slot
     from marong.store import Store
 
     # ── 설정 ──
@@ -165,9 +176,20 @@ async def main():
     def plan_of(per_day=None, start=None, end=None):
         return schedule({"per_day": per_day, "start_hour": start, "end_hour": end}, s)
 
-    ok(plan_of() == ((12, 21), 2) and plan_of(12, 7, 24) == ((7, 24), 12) and plan_of(5) == ((12, 21), 5)
-       and plan_of(3, None, 23) == ((12, 23), 3), "방 일정, 빈 값은 기본값")
-    ok(plan_of(4, 22) == ((12, 21), 4) and plan_of(4, 9, 9) == ((12, 21), 4), "시작이 끝보다 늦으면 기본 시간")
+    for stored, expected in (
+        ((None, None, None), ((12, 21), 2)), ((12, 7, 24), ((8, 22), 3)),
+        ((48, 0, 24), ((8, 22), 3)), ((1, 9, 20), ((9, 20), 1)),
+        ((3, None, 23), ((12, 22), 3)), ((2, 23, 24), ((8, 22), 2)),
+        ((5, 9, 18), ((9, 18), 3)), ((4, 9, 9), ((12, 21), 3)),
+    ):
+        ok(plan_of(*stored) == expected, f"W1 effective schedule for {stored}")
+    hours, limit = plan_of(36, 0, 24)
+    ok(slot(at(7, 59), hours, limit) is None and slot(at(8), hours, limit) is not None
+       and slot(at(21, 59), hours, limit) is not None
+       and slot(at(22), hours, limit) is None and slot(at(23, 30), hours, limit) is None, "W1 KST boundaries")
+    ok([backoff(i) for i in range(6)] ==
+       [timedelta(hours=0), timedelta(hours=21), timedelta(hours=45), timedelta(hours=93), None, None],
+       "W2 wait times and pause")
 
     # ── 여러 말: 빈 줄로 나눈 덩어리, 많아야 4개 ──
     ok(parts("야 뭐해") == ["야 뭐해"] and parts("야 뭐해\n\n 나 군밤 샀어 \n \n\n너는?") == ["야 뭐해", "나 군밤 샀어", "너는?"]
@@ -288,40 +310,50 @@ async def main():
         convo = json.dumps(llm.bodies[-1]["messages"], ensure_ascii=False)
         ok("동희 선톡 2 🌰" in convo and convo.index("동희 선톡 2") < convo.index("시험 망했어"), "선톡에 답하면 선톡이 앞 문맥")
 
-        # ── 하루 두 칸: 칸마다 한 번, 답이 없어도 다음 칸에 또 ──
+        # ── 하루 두 칸: 칸별 추첨, 답이 없으면 다음 칸에도 쉼 ──
         tick(209)  # 16:29, 오후 칸 마지막 확인
         sure = Proactive(s, store, agent, http, rng=lambda: 0.99)
         ok(await sure.step(t.replace(hour=16, minute=29)) == 1 and SENT[-1]["body"]["botGroupKey"] == "p2",
            "같은 칸엔 한 번만(p4·p1). 그사이 조용해진 친구(p2)는 칸 마지막 확인이라 꼭 받음")
+        await store.add_message("p2", "user", "저녁에 봐", user_key="u2", kakao_id="test-reply-p2")
         tick(16)  # 16:45, 저녁 칸
         evening = t.replace(hour=16, minute=45)
         shy = Proactive(s, store, agent, http, rng=lambda: 0.2)
         ok(await shy.step(evening) == 0 and len(SENT) == 3, "칸에 남은 확인이 255번이면 1/255 확률: 이번엔 안 보냄")
+        ok(await due_rooms(evening) == ["p1"], "저녁 칸: p4는 답이 없고 p2는 칸 반 길이가 안 지나서 쉼")
+        await store.add_message("p4", "user", "나 왔어", user_key="u4", kakao_id="test-reply-p4")
+        db.admin("UPDATE marong.messages SET created_at=now()-interval '110 minutes' WHERE kakao_id='test-reply-p4'")
+        db.admin("UPDATE marong.messages SET created_at=now()-interval '100 minutes' WHERE kakao_id='a2'")
         ok(await pro.step(evening) == 2 and [x["body"]["botGroupKey"] for x in SENT[-2:]] == ["p4", "p1"],
-           "저녁 칸: 답이 없는 친구(p4)에게도 또. 오후 칸 끝에 받은 친구(p2)는 칸 반 길이(2시간 15분)가 지나야")
+           "답을 하고 조용해진 p4는 저녁 칸에 다시 받을 수 있음")
         tick(135)  # 19:00
         ok(await pro.step(t.replace(hour=19)) == 1 and SENT[-1]["body"]["botGroupKey"] == "p2"
            and await pro.step(t.replace(hour=19)) == 0, "칸 반 길이가 지나면 받고, 칸마다 한 번")
 
         # ── 하루 상한(모든 친구 합) ──
-        tick(18 * 60)  # 다음 날 13:00
+        # p1·p2의 두 전달 실패를 볼 때는 답 없는 선톡이 앞서 남아 있지 않도록 둘 다 답함.
+        await store.add_message("p1", "user", "내일 봐", user_key="u1", kakao_id="test-reply-day1-p1")
+        await store.add_message("p2", "user", "내일 봐", user_key="u2", kakao_id="test-reply-day1-p2")
+        tick(21 * 60)  # 다음 날 16:00, 모두 마지막 선톡 뒤 21시간 이상
+        send_window = t.replace(hour=16)
         capped = Proactive(replace(s, proactive_daily_max=1), store, agent, http, rng=lambda: 0.0)
-        ok(await capped.step(t) == 1 and len(SENT) == 7 and await capped.step(t) == 0, "하루 상한(1번)에 닿으면 거기까지")
+        ok(await capped.step(send_window) == 1 and len(SENT) == 7 and await capped.step(send_window) == 0, "하루 상한(1번)에 닿으면 거기까지")
 
         # ── 전송 실패: 전달 안 됨으로 남기고 그 칸엔 다시 안 보냄. 친구가 말한 뒤로 두 번이면 쉼 ──
         FAIL["code"] = -877
-        ok(await pro.step(t) == 2 and len(SENT) == 9, "전송 실패도 보낸 것으로 셈. 키 문제가 아닌 오류는 다른 키로 안 보냄")
+        ok(await pro.step(send_window) == 2 and len(SENT) == 9, "전송 실패도 보낸 것으로 셈. 키 문제가 아닌 오류는 다른 키로 안 보냄")
         FAIL["code"] = None
         content, meta = last_message("p1")
         ok(meta["proactive"] is True and meta["delivered"] is False and meta["send_code"] == -877
            and meta["send_key"] == "room" and meta["parts"] == [0, 1], meta)
-        ok(await pro.step(t) == 0 and len(SENT) == 9, "실패한 방에도 그 칸엔 다시 안 보냄")
+        ok(await pro.step(send_window) == 0 and len(SENT) == 9, "실패한 방에도 그 칸엔 다시 안 보냄")
         ok(all(r["content"] != content for r in await store.recent("p1", 20)), "전달 안 된 선톡은 다음 대화에서 뺌")
-        tick(225)  # 16:45
+        await store.add_message("p4", "user", "또 왔어", user_key="u4", kakao_id="test-reply-after-cap")
+        tick(175)  # 다음 칸, 칸 반 길이도 지난 뒤
         FAIL["code"] = -877
-        ok(await pro.step(evening) == 3 and len(SENT) == 12, "실패한 방도 다음 칸엔 다시 해 봄")
+        ok(await pro.step(t.replace(hour=18, minute=55)) == 3 and len(SENT) == 12, "실패한 방도 다음 칸엔 다시 해 봄")
         FAIL["code"] = None
-        tick(20 * 60 + 15)  # 다음 날 13:00
+        tick(18 * 60 + 5)  # 다음 날 13:00
         ok(await due_rooms(t) == ["p4"],
            "친구가 마지막으로 말한 뒤로 전달 실패가 두 번이면 친구가 다시 말할 때까지 쉼(차단 등). 한 번이면 계속")
         await say("p1", "u1", "나 왔어", kid="a3")
@@ -373,21 +405,23 @@ async def main():
         ok(content == "안녕 첫 말\n\n두 번째 말 🌰\n\n세 번째 말?" and meta["parts"] == [3, 3] and meta["delivered"] is True
            and db.admin("SELECT count(*) FROM marong.messages WHERE meta->>'proactive' = 'true'")[0][0] == stored + 1,
            "기록은 한 번(하루 상한도 한 번으로 셈)")
+        MODE.update(proactive="ok", line="나무 책상\n\n햇빛 아래 🌰\n\n바람 소리?")
         FAIL.update(code=-877, after=1)
         n = len(SENT)
         r = await chatty.deliver(room4)
         FAIL.update(code=None, after=0)
         content, meta = last_message("p4")
         ok(r["ok"] is True and r["code"] == -877 and r["parts"] == [1, 3] and len(SENT) == n + 2
-           and content == "안녕 첫 말" and meta["delivered"] is True and meta["send_code"] == -877
+           and content == "나무 책상" and meta["delivered"] is True and meta["send_code"] == -877
            and meta["parts"] == [1, 3], f"중간에 끊기면 거기서 멈추고 친구가 받은 말까지만 남김: {r} {meta}")
         FAIL["code"] = -877
+        MODE["line"] = "옥상 정원\n\n파란 우산 🌰\n\n새 신발?"
         r = await chatty.deliver(room4)
         FAIL["code"] = None
         content, meta = last_message("p4")
-        ok(r["ok"] is False and r["parts"] == [0, 3] and "세 번째 말?" in content and meta["delivered"] is False,
+        ok(r["ok"] is False and r["parts"] == [0, 3] and "새 신발?" in content and meta["delivered"] is False,
            "첫 말부터 실패하면 만든 말 전부를 전달 안 됨으로")
-        MODE["proactive"] = "ok"
+        del MODE["line"]
 
         # ── 친구가 선톡을 그만·다시·더 해 달라고 해도 설정은 안 바뀌고 관리자에게 요청으로만 남음 ──
         def requests_of(room):
@@ -529,23 +563,22 @@ async def main():
         ok(code == 0 and plan_row() == [(12, 7, 24)], out)
 
         shift("p6", 120)
-        morning = today.replace(hour=7, minute=30)
+        morning = today.replace(hour=8, minute=0)
         room6 = (await store.proactive_rooms("p6"))[0]
         ok(room6["per_day"] == 12 and room6["start_hour"] == 7 and room6["end_hour"] == 24, room6)
-        ok(planner.plan(room6, morning) == (today.replace(hour=7), 1 / 55), "7:30 은 07:00~08:25 칸, 남은 확인 55번")
-        ok(await due_rooms(morning) == ["p6"], "다른 친구는 12~21시, 현경이는 7시부터")
+        ok(planner.plan(room6, morning) == (morning, 1 / 280), "08:00은 08:00~12:40 칸, 남은 확인 280번")
+        ok(await due_rooms(morning) == ["p6"], "아침에는 이 방만 대상")
         ok(await pro.step(morning) == 1 and SENT[-1]["body"]["botGroupKey"] == "p6", "현경이에게 아침 선톡")
         sit = situation(llm.bodies[-1])
-        ok("- 친구: 현경" in sit and PROACTIVE_GUIDE.format(per_day=12) in sit, "선톡 안내에도 하루 12번")
-        tick(20)  # 07:50 친구가 답함
+        ok("- 친구: 현경" in sit and PROACTIVE_GUIDE.format(per_day=3) in sit, "선톡 안내에도 하루 3번")
+        tick(20)  # 08:20 친구가 답함
         await say("p6", "u6", "ㅋㅋ 아침부터 웬일", kid="g2")
-        ok("하루 12번쯤 먼저 카톡을 보내(선톡, 동희가 정함)" in situation(llm.bodies[-1]), "답할 때 안내에도 이 방 횟수")
-        tick(40)  # 08:30, 다음 칸(08:25~09:50)
-        ok(await due_rooms(today.replace(hour=8, minute=30)) == [], "칸 반 길이(42분 30초)만큼은 조용해야")
-        tick(10)  # 08:40
-        later = today.replace(hour=8, minute=40)
-        ok(await due_rooms(later) == ["p6"] and await pro.step(later) == 1 and SENT[-1]["body"]["botGroupKey"] == "p6",
-           "칸이 짧으면 1시간까지 안 기다리고 칸 반 길이만 조용하면 보냄")
+        ok("하루 3번쯤 먼저 카톡을 보내(선톡, 동희가 정함)" in situation(llm.bodies[-1]), "답할 때도 상한을 적용한 횟수")
+        later = today.replace(hour=13, minute=0)
+        tick(40)
+        ok(planner.plan((await store.proactive_rooms("p6"))[0], later) is None, "대화 뒤 한 시간은 조용해야 함")
+        tick(225)
+        ok(planner.plan((await store.proactive_rooms("p6"))[0], later) is not None, "다음 칸과 대기 조건을 만족")
 
         # ── 카카오가 1:1 먼저 보내기를 막은 뒤(2026-11-05 14:30 KST~): 방 키 -880 → 사람 키로 한 번만 더(-876) ──
         def keys_of(sent):
@@ -563,15 +596,16 @@ async def main():
 
         # 카카오가 1:1 을 사람 키로 다시 열면(11-05 전처럼) 코드를 고치지 않아도 감. 첫 말에서 키를 바꾸고 다음 말은 바로 그 키로
         KAKAO["mode"] = "user_only"
-        MODE["proactive"] = "multi"
+        old_protocol_words = ["의자 놓았어", "창이 밝아 🌰", "어디에 둘까?"]
+        MODE["line"] = "\n\n".join(old_protocol_words)
         n = len(SENT)
         r = await chatty.deliver(room4)
         content, meta = last_message("p4")
         ok(r["ok"] is True and r["parts"] == [3, 3] and r["code"] is None
            and keys_of(SENT[n:]) == [("botGroupKey", "p4")] + [("botUserKey", "u4")] * 3
-           and said_texts(SENT[n + 1:]) == ["안녕 첫 말", "두 번째 말 🌰", "세 번째 말?"]
+           and said_texts(SENT[n + 1:]) == old_protocol_words
            and meta["delivered"] is True and meta["send_key"] == "user", f"사람 키로만 가는 1:1: {r} {meta}")
-        MODE["proactive"] = "ok"
+        del MODE["line"]
 
         # 200 이어도 sendCount 0·errorCount 가 있으면 받는 사람에게 못 간 것(키 문제인지 몰라 다른 키로 다시 안 보냄)
         KAKAO["mode"] = "zero"
@@ -678,21 +712,22 @@ async def main():
         ok(code == 0 and room_g2["memory_room"] == "p6" and room_g2["is_channel"] is False and room_g2["user_key"] == "u6"
            and room_g2["name"] == "현경" and room_g2["per_day"] == 36 and room_g2["quiet_for"] < timedelta(minutes=5),
            f"묶인 단체방 선톡 대상은 1:1 친구, 조용한 시간은 두 방을 함께 봄: {room_g2}")
-        evening = today.replace(hour=20, minute=5)  # 19:45~20:13 칸(36칸이면 28분 20초씩)
+        evening = today.replace(hour=20, minute=5)  # 8~22시, 3칸 중 마지막 칸
         ok(planner.plan(room_g2, evening) is None, "1:1 에서 방금 말했으면 묶인 단체방에도 끼어들지 않음")
-        shift("p6", 30)
-        shift("g2", 30)
+        # 마지막 선톡 뒤 칸 반 길이와 지금 칸에서 지난 시간까지 넘어야 함.
+        shift("p6", 180)
+        shift("g2", 180)
         room_g2 = (await store.proactive_rooms("g2"))[0]
         ok(planner.plan(room_g2, evening) is not None, room_g2)
         n, calls = len(SENT), len(llm.bodies)
         r = await pro.deliver(room_g2)
         content, meta = last_message("g2")
-        ok(r["ok"] is True and keys_of(SENT[n:]) == [("botGroupKey", "g2")] and content == f"현경 선톡 {n + 1} 🌰"
+        ok(r["ok"] is True and keys_of(SENT[n:]) == [("botGroupKey", "g2")] and content == fixture_greeting("현경", n + 1)
            and meta["proactive"] is True and meta["delivered"] is True and meta["send_key"] == "room",
            f"묶인 단체방 선톡은 방 키로, 1:1 친구 이름을 불러 말 걺: {r} {meta}")
         lsit = situation(llm.bodies[-1])
         ok("- 이 친구와 1:1 로 하던 대화를 이어 가는 단체 채팅방이야(동희가 묶음)" in lsit and "- 친구: 현경" in lsit
-           and PROACTIVE_GUIDE.format(per_day=36) in lsit and lsit.endswith(LINKED_GUARD)
+           and PROACTIVE_GUIDE.format(per_day=3) in lsit and lsit.endswith(LINKED_GUARD)
            and "현경: 나 귤 좋아해" in lsit and "## 현경\n- 귤 좋아함" in lsit and "현경이는 귤을 좋아한다고 함" in lsit
            and "# 단체방에 먼저 말 걸기" not in lsit and "토익" not in lsit, lsit)
         ok((await store.proactive_rooms("p6"))[0]["sent_ago"] < timedelta(minutes=1)
@@ -703,14 +738,14 @@ async def main():
         b = llm.bodies[-1]
         rsit = situation(b)
         ok("- 이 방은 한 친구와 1:1 로 하던 대화를 이어 가는 방이야(1:1 친구: 현경, 동희가 묶음)." in rsit
-           and LINKED_GUARD in rsit and "- 마롱이는 이 방에 하루 36번쯤 먼저 카톡을 보내(선톡, 동희가 정함)" in rsit
+           and LINKED_GUARD in rsit and "- 마롱이는 이 방에 하루 3번쯤 먼저 카톡을 보내(선톡, 동희가 정함)" in rsit
            and "## 현경\n- 귤 좋아함" in rsit and "현경: 나 귤 좋아해" in json.dumps(b["messages"], ensure_ascii=False),
            f"묶인 단체방 답에는 1:1 대화·메모와 선톡 안내: {rsit}")
         await say("p6", "u6", "응 귤", kid="g4")
         b = llm.bodies[-1]
         speaker = "친구-" + hashlib.sha1(b"u1g2").hexdigest()[:4]
         ok("- 이 1:1 방은 동희가 묶은 단체방과 기억을 같이 써." in situation(b)
-           and "하루 12번쯤 먼저 카톡을 보내" in situation(b)
+           and "하루 3번쯤 먼저 카톡을 보내" in situation(b)
            and f"{speaker}: 현경이 뭐 좋아해?" in json.dumps(b["messages"], ensure_ascii=False),
            "1:1 방에서도 묶인 단체방에서 오간 말을 이름을 붙여 읽음")
         await say("g2", "u1g2", "선톡 그만 보내", channel=False, kid="h3")
@@ -753,12 +788,78 @@ async def main():
         admin("merge", g2, p6_room)
         KAKAO["mode"] = "ok"
 
+        # W2: a separate synthetic room exercises the actual message count and scheduler.
+        db.admin("UPDATE marong.rooms SET proactive=false, group_proactive=false")
+        room_key = "stage0-fixture"
+        await say(room_key, "stage0-user", "테스트 시작", kid="stage0-initial")
+        await store.set_name("stage0-user", "수빈")
+        shift(room_key, 70)
+        prior = ("수빈아 군밤 먹으니까 너무 달더라", "이불 바꿨어\n푹신해", "별 보려고 망원경 꺼냈어", "오늘 사진 찍었어")
+
+        async def room_state():
+            return (await store.proactive_rooms(room_key))[0]
+
+        for i, line in enumerate(prior, 1):
+            await store.add_message(room_key, "assistant", line, meta={"proactive": True, "delivered": True})
+            row = await room_state()
+            ok(row["unanswered"] == i and planner.plan(row, t) is None, f"W2 unanswered count {i}")
+            if i < 4:
+                wait = backoff(i)
+                assert wait is not None
+                ok(planner.plan({**row, "sent_ago": wait - timedelta(minutes=1)}, t) is None
+                   and planner.plan({**row, "sent_ago": wait}, t) is not None, f"W2 boundary #{i}")
+        row = await room_state()
+        ok(planner.plan({**row, "sent_ago": timedelta(days=21)}, t) is None, "W2 four unanswered even after weeks")
+        db.admin("UPDATE marong.messages SET created_at=now()-interval '9 days' WHERE room_key=%s AND content=%s",
+                 (room_key, prior[-1]))
+        await store.add_message(room_key, "assistant", "실패한 시험 내용",
+                                meta={"proactive": True, "delivered": False})
+        row = await room_state()
+        ok(row["unanswered"] == 4 and row["failures"] == 1, "W2 failures are not unanswered deliveries")
+        await store.add_message(room_key, "user", "별 사진 있으면 나중에 보여줘", user_key="stage0-user",
+                                kakao_id="stage0-reply")
+        shift(room_key, 190)
+        ok((await room_state())["unanswered"] == 0 and planner.plan(await room_state(), t) is not None,
+           "W2 a reply resets the count")
+
+        # W3/W5: after replying, the recipient can get different words but never a repeat or stage-only turn.
+        old = await store.recent_proactives(room_key, timedelta(days=7), 12)
+        ok([item["content"] for item in old] == list(reversed(prior[:3])), "W3 recent delivered proactive materials")
+        MODE["line"] = "수빈아 군밤 먹으니까 진짜 달더라"
+        n, calls = len(SENT), len(llm.bodies)
+        repeat = Proactive(s, store, agent, http, rng=lambda: 0.0)
+        before = await store.recent(room_key, 20)
+        ok(await repeat.step(t) == 0 and await repeat.step(t) == 0 and len(SENT) == n
+           and len(llm.bodies) == calls + 1 and await store.recent(room_key, 20) == before,
+           "W3 one generation, no delivery or database message")
+        prompt = situation(llm.bodies[-1])
+        materials, recent = prompt.split("# 최근 대화", 1)
+        ok("# 최근 7일 동안 마롱이가 먼저 보낸 말" in materials and prior[0] in materials
+           and "이불 바꿨어 / 푹신해" in materials and prior[2] in materials
+           and prior[0] not in recent and "별 사진 있으면 나중에 보여줘" in recent
+           and "마롱이: [먼저 보낸 말, 위 목록에 있음]" in recent and prior[-1] not in materials + recent
+           and "실패한 시험 내용" not in materials + recent, "W3 seven-day section and dialogue placeholders")
+        MODE["line"] = "(조용히 기다립니다)"
+        ok((await pro.deliver(await room_state(), dry=True))["text"] is None, "W5 stage-only proactive is dropped")
+        MODE["line"] = "수빈아 러닝화 골랐어!"
+        preview = await pro.deliver(await room_state(), dry=True)
+        ok(preview["text"] == MODE["line"], "W3 different topic is accepted")
+        ended = await pro.deliver(await room_state(), send_until=0)
+        ok(ended["text"] is None and len(SENT) == n and await store.recent(room_key, 20) == before,
+           "W1 a greeting that finished generating after quiet hours began is not sent or stored")
+        with patch.object(store, "recent_proactives", side_effect=RuntimeError("PRIVATE_FIXTURE")):
+            preview = await pro.deliver(await room_state(), dry=True)
+        ok(preview["text"] == MODE["line"] and "# 최근 7일 동안" not in situation(llm.bodies[-1]),
+           "W3 recent materials query can fail without stopping the turn")
+        del MODE["line"]
+
     # ── 로그에 대화 내용·토큰·카카오 키 원문이 없음 ──
     joined = "\n".join(LOGS)
     for secret in ("tok-secret", "선톡 1 🌰", "동희 선톡", "토익", "심심해", "botUserKey", "첫 말", "현경이야", "웬일",
-                   "귤", "현경이 방"):
+                   "귤", "현경이 방", "PRIVATE_FIXTURE", "수빈아 군밤"):
         ok(secret not in joined, f"로그에 '{secret}'이(가) 남음")
     ok("선톡 room=" in joined and "parts=3/3" in joined and "ask_owner user=" in joined, "로그 자체는 남음")
+    ok("reason=repeat similarity=" in joined and "reason=stage_only" in joined, "W3/W5 log only the reasons")
 
     await store.close()
     claude.close()

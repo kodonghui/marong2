@@ -90,6 +90,10 @@ def done(room: str) -> str:
             f"OR sd.meta->'rooms' ? {room}), 0)")
 
 
+# 선톡, 그림 화두, 선 전화를 못 받았을 때 남긴 한마디. 이 조건을 쓰는 쿼리의 메시지 별칭은 m.
+PROACTIVE_MESSAGE = "(m.meta->>'proactive' = 'true' OR m.meta->>'hello' = 'true')"
+
+
 # 카카오에서 온 방마다 마지막 사람 말과 이 방의 선톡 일정·조건 재료. 친구(user_key·name)는 1:1 방이면 그 친구, 1:1 방에 묶인
 # 단체방이면 그 1:1 친구, 그냥 단체방이면 마지막으로 마롱이에게 말한 사람(카카오는 단체방에서 마롱이를 태그한 말만 보내 줌).
 # 터미널 대화('terminal' 방)는 카카오 id 가 없어서 빠짐. 시각은 DB 시계 now() 에서 거꾸로 잰 길이: quiet_for(묶인 방들 어디서든
@@ -103,7 +107,9 @@ ROOM_STATE = (
     "  now() - (SELECT max(x.created_at) FROM marong.messages x WHERE x.room_key IN " + scope("r.room_key") + " "
     "    AND x.meta->>'proactive' = 'true') AS sent_ago, "
     "  (SELECT count(*) FROM marong.messages f WHERE f.room_key = r.room_key AND f.id > u.id "
-    "    AND f.meta->>'proactive' = 'true' AND f.meta->>'delivered' = 'false') AS failures "
+    "    AND f.meta->>'proactive' = 'true' AND f.meta->>'delivered' = 'false') AS failures, "
+    "  (SELECT count(*) FROM marong.messages m WHERE m.room_key IN " + scope("r.room_key") + " AND m.id > u.id "
+    "    AND m.role = 'assistant' AND m.meta->>'delivered' = 'true' AND " + PROACTIVE_MESSAGE + ") AS unanswered "
     "FROM marong.rooms r "
     "CROSS JOIN LATERAL (SELECT m.id, m.user_key, m.kakao_id, m.created_at FROM marong.messages m "
     "  WHERE m.room_key IN " + scope("r.room_key") + " AND m.role = 'user' ORDER BY m.id DESC LIMIT 1) u "
@@ -223,7 +229,8 @@ class Store:
         """방(묶인 방들 함께)의 최근 메시지(오래된 것부터). since_id 가 있으면 그 메시지부터는 limit 을 넘어도 다 넣는다.
         친구에게 전달되지 못한 마롱이 답은 뺀다."""
         rows = await self._all(
-            "SELECT m.id, m.role, m.user_key, p.name, m.content, m.created_at FROM marong.messages m "
+            "SELECT m.id, m.role, m.user_key, p.name, m.content, m.created_at, "
+            "  coalesce(" + PROACTIVE_MESSAGE + ", false) AS proactive FROM marong.messages m "
             "LEFT JOIN marong.people p ON p.user_key = m.user_key "
             "WHERE m.room_key IN " + self._reply_rooms("%(room)s") + " AND m.meta->>'delivered' IS DISTINCT FROM 'false' "
             + self._call_guard('message','m.id','m.room_key') +
@@ -231,6 +238,15 @@ class Store:
             "(SELECT count(*) FROM marong.messages WHERE room_key IN " + self._reply_rooms("%(room)s") + " AND id >= %(since)s))",
             {"room": room_key, "limit": limit, "since": since_id})
         return rows[::-1]
+
+    async def recent_proactives(self, room_key: str, within: timedelta, limit: int) -> list[dict]:
+        """같은 대화 범위에서 최근 전달된 선톡과 선 전화 뒤 한마디(새것부터)."""
+        return await self._all(
+            "SELECT m.id, m.content, m.created_at FROM marong.messages m "
+            "WHERE m.room_key IN " + self._reply_rooms("%(room)s") + " AND m.role = 'assistant' "
+            "AND m.meta->>'delivered' = 'true' AND " + PROACTIVE_MESSAGE + " AND m.created_at >= now() - %(within)s "
+            + self._call_guard("message", "m.id", "m.room_key") + "ORDER BY m.created_at DESC, m.id DESC LIMIT %(limit)s",
+            {"room": room_key, "within": within, "limit": limit})
 
     async def recent_turns(self, room_key: str, turns: int, max_rows: int, since_id: int | None = None,
                            unanswered: int = 3) -> list[dict]:
