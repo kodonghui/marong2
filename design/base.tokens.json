@@ -726,6 +726,13 @@
         "unit": "px"
       }
     },
+    "bubble": {
+      "$value": {
+        "value": 15,
+        "unit": "px"
+      },
+      "$description": "글 대화 말풍선 글(지금 chat.css .bubble 15px, 줄 간격 1.65). 말풍선을 다시 쓰는 새 화면(SCR-121 마롱이 답, SCR-123 고르기 카드 위 말)도 같은 값"
+    },
     "title": {
       "$value": {
         "value": 22,
@@ -821,6 +828,13 @@
         "value": 16,
         "unit": "px"
       }
+    },
+    "bubble": {
+      "$value": {
+        "value": 18,
+        "unit": "px"
+      },
+      "$description": "글 대화 말풍선 모서리(지금 chat.css .bubble 18px, 말한 쪽 위 모서리만 4px)"
     },
     "lg": {
       "$value": {

@@ -58,6 +58,8 @@
 
 2026-11-17에 고친 것: 목업과 실제 화면이 같은 값을 쓰도록 `color.a.line`, `color.a.on-accent`, `color.a.on-hangup`, `font.body`를 화면 CSS 값으로 맞추고, 화면 CSS에만 있던 `danger`, `input-border`, `hint`, `backdrop`, `panel-shadow`, `face-disc`(두 테마)와 `color.b.star`를 더했어요. 선 전화·그림 화두(CTX-020, PR #27)의 `size.topic-picture`(240px)도 같은 글자로 넣었어요. 토큰은 87개에서 101개가 됐고, 일기 대지 72장은 새 값으로 다시 만들었어요. 밤하늘의 끊기 버튼 위 글(`on-hangup` on `hangup`)은 대비 3.47이라 아이콘과 굵은 큰 글에만 맞아요(이미 쓰는 화면 그대로).
 
+2026-11-17 오후(성향 맞춤 화면을 합치며): 글 대화 말풍선을 새 화면도 다시 쓰니까 `chat.css`의 말풍선 값 `font-size.bubble`(15px)과 `radius.bubble`(18px)을 더해 103개가 됐어요. 성향 목업이 `chat.css`에서 그대로 가져온 다른 두 값은 토큰을 더하지 않고 이렇게 맞춰요: 작은 모서리 12px은 새 페이지(SCR-120\~122)에서 글 버튼·띠는 `radius.sm`, 칩은 `radius.full`이고, 글 대화 안(SCR-123)은 이미 있는 화면이라 `chat.css` 값 그대로예요. 약속 문장 17px은 `font-size.body`(16px)를 굵게(600) 써요. 한 단계 차이의 새 글 크기를 늘리지 않으려고요.
+
 토큰 얼리기(09단계 체크포인트)는 전체 목업 번들로 한 번 받아요. 얼리기 전까지 바뀌는 값은 이 문서의 이 절에 적어요.
 
 ## 4. 부품
@@ -80,6 +82,9 @@
 | 마롱이 얼굴 | 통화 중 248px, 통화 홈 200px, 끝난 화면·안내 152px. 쓰임은 [`marong-face/README.md`](marong-face/README.md), 그림은 꾸밈이라 `alt=""` | `size.face-*` |
 | 그림 화두 카드·말풍선 | 통화 중 얼굴 원 자리에 그림 15초, 글 대화 말 위 그림 240px(CTX-020, `design/call-first-candidates.md`) | `size.topic-picture`, `size.face-call`, `panel-shadow` |
 | 메뉴 상태 줄 | 글 대화 메뉴(SCR-109)의 '알림'·'약속 전화'·'자동 업데이트' 줄. 줄 글 + 필요할 때 '켜기'류 두 번째 버튼(누르는 높이 44px 이상, 원본은 `chat.css`) | `surface`, `line` |
+| 말풍선 | 마롱이 말은 왼쪽 위 모서리 4px·나머지 18px, `surface` 바탕, `line` 테두리, 글 15px·줄 간격 1.65. 내 말은 오른쪽 위 4px, `surface-2` 바탕(원본 `chat.css` `.bubble`). 새 화면에서 마롱이 답을 보일 때도 같은 모양(SCR-121) | `font-size.bubble`, `radius.bubble` |
+| 고르기 칩 그룹 | 한 그룹이 `role="radiogroup"`, 칩마다 `role="radio"`, 높이 48px, 끝까지 둥근 모서리. 고른 칩은 `accent` 바탕·`on-accent` 글과 ✓, 글로도 '골랐어'가 읽혀요. 친구 약속(SCR-120)과 글 대화 안 고르기 카드(SCR-123)가 같은 칩이에요 | `size.touch-min`, `radius.full` |
+| 글 대화 머리 오른쪽 버튼 | 전화·알림에 일기장(SCR-113, API-108의 `enabled`가 참이거나 `date`가 있을 때만)과 나(SCR-120, API-127이 200일 때만, `aria-label` "친구 약속")가 더해져요. 같은 줄의 지금 버튼과 같은 크기(`chat.css` 44px)로 맞추고, 48px로 올리는 건 글 대화 전체를 바꿀 때 함께 해요. 네 개(사이 6px)여도 360px 한 줄 | `size.icon` |
 | 듣기 시험 | "3 / 10"과 문장 점, 소리 줄(▶·■, 흐른 시간 막대), 점수 버튼 48px 다섯 개 한 줄, '마롱이 같다' | `size.touch-min`, `radius.full` |
 
 ### 종이 모양(일기장)
@@ -107,7 +112,9 @@
 | SCR-110\~111 | 벨 화면, 전화 알림 | `docs/app-ring.md`, `docs/08-screens/call-first.md` | 공통 캔버스(먼저 건 전화) | 앱 벨 |
 | SCR-113\~118 | 일기장 한 날, 말로 고치기, 다시 그리기, 달력, 숨긴 일기, 내 모습 카드 | `docs/08-screens/SCR-113`\~`118.md` | 공통 캔버스 'A · SCR-11x' | 일기(CTX-007) |
 | SCR-119 | 듣기 시험 | `docs/08-screens/SCR-119.md` | 공통 캔버스 | 통화 비용 |
-| SCR-120\~129 | 성향 맞춤·맞춤형 지침·선톡 화면(설계 중) | 그 스레드 PR | 받으면 공통 캔버스 | 성향 맞춤(CTX-008\~) |
+| SCR-120\~122 | 친구 약속, 맞춤형 지침, 마롱이가 기억하는 나 | PR #30 `docs/08-screens/SCR-120`\~`122.md`, `persona.md` | 공통 캔버스 '성향 맞춤' A·B(방향 고르기 전, 추천 A) | 성향 맞춤(CTX-008·011) |
+| SCR-123 | 글 대화 안 고르기 카드(SCR-107 메시지 안 부품이라 사이트맵에 없음) | PR #30 `docs/08-screens/SCR-123.md` | 같은 줄 | 성향 맞춤(CTX-008) |
+| SCR-124\~129 | 성향 맞춤 몫으로 남김(선톡·부탁 화면이 필요해지면) | | | CTX-008\~ |
 | SCR-130 | 앱 새 버전 알림(안드로이드가 그림) | `docs/08-screens/app-update.md` | 공통 캔버스 참고 한 장 | 앱 업데이트(CTX-021) |
 | SCR-131\~139 | 앱 업데이트 몫으로 남김 | | | CTX-021 |
 | SCR-140\~ | 다음 범위. 쓰기 전에 이 스레드에 받아요 | | | |
@@ -116,9 +123,10 @@
 
 ## 6. 목업 캔버스
 
-- 한 캔버스 [마롱이 화면 설계](https://claude.ai/artifact/CC154gunovJS3tqa8XkpZ9)에 맥락별로 줄을 나눠 올려요: 일기 A(72장), 통화 비용 #budget, 선 전화·그림 화두(CTX-020), 앱 자동 업데이트(CTX-021), 성향 맞춤(받으면). 고르지 않은 후보와 비교 기록은 맨 아래예요.
-- 대지 파일 이름: 일기 `A1xx-<상태>`(SCR-113\~119, `Main`·`A-*`도 일기 A), 통화 비용 `A001-budget`, 선 전화 `C020-<SCR>-<상태>-<day|night>-<폭>`(23장, 고르지 않은 B 4장은 `C020-B-*`), 앱 업데이트 `C021-109-update-<on|off>-*`(4장)과 `C021-130-notification`(참고 한 장). 2026-11-17 캔버스 버전 13에서 대지 108장이에요.
+- 한 캔버스 [마롱이 화면 설계](https://claude.ai/artifact/CC154gunovJS3tqa8XkpZ9)에 맥락별로 줄을 나눠 올려요: 일기 A(72장), 통화 비용 #budget, 선 전화·그림 화두(CTX-020), 앱 자동 업데이트(CTX-021), 성향 맞춤(CTX-008·011, A·B 두 줄). 고르지 않은 후보와 비교 기록은 맨 아래예요.
+- 대지 파일 이름: 일기 `A1xx-<상태>`(SCR-113\~119, `Main`·`A-*`도 일기 A), 통화 비용 `A001-budget`, 선 전화 `C020-<SCR>-<상태>-<day|night>-<폭>`(23장, 고르지 않은 B 4장은 `C020-B-*`), 앱 업데이트 `C021-109-update-<on|off>-*`(4장)과 `C021-130-notification`(참고 한 장), 성향 맞춤 `C008-<A|B>-<SCR>-<상태>-<day|night>`(12장, 방향 고르기 전이라 A·B 모두 검토 대상). 2026-11-17 캔버스 버전 16에서 대지 120장이에요.
 - 대지 제목은 `SCR-번호#상태 · 테마 · 폭`이에요. 폭은 360px을 기본으로, 줄바꿈이 달라지는 화면은 430px도 그려요.
+- 성향 맞춤 목업은 그 스레드가 토큰 값으로 HTML을 그려 360px 폭 전체 길이로 찍은 그림이라 그대로 올렸어요(프로젝트 파일 `persona-mockup-20261117/`, 후보와 추천은 PR #30 `design/persona-candidates.md`).
 - 선 전화 목업은 그 스레드가 실제 화면 CSS를 띄워 찍은 그림이라 그대로 올렸어요(원본 [그 목업](https://claude.ai/artifact/UQYxaGXQ72wGRSWv5YuU8x), 프로젝트 파일 `marong-call-first-mockup-20261116/`).
 
 ## 7. 다른 스레드가 화면을 더할 때

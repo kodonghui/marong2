@@ -1,6 +1,6 @@
 # 마롱이 웹 화면 목록(07단계 원본). 보기는 sitemap.md 에 이 파일에서 그려요.
-# 통화 웹앱(SCR-001~005)과, 봇의 글 대화 서버가 /chat/ 아래로 내보내는 일기장(SCR-113~118)·듣기 시험(SCR-119)이 있어요.
-# SCR-113~119는 2026-11-16 설계예요(아직 만들지 않음). 앱 창과 글 대화 화면(SCR-101~112)은 docs/android-app.md, docs/app-chat.md, docs/app-ring.md 에 있어서 여기 다시 적지 않아요.
+# 통화 웹앱(SCR-001~005)과, 봇의 글 대화 서버가 /chat/ 아래로 내보내는 일기장(SCR-113~118)·듣기 시험(SCR-119)·성향 맞춤(SCR-120~122)이 있어요.
+# SCR-113~119는 2026-11-16, SCR-120~122는 2026-11-17 설계예요(아직 만들지 않음, SCR-120~122는 성향 맞춤 스레드 PR #30의 docs/08-screens/persona.md 1절에서 옮김). 앱 창과 글 대화 화면(SCR-101~112)은 docs/android-app.md, docs/app-chat.md, docs/app-ring.md 에 있어서 여기 다시 적지 않아요.
 # 마롱이 화면 전체의 번호표(어느 번호를 어느 맥락이 쓰는지, SCR-120~ 범위 포함)와 토큰·부품 기준은 design/README.md 에 있어요(2026-11-17).
 # 앱 자동 업데이트(CTX-021, 2026-11-17)는 웹 화면이 없어요: 앱 글 대화 메뉴 SCR-109의 '자동 업데이트' 줄(FL-148, TERM-092·097)과 안드로이드 알림 SCR-130(FL-148, TERM-095·098). 정의 docs/08-screens/app-update.md.
 #   화면이 없는 흐름 FL-146(서버 명령)·FL-147(조용히 일어남), 화면이 없는 용어 TERM-093·094·096·099·100.
@@ -110,3 +110,31 @@
   status: active
   flows: [FL-123]
   terms: [CTX-002, TERM-039]
+
+# 성향 맞춤·친구 기억(CTX-008·CTX-011, 2026-11-17 설계, 아직 만들지 않음). /chat/persona/ 아래 페이지 세 개예요(docs/08-screens/persona.md).
+# 들어오는 곳: 글 대화(SCR-107) 머리의 '나' 버튼(API-127이 200일 때만 보임), 약속 초안 카드 '고칠래'(SCR-123, FL-125).
+# 앱에서는 글 대화 창 안에서 열리고 그 창의 뒤로 가기는 창을 닫아서, 세 페이지 머리 왼쪽에 돌아가는 버튼을 둬요(SCR-120은 '글 대화', SCR-121·122는 '친구 약속').
+# SCR-123(글 대화 안 고르기 카드)은 SCR-107 메시지 안 부품이라 여기 적지 않아요. 그 카드에 보이는 용어: TERM-041(첫 질문), TERM-045(지지 방식 묻기), TERM-047(약속 바꾸기 제안), TERM-061(전하기), TERM-062(부탁 확인).
+# without a screen: TERM-046(선호 신호, 서버가 셈), TERM-049~057(선톡 칸·게이트·이유·기억형 선톡·안 보냄·답 없는 선톡·백오프·잠금 화면 등급·꺼낼 얘기, 선톡 그래프 안), TERM-058(기능 목록, 코드), TERM-059·060(부탁·조건 연락, 대화로만), TERM-065(기억 연산), TERM-067~070(돌봄 안부·고정 요약·찾은 기억·정리 작업, 서버 안), TERM-074·075(위기 상태·위기 신호, 화면에 보이지 않음), TERM-076~079(보내기 전 검사·기운 단계·통화 화제 목록·그림자 모드, 서버 안)
+- id: SCR-120
+  name: 친구 약속
+  path: /chat/persona/
+  access: 허용된 Google 계정(통화하는 친구, 마롱이 친구에 묶임, 자기 약속만)
+  status: active
+  flows: [FL-124, FL-125, FL-126, FL-127]
+  terms: [CTX-008, CTX-020, TERM-040, TERM-041, TERM-042, TERM-044, TERM-048, TERM-090]
+  children:
+    - id: SCR-121
+      name: 맞춤형 지침
+      path: /chat/persona/instructions
+      access: 허용된 Google 계정(통화하는 친구, 마롱이 친구에 묶임, 자기 지침만)
+      status: active
+      flows: [FL-128]
+      terms: [CTX-008, TERM-043, TERM-044]
+    - id: SCR-122
+      name: 마롱이가 기억하는 나
+      path: /chat/persona/memory
+      access: 허용된 Google 계정(통화하는 친구, 마롱이 친구에 묶임, 자기 기억만)
+      status: active
+      flows: [FL-135]
+      terms: [CTX-011, TERM-063, TERM-064, TERM-066, TERM-071, TERM-072, TERM-073]

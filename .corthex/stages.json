@@ -179,9 +179,14 @@
           "level": "info",
           "message": "main 합친 뒤 허브 경고 screen-not-in-sitemap 7건(SCR-101·107~111·130): 앱 화면은 docs/android-app.md·app-chat.md·app-ring.md 쪽 목록이고 sitemap.yaml은 웹 화면 목록이라 그대로 둠. 앱 화면까지 한 사이트맵에 넣을지는 공통 기준 체크포인트 때 함께 정함",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "2026-11-17 성향 맞춤 SCR-120~122를 sitemap.yaml에 넣고(PR #30 docs/08-screens/persona.md 1절 그대로) 보드·목록·슬라이드를 다시 그림. 그 ID(FL-124~135, TERM-040~073, CTX-008·011)는 PR #30이 합쳐지기 전까지 이 브랜치에서 unknown-ref",
+          "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T04:34:13+00:00"
+      "updated": "2026-11-17T05:29:49+00:00"
     },
     "08-screen-states": {
       "state": "in_progress",
@@ -226,7 +231,6 @@
         }
       ],
       "next": "[선 전화·앱 업데이트] CTX-020 없음. 앱 스스로 업데이트(CTX-021)는 07~09에서 따로 / [일기·통화 비용] 체크포인트: 합친 목업 번들(일기 A·통화 비용·선 전화 CTX-020·앱 업데이트 CTX-021·성향 맞춤 받으면) 검토와 토큰 얼리기 한 번(개발 전). 공통 기준 design/README.md",
-      "updated": "2026-11-17T03:46:40+00:00",
       "checks": [
         {
           "level": "info",
@@ -237,8 +241,14 @@
           "level": "info",
           "message": "CTX-021은 따로 목업을 만들지 않고 '마롱이의 일기 설계하기' 스레드의 목업 한 벌에 두 상태(SCR-109 줄, SCR-130 알림)를 넘김(동희님 11/17 12:36). 새 토큰 없음",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "2026-11-17 14:4x KST 성향 맞춤(PR #30 f6984de) 대지 12장(A·B, 방향 고르기 전, 추천 A)을 공통 캔버스 버전 16에 합침(대지 120장, C008-*). 말풍선 토큰 font-size.bubble 15px·radius.bubble 18px을 더해 103개(형식 오류 0). 성향 목업의 12px·17px은 토큰을 더하지 않고 radius.sm/radius.full·font-size.body 굵게로 맞춤(design/README.md 3절)",
+          "at": "2026-11-17"
         }
-      ]
+      ],
+      "updated": "2026-11-17T05:29:49+00:00"
     },
     "10-wbs": {
       "state": "in_progress",
