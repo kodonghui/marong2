@@ -42,7 +42,11 @@ AS_MARONG="sudo -u marong sh -c"
 on_server() { "${SSH[@]}" "$HOST" "$@"; }
 
 app_release_metadata() {
-  python3 - "$1" <<'PY'
+  local python=(python3)
+  if [[ ${OS:-} == Windows_NT ]] && command -v py >/dev/null 2>&1; then
+    python=(py -3)
+  fi
+  "${python[@]}" - "$1" <<'PY'
 import json
 from pathlib import Path
 import re
