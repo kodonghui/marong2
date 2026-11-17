@@ -107,6 +107,10 @@ class DiscordStore(AppStore, GoogleStore, ScheduleStore, Store):
         # Legacy summaries may combine the direct and linked group rooms. A channel's own summaries are its own.
         return "AND (e.source_type='message' OR e.room_key LIKE 'discord-dm:%%' OR e.room_key LIKE 'discord-ch:%%') "
 
+    def _summary_keyword_filter(self) -> str:
+        # The same rule for summaries found by words (keyword_hits): only DM and channel summaries.
+        return "AND (s.room_key LIKE 'discord-dm:%%' OR s.room_key LIKE 'discord-ch:%%') "
+
     async def channel_friends(self) -> list[str]:
         """Names of the friends linked to Marong on Discord: who Marong talks with in the private server's channels."""
         rows = await self._all("SELECT f.name FROM marong.discord_dm_links d JOIN marong.friends f ON f.id=d.friend_id "

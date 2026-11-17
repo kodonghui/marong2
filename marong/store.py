@@ -3,6 +3,7 @@
 import hashlib
 import os
 import logging
+import re
 from datetime import timedelta
 
 from psycopg.rows import dict_row
@@ -14,6 +15,59 @@ log = logging.getLogger("store")
 SCHEMA_VERSION = 9
 # 'ㅋㅋㅋ'·'ㅇㅇ'·이모티콘만 있는 말은 검색해도 쓸모가 없어 임베딩하지 않음(한글 음절·영문·숫자가 2개 이상 이어진 말만)
 MEANINGFUL = "[가-힣A-Za-z0-9]{2}"
+SCAN_ROWS = 400          # 답할 최근 대화를 고를 때 거슬러 읽는 줄 수(선톡이 몰려도 친구 말 reply_turns 번을 찾게)
+KEYWORD_ROWS = 300       # 낱말로 찾을 때 읽는 후보 수(최근 것부터)
+
+
+def pick_recent(rows: list[dict], turns: int, max_rows: int, since_id: int | None = None,
+                unanswered: int = 3) -> list[dict]:
+    """답할 때 넣을 최근 대화(rows 는 오래된 것부터, proactive 는 선톡인지).
+    친구 말(role user)이 turns 번 들어가도록 거슬러 올라간 구간에서, 친구가 답하지 않은 선톡(바로 다음 줄이 친구 말이
+    아닌 선톡)은 가장 최근 unanswered 개만 남긴다. 그래도 max_rows 를 넘으면 오래된 줄부터 뺀다. since_id(묶어 답할 첫
+    말)부터는 늘 다 넣는다(필받음 '최근 15턴', 2026-11-16 선톡이 몰려 최근 20줄이 다 선톡이던 일)."""
+    start, users = 0, 0
+    for i in range(len(rows) - 1, -1, -1):
+        if rows[i]["role"] == "user":
+            users += 1
+            if users == turns:
+                start = i
+                break
+    if since_id is not None:
+        first = next((i for i, r in enumerate(rows) if r["id"] >= since_id), len(rows))
+        start = min(start, first)
+    picked = rows[start:]
+    pro = [i for i, r in enumerate(picked) if r.get("proactive")]
+    latest = set(pro[-unanswered:]) if unanswered > 0 else set()
+    out = []
+    for i, r in enumerate(picked):
+        held = since_id is not None and r["id"] >= since_id
+        answered = i + 1 < len(picked) and picked[i + 1]["role"] == "user"
+        if r.get("proactive") and i not in latest and not answered and not held:
+            continue
+        out.append(r)
+    if len(out) > max_rows:
+        held = sum(1 for r in out if since_id is not None and r["id"] >= since_id)
+        out = out[len(out) - max(max_rows, held):]
+    return out
+
+
+def keyword_terms(text: str, limit: int = 24) -> list[str]:
+    """낱말 검색에 쓸 조각: 한글은 두 글자씩 겹쳐 자르고(코트 → '코트', 울코트 → '울코'·'코트'), 영문·숫자는 낱말 그대로
+    (두 글자 이상, 소문자). 'ㅋㅋ' 같은 자모만 있는 말은 뺀다. 앞에 나온 것부터 limit 개(M10 RAG: 한글 2글자 BM25)."""
+    terms: list[str] = []
+    for word in re.findall(r"[가-힣]+|[A-Za-z0-9]+", text or ""):
+        if re.fullmatch(r"[가-힣]+", word):
+            grams = [word[i:i + 2] for i in range(len(word) - 1)]
+        else:
+            grams = [word.lower()] if len(word) >= 2 else []
+        for g in grams:
+            if g not in terms:
+                terms.append(g)
+    return terms[:limit]
+
+
+def like_pattern(term: str) -> str:
+    return "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
 def scope(room: str) -> str:
@@ -177,6 +231,70 @@ class Store:
             "(SELECT count(*) FROM marong.messages WHERE room_key IN " + self._reply_rooms("%(room)s") + " AND id >= %(since)s))",
             {"room": room_key, "limit": limit, "since": since_id})
         return rows[::-1]
+
+    async def recent_turns(self, room_key: str, turns: int, max_rows: int, since_id: int | None = None,
+                           unanswered: int = 3) -> list[dict]:
+        """답할 때 넣는 최근 대화(오래된 것부터). 고르는 법은 pick_recent. 친구에게 전달되지 못한 마롱이 답은 뺀다."""
+        rows = await self._all(
+            "SELECT m.id, m.role, m.user_key, p.name, m.content, m.created_at, "
+            "  coalesce(m.meta->>'proactive' = 'true', false) AS proactive FROM marong.messages m "
+            "LEFT JOIN marong.people p ON p.user_key = m.user_key "
+            "WHERE m.room_key IN " + self._reply_rooms("%(room)s") + " AND m.meta->>'delivered' IS DISTINCT FROM 'false' "
+            + self._call_guard('message','m.id','m.room_key') +
+            "ORDER BY m.id DESC LIMIT greatest(%(scan)s, "
+            "(SELECT count(*) FROM marong.messages WHERE room_key IN " + self._reply_rooms("%(room)s") + " AND id >= %(since)s))",
+            {"room": room_key, "scan": SCAN_ROWS, "since": since_id})
+        return pick_recent(rows[::-1], turns, max_rows, since_id, unanswered)
+
+    async def keyword_hits(self, room_key: str, terms: list[str], before_id: int, skip_summary_ids: list[int],
+                           limit: int = KEYWORD_ROWS) -> tuple[list[dict], int]:
+        """같은 방(묶인 방들 함께)에서 terms 중 하나라도 든 예전 메시지·요약(최근 것부터)과, 찾은 범위의 전체 수(점수의
+        IDF 에 씀). 최근 원문 구간(before_id 부터)과 이미 넣은 요약은 뺀다. 점수는 agent 가 매긴다."""
+        if not terms:
+            return [], 0
+        params = {"room": room_key, "before": before_id, "skip": list(skip_summary_ids),
+                  "pats": [like_pattern(x) for x in terms], "limit": limit}
+        rows = await self._all(
+            "SELECT * FROM ("
+            "  SELECT 'message' AS source_type, m.id AS source_id, m.role, m.user_key, p.name, m.content, m.created_at "
+            "  FROM marong.messages m LEFT JOIN marong.people p ON p.user_key = m.user_key "
+            "  WHERE m.room_key IN " + self._reply_rooms("%(room)s") + " AND m.id < %(before)s "
+            "  AND m.meta->>'delivered' IS DISTINCT FROM 'false' AND m.content ILIKE ANY(%(pats)s) "
+            + self._call_guard('message','m.id','m.room_key') +
+            "  UNION ALL "
+            "  SELECT 'summary', s.id, NULL, NULL, NULL, s.content, s.created_at FROM marong.summaries s "
+            "  WHERE s.room_key IN " + self._reply_rooms("%(room)s") + " AND s.content <> '' "
+            "  AND NOT (s.id = ANY(%(skip)s::bigint[])) AND s.content ILIKE ANY(%(pats)s) "
+            + self._summary_keyword_filter()
+            + self._call_guard('summary','s.id','s.room_key') +
+            ") k ORDER BY created_at DESC LIMIT %(limit)s", params)
+        total = await self._one(
+            "SELECT (SELECT count(*) FROM marong.messages m WHERE m.room_key IN " + self._reply_rooms("%(room)s")
+            + " AND m.id < %(before)s) + (SELECT count(*) FROM marong.summaries s WHERE s.room_key IN "
+            + self._reply_rooms("%(room)s") + ") AS n", params)
+        return rows, int(total["n"] if total else len(rows))
+
+    def _summary_keyword_filter(self) -> str:
+        return ""
+
+    async def neighbors(self, room_key: str, ids: list[int]) -> dict[int, dict]:
+        """메시지마다 짝이 되는 말(문답 한 쌍으로 기억하기): 친구 말이면 바로 뒤 마롱이 답, 마롱이 말이면 바로 앞 친구 말.
+        같은 방 안에서만, 짝이 없으면 뺀다. {메시지 id: 짝 줄}(LangGraph 실측: 뽑은 사실보다 원문 문답 검색이 나음)."""
+        if not ids:
+            return {}
+        rows = await self._all(
+            "SELECT h.id AS hit, n.id, n.role, n.user_key, p.name, n.content, n.created_at "
+            "FROM marong.messages h CROSS JOIN LATERAL ("
+            "  (SELECT x.* FROM marong.messages x WHERE h.role = 'user' AND x.room_key = h.room_key AND x.id > h.id "
+            "   AND x.meta->>'delivered' IS DISTINCT FROM 'false' ORDER BY x.id LIMIT 1) "
+            "  UNION ALL "
+            "  (SELECT x.* FROM marong.messages x WHERE h.role = 'assistant' AND x.room_key = h.room_key AND x.id < h.id "
+            "   ORDER BY x.id DESC LIMIT 1)"
+            ") n LEFT JOIN marong.people p ON p.user_key = n.user_key "
+            "WHERE h.id = ANY(%(ids)s::bigint[]) AND h.room_key IN " + self._reply_rooms("%(room)s") + " "
+            "AND n.role <> h.role " + self._call_guard('message','n.id','n.room_key'),
+            {"room": room_key, "ids": list(ids)})
+        return {r["hit"]: r for r in rows}
 
     async def summaries(self, room_key: str, limit: int) -> list[dict]:
         """방(묶인 방들 함께)의 최근 요약(오래된 것부터). until 은 요약한 구간의 마지막 메시지 시각."""
@@ -412,7 +530,8 @@ class Store:
         친구에게 전달되지 못한 답."""
         return await self._all(
             "SELECT m.id, m.role, m.user_key, p.name, m.content, m.created_at, "
-            "  m.meta->>'delivered' IS DISTINCT FROM 'false' AS delivered "
+            "  m.meta->>'delivered' IS DISTINCT FROM 'false' AS delivered, "
+            "  coalesce(m.meta->>'proactive' = 'true', false) AS proactive "
             "FROM (SELECT w.room_key, " + done("w.room_key") + " AS done FROM marong.rooms w "
             "  WHERE w.room_key IN " + scope("%(room)s") + ") w "
             "JOIN marong.messages m ON m.room_key = w.room_key AND m.id > w.done "
