@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+import psycopg
 
 from aiohttp.test_utils import TestClient, TestServer
 
@@ -126,6 +127,39 @@ async def scenario(db):
             for _ in range(3):
                 await check(await http.put(path, json={"text": source}, headers=one), 200)
             await check(await http.put(path, json={"text": source}, headers=one), 429, "too_many_requests")
+
+            endpoints = (
+                ("GET", "/card", None), ("PATCH", "/card", {"lead": "lead"}),
+                ("POST", "/rules", {"kind": "avoid_topic", "text": "시험주제"}),
+                ("DELETE", "/rules/999999", None), ("GET", "/instructions", None),
+                ("PUT", "/instructions", {"text": "짧게 말해 줘"}), ("DELETE", "/instructions", None),
+                ("POST", "/cards/999999/answer", {"value": "yes"}),
+            )
+            original_login = store.app_login.side_effect
+            for method, suffix, body in endpoints:
+                async def send(headers):
+                    return await http.request(method, BASE+suffix, json=body, headers=headers)
+                await check(await send({"Origin": ORIGIN}), 401, "unauthenticated")
+                await check(await send({**one, "Cf-Access-Jwt-Assertion": "unlinked"}), 403, "not_allowed")
+                if method != "GET":
+                    await check(await send({**one, "Origin": "https://other.test"}), 403, "cross_site")
+                agent.friend_cards = None
+                await check(await send(one), 403, "feature_off")
+                agent.friend_cards = cards
+                store.app_login.side_effect = psycopg.OperationalError("fixture-private-error")
+                await check(await send(one), 503, "db_unavailable")
+                store.app_login.side_effect = RuntimeError("fixture-private-error")
+                result = await send(one)
+                assert result.status == 500
+                error = await result.json()
+                assert error["code"] == "internal" and len(error["traceId"]) == 16
+                assert "fixture-private-error" not in json.dumps(error)
+                store.app_login.side_effect = original_login
+            await check(await http.put(BASE+"/instructions", json={"text": "가"*501}, headers=one), 400, "invalid_request")
+            await check(await http.delete(BASE+"/rules/not-a-number", headers=one), 400, "invalid_request")
+            for index in range(20):
+                await check(await http.post(BASE+"/rules", json={"kind": "avoid_topic", "text": f"시험{index}"}, headers=two), 201)
+            await check(await http.post(BASE+"/rules", json={"kind": "avoid_topic", "text": "한도밖"}, headers=two), 409, "rule_limit")
     finally:
         await store.close()
 

@@ -13,6 +13,8 @@ from call_memory import MemoryStore, Principal
 from call_safety import CallSafety
 
 from marong.agent import Agent, Incoming
+from marong.discord_dm import DiscordAgent, DiscordIncoming
+from marong.topics import Today, Topics
 from marong.friend_card import CardError, FriendCards, KST, ModelRun, card_sentence, question_choices, text_choice
 from marong.persona_prompt import FriendPrompt, append_prefix
 from marong.store import Store
@@ -272,6 +274,24 @@ async def scenario(db, store):
     command.is_channel = True
     await handler._instruction_reply(command, "앞으로 이렇게 대해 줘:")
     assert (await cards.read(new_friend))["instruction"]["text"] is None
+
+    dm = DiscordAgent(settings, store, None, None)
+    dm.friend_cards = cards
+    for phrase, on, expected in (("선톡 끄기", False, "off"), ("선톡 켜기", True, "normal")):
+        id = await store.add_message("fixture-room-a", "user", phrase, user_key="fixture-person-a")
+        command = DiscordIncoming("fixture-room-a", "fixture-person-a", phrase, friend_id=1, proactive_preference=on)
+        await dm._dm_command(command, {"friend_id": 1}, id, phrase, True)
+        assert (await cards.read(1))["card"]["proactive"] == expected
+
+    rule, _ = await cards.add_rule(new_friend, "avoid_topic", "바닷가")
+    assert rule.outcome == "ok"
+    picture = SimpleNamespace(title="바닷가", scene="fixture", line="fixture", ask="fixture", alt="fixture",
+                              key="v1/fixture", fits=lambda _now: True)
+    topics = Topics(SimpleNamespace(timezone="Asia/Seoul"), store,
+                    pictures=SimpleNamespace(pickable=(picture,)), rng=lambda: 0)
+    topics.today = AsyncMock(return_value=Today({"pictures": True}, set(), None, now))
+    with patch.dict("os.environ", {"MARONG_FRIEND_CARD": "on"}):
+        assert await topics.choose({"friend_id": new_friend}, now, now+timedelta(hours=1)) is None
 
 
 async def run(db):

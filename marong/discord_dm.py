@@ -535,6 +535,16 @@ class DiscordAgent(Agent):
 
     async def _dm_command(self, msg, person, user_id, text, use_memory):
         """A DM reply that needs no model (opt-out/in, Google link, the opening, the guide), or None."""
+        if self.friend_cards and msg.proactive_preference is not None and msg.friend_id and use_memory:
+            try:
+                changed = await self.friend_cards.apply_tool(msg.friend_id, msg.room_key, user_id,
+                    f"preference:{user_id}", {"op": "proactive_lower", "value": "normal" if msg.proactive_preference else "off",
+                                            "quote": text})
+                if changed.outcome != "ok":
+                    return PREF_FAILED, {"persona_preference": "failed"}
+            except Exception as error:
+                log.warning("card_preference_error %s", type(error).__name__)
+                return PREF_FAILED, {"persona_preference": "failed"}
         if msg.proactive_preference is False:
             return "응, 먼저 연락하는 건 멈출게.", {}
         if msg.topic_command and self.topics and msg.friend_id is not None:
