@@ -56,6 +56,11 @@ PROBLEMS = {
     "not_ready": (409, "준비된 일기가 아님"),
     "stale_revision": (409, "보낸 판 번호가 지금 판과 다름"),
     "busy": (409, "이 일기를 고치거나 다시 그리는 중"),
+    "fix_limit": (409, "고치기 다섯 번을 다 씀"),
+    "redraw_limit": (409, "다시 그리기 두 번을 다 씀"),
+    "too_many_requests": (429, "고치기와 다시 그리기를 합쳐 1분에 5번 넘게 보냄"),
+    "drawing_budget": (429, "이번 달 그림 월 예산을 다 씀"),
+    "fix_failed": (503, "고치기 모델이 실패함"),
     "db_unavailable": (503, "DB에 닿지 않음"),
     "internal": (500, "예상하지 못한 서버 오류"),
 }
@@ -80,7 +85,7 @@ def bad(*errors) -> Problem:
 
 class AppChat:
     def __init__(self, store, agent, client, access, push, *, origin: str = DEFAULT_ORIGIN, port: int = DEFAULT_PORT,
-                 timezone: str = "Asia/Seoul", clock=time.monotonic):
+                 timezone: str = "Asia/Seoul", clock=time.monotonic, diary_models=None):
         self.store = store
         self.agent = agent      # DiscordAgent: the same one that answers the Discord DM
         self.client = client    # DiscordDM: its room locks keep one answer at a time per room
@@ -97,6 +102,7 @@ class AppChat:
         self.tasks = set()
         self.files = {k: ((STATIC / name).read_bytes(), kind) for k, (name, kind) in FILES.items()}
         self.runner = None
+        self.diary_models = diary_models
 
     # ── plumbing ───────────────────────────────────────────────
 
@@ -127,6 +133,7 @@ class AppChat:
     @web.middleware
     async def guard(self, req, handler):
         trace = secrets.token_hex(8)
+        req["trace_id"] = trace
         try:
             res = await handler(req)
         except Problem as p:

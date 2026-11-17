@@ -75,6 +75,9 @@ class AppDiary:
         return await self._day_response(friend, day, datetime.now(KST))
 
     async def _day_response(self, friend, day, now):
+        return self.chat._json(200, await self.day_data(friend, day, now))
+
+    async def day_data(self, friend, day, now):
         row = await self.store._one(
             f"""WITH params AS (SELECT %s::bigint AS friend, %s::date AS day, %s::date AS today)
             SELECT d.state, d.revision, d.drawing_id, d.hidden, d.stamped_at, d.busy, d.busy_until,
@@ -93,8 +96,8 @@ class AppDiary:
         content = await self._content(row, now) if state == "ready" else None
         if state in ("pending", "drawing"):
             state = "writing"
-        return self.chat._json(200, {"date": day.isoformat(), "state": state,
-            "prev": _iso(row["prev"]), "next": _iso(row["next"]), "diary": content})
+        return {"date": day.isoformat(), "state": state,
+                "prev": _iso(row["prev"]), "next": _iso(row["next"]), "diary": content}
 
     async def _ready(self, conn, friend, day, now):
         if day > diary_day(now):
@@ -116,7 +119,7 @@ class AppDiary:
         revision, weather = data.get("revision"), data.get("weather")
         if set(data) - {"revision", "weather"}:
             raise bad(("body", "bad_format"))
-        if type(revision) is not int or revision < 1:
+        if type(revision) is not int or not 1 <= revision <= 2_147_483_647:
             raise bad(("revision", "bad_format"))
         if not isinstance(weather, str) or weather not in WEATHER:
             raise bad(("weather", "bad_format"))
@@ -181,6 +184,8 @@ class AppDiary:
             redraw_block = "drawing_budget"
         drawing_id = row["drawing_id"]
         last = {"result": row["redraw_result"], "at": _iso(row["redraw_at"])} if row["redraw_result"] else None
+        if row["busy"] == "redraw" and busy is None:
+            last = {"result": "draw_failed", "at": _iso(row["busy_until"])}
         return {
             "revision": row["revision"], "title": row["title"], "weather": row["weather"], "body": row["body"],
             "drawing": {"id": str(drawing_id) if drawing_id else None, "kind": "ai" if drawing_id else "placeholder"},
@@ -246,11 +251,16 @@ class AppDiary:
         return web.Response(status=204)
 
     def register(self, app):
+        from .diary_edits import DiaryEdits
+
         for path, handler in (("/latest", self.latest), ("/days", self.month), ("/days/{date}", self.day),
                               ("/hidden", self.hidden), ("/drawings/{id}", self.drawing)):
             app.router.add_get(_PREFIX + path, handler, allow_head=False)
         for path, handler in (("weather", self.put_weather), ("hidden", self.put_hidden), ("stamp", self.put_stamp)):
             app.router.add_put(f"{_PREFIX}/days/{{date}}/{path}", handler)
+        edits = DiaryEdits(self)
+        app.router.add_post(_PREFIX + "/days/{date}/fixes", edits.fix)
+        app.router.add_post(_PREFIX + "/days/{date}/drawings", edits.redraw)
         app.router.add_get(_PREFIX + "/look", self.look, allow_head=False)
         app.router.add_put(_PREFIX + "/look", self.put_look)
         app.router.add_delete(_PREFIX + "/look", self.clear_look)

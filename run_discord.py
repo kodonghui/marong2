@@ -155,6 +155,9 @@ async def main():
             app_config = None
         if worker_store:
             await worker_store.open(wait=True)
+        diary_enabled = os.getenv("MARONG_DIARY") == "1"
+        if app_config or diary_enabled:
+            diary_models = DiaryModels(settings, os.environ)
         emb.start()
         if worker:
             tasks.append(asyncio.create_task(worker.run()))
@@ -171,7 +174,7 @@ async def main():
             push = AppPush(store, app_config["fcm"], ring_enabled=app_config["ring"])
             agent.ring = app_config["ring"]
             chat = AppChat(store, agent, client, AccessVerifier(app_config["access"]), push, origin=origin,
-                           port=app_config["port"], timezone=settings.timezone)
+                           port=app_config["port"], timezone=settings.timezone, diary_models=diary_models)
             saved = agent.on_saved
 
             def on_saved():  # every saved message also wakes the chat screens' waits (SPEC-114)
@@ -193,8 +196,7 @@ async def main():
                 DiscordProactive(settings, store, agent, client, app=push, topics=topics).run()))
             reminders = DiscordReminders(settings, store, agent, client, app=push, origin=origin)
             tasks.append(asyncio.create_task(reminders.run()))
-            if os.getenv("MARONG_DIARY") == "1":
-                diary_models = DiaryModels(settings, os.environ)
+            if diary_enabled:
                 diary = DiaryWorker(store, diary_models, reminders, image_budget(os.getenv("MARONG_DIARY_IMAGE_BUDGET_USD")),
                                     on_saved=agent.on_saved)
                 tasks.append(asyncio.create_task(diary.run()))

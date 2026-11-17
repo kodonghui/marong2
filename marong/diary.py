@@ -100,12 +100,18 @@ def image_budget(value: str | None) -> Decimal:
 
 
 async def drawing_allowed(store, budget: Decimal, now: datetime) -> bool:
+    async with store.pool.connection() as conn:
+        return await drawing_allowed_in(conn, budget, now)
+
+
+async def drawing_allowed_in(conn, budget: Decimal, now: datetime) -> bool:
     start = now.astimezone(KST).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    row = await store._one(
+    cursor = await conn.execute(
         "SELECT COALESCE(sum(cost_usd),0) AS usd FROM marong.diary_ai_runs "
         "WHERE kind='draw' AND sent_at >= %s AND sent_at <= %s",
         (start, now),
     )
+    row = await cursor.fetchone()
     return row["usd"] + Decimal("0.03") <= budget
 
 
