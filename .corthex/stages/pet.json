@@ -92,6 +92,12 @@
       "checkpoints": [],
       "next": "SCR-140~162 상태 정의 초안(docs/08-screens/pet.md) 뒤 회색 와이어프레임, 이어서 09 목업(공통 캔버스 '반려동물' 줄)",
       "updated": "2026-11-17T07:08:43+00:00"
+    },
+    "09-mockup": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "방향 A·B 고르기(추천 A, design/pet-candidates.md) 뒤 나머지 상태를 고른 안으로 그리기, 토큰 얼리기는 전체 번들로",
+      "updated": "2026-11-17T07:30:18+00:00"
     }
   }
 }
