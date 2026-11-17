@@ -1,5 +1,5 @@
 """Integration test on a restored, isolated database. Never sends Kakao messages."""
-import asyncio,hashlib,json,sys,uuid
+import asyncio,hashlib,json,os,sys,uuid
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 from call_memory import MemoryStore
