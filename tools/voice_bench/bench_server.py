@@ -83,6 +83,10 @@ ELEVEN_RT_EAGERNESS = os.environ.get('VB_ELEVEN_RT_EAGERNESS', 'medium')
 # .../libraries/web-sockets.md, .../api-reference/eleven-agents/websocket.md, .../api-reference/agents/create.md
 ELEVEN_AGENT_LLM = os.environ.get('VB_ELEVEN_AGENT_LLM', 'gpt-6-luna')
 ELEVEN_AGENT_EAGERNESS = os.environ.get('VB_ELEVEN_AGENT_EAGERNESS', 'normal')
+# an agent made beforehand (for example from the ElevenLabs dashboard or connector) with authentication off: the run
+# then talks to it by agent_id alone and needs no key permission (for when the key lacks the agents permission)
+ELEVEN_AGENT_ID = os.environ.get('VB_ELEVEN_AGENT_ID', '')
+ELEVEN_AGENT_RT_ID = os.environ.get('VB_ELEVEN_AGENT_RT_ID', '')
 
 VAD_MS = 700           # production silenceDurationMs
 GAP_AFTER_REPLY = 0.6  # the friend answers 0.6 s after the reply finished playing
@@ -832,6 +836,8 @@ def _trim_conversation(c):
 async def eleven_billing(conv_id, t_start_unix, wait_s=120):
     """The billed conversation: by id when the API knows it, otherwise the workspace's conversations started during
     this run. Polls until ElevenLabs has processed it (status done), at most wait_s."""
+    if not key('elevenlabs.key'):
+        return {'skipped': 'no elevenlabs.key; read the conversation from the ElevenLabs account instead'}
     h = {'xi-api-key': key('elevenlabs.key')}
     out = {'looked_up_by': None, 'conversations': []}
     ids = []
@@ -941,8 +947,19 @@ class ElevenAgent(Engine):
     name = 'eleven-agent'
     in_sr = 16000
     out_sr = 16000
+    AGENT_ID = ELEVEN_AGENT_ID
 
     async def connect(self):
+        self.create_log, self.other_types = [], {}
+        self.agent_id = self.conversation_id = self.formats = None
+        if self.AGENT_ID:
+            # a public agent set up beforehand: no key, no signed URL
+            self.agent_id = self.AGENT_ID
+            self.create_log.append({'attempt': 'existing agent given in the environment, authentication off'})
+            self.ws = await WS.connect('%s/v1/convai/conversation?agent_id=%s'
+                                       % (ELEVEN_WS, urllib.parse.quote(self.agent_id)), {})
+            await self.ws.send_json({'type': 'conversation_initiation_client_data'})
+            return
         h = {'xi-api-key': key('elevenlabs.key')}
         prompt_cfg = {'prompt': self.prompt, 'llm': self.model, 'reasoning_effort': 'none'}
         cfg = {'agent': {'first_message': '', 'language': 'ko', 'prompt': prompt_cfg},
@@ -952,8 +969,6 @@ class ElevenAgent(Engine):
                'conversation': {'max_duration_seconds': 480}}
         body = {'name': 'voice-bench %s Han Aim (synthetic test)' % self.model, 'tags': ['voice-bench'],
                 'conversation_config': cfg}
-        self.create_log, self.other_types = [], {}
-        self.agent_id = self.conversation_id = self.formats = None
         for attempt in ('reasoning none', 'model default reasoning'):
             if attempt == 'model default reasoning':
                 prompt_cfg.pop('reasoning_effort', None)
@@ -1028,19 +1043,33 @@ class ElevenAgent(Engine):
         await self.ws.send_json({'user_audio_chunk': base64.b64encode(chunk).decode()})
 
 
+class ElevenAgentRealtime(ElevenAgent):
+    """The same ElevenAgents conversation with the agent's voice mode set to Realtime (Eleven Realtime v1 Mini), which
+    then manages the LLM, TTS model and ASR itself; the prompt, Han Aim voice, language and turn settings stay the
+    agent's. Only an agent set up beforehand (VB_ELEVEN_AGENT_RT_ID), since the mode is set on the agent."""
+    name = 'eleven-agent-rt'
+    AGENT_ID = ELEVEN_AGENT_RT_ID
+
+    async def connect(self):
+        if not self.AGENT_ID:
+            raise RuntimeError('set VB_ELEVEN_AGENT_RT_ID to an agent in Realtime voice mode with authentication off')
+        await ElevenAgent.connect(self)
+
+
 S2S = {'gemini': (GeminiVertex, 'gemini-3.8-live', 'Sulafat', 'gemini2.key'),
        'openai': (OpenAIRealtime, 'gpt-realtime-2.1-mini', 'marin', 'openai.key'),
        'live': (GPTLive, 'gpt-live-1', 'noeul', 'openai.key'),
        'eleven-rt': (ElevenRealtime, ELEVEN_RT_MODEL, HAN_AIM, 'elevenlabs.key'),
-       'eleven-agent': (ElevenAgent, ELEVEN_AGENT_LLM, HAN_AIM, 'elevenlabs.key')}
-ELEVEN = ('eleven-rt', 'eleven-agent')
+       'eleven-agent': (ElevenAgent, ELEVEN_AGENT_LLM, HAN_AIM, None if ELEVEN_AGENT_ID else 'elevenlabs.key'),
+       'eleven-agent-rt': (ElevenAgentRealtime, 'eleven_realtime_v1_mini', HAN_AIM, None)}
+ELEVEN = ('eleven-rt', 'eleven-agent', 'eleven-agent-rt')
 
 
 async def run_s2s(kind, prompt, turns, timeout=25.0):
     cls, model, voice, keyname = S2S[kind]
     outdir = os.path.join(RESULTS, 's2s-' + kind)
     log = Log(outdir)
-    if not key(keyname):
+    if keyname and not key(keyname):
         log.summary({'engine': kind, 'skipped': 'no key file ' + keyname})
         return
     eng = cls(model, voice, prompt)
@@ -1085,7 +1114,7 @@ async def run_s2s(kind, prompt, turns, timeout=25.0):
         t_speech = mono()
         t.t_end = await mic.say(ut['pcm24'] if eng.in_sr == 24000 else ut['pcm16'])
         deadline = t.t_end + timeout
-        quiet = {'live': 1.5, 'eleven-agent': 2.5}.get(kind)
+        quiet = {'live': 1.5, 'eleven-agent': 2.5, 'eleven-agent-rt': 2.5}.get(kind)
         if quiet:
             # GPT-Live has no per-turn done event over WebSocket, and the ElevenAgents one is not documented as
             # always sent: the reply also ends after `quiet` seconds without audio
@@ -1158,10 +1187,19 @@ async def run_s2s(kind, prompt, turns, timeout=25.0):
                             'turn_detection': {'type': 'semantic_vad', 'eagerness': ELEVEN_RT_EAGERNESS},
                             'event_types': eng.event_types, 'session_id': eng.session_id})
             conv = eng.session_id
+        elif kind == 'eleven-agent-rt':
+            summary.update({'agent_id': eng.agent_id, 'agent_create': eng.create_log, 'formats': eng.formats,
+                            'realtime_model': model, 'set_on_agent': 'voice mode Realtime; LLM, TTS model and ASR '
+                            'managed by ElevenLabs; turn_v3, eagerness normal, speculative turn on',
+                            'other_event_types': eng.other_types, 'conversation_id': eng.conversation_id})
+            conv = eng.conversation_id
         else:
+            setup = ('set on the agent beforehand (asr scribe_realtime, turn_v3 normal with speculative turn, '
+                     'tts eleven_flash_v2_5, llm %s, reasoning_effort none)' % model) if eng.AGENT_ID else None
             summary.update({'agent_id': eng.agent_id, 'agent_create': eng.create_log, 'formats': eng.formats,
                             'asr': 'scribe_realtime', 'turn_eagerness': ELEVEN_AGENT_EAGERNESS,
                             'tts': 'eleven_flash_v2_5', 'llm': model + ' (reasoning_effort none when accepted)',
+                            'agent_setup': setup,
                             'other_event_types': eng.other_types, 'conversation_id': eng.conversation_id})
             conv = eng.conversation_id
         try:
@@ -1826,7 +1864,7 @@ async def run_named(name, prompt, turns, budget_s):
     return {'name': name, 'status': status, 'seconds': round(mono() - t0, 1)}
 
 
-RUNS = ('gemini', 'openai', 'live', 'cascade', 'cascade-aai', 'eleven-rt', 'eleven-agent')
+RUNS = ('gemini', 'openai', 'live', 'cascade', 'cascade-aai', 'eleven-rt', 'eleven-agent', 'eleven-agent-rt')
 
 
 def main():

@@ -4,8 +4,10 @@
 #
 #   git fetch origin claude/project-thread-p4wjk1
 #   git show origin/claude/project-thread-p4wjk1:tools/voice_bench/run_from_laptop.sh | bash -s -- start
-#   ... | bash -s -- start live # 한 엔진만 다시(gemini|openai|live|cascade|cascade-aai|eleven-rt|eleven-agent), 결과 묶음과 DONE은 같아요
+#   ... | bash -s -- start live # 한 엔진만 다시(gemini|openai|live|cascade|cascade-aai|eleven-rt|eleven-agent|eleven-agent-rt), 결과 묶음과 DONE은 같아요
 #   ... | bash -s -- start gemini,cascade,cascade-aai  # 쉼표로 여러 개를 차례로
+#   ... | VB_ELEVEN_AGENT_ID=agent_... VB_ELEVEN_AGENT_RT_ID=agent_... bash -s -- start eleven-agent,eleven-agent-rt
+#                               # 미리 만든 인증 꺼진 시험 에이전트에 agent_id로만 붙어요(키에 에이전트 권한이 없어도 돼요)
 #   ... | bash -s -- status     # 진행 중이면 RUNNING과 마지막 줄들, 끝나면 DONE
 #   ... | bash -s -- collect    # 끝난 결과(results.tar.gz)를 받아 브랜치의 tools/voice_bench/server-results/ 에 커밋·푸시
 #
@@ -19,7 +21,14 @@ cmd=${1:-status}
 what=${2:-all}
 IFS=',' read -r -a runs <<< "$what"
 for r in "${runs[@]}"; do
-  case "$r" in all|gemini|openai|live|cascade|cascade-aai|eleven-rt|eleven-agent) ;; *) echo "unknown engine: $r" >&2; exit 2 ;; esac
+  case "$r" in all|gemini|openai|live|cascade|cascade-aai|eleven-rt|eleven-agent|eleven-agent-rt) ;; *) echo "unknown engine: $r" >&2; exit 2 ;; esac
+done
+envs=""
+for v in VB_ELEVEN_AGENT_ID VB_ELEVEN_AGENT_RT_ID; do
+  val=${!v:-}
+  [ -z "$val" ] && continue
+  [[ "$val" =~ ^agent_[A-Za-z0-9]+$ ]] || { echo "bad $v" >&2; exit 2; }
+  envs="$envs $v=$val"
 done
 
 latest() { "${SSH[@]}" "$HOST" 'cat ~/marong-voice-bench/LATEST'; }
@@ -32,7 +41,7 @@ case "$cmd" in
     dir="marong-voice-bench/$stamp"
     git archive "$ref" tools/voice_bench/bench_server.py tools/voice_bench/inputs |
       "${SSH[@]}" "$HOST" "mkdir -p ~/$dir && tar -x -C ~/$dir && echo $ref > ~/$dir/COMMIT && echo $dir > ~/marong-voice-bench/LATEST"
-    "${SSH[@]}" "$HOST" "cd ~/$dir/tools/voice_bench && PY=\$HOME/marong-vertex-test/venv-memory2/bin/python && { [ -x \"\$PY\" ] || PY=python3; } && \"\$PY\" -I -c 'import sys; print(\"python\", sys.version.split()[0])' && (nohup \"\$PY\" -I bench_server.py $what > run.log 2>&1 < /dev/null &) && echo started ~/$dir"
+    "${SSH[@]}" "$HOST" "cd ~/$dir/tools/voice_bench && PY=\$HOME/marong-vertex-test/venv-memory2/bin/python && { [ -x \"\$PY\" ] || PY=python3; } && \"\$PY\" -I -c 'import sys; print(\"python\", sys.version.split()[0])' && (nohup env$envs \"\$PY\" -I bench_server.py $what > run.log 2>&1 < /dev/null &) && echo started ~/$dir"
     ;;
   status)
     dir=$(latest)
