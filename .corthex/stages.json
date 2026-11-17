@@ -143,9 +143,14 @@
           "level": "info",
           "message": "CTX-021 앱 자동 업데이트는 DB 표가 없음(TBL 안 씀): 서버는 릴리스 폴더의 release.json·paused 파일(SPEC 3.1), 앱은 SharedPreferences marong_update(SPEC 3.4)",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "persona 1~4단계 05 초안: 019_persona.sql TBL-115~124·127~133(17개 표, talk_graph 스키마), docs/05-erd/persona.md. 시험 DB 두 번 적용·제약 시험 76개 통과. 2차 논의 질문 3개",
+          "at": "2026-11-17"
         }
       ],
-      "updated": "2026-11-17T03:42:26+00:00"
+      "updated": "2026-11-17T04:51:23+00:00"
     },
     "06-api": {
       "state": "in_progress",
