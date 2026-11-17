@@ -1,0 +1,1219 @@
+<title>반려동물 서비스 와이어프레임</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: one column of screens; each state is a figure whose phone frames (360px, 430px, and 1280px for the home) sit in their own sideways scroller. */
+:root {
+  --bg: #f2f1ee;
+  --panel: #ffffff;
+  --ink: #1e1e1c;
+  --muted: #5c5b57;
+  --line: #c4c2bc;
+  --fill: #e6e4df;
+  --fill-2: #d2d0ca;
+  --shade: rgba(20, 20, 18, 0.38);
+  --on-ink: #ffffff;
+  --font: system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151514; --panel: #1f1f1d; --ink: #ecebe7; --muted: #a7a59f; --line: #4a4944;
+    --fill: #2b2a27; --fill-2: #3b3a36; --shade: rgba(0, 0, 0, 0.6); --on-ink: #151514; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #151514; --panel: #1f1f1d; --ink: #ecebe7; --muted: #a7a59f; --line: #4a4944;
+  --fill: #2b2a27; --fill-2: #3b3a36; --shade: rgba(0, 0, 0, 0.6); --on-ink: #151514; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font-family: var(--font); }
+.wrap { max-width: 1040px; margin: 0 auto; padding-block: 32px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 40px; }
+.intro { display: flex; flex-direction: column; gap: 12px; max-width: 68ch; word-break: keep-all; overflow-wrap: break-word; }
+.intro h1 { margin: 0; font-size: 26px; line-height: 1.25; text-wrap: balance; }
+.intro p { margin: 0; line-height: 1.6; color: var(--muted); }
+.intro ul { margin: 0; padding-left: 20px; line-height: 1.6; color: var(--muted); }
+.toc { display: flex; flex-wrap: wrap; gap: 8px; }
+.toc a { color: var(--ink); text-decoration: none; border: 1px solid var(--line); border-radius: 999px; padding: 8px 12px; min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+.toc a:hover, .toc a:focus-visible { background: var(--fill); outline: none; }
+.toc a span { color: var(--muted); font-variant-numeric: tabular-nums; }
+section.scr { display: flex; flex-direction: column; gap: 20px; border-top: 1px solid var(--line); padding-top: 24px; }
+section.scr > header { display: flex; flex-direction: column; gap: 6px; max-width: 72ch; word-break: keep-all; overflow-wrap: break-word; }
+section.scr h2 { margin: 0; font-size: 21px; }
+section.scr h2 code { font-family: var(--mono); font-size: 13px; color: var(--muted); font-weight: 400; }
+section.scr header p { margin: 0; line-height: 1.6; color: var(--muted); }
+figure.st { margin: 0; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+figure.st figcaption { display: flex; flex-direction: column; gap: 2px; max-width: 80ch; word-break: keep-all; overflow-wrap: break-word; }
+figure.st figcaption b { font-family: var(--mono); font-size: 14px; }
+figure.st figcaption span { color: var(--muted); line-height: 1.5; font-size: 14px; }
+.pair { display: flex; gap: 28px; overflow-x: auto; padding-bottom: 8px; align-items: flex-start; }
+.col { display: flex; flex-direction: column; gap: 6px; flex: none; }
+.col > small { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* phone frames: greys, system font, placeholder text only */
+.ph { position: relative; box-sizing: border-box; min-height: 740px; word-break: keep-all; overflow-wrap: break-word; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; font-size: 14px; line-height: 1.45; padding-bottom: 16px; display: flex; flex-direction: column; }
+.ph.fixed { height: 740px; }
+.ph.desk { border-radius: 8px; background: var(--bg); align-items: center; padding-bottom: 0; }
+.c480 { width: 480px; max-width: 100%; min-height: 740px; background: var(--panel); border-left: 1px solid var(--line); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding-bottom: 16px; box-sizing: border-box; }
+.fold { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--muted); pointer-events: none; }
+.fold span { position: absolute; right: 8px; top: 2px; font-size: 11px; color: var(--muted); background: var(--panel); padding: 0 4px; }
+.bar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 52px; border-bottom: 1px solid var(--line); padding: 0 8px; flex: none; }
+.bar .l { justify-self: start; min-height: 48px; display: flex; align-items: center; padding: 0 8px; font-size: 14px; }
+.bar .t { font-weight: 700; font-size: 15px; text-align: center; }
+.bar .r { justify-self: end; display: flex; gap: 6px; }
+.ib { min-width: 44px; height: 40px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 10px; display: grid; place-items: center; font-size: 12px; padding: 0 8px; }
+.ai { padding: 6px 16px; background: var(--fill); font-size: 13px; flex: none; }
+.band { margin: 10px 16px 0; border: 1px solid var(--ink); border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; line-height: 1.45; }
+.band .lnk { min-height: 32px; font-weight: 600; flex: none; }
+.band.small { justify-content: center; border-style: dashed; padding: 6px 12px; }
+.ttl { margin: 14px 16px 0; font-size: 18px; font-weight: 700; line-height: 1.35; }
+.p { margin: 8px 16px 0; font-size: 14px; line-height: 1.5; }
+.p.m { color: var(--muted); font-size: 13px; }
+.p.c { text-align: center; }
+.pic { position: relative; max-width: 100%; margin: 10px 16px 0; border: 1px solid var(--line); border-radius: 6px; display: grid; place-items: center; text-align: center; box-sizing: border-box;
+  background: linear-gradient(to top right, transparent calc(50% - 0.6px), var(--fill-2) 50%, transparent calc(50% + 0.6px)), linear-gradient(to top left, transparent calc(50% - 0.6px), var(--fill-2) 50%, transparent calc(50% + 0.6px)), var(--fill); }
+.pic.skel { background: var(--fill); }
+.pic.blank { background: var(--panel); border-style: dashed; }
+.pic.c { margin-left: auto; margin-right: auto; }
+.pic > span { background: var(--panel); padding: 4px 8px; border-radius: 6px; font-size: 13px; max-width: 80%; }
+.pic.dim::after { content: ""; position: absolute; inset: 0; background: var(--panel); opacity: 0.55; }
+.pic > b { position: relative; z-index: 1; background: var(--ink); color: var(--on-ink); padding: 8px 12px; border-radius: 8px; font-weight: 600; font-size: 13px; max-width: 80%; }
+.pic > i { position: absolute; width: 34px; height: 34px; border: 1.5px dashed var(--ink); border-radius: 8px; font-style: normal; font-size: 10px; display: grid; place-items: center; background: var(--panel); }
+.cap { margin: 4px 16px 0; text-align: right; font-size: 12px; color: var(--muted); }
+.face { border-radius: 50%; margin: 40px auto 0; background: var(--fill); border: 1px solid var(--line); display: grid; place-items: center; text-align: center; font-size: 12px; color: var(--muted); flex: none; padding: 8px; box-sizing: border-box; }
+.msg { margin: 18px 24px 0; text-align: center; display: flex; flex-direction: column; gap: 6px; }
+.msg p { margin: 0; font-size: 16px; line-height: 1.5; text-wrap: balance; }
+.msg small { font-size: 13px; color: var(--muted); line-height: 1.5; }
+.trace { font-family: var(--mono); font-size: 11px; color: var(--muted); text-align: center; margin-top: 8px; }
+.bw { margin: 12px 16px 0; display: flex; flex-direction: column; gap: 4px; }
+.btn { min-height: 52px; box-sizing: border-box; border-radius: 12px; background: var(--ink); color: var(--on-ink); display: grid; place-items: center; text-align: center; padding: 6px 10px; font-weight: 600; font-size: 14px; }
+.btn.sec { background: transparent; color: var(--ink); border: 1px solid var(--ink); }
+.btn.off { background: var(--fill); color: var(--muted); border: 1px solid var(--line); }
+.btn.danger { background: transparent; color: var(--ink); border: 2px solid var(--ink); text-decoration: underline; }
+.btn.prov { background: var(--fill-2); color: var(--ink); }
+.why { font-size: 12px; color: var(--muted); line-height: 1.4; }
+.btn2 { margin: 12px 16px 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.lnkrow { margin: 10px 16px 0; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.lnk { min-height: 44px; display: inline-flex; align-items: center; padding: 0 4px; font-size: 14px; text-decoration: underline; text-underline-offset: 3px; }
+.lnk.off { color: var(--muted); text-decoration: none; opacity: 0.6; }
+.err-t { margin: 6px 16px 0; font-size: 13px; font-weight: 600; line-height: 1.45; }
+.sk { background: var(--fill); border-radius: 6px; height: 16px; margin: 10px 16px 0; }
+.note { margin: 10px 16px 0; padding: 10px 12px; background: var(--fill); border-radius: 10px; font-size: 13px; line-height: 1.45; display: flex; flex-direction: column; gap: 8px; }
+.note .btn { min-height: 44px; }
+.note .btn2 { margin: 0; }
+.none { margin: 120px 24px 0; border: 1px dashed var(--muted); border-radius: 12px; padding: 24px; text-align: center; color: var(--muted); line-height: 1.6; }
+.spin { margin: 14px 16px 0; text-align: center; font-size: 13px; color: var(--muted); }
+.spin::before { content: "◌ "; }
+.spacer { flex: 1; min-height: 12px; }
+.gauge { margin: 10px 16px 0; display: flex; flex-direction: column; gap: 6px; }
+.gauge .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; }
+.gauge .top u { font-weight: 600; text-underline-offset: 3px; min-height: 32px; display: inline-flex; align-items: center; }
+.gauge .track { height: 8px; border-radius: 4px; background: var(--fill); overflow: hidden; }
+.gauge .track em { display: block; height: 100%; background: var(--muted); }
+.cards { margin: 12px 16px 0; display: flex; flex-direction: column; gap: 10px; }
+.card { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 12px; align-items: center; border: 1px solid var(--line); border-radius: 14px; padding: 10px; }
+.card > i { width: 64px; height: 64px; border-radius: 12px; border: 1px solid var(--line); box-sizing: border-box; background: linear-gradient(to top right, transparent calc(50% - 0.6px), var(--fill-2) 50%, transparent calc(50% + 0.6px)), var(--fill); }
+.card > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.card b { font-size: 15px; }
+.card span { font-size: 12px; color: var(--muted); }
+.card em { font-style: normal; font-size: 12px; border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; }
+.card.dim { opacity: 0.5; }
+.card.sk > i, .card.sk b { background: var(--fill); border-color: var(--fill); }
+.card.sk b { height: 16px; width: 60%; border-radius: 6px; }
+.card.dash { border-style: dashed; }
+.chips { margin: 14px 16px 0; display: flex; flex-direction: column; gap: 8px; }
+.chips > span { font-size: 13px; color: var(--muted); }
+.chips > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { min-height: 40px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 999px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.chip.on { border: 2px solid var(--ink); font-weight: 700; }
+.chip.sk { background: var(--fill); border-color: var(--fill); width: 72px; }
+.chip.dim { opacity: 0.5; }
+.fld { margin: 12px 16px 0; display: flex; flex-direction: column; gap: 6px; }
+.fld > span { font-size: 13px; color: var(--muted); }
+.fld > div { position: relative; min-height: 48px; border: 1px solid var(--line); border-radius: 10px; padding: 12px; box-sizing: border-box; font-size: 15px; }
+.fld > div.hint { color: var(--muted); }
+.fld > div.err { border: 2px solid var(--ink); }
+.fld > div.off { background: var(--fill); }
+.fld > div.multi { min-height: 88px; padding-bottom: 26px; }
+.fld > div small { position: absolute; right: 10px; bottom: 6px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.fld > b { font-size: 13px; }
+.fld.sk > div { background: var(--fill); border-color: var(--fill); }
+.tiles { margin: 12px 16px 0; display: grid; grid-template-columns: repeat(var(--c, 2), minmax(0, 1fr)); gap: 10px; }
+.tile { border: 1px solid var(--line); border-radius: 12px; padding: 6px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; position: relative; min-width: 0; }
+.tile > i { aspect-ratio: 1; border-radius: 8px; display: grid; place-items: center; font-style: normal; color: var(--muted); font-size: 11px; text-align: center;
+  background: linear-gradient(to top right, transparent calc(50% - 0.6px), var(--fill-2) 50%, transparent calc(50% + 0.6px)), linear-gradient(to top left, transparent calc(50% - 0.6px), var(--fill-2) 50%, transparent calc(50% + 0.6px)), var(--fill); }
+.tile.on { border: 2px solid var(--ink); }
+.tile.on::after { content: "✓"; position: absolute; top: 10px; right: 10px; background: var(--ink); color: var(--on-ink); width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; }
+.tile.sk > i, .tile.wait > i { background: var(--fill); }
+.tile.sk b { background: var(--fill); height: 12px; border-radius: 4px; }
+.tile.wait { border-style: dashed; }
+.tile.txt > i { aspect-ratio: auto; min-height: 72px; }
+.tile b { font-size: 13px; }
+.tile small { color: var(--muted); font-size: 12px; line-height: 1.35; }
+.photos { margin: 12px 16px 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.photos span { aspect-ratio: 1; border: 1.5px dashed var(--line); border-radius: 12px; display: grid; place-items: center; font-size: 12px; color: var(--muted); position: relative; text-align: center; padding: 4px; box-sizing: border-box; }
+.photos span.has { border-style: solid; color: var(--ink); background: linear-gradient(to top right, transparent calc(50% - 0.6px), var(--fill-2) 50%, transparent calc(50% + 0.6px)), var(--fill); }
+.photos span.err { border: 2px solid var(--ink); }
+.photos span.dim { opacity: 0.45; }
+.photos span.sk { background: var(--fill); border-color: var(--fill); }
+.photos span u { position: absolute; top: 4px; right: 4px; text-decoration: none; width: 28px; height: 28px; border-radius: 50%; background: var(--ink); color: var(--on-ink); display: grid; place-items: center; font-size: 13px; }
+.checks { margin: 10px 16px 0; display: flex; flex-direction: column; }
+.ck { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 10px; align-items: center; min-height: 52px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.ck > i { width: 22px; height: 22px; border: 1.5px solid var(--muted); border-radius: 6px; box-sizing: border-box; }
+.ck.on > i { background: var(--ink); border-color: var(--ink); }
+.ck.bad > i { border: 3px solid var(--ink); }
+.ck.radio > i { border-radius: 50%; }
+.ck.radio.on > i { background: var(--panel); border: 7px solid var(--ink); }
+.ck u { font-size: 13px; color: var(--muted); text-underline-offset: 3px; min-height: 40px; display: inline-flex; align-items: center; }
+.ck em { grid-column: 2 / 4; font-style: normal; font-size: 12px; color: var(--muted); margin-top: -8px; padding-bottom: 8px; line-height: 1.4; }
+.ck em.b { color: var(--ink); font-weight: 600; }
+.prog { margin: 16px 16px 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.prog > div { height: 8px; background: var(--fill); border-radius: 4px; overflow: hidden; }
+.prog em { display: block; height: 100%; background: var(--ink); }
+.rows { margin: 10px 0 0; display: flex; flex-direction: column; }
+.rw { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; min-height: 52px; padding: 6px 16px; box-sizing: border-box; border-bottom: 1px solid var(--line); }
+.rw > b { font-weight: 500; font-size: 14px; }
+.rw > span { font-size: 13px; color: var(--muted); text-align: right; }
+.rw > em { grid-column: 1 / 3; font-style: normal; font-size: 12px; color: var(--muted); line-height: 1.4; }
+.rw > em.b { color: var(--ink); font-weight: 600; }
+.rw.red > b { font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.rw.off { opacity: 0.5; }
+.rw.sk > b { background: var(--fill); height: 14px; border-radius: 6px; width: 50%; }
+.rw .tg { width: 44px; height: 26px; border-radius: 13px; border: 1.5px solid var(--muted); position: relative; box-sizing: border-box; }
+.rw .tg::after { content: ""; position: absolute; top: 3px; left: 3px; width: 17px; height: 17px; border-radius: 50%; background: var(--muted); }
+.rw .tg.on { background: var(--ink); border-color: var(--ink); }
+.rw .tg.on::after { left: 21px; background: var(--on-ink); }
+.rw .act { font-size: 13px; color: var(--ink); border: 1px solid var(--ink); border-radius: 10px; min-height: 40px; display: grid; place-items: center; padding: 0 10px; }
+.kv { margin: 10px 16px 0; display: flex; flex-direction: column; }
+.kv div { display: flex; justify-content: space-between; gap: 12px; min-height: 44px; align-items: center; border-bottom: 1px solid var(--line); font-size: 14px; }
+.kv div span:last-child { font-weight: 600; text-align: right; }
+.box { margin: 12px 16px 0; border: 1px solid var(--line); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.box > b { font-size: 15px; }
+.box > span { font-size: 13px; color: var(--muted); line-height: 1.45; }
+.box .bw, .box .btn2 { margin: 6px 0 0; }
+.foldrow { margin: 10px 16px 0; min-height: 44px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.month { display: flex; justify-content: space-between; align-items: center; margin: 8px 8px 0; }
+.month b { font-size: 16px; }
+.nav { display: flex; justify-content: space-between; margin: 10px 16px 0; }
+.quote { margin: 10px 16px 0; border-left: 3px solid var(--line); padding: 6px 10px; font-size: 13px; color: var(--muted); line-height: 1.45; }
+.bubs { margin: 10px 12px 0; display: flex; flex-direction: column; gap: 8px; }
+.bub { max-width: 78%; padding: 8px 12px; border-radius: 14px; font-size: 14px; line-height: 1.45; box-sizing: border-box; }
+.bub.l { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); border-top-left-radius: 4px; }
+.bub.r { align-self: flex-end; background: var(--fill); }
+.bub.c { align-self: center; max-width: 90%; color: var(--muted); font-size: 12px; padding: 2px 8px; text-align: center; }
+.bub .fail { display: block; font-size: 12px; font-weight: 600; margin-top: 4px; text-decoration: underline; text-underline-offset: 3px; }
+.bub.pic > i { display: block; width: 160px; max-width: 100%; aspect-ratio: 1; border-radius: 8px; margin-bottom: 6px; font-style: normal; font-size: 11px; color: var(--muted);
+  background: linear-gradient(to top right, transparent calc(50% - 0.6px), var(--fill-2) 50%, transparent calc(50% + 0.6px)), var(--fill); }
+.bub.dots { letter-spacing: 3px; color: var(--muted); }
+.bub.sk { background: var(--fill); border-color: var(--fill); height: 36px; }
+.callrow { align-self: stretch; border: 1px dashed var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13px; color: var(--muted); }
+.crisis { align-self: stretch; border: 2px solid var(--ink); border-radius: 12px; padding: 10px 12px; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 4px; }
+.crisis b { font-family: var(--mono); font-size: 14px; text-decoration: underline; text-underline-offset: 3px; }
+.chatin { margin: 10px 12px 0; display: flex; gap: 8px; align-items: flex-end; flex: none; }
+.chatin .box2 { flex: 1; min-height: 44px; border: 1px solid var(--line); border-radius: 22px; padding: 11px 14px; box-sizing: border-box; color: var(--muted); font-size: 14px; }
+.chatin .box2.val { color: var(--ink); }
+.chatin .box2.off { background: var(--fill); }
+.chatin .send { min-width: 60px; min-height: 44px; border-radius: 22px; background: var(--ink); color: var(--on-ink); display: grid; place-items: center; font-size: 13px; font-weight: 600; }
+.chatin .send.off { background: var(--fill); color: var(--muted); }
+.tabs { margin-top: auto; border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(var(--n, 3), minmax(0, 1fr)); min-height: 56px; flex: none; }
+.tabs span { display: grid; place-items: center; font-size: 12px; color: var(--muted); }
+.tabs span.on { color: var(--ink); font-weight: 700; }
+.ph > .tabs { margin-bottom: -16px; }
+.c480 > .tabs { margin-bottom: -16px; }
+.seg { margin: 12px 16px 0; display: flex; gap: 8px; overflow: hidden; }
+.seg span { flex: none; min-height: 40px; display: grid; place-items: center; font-size: 13px; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px; }
+.seg span.on { background: var(--ink); color: var(--on-ink); border-color: var(--ink); font-weight: 700; }
+.shade { position: absolute; inset: 0; background: var(--shade); }
+.dimpage { opacity: 0.35; display: flex; flex-direction: column; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: 86%; overflow: hidden; background: var(--panel); border-radius: 18px 18px 0 0; border-top: 1px solid var(--line); padding: 8px 0 16px; display: flex; flex-direction: column; }
+.sheet .grab { width: 40px; height: 4px; border-radius: 2px; background: var(--fill-2); margin: 0 auto 4px; }
+.sh-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 0 8px 0 16px; }
+.sh-h b { font-size: 17px; }
+.toast { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); background: var(--ink); color: var(--on-ink); border-radius: 999px; padding: 10px 16px; font-size: 13px; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+
+<main class="wrap">
+  <div class="intro">
+    <h1>반려동물 서비스 와이어프레임</h1>
+    <p>08단계 화면 상태를 그린 회색 틀이에요. 원본은 저장소의 <code>docs/08-screens/pet.md</code>(SCR-140~162)이고, 이 쪽과 다르면 원본이 맞아요. 상태마다 360px와 430px 두 폭으로 그렸고, 홈은 1280px도 한 번 그렸어요. 그린 때: 2026-11-17(한국 시각).</p>
+    <ul>
+      <li>회색, 시스템 글꼴, 자리 글만 써요. 색·글꼴·그림 느낌은 09단계 목업에서 정해요.</li>
+      <li>점선은 첫 화면이 끝나는 곳(높이 약 740px)이에요. 그 아래는 스크롤해야 보여요.</li>
+      <li>'합성 그림'은 배경·표정·입은 것을 겹친 아이 모습 자리예요(명세 3.6). 아이 이름은 예로 '콩이', 다른 아이는 '보리'예요.</li>
+      <li>화면 글은 존댓말이고, 아이가 하는 말(말풍선, 일기, 편지)만 반말이에요.</li>
+      <li>'◌'는 기다리는 동안의 작은 움직임 자리예요.</li>
+    </ul>
+    <nav class="toc" id="toc" aria-label="화면 목록"></nav>
+  </div>
+  <div id="screens"></div>
+  <noscript><p>이 쪽은 스크립트로 틀을 그려요. 스크립트를 켜 주세요.</p></noscript>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  var WIDTHS = [360, 430];
+  var FOLD = 740;
+  var P = '콩이';
+  var TRACE = '추적 번호 4bf92f3577b34da6';
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined && text !== null) e.textContent = text;
+    return e;
+  }
+  function add(parent, kids) { kids.forEach(function (k) { if (k) parent.append(k); }); return parent; }
+
+  var R = {
+    bar: function (o) {
+      var e = el('div', 'bar');
+      e.append(el('span', 'l', o.back ? '‹ ' + o.back : (o.left || '')));
+      e.append(el('span', 't', o.title || ''));
+      var r = el('span', 'r');
+      (o.right || []).forEach(function (x) { r.append(el('span', 'ib', x)); });
+      e.append(r);
+      return e;
+    },
+    ai: function () { return el('div', 'ai', 'AI가 만든 캐릭터예요'); },
+    band: function (o) {
+      var e = el('div', 'band' + (o.small ? ' small' : ''));
+      e.append(el('span', '', o.text));
+      if (o.link) e.append(el('span', 'lnk', o.link));
+      return e;
+    },
+    h: function (t) { return el('div', 'ttl', t); },
+    p: function (t) { return el('div', 'p', t); },
+    pm: function (t) { return el('div', 'p m', t); },
+    pc: function (t) { return el('div', 'p m c', t); },
+    pic: function (o) {
+      var e = el('div', 'pic' + (o.dim ? ' dim' : '') + (o.skel ? ' skel' : '') + (o.blank ? ' blank' : '') + (o.w ? ' c' : ''));
+      e.style.aspectRatio = o.ratio || '3 / 2';
+      if (o.w) e.style.width = o.w + 'px';
+      if (o.label) e.append(el('span', '', o.label));
+      if (o.overlay) e.append(el('b', '', o.overlay));
+      (o.stickers || []).forEach(function (s) { var i = el('i', '', s[2] || '스티커'); i.style.left = s[0] + '%'; i.style.top = s[1] + '%'; e.append(i); });
+      return e;
+    },
+    cap: function (t) { return el('div', 'cap', t); },
+    face: function (o) {
+      var e = el('div', 'face', o.t);
+      var s = o.size || 160;
+      e.style.width = s + 'px'; e.style.height = s + 'px';
+      if (o.skel) { e.textContent = ''; }
+      return e;
+    },
+    msg: function (o) {
+      var e = el('div', 'msg');
+      e.append(el('p', '', o.text));
+      if (o.small) e.append(el('small', '', o.small));
+      return e;
+    },
+    trace: function () { return el('div', 'trace', TRACE); },
+    btn: function (o) {
+      var w = el('div', 'bw');
+      var cls = 'btn' + (o.sec ? ' sec' : '') + (o.off ? ' off' : '') + (o.danger ? ' danger' : '') + (o.prov ? ' prov' : '');
+      w.append(el('div', cls, o.label));
+      if (o.why) w.append(el('div', 'why', o.why));
+      return w;
+    },
+    btn2: function (list) {
+      var e = el('div', 'btn2');
+      list.forEach(function (b) {
+        var o = b[1] || {};
+        e.append(el('div', 'btn' + (o.sec ? ' sec' : '') + (o.off ? ' off' : '') + (o.danger ? ' danger' : ''), b[0]));
+      });
+      return e;
+    },
+    lnk: function (list) {
+      var e = el('div', 'lnkrow');
+      (Array.isArray(list) ? list : [list]).forEach(function (t) { e.append(el('span', 'lnk', t)); });
+      return e;
+    },
+    err: function (t) { return el('div', 'err-t', t); },
+    sk: function (list) {
+      var f = document.createDocumentFragment();
+      list.forEach(function (w) { var s = el('div', 'sk'); s.style.width = 'calc(' + w + ' - 32px)'; f.append(s); });
+      return f;
+    },
+    note: function (o) {
+      var e = el('div', 'note');
+      e.append(el('div', '', o.text));
+      if (o.btn) e.append(el('div', 'btn' + (o.sec ? ' sec' : ''), o.btn));
+      if (o.btn2) e.append(R.btn2(o.btn2));
+      return e;
+    },
+    none: function (t) { return el('div', 'none', t); },
+    spin: function (t) { return el('div', 'spin', t); },
+    spacer: function () { return el('div', 'spacer'); },
+    gauge: function (o) {
+      var e = el('div', 'gauge');
+      var top = el('div', 'top');
+      top.append(el('span', '', o.text));
+      if (o.link) top.append(el('u', '', o.link));
+      e.append(top);
+      var tr = el('div', 'track'); var m = el('em'); m.style.width = (o.pct || 0) + '%'; tr.append(m); e.append(tr);
+      return e;
+    },
+    cards: function (list) {
+      var e = el('div', 'cards');
+      list.forEach(function (c) {
+        var d = el('div', 'card' + (c.dim ? ' dim' : '') + (c.sk ? ' sk' : '') + (c.dash ? ' dash' : ''));
+        d.append(el('i'));
+        var t = el('div'); t.append(el('b', '', c.sk ? '' : c.t)); if (c.s) t.append(el('span', '', c.s)); d.append(t);
+        d.append(c.tag ? el('em', '', c.tag) : el('span'));
+        e.append(d);
+      });
+      return e;
+    },
+    chips: function (o) {
+      var e = el('div', 'chips');
+      if (o.label) e.append(el('span', '', o.label));
+      var d = el('div');
+      (o.items || []).forEach(function (x) {
+        var on = (o.on || []).indexOf(x) >= 0;
+        d.append(el('span', 'chip' + (on ? ' on' : '') + (o.dim ? ' dim' : '') + (o.sk ? ' sk' : ''), o.sk ? '' : x));
+      });
+      e.append(d);
+      return e;
+    },
+    fld: function (o) {
+      var e = el('div', 'fld' + (o.sk ? ' sk' : ''));
+      if (o.label) e.append(el('span', '', o.label));
+      var v = o.value != null;
+      var d = el('div', (v ? '' : 'hint') + (o.err ? ' err' : '') + (o.off ? ' off' : '') + (o.multi ? ' multi' : ''), o.sk ? '' : (v ? o.value : (o.hint || '')));
+      if (o.count) d.append(el('small', '', o.count));
+      e.append(d);
+      if (o.errText) e.append(el('b', '', o.errText));
+      return e;
+    },
+    tiles: function (o) {
+      var e = el('div', 'tiles');
+      e.style.setProperty('--c', o.c || 2);
+      o.items.forEach(function (t) {
+        var d = el('div', 'tile' + (t.on ? ' on' : '') + (t.sk ? ' sk' : '') + (t.wait ? ' wait' : '') + (o.txt ? ' txt' : ''));
+        d.append(el('i', '', t.i || (t.wait ? '그리는 중 ◌' : '')));
+        if (t.l || t.sk) d.append(el('b', '', t.l || ''));
+        if (t.s) d.append(el('small', '', t.s));
+        e.append(d);
+      });
+      return e;
+    },
+    photos: function (list) {
+      var e = el('div', 'photos');
+      list.forEach(function (p) {
+        var s = el('span', (p.has ? 'has' : '') + (p.err ? ' err' : '') + (p.dim ? ' dim' : '') + (p.sk ? ' sk' : ''), p.sk ? '' : p.l);
+        if (p.has) s.append(el('u', '', '×'));
+        e.append(s);
+      });
+      return e;
+    },
+    checks: function (list) {
+      var e = el('div', 'checks');
+      list.forEach(function (c) {
+        var d = el('div', 'ck' + (c.on ? ' on' : '') + (c.bad ? ' bad' : '') + (c.radio ? ' radio' : ''));
+        d.append(el('i')); d.append(el('span', '', c.t)); d.append(c.more ? el('u', '', c.more) : el('span'));
+        if (c.sub) d.append(el('em', c.bad ? 'b' : '', c.sub));
+        e.append(d);
+      });
+      return e;
+    },
+    prog: function (o) {
+      var e = el('div', 'prog');
+      e.append(el('span', '', o.text));
+      var t = el('div'); var m = el('em'); m.style.width = o.pct + '%'; t.append(m); e.append(t);
+      return e;
+    },
+    rows: function (list) {
+      var e = el('div', 'rows');
+      list.forEach(function (r) {
+        var d = el('div', 'rw' + (r.red ? ' red' : '') + (r.off ? ' off' : '') + (r.sk ? ' sk' : ''));
+        d.append(el('b', '', r.sk ? '' : r.t));
+        if (r.tg !== undefined) { d.append(el('span', 'tg' + (r.tg ? ' on' : ''))); }
+        else if (r.act) { d.append(el('span', 'act', r.act)); }
+        else { d.append(el('span', '', r.r || (r.red || r.sk || r.plain ? '' : '›'))); }
+        if (r.sub) d.append(el('em', r.bold ? 'b' : '', r.sub));
+        e.append(d);
+      });
+      return e;
+    },
+    kv: function (list) {
+      var e = el('div', 'kv');
+      list.forEach(function (k) { var d = el('div'); d.append(el('span', '', k[0])); d.append(el('span', '', k[1])); e.append(d); });
+      return e;
+    },
+    box: function (o) {
+      var e = el('div', 'box');
+      e.append(el('b', '', o.t));
+      (o.p || []).forEach(function (t) { e.append(el('span', '', t)); });
+      if (o.btn) e.append(R.btn(o.btn));
+      return e;
+    },
+    foldrow: function (t) { var e = el('div', 'foldrow'); e.append(el('span', '', t)); e.append(el('span', '', '펼치기 ▾')); return e; },
+    month: function (o) {
+      var e = el('div', 'month');
+      e.append(el('span', 'lnk' + (o.prevOff ? ' off' : ''), '‹ 지난달'));
+      e.append(el('b', '', o.text));
+      e.append(el('span', 'lnk' + (o.nextOff ? ' off' : ''), '다음 달 ›'));
+      return e;
+    },
+    nav: function (o) {
+      var e = el('div', 'nav');
+      e.append(el('span', 'lnk' + (o.prevOff ? ' off' : ''), '‹ 앞 날'));
+      e.append(el('span', 'lnk' + (o.nextOff ? ' off' : ''), '뒷 날 ›'));
+      return e;
+    },
+    quote: function (t) { return el('div', 'quote', t); },
+    bubs: function (list) {
+      var e = el('div', 'bubs');
+      list.forEach(function (b) {
+        var k = b[0], t = b[1];
+        if (k === 'call') { e.append(el('div', 'callrow', t)); return; }
+        if (k === 'crisis') {
+          var c = el('div', 'crisis');
+          c.append(el('span', '', '마음이 많이 힘들면 지금 이야기할 수 있는 곳이 있어요.'));
+          c.append(el('b', '', '109 자살예방상담전화(24시간)'));
+          c.append(el('span', '', '이미 다쳤다면 119'));
+          e.append(c); return;
+        }
+        if (k === 'typing') { e.append(el('div', 'bub l dots', '• • •')); return; }
+        if (k === 'sk') { var s = el('div', 'bub sk ' + t); s.style.width = (b[2] || 50) + '%'; e.append(s); return; }
+        if (k === 'picb') { var p = el('div', 'bub l pic'); p.append(el('i', '', '')); p.append(document.createTextNode(t)); e.append(p); return; }
+        if (k === 'fail') { var f = el('div', 'bub r', t); f.append(el('span', 'fail', '보내지 못했어요 · 다시 보내기')); e.append(f); return; }
+        e.append(el('div', 'bub ' + k, t));
+      });
+      return e;
+    },
+    input: function (o) {
+      var e = el('div', 'chatin');
+      var v = o.value != null;
+      e.append(el('div', 'box2' + (v ? ' val' : '') + (o.off ? ' off' : ''), v ? o.value : (o.hint || P + '에게 말 걸기')));
+      e.append(el('div', 'send' + (o.off || !v ? ' off' : ''), '보내기'));
+      return e;
+    },
+    tabs: function (o) {
+      var items = (o && o.items) || ['홈', '상점', '내 정보'];
+      var e = el('div', 'tabs'); e.style.setProperty('--n', items.length);
+      items.forEach(function (t) { e.append(el('span', t === (o && o.on) ? 'on' : '', t)); });
+      return e;
+    },
+    seg: function (o) {
+      var e = el('div', 'seg');
+      o.items.forEach(function (t) { e.append(el('span', t === o.on ? 'on' : '', t)); });
+      return e;
+    }
+  };
+
+  function block(b, w) {
+    var f = R[b[0]];
+    if (!f) throw new Error('unknown block ' + b[0]);
+    return f(b[1] === undefined ? {} : b[1], w);
+  }
+
+  /* ---------- small builders ---------- */
+  function bar(title, back, right) { return ['bar', { title: title, back: back, right: right }]; }
+  function msg(t, s) { return ['msg', { text: t, small: s }]; }
+  function btn(l, o) { o = o || {}; o.label = l; return ['btn', o]; }
+  function sec(l, o) { o = o || {}; o.sec = true; return btn(l, o); }
+  function off(l, why) { return btn(l, { off: true, why: why }); }
+  function band(t, l) { return ['band', { text: t, link: l }]; }
+  var B_OFF = band('연결이 없어요. 연결되면 다시 불러올게요.');
+  var B_CONSENT = band('사진과 대화를 해외 AI 회사로 보내는 데 동의해야 쓸 수 있어요. 설정에서 바꿀 수 있어요.', '설정에서 바꾸기');
+  var B_BUDGET = band('오늘은 새 그림과 통화가 쉬어요. 글로는 계속 이야기할 수 있어요.');
+  var WERR = [['err', '잠시 뒤 다시 해 주세요.'], ['lnk', '다시 해 보기'], ['trace']];
+  function loadErr(title, back, tabs) {
+    var b = [bar(title, back), ['spacer'], msg('잠시 뒤 다시 해 주세요.'), btn('다시 해 보기'), ['trace'], ['spacer']];
+    if (tabs) b.push(['tabs', tabs]);
+    return b;
+  }
+  function nf(title, back, to) { return [bar(title, back), ['spacer'], msg('찾을 수 없어요.'), btn(to), ['spacer']]; }
+  function stale(title, back, to) { return [bar(title, back), ['none', '서버 상태에 맞는 ' + to + ' 주소로 바꾸고 그 화면을 그려요']]; }
+  function sheet(under, title, blocks) { return { under: under, title: title, blocks: blocks }; }
+  function cat(a) { var out = []; for (var i = 0; i < arguments.length; i++) out = out.concat(arguments[i]); return out; }
+  function payBlocks(name, price, refund, extra) {
+    return cat([['kv', [['상품', name], ['원화 총액', price + ', 부가세 포함']]], ['pm', refund], ['foldrow', '사업자 정보']], extra || [btn('결제하기')]);
+  }
+  var IDENT = [['note', { text: '첫 결제 전에 본인인증을 한 번 해 주세요.', btn: '본인인증 하기' }]];
+
+  /* ---------- SCR-140 home ---------- */
+  var CARDS = [
+    { t: P, s: '개 · 어제 이야기했어요' },
+    { t: '보리 ✿ 추억', s: '고양이 · 11월 10일' }
+  ];
+  var MAKING = { t: '만들고 있는 아이', s: '특징표를 기다려요', tag: '이어서', dash: true };
+  function signedOut() {
+    return [bar('마롱이'), ['pic', { label: '그려진 개와 고양이', ratio: '4 / 3' }], ['h', '우리 아이 사진으로 그림 캐릭터를 만들고 이야기해요'], ['pm', 'AI가 만든 캐릭터와 이야기하는 서비스예요. 진짜 그 아이가 아니에요'], btn('카카오로 시작', { prov: true }), btn('구글로 시작', { sec: true }), ['pc', '만 19세 이상만 쓸 수 있어요'], ['lnk', ['이용약관', '개인정보 처리방침']]];
+  }
+  function home(o) {
+    o = o || {};
+    var b = [bar('마롱이')];
+    if (o.band) b.push(o.band);
+    b.push(['gauge', { pct: 60, text: '오늘 한도 60% · 새벽 4시에 다시 차요' }]);
+    var cards = (o.cards || CARDS).map(function (c) { var x = Object.assign({}, c); if (o.dim) x.dim = true; return x; });
+    if (!o.noMaking) cards.push(Object.assign({}, MAKING, o.dim ? { dim: true } : {}));
+    b.push(['cards', cards]);
+    if (o.archived) {
+      b.push(['rows', [{ t: '보관한 아이 2', r: '접기 ▴' }]]);
+      b.push(['cards', [{ t: '두부', s: '보관함 · 10월 2일', dim: true }, { t: '감자', s: '보관함 · 9월 28일', dim: true }]]);
+    }
+    b.push(o.full ? off('아이 만들기', '아이는 5마리까지 만들 수 있어요.') : (o.offline ? off('아이 만들기') : btn('아이 만들기')));
+    b.push(['tabs', { on: '홈' }]);
+    return b;
+  }
+
+  /* ---------- SCR-141 signup ---------- */
+  function signup(o) {
+    o = o || {};
+    var f = o.filled;
+    var b = [bar('가입'), ['pm', '처음 한 번만 해요.']];
+    b.push(['fld', { label: '생년월일', value: f ? '1990 · 05 · 14' : null, hint: '년 · 월 · 일', err: o.badBirth, errText: o.badBirth ? '입력을 확인해 주세요.' : null }]);
+    b.push(['checks', [
+      { t: '이용약관(필수)', on: f, more: '보기' },
+      { t: '개인정보 처리방침(필수)', on: f && !o.missing, bad: o.missing, more: '보기', sub: o.missing ? '필수 항목에 동의해야 가입할 수 있어요.' : null },
+      { t: 'AI 고지(필수)', on: f, more: '보기', sub: 'AI가 만든 캐릭터이고 진짜 그 아이가 아니에요' },
+      { t: '국외 이전 동의(선택)', on: false, more: '받는 곳', sub: '동의하지 않으면 캐릭터 만들기와 대화를 할 수 없어요. 나중에 설정에서 바꿀 수 있어요' }
+    ]]);
+    if (o.invite) { b.push(['fld', { label: '초대 코드', hint: '초대 코드' }]); b.push(['p', '지금은 초대받은 분만 가입할 수 있어요.']); }
+    b.push(o.busy ? off('가입하기 ◌') : (f && !o.missing ? btn('가입하기') : off('가입하기', '필수 셋과 생년월일이 차야 켜져요')));
+    return b;
+  }
+
+  /* ---------- SCR-142 create ---------- */
+  function create(o) {
+    o = o || {};
+    var b = [bar('아이 만들기', '홈')];
+    if (o.making) b.push(['cards', [MAKING]]);
+    b.push(['h', '누구를 만들까요?']);
+    b.push(['chips', { items: ['함께 사는 아이', '무지개다리를 건넌 아이'], on: o.kind ? [o.kind] : [], sk: o.sk }]);
+    if (o.consent) { b.push(B_CONSENT); return b; }
+    b.push(['photos', o.photos || [{ l: '정면 얼굴', dim: !o.kind, sk: o.sk }, { l: '귀와 무늬', dim: !o.kind, sk: o.sk }, { l: '전신', dim: !o.kind, sk: o.sk }]]);
+    if (!o.sk) {
+      b.push(['pm', '정면 얼굴, 귀와 무늬가 보이는 사진, 전신 한 장이면 가장 닮아요']);
+      b.push(['pm', '사람이 함께 찍히면 얼굴은 회색으로 가려요']);
+    }
+    (o.after || []).forEach(function (x) { b.push(x); });
+    b.push(o.btn || (o.ready ? btn('올리기') : off('올리기', '칩과 사진 한 장이 있어야 켜져요')));
+    return b;
+  }
+  var PH2 = [{ l: '사진 1', has: true }, { l: '사진 2', has: true }, { l: '+ 사진' }];
+
+  /* ---------- SCR-143 traits ---------- */
+  function traits(o) {
+    o = o || {};
+    var b = [bar('특징표', '아이 만들기')];
+    if (o.band) b.push(o.band);
+    b.push(['pm', '사진에서 본 모습이에요. 다르면 고쳐 주세요.']);
+    b.push(['chips', { label: '종', items: ['개', '고양이'], on: ['개'] }]);
+    b.push(['fld', { label: '품종 추정', value: '말티즈 같아요', count: '7/30' }]);
+    b.push(['chips', { label: o.saving ? '털 색 · 저장 중 ◌' : '털 색(1~3개)', items: ['흰색', '크림', '갈색', '검정', '회색', '…'], on: ['흰색', '크림'] }]);
+    b.push(['chips', { label: '무늬', items: ['단색', '점박이', '얼룩', '줄무늬', '…'], on: ['단색'] }]);
+    b.push(['fld', { label: '무늬 설명', hint: '사진에서 보는 방향으로 적어요', multi: true, count: '0/60' }]);
+    b.push(['chips', { label: '귀 모양', items: ['선 귀', '접힌 귀', '늘어진 귀'], on: ['늘어진 귀'] }]);
+    b.push(['chips', { label: '눈 색', items: ['검정', '갈색', '파랑', '…'], on: ['검정'] }]);
+    b.push(['chips', { label: '체격', items: ['작음', '보통', '큼'], on: ['작음'] }]);
+    b.push(['chips', { label: '털 길이', items: ['짧음', '중간', '김'], on: ['김'] }]);
+    b.push(['fld', { label: '특징', value: '왼쪽 귀 끝이 갈색', count: '9/60' }]);
+    b.push(btn('이대로 만들기'));
+    return b;
+  }
+
+  /* ---------- SCR-144 preview ---------- */
+  function preview(o) {
+    o = o || {};
+    var b = [bar('미리 보기', '특징표')];
+    b.push(['pic', { label: o.picLabel || '미리 보기(1:1)', ratio: '1 / 1', w: 280 }]);
+    b.push(['cap', 'AI가 그린 미리 보기']);
+    b.push(['p', '결제하면 이 모습을 바탕으로 그림 후보 4장을 그려요']);
+    b.push(['kv', [['캐릭터 만들기', '5,900원(부가세 포함)']]]);
+    b.push(['pm', '후보를 그리기 시작하면 철회할 수 없어요']);
+    if (o.payOff) { b.push(off('결제하고 만들기', '결제는 곧 열려요.')); } else { b.push(btn('결제하고 만들기')); }
+    b.push(sec('만들기권으로 만들기 · 1장 있어요'));
+    b.push(['lnk', '특징표 다시 고치기']);
+    b.push(['pm', '12월 17일까지 결제하지 않으면 지워요']);
+    return b;
+  }
+  function previewTop(picBlock, rest) {
+    return cat([bar('미리 보기', '특징표'), picBlock], rest, [['lnk', '특징표 다시 고치기']]);
+  }
+
+  /* ---------- SCR-145 candidates ---------- */
+  function cands(o) {
+    o = o || {};
+    var items = [{ l: '후보 1', s: 'AI가 그린 그림' }, { l: '후보 2', s: 'AI가 그린 그림', on: !o.none }, { l: '후보 3', s: 'AI가 그린 그림' }, { l: '후보 4', s: 'AI가 그린 그림' }];
+    var b = [bar('그림 후보', '홈'), ['pm', '정면 그림으로 쓸 한 장을 골라 주세요.'], ['tiles', { items: items }]];
+    if (o.more) b.push(['tiles', { items: [{ wait: true }, { wait: true }, { wait: true }, { wait: true }] }]);
+    b.push(o.none ? off('이 그림으로 할게요', '하나를 고르면 켜져요') : btn('이 그림으로 할게요'));
+    b.push(o.limit ? off('다시 그려 주세요', '다시 그리기를 다 썼어요.') : (o.more ? off('다시 그려 주세요 · 1번 남음', '그리는 동안은 기다려요') : sec('다시 그려 주세요 · 2번 남음')));
+    return b;
+  }
+
+  /* ---------- SCR-146 name ---------- */
+  function naming(o) {
+    o = o || {};
+    var f = o.filled;
+    var b = [bar('이름 짓기', '홈'), ['ai'], ['pic', { label: '정면 그림', ratio: '1 / 1', w: 160 }], ['pc', 'AI가 그린 그림'], ['h', '이름을 지어 주세요']];
+    b.push(['fld', { label: '이름', value: f ? (o.badName ? '콩이콩이콩이콩이콩이콩이콩' : P) : null, hint: '1~12자', err: o.badName, errText: o.badName ? '입력을 확인해 주세요. 1~12자, 한글·영문·숫자' : null, count: f ? (o.badName ? '13/12' : '2/12') : '0/12' }]);
+    b.push(['chips', { label: '성격(3개까지)', items: ['다정해요', '장난꾸러기', '겁이 많아요', '먹보', '느긋해요', '…'], on: f ? ['다정해요', '먹보'] : [] }]);
+    b.push(['fld', { label: '좋아하는 것', value: f ? '산책, 고구마, 담요' : null, hint: '60자까지' }]);
+    b.push(['fld', { label: '싫어하는 것', value: f ? '목욕, 청소기 소리' : null, hint: '60자까지' }]);
+    b.push(['fld', { label: '나를 부르는 말', value: f ? '엄마' : null, hint: '예: 엄마, 형, 집사' }]);
+    (o.after || []).forEach(function (x) { b.push(x); });
+    b.push(o.busy ? off('첫 인사를 준비하고 있어요 ◌') : (f ? btn('만나러 가기') : off('만나러 가기', '이름과 부르는 말이 있어야 켜져요')));
+    return b;
+  }
+
+  /* ---------- SCR-147 pet view ---------- */
+  var CHAT = [['c', '11월 17일'], ['call', '통화했어요 · 11월 17일 오후 3시  ▸ 펼치기'], ['l', '오늘 산책 재밌었어! 공원에 비둘기 엄청 많더라'], ['r', '비둘기 쫓아가다 넘어질 뻔했잖아 ㅋㅋ'], ['l', '헤헤 안 넘어졌으니까 괜찮아. 내일도 가자!']];
+  function petView(o) {
+    o = o || {};
+    var name = P + (o.memorial ? ' ✿' : '');
+    var right = o.archived ? ['⋯'] : ['통화', '⋯'];
+    var b = [bar(name, '홈', right)];
+    (o.bands || []).forEach(function (x) { b.push(x); });
+    b.push(['ai']);
+    b.push(['pic', { label: o.memorial ? '합성 그림(추억 모드 배경)' : (o.archived ? '합성 그림(흐리게 보관)' : '합성 그림(털모자, 거실 배경)'), ratio: '16 / 9', dim: o.archived }]);
+    var pct = o.pct == null ? 60 : o.pct;
+    var g = { pct: pct, text: '오늘 한도 ' + pct + '%' + (pct === 0 ? '' : ' · 새벽 4시에 다시 차요') };
+    if (o.recharge) g.link = '충전하기';
+    if (o.memorialQuota) g.text = '오늘은 여기까지, 새벽 4시 뒤에 또 이야기해요.';
+    b.push(['gauge', g]);
+    b.push(['bubs', o.chat || CHAT]);
+    if (o.center) b.push(o.center);
+    b.push(['spacer']);
+    if (o.archived) { b.push(['note', { text: '보관한 아이예요. 꺼내면 다시 이야기할 수 있어요.', btn: '꺼내기' }]); return b; }
+    if (o.above) b.push(o.above);
+    b.push(['input', o.input || {}]);
+    return b;
+  }
+
+  /* ---------- SCR-148 call ---------- */
+  function call(blocks, o) {
+    o = o || {};
+    return cat([bar(P, '대화'), ['ai']], blocks);
+  }
+
+  /* ---------- SCR-149 / 150 diary ---------- */
+  var DIARY_CARDS = [
+    { t: '11월 16일 · 맑음', s: '공원에서 비둘기를 만났다' },
+    { t: '11월 15일', s: '쓰는 중', tag: '쓰는 중' },
+    { t: '11월 14일', s: '쓰지 못한 날', dim: true },
+    { t: '11월 12일 · 비', s: '창밖에 비가 왔다' }
+  ];
+  var DIARY_TEXT = '오늘 엄마랑 공원에 갔다. 비둘기가 엄청 많아서 쫓아가다가 넘어질 뻔했다. 엄마가 웃어서 나도 꼬리를 흔들었다. 집에 와서 고구마를 먹었다. 내일도 산책 가고 싶다.';
+  function page(o) {
+    o = o || {};
+    var b = [o.decorate ? ['bar', { left: '취소', title: '꾸미기', right: [o.saving ? '저장 ◌' : '저장'] }] : bar('11월 16일', '일기장', ['⋯'])];
+    if (o.band) b.push(o.band);
+    b.push(['rows', [{ t: '11월 16일 일요일', r: '마음 날씨 · 맑음', plain: true }]]);
+    b.push(['h', '공원에서 비둘기를 만났다']);
+    b.push(['pic', { label: o.picLabel || '합성 그림', ratio: '3 / 2', dim: o.picDim, overlay: o.overlay, stickers: o.stickers === false ? [] : [[8, 10, '★'], [78, 62, '♥']] }]);
+    b.push(['cap', 'AI가 그린 그림']);
+    if (o.picNote) b.push(o.picNote);
+    b.push(['p', DIARY_TEXT]);
+    if (o.decorate) {
+      b.push(['seg', { items: ['테마', '글꼴', '스티커'], on: '스티커' }]);
+      b.push(['tiles', { c: 4, items: [{ l: '별', on: true }, { l: '하트', on: true }, { l: '발자국' }, { l: '구름' }] }]);
+      b.push(['pm', '보관함에 있는 것만 보여요 · 스티커는 10개까지예요']);
+      return b;
+    }
+    if (o.actions !== false) {
+      b.push(['btn2', [['꾸미기', { sec: true, off: o.actOff }], [o.limitTxt || '새 그림으로 다시 그리기 · 2번 남음', { sec: true, off: o.actOff }]]]);
+    }
+    b.push(sec('카드로 공유'));
+    if (o.shareErr) b.push(['err', o.shareErr]);
+    b.push(['nav', { nextOff: true }]);
+    return b;
+  }
+
+  /* ---------- SCR-152 closet ---------- */
+  function closet(o) {
+    o = o || {};
+    var b = [bar('옷 입히기', P + (o.memorial ? ' ✿' : ''))];
+    b.push(['pic', { label: o.picLabel || '정면 그림 + 털모자', ratio: '1 / 1', w: 220 }]);
+    if (o.layerErr) b.push(['pc', '미리 보기를 불러오지 못했어요']);
+    b.push(['seg', { items: ['머리', '몸', '목'], on: o.slot || '머리' }]);
+    if (o.empty) {
+      b.push(msg('이 자리에 입힐 아이템이 없어요.'));
+    } else {
+      b.push(['tiles', { c: 3, items: o.tiles || [{ l: '털모자', on: true }, { l: '리본 머리띠', s: '보리도 입어요' }, { l: o.saving ? '밀짚모자 ◌' : '밀짚모자' }] }]);
+    }
+    if (!o.memorial) b.push(['lnk', '상점에서 더 보기']);
+    return b;
+  }
+
+  /* ---------- SCR-153 settings ---------- */
+  function settings(o) {
+    o = o || {};
+    var b = [bar('아이 설정', P + (o.memorial || o.archived ? ' ✿' : ''))];
+    if (o.archived) b.push(['note', { text: '보관한 아이예요', btn: '꺼내기' }]);
+    if (!o.archived) {
+      b.push(['fld', { label: '이름', value: P, count: '2/12' }]);
+      b.push(['fld', { label: '아이 소개', value: '다정해요 · 먹보 · 좋아하는 것 산책, 고구마 · 부르는 말 엄마', multi: true }]);
+      b.push(['lnk', '저장']);
+    }
+    var rows = [];
+    if (o.memorial) {
+      rows.push({ t: '함께 사는 아이로 되돌리기', r: '11월 24일까지' });
+      rows.push({ t: '작별 의식' });
+      rows.push({ t: '보관하기', sub: '보관하면 먼저 말 걸지 않고 일기와 그림만 볼 수 있어요' });
+    } else if (!o.archived) {
+      rows.push({ t: '무지개다리를 건넜어요' });
+    }
+    rows.push(o.exportRow || { t: '기록 내보내기', sub: '대화·일기·그림을 파일 하나로 받아요(하루 1번)' });
+    rows.push({ t: '아이 지우기', red: true });
+    b.push(['rows', rows]);
+    return b;
+  }
+
+  /* ---------- SCR-155 recharge ---------- */
+  function rechargeBlocks(o) {
+    o = o || {};
+    var b = [];
+    b.push(['p', o.open ? '새벽 4시에 다시 차요.' : '새벽 4시에 다시 차요.']);
+    b.push(['gauge', { pct: o.open ? 60 : 0, text: '오늘 한도 ' + (o.open ? 60 : 0) + '%' }]);
+    var offAll = o.limit || o.payOff;
+    b.push(offAll ? off('절반 채우기 · 1,500원') : btn('절반 채우기 · 1,500원'));
+    b.push(offAll ? off('가득 채우기 · 2,900원', o.limit ? '충전권은 하루 3장까지예요.' : '결제는 곧 열려요.') : btn('가득 채우기 · 2,900원'));
+    if (o.full) b.push(['err', '지금은 한도가 가득해요.']);
+    if (o.err) b = b.concat(WERR);
+    if (!o.limit) b.push(['pm', '오늘 ' + (o.left || 3) + '장 더 살 수 있어요']);
+    b.push(o.subscribed ? ['pm', '구독 중이에요 · 하루 한도 2배'] : sec('구독하면 하루 한도가 2배예요 · 월 9,900원'));
+    b.push(['lnk', '괜찮아요']);
+    b.push(['pm', '글 대화는 그대로 할 수 있어요']);
+    return b;
+  }
+
+  /* ---------- SCR-156 report ---------- */
+  var REASONS = ['이상한 말', '상처 주는 말', '성적인 말', '위험한 말', '그림이 이상함', '그 밖'];
+  function reportBlocks(o) {
+    o = o || {};
+    var b = [['quote', '“헤헤 안 넘어졌으니까 괜찮아. 내일도 가자!”']];
+    b.push(['chips', { label: '무엇이 문제인가요? 하나만 골라요', items: REASONS, on: o.sel ? [o.sel] : [] }]);
+    b.push(['fld', { label: '메모(선택)', value: o.sel ? '갑자기 말투가 달라졌어요' : null, hint: '200자까지', count: o.sel ? '12/200' : '0/200' }]);
+    (o.after || []).forEach(function (x) { b.push(x); });
+    b.push(o.busy ? off('신고하기 ◌') : (o.sel ? btn('신고하기') : off('신고하기', '이유를 골라야 켜져요')));
+    return b;
+  }
+
+  /* ---------- SCR-157 / 158 shop ---------- */
+  function shop(o) {
+    o = o || {};
+    var b = [bar('상점')];
+    if (o.band) b.push(o.band);
+    b.push(['pm', '모두 정가예요. 뽑기는 없어요']);
+    b.push(['seg', { items: ['착용', '스티커', '일기장 테마', '테마 패키지'], on: '착용' }]);
+    if (o.empty) { b.push(msg('지금은 팔고 있는 것이 없어요.')); }
+    else {
+      b.push(['tiles', { items: o.sk ? [{ sk: true }, { sk: true }, { sk: true }, { sk: true }, { sk: true }, { sk: true }] : [
+        { l: '털모자', s: '1,200원' }, { l: '리본 머리띠', s: '1,200원 · 11월 30일까지' }, { l: '밀짚모자', s: '가지고 있어요' }, { l: '노란 우비', s: '1,500원' }] }]);
+    }
+    b.push(['foldrow', '사업자 정보']);
+    b.push(['tabs', { on: '상점' }]);
+    return b;
+  }
+  function item(o) {
+    o = o || {};
+    var b = [bar('털모자', '상점')];
+    b.push(['chips', { label: '입혀 볼 아이', items: [P, '두부'], on: [P] }]);
+    b.push(['pic', { label: o.picLabel || P + ' 모습 + 털모자', ratio: '1 / 1', w: 260 }]);
+    if (o.layerErr) b.push(['pc', '입혀 보기를 불러오지 못했어요']);
+    b.push(['h', '털모자']);
+    b.push(['kv', [['값', '1,200원(부가세 포함)'], ['자리', '머리']]]);
+    if (o.owned) { b.push(['p', '가지고 있어요']); b.push(btn('입히러 가기')); return b; }
+    b.push(['pm', '산 지 7일 안이고 한 번도 입히거나 붙이지 않았으면 철회할 수 있어요']);
+    b.push(o.payOff ? off('사기', '결제는 곧 열려요.') : btn('사기'));
+    return b;
+  }
+
+  /* ---------- SCR-159 / 160 / 161 me ---------- */
+  function me(o) {
+    o = o || {};
+    var b = [bar('내 정보')];
+    if (o.band) b.push(o.band);
+    var rows = [
+      { t: '회원 번호 AB12CD34', r: '복사', sub: '문의할 때 알려 주세요' },
+      { t: '무료 만들기권 1장', plain: true },
+      { t: '한도와 구독', off: o.locked },
+      { t: '주문 내역' },
+      { t: '이 기기의 알림', tg: true },
+      { t: '동의', r: o.consents ? '접기 ▴' : '펼치기 ▾' }
+    ];
+    if (o.consents) {
+      rows.push({ t: '이용약관', r: '동의함 · 2026년 11월 17일', sub: '거두려면 계정을 지워요' });
+      rows.push({ t: '개인정보 처리방침', r: '동의함 · 2026년 11월 17일' });
+      rows.push({ t: 'AI 고지', r: '동의함 · 2026년 11월 17일' });
+      rows.push({ t: '국외 이전(선택)', tg: true, sub: '받는 곳 보기' });
+    }
+    rows.push({ t: '본인인증', r: '안 했어요', off: o.locked });
+    rows.push({ t: '이용약관 · 개인정보 처리방침' });
+    rows.push({ t: '로그아웃', plain: true });
+    rows.push({ t: '계정 지우기', red: true });
+    b.push(['rows', rows]);
+    b.push(['tabs', { on: '내 정보' }]);
+    return b;
+  }
+  function plan(o) {
+    o = o || {};
+    var b = [bar('한도와 구독', '내 정보')];
+    if (o.band) b.push(o.band);
+    b.push(['gauge', { pct: 60, text: '오늘 한도 60% · 새벽 4시에 다시 차요' }]);
+    var offR = o.payOff;
+    b.push(['btn2', [['절반 채우기 · 1,500원', { sec: true, off: offR }], ['가득 채우기 · 2,900원', { sec: true, off: offR }]]]);
+    b.push(['pm', '오늘 3장 더 살 수 있어요 · 충전권은 사면 바로 채워져 철회할 수 없어요']);
+    var box = o.box || { t: '구독', p: ['하루 한도 2배 · 월 9,900원', '매달 같은 날 결제돼요. 이 화면에서 언제든 해지할 수 있어요'], btn: { label: '구독하기', off: offR, why: offR ? '결제는 곧 열려요.' : null } };
+    b.push(['box', box]);
+    return b;
+  }
+  var ORDERS = [
+    { t: '털모자', r: '1,200원', sub: '11월 17일 · 지급됨 · 주문 PO7F3K2' },
+    { t: '캐릭터 만들기', r: '5,900원', sub: '11월 15일 · 지급됨 · 후보를 그리기 시작해 철회할 수 없어요' },
+    { t: '가득 채우기', r: '2,900원', sub: '11월 14일 · 지급됨 · 충전권은 사면 바로 채워져 철회할 수 없어요' },
+    { t: '구독 1개월', r: '9,900원', sub: '11월 1일 · 결제 안 됨' }
+  ];
+  function orders(o) {
+    o = o || {};
+    var list = ORDERS.map(function (x, i) { return Object.assign({}, x, i === 0 ? (o.first || { act: '청약철회' }) : {}); });
+    return [bar('주문 내역', '내 정보'), ['rows', list]];
+  }
+
+  /* ---------- screens ---------- */
+  var SCREENS = [
+    { id: '공통', name: '공통 규칙(1절)', path: '모든 화면', purpose: '여러 화면이 함께 쓰는 칸과 띠예요. 화면 절에서는 이 모양을 다시 그리지 않고 이름으로 불러요.', common: true, states: [
+      ['결제 칸', 'SCR-144·155·158·160: 상품 이름, 원화 총액, 청약철회 제한, 사업자 정보(접힘), 결제하기 → 결제 대행 창 → SCR-162', sheet(preview(), '결제', payBlocks('캐릭터 만들기', '5,900원', '후보를 그리기 시작하면 철회할 수 없어요'))],
+      ['본인인증 칸', '409 identity_required: 같은 칸 안에서 본인확인 기관 창 → API-158 → 같은 결제를 한 번 이어서', sheet(preview(), '결제', payBlocks('캐릭터 만들기', '5,900원', '후보를 그리기 시작하면 철회할 수 없어요', IDENT))],
+      ['띠 셋', '연결 없음(쓰기 버튼 꺼짐), 국외 이전 동의(보기·꾸미기·내보내기는 그대로), 예산 쉼(새 그림·통화 버튼 꺼짐)', cat([bar(P, '홈', ['통화', '⋯']), B_OFF, B_CONSENT, B_BUDGET, ['ai'], ['pic', { label: '합성 그림', ratio: '16 / 9' }]])],
+      ['안내 화면', '불러오기가 429·500·default·네트워크·10초 넘김으로 실패: 짧은 말, 다시 해 보기, 추적 번호', loadErr('화면 이름', '돌아갈 곳')],
+      ['쓰기 실패', '쓰기 실패는 값을 되돌리고 그 동작 옆에 같은 글과 다시 해 보기. 저절로 다시 보내지 않아요', cat([bar('아이 설정', P), ['fld', { label: '이름', value: '콩이' }]], WERR)],
+      ['말풍선 종류', 'SCR-147: 아이 말(왼쪽), 내 말(오른쪽), 날짜, 접힌 통화 자막, 그림을 단 선톡, reply_failed 안내, 위기 카드(번호는 글자, 누르면 전화 앱)', cat([bar(P, '홈', ['통화', '⋯']), ['bubs', [['c', '11월 17일'], ['l', '엄마 왔다! 오늘 뭐 했어?'], ['r', '회사 갔다 왔지'], ['call', '통화했어요 · 11월 17일 오후 3시  ▸ 펼치기'], ['picb', '털모자 써 봤어! 어때?'], ['c', '잠깐 딴생각했어, 다시 말해 줄래?'], ['crisis']]]])]
+    ] },
+    { id: 'SCR-140', name: '홈', path: '/', purpose: '로그인 전에는 서비스를 소개하고 카카오·구글로 들어오게 하고, 회원은 자기 아이에게 가거나 새 아이를 만들러 가요.', states: [
+      ['signed-out', '탭 줄 없음, 공급자 버튼 둘, 만 19세 이상, 약관 링크', signedOut(), null, { wide: true }],
+      ['login-error', '주소의 loginError를 읽고 지움', cat([bar('마롱이'), band('로그인을 마치지 못했어요. 다시 해 주세요.')], signedOut().slice(1))],
+      ['loading', '카드 두 장과 버튼 모양', [bar('마롱이'), ['sk', ['60%']], ['cards', [{ sk: true }, { sk: true }]], off(''), ['tabs', { on: '홈' }]]],
+      ['empty', '아이도 만들기도 없음. 살아 있는 아이가 없어서 상점 탭이 숨어요', [bar('마롱이'), ['spacer'], msg('아직 아이가 없어요. 사진 한 장으로 만들어 볼까요?'), btn('아이 만들기'), ['spacer'], ['tabs', { on: '홈', items: ['홈', '내 정보'] }]]],
+      ['normal', '한도 줄, 아이 카드(추억 모드는 꽃 표시), 진행 중 만들기, 아이 만들기, 탭 줄', home(), null, { wide: true }],
+      ['archived', '보관한 아이를 펼친 모습. 누르면 SCR-147#archived', home({ archived: true })],
+      ['consent-off', '국외 이전 동의 띠', home({ band: B_CONSENT })],
+      ['full', '아이 5마리: 만들기 꺼짐', home({ cards: [{ t: P, s: '개 · 어제' }, { t: '보리 ✿ 추억', s: '고양이' }, { t: '두부', s: '개' }, { t: '감자', s: '고양이' }, { t: '호두', s: '개' }], noMaking: true, full: true })],
+      ['error', '불러오기 실패', loadErr('마롱이', null, { on: '홈' })],
+      ['offline', '연결 없음 띠, 지난번 카드를 흐리게, 만들기 꺼짐', home({ band: B_OFF, dim: true, offline: true })]
+    ] },
+    { id: 'SCR-141', name: '가입', path: '/signup', purpose: '처음 로그인한 사람이 만 19세 이상인지 밝히고 필수 동의와 국외 이전 동의를 해서 회원이 돼요. \'모두 동의\'는 두지 않아요.', states: [
+      ['normal', '빈 폼, 가입하기 꺼짐', signup()],
+      ['loading', '불러올 데이터가 없어 이 상태는 없어요', [bar('가입'), ['none', '불러올 데이터가 없어 이 상태는 없어요. 정적 글은 페이지와 함께 와요']]],
+      ['submitting', '가입하기 꺼짐과 움직임', signup({ filled: true, busy: true })],
+      ['missing', '빠진 필수 줄 표시', signup({ filled: true, missing: true })],
+      ['invalid', '생년월일 칸 아래 글', signup({ filled: true, badBirth: true })],
+      ['underage', '폼을 지움, 서버는 가입 대기 세션도 지움', [bar('가입'), ['spacer'], msg('이 서비스는 만 19세 이상만 쓸 수 있어요.'), btn('처음으로'), ['spacer']]],
+      ['invite', '초대 코드 칸이 나타남, 쓴 값은 그대로', signup({ filled: true, invite: true })],
+      ['expired', '가입 대기 세션 30분이 지남', [bar('가입'), ['spacer'], msg('가입 시간이 지났어요. 다시 로그인해 주세요.'), btn('처음으로'), ['spacer']]],
+      ['already', '이미 회원', [bar('가입'), ['spacer'], msg('이미 가입했어요.'), btn('홈으로'), ['spacer']]],
+      ['error', 'cross_site 또는 default: 쓴 값은 그대로', cat(signup({ filled: true }), WERR)]
+    ] },
+    { id: 'SCR-142', name: '아이 만들기', path: '/create', purpose: '함께 사는 아이인지 무지개다리를 건넌 아이인지 고르고, 사진 1~3장을 올려 만들기를 시작해요.', states: [
+      ['loading', '칩과 사진 칸 자리 회색', create({ sk: true })],
+      ['normal', '고르기 전: 사진 칸이 흐림, 올리기 꺼짐', create()],
+      ['selected', '고른 사진에 ×', create({ kind: '함께 사는 아이', photos: PH2, ready: true })],
+      ['uploading', '올리는 막대', create({ kind: '함께 사는 아이', photos: PH2, after: [['prog', { pct: 45, text: '사진을 올리고 있어요 · 45%' }]], btn: off('올리기') })],
+      ['photo-error', '그 번째 칸만 빨간 테두리, 다른 사진은 남음', create({ kind: '함께 사는 아이', photos: [{ l: '사진 1', has: true }, { l: '사진 2', has: true, err: true }, { l: '+ 사진' }], after: [['err', '2번째 사진을 열 수 없어요. JPEG나 PNG, 8MB 이하로 올려 주세요.']], ready: true })],
+      ['too-large', '413', create({ kind: '함께 사는 아이', photos: PH2, after: [['err', '사진이 너무 커요. 다시 골라 주세요.']], ready: true })],
+      ['check-failed', '사진 검사 서비스가 안 됨, 사진은 칸에 남음', create({ kind: '함께 사는 아이', photos: PH2, after: [['note', { text: '사진을 확인하지 못했어요. 잠시 뒤 다시 해 주세요.' }]], btn: btn('다시 올리기') })],
+      ['consent', '국외 이전 동의가 꺼짐: 사진 칸 대신 띠', create({ kind: '무지개다리를 건넌 아이', consent: true })],
+      ['limit', '만들고 있는 아이가 있음(또는 5마리)', [bar('아이 만들기', '홈'), ['cards', [MAKING]], ['spacer'], msg('만들고 있는 아이가 있어요. 먼저 마치거나 지워 주세요.', '아이 5마리일 때는 \'아이는 5마리까지 만들 수 있어요.\''), ['spacer']]],
+      ['error', '공통 규칙(쓰기)', create({ kind: '함께 사는 아이', photos: PH2, after: WERR, ready: true })]
+    ] },
+    { id: 'SCR-143', name: '특징표 고치기', path: '/create/:id/traits', purpose: '서버가 사진에서 만든 특징표를 고치고 확정해요. 칸을 떠날 때 바뀐 칸만 저장해요.', states: [
+      ['analyzing', '30초쯤, 2초마다 다시 불러요', [bar('특징표', '아이 만들기'), ['face', { t: '◌', size: 120 }], msg('사진을 살펴보고 있어요', '30초쯤 걸려요')]],
+      ['loading', '칸 제목과 칩 자리 회색', [bar('특징표', '아이 만들기'), ['chips', { label: '종', items: ['a', 'b'], sk: true }], ['chips', { label: '털 색', items: ['a', 'b', 'c'], sk: true }], ['chips', { label: '무늬', items: ['a', 'b', 'c'], sk: true }], ['chips', { label: '귀 모양', items: ['a', 'b'], sk: true }], ['fld', { label: '특징', sk: true }]]],
+      ['normal', '아홉 칸과 이대로 만들기', traits()],
+      ['multiple', '여러 아이가 찍힌 사진', traits({ band: band('사진에 여러 아이가 있어요. 한 아이만 나온 사진이면 더 닮아요', '사진 다시 고르기') })],
+      ['saving', '고친 칸 옆 움직임', traits({ saving: true })],
+      ['rejected', '개·고양이를 못 찾음(또는 아이가 잘 안 보임). 사진은 서버가 지웠어요', [bar('특징표', '아이 만들기'), ['spacer'], msg('개나 고양이를 찾지 못했어요', '정면 얼굴과 귀가 잘 보이는 사진이면 좋아요. 올린 사진은 지웠어요'), btn('사진 다시 고르기'), ['spacer']]],
+      ['failed', '특징표를 만들지 못함', [bar('특징표', '아이 만들기'), ['spacer'], msg('특징표를 만들지 못했어요. 잠시 뒤 다시 해 주세요. 사진은 지웠어요.'), btn('사진 다시 고르기'), ['spacer']]],
+      ['stale', '확정 뒤 단계: 그 단계 주소로', stale('미리 보기', '특징표', 'SCR-144~146'), '화면을 새로 고쳤어요.'],
+      ['error', '불러오기 실패(쓰기 실패는 그 칸 옆)', loadErr('특징표', '아이 만들기')]
+    ] },
+    { id: 'SCR-144', name: '미리 보기와 결제', path: '/create/:id/preview', purpose: '무료 미리 보기 한 장으로 닮았는지 보고, 원화 총액과 철회 제한을 본 뒤 캐릭터 만들기를 결제해요.', states: [
+      ['loading', '정사각 그림 칸과 버튼 자리 회색', [bar('미리 보기', '특징표'), ['pic', { skel: true, ratio: '1 / 1', w: 280 }], ['sk', ['70%', '50%']], off('')]],
+      ['ready', '아직 미리 보기 없음', previewTop(['pic', { blank: true, ratio: '1 / 1', w: 280, label: '미리 보기는 무료예요. 하루 3장까지 그려요' }], [btn('미리 보기 그리기')])],
+      ['drawing', '1분쯤, 2초마다 다시 불러요', previewTop(['pic', { dim: true, ratio: '1 / 1', w: 280, overlay: '그리고 있어요 ◌' }], [['pc', '1분쯤 걸려요. 화면을 닫아도 돼요']])],
+      ['normal', '미리 보기, 값, 철회 제한, 결제하기, 만들기권, 끝나는 때', preview()],
+      ['preview-failed', '횟수는 세지 않음', previewTop(['pic', { blank: true, ratio: '1 / 1', w: 280 }], [msg('미리 보기를 그리지 못했어요. 횟수는 세지 않았어요.'), btn('다시 그리기')])],
+      ['preview-limit', '하루 3장을 다 봄', previewTop(['pic', { blank: true, ratio: '1 / 1', w: 280 }], [['note', { text: '오늘 미리 보기를 다 봤어요. 새벽 4시 뒤에 다시 볼 수 있어요.' }], off('미리 보기 그리기')])],
+      ['payments-off', '결제 꺼짐, 만들기권은 켜짐', preview({ payOff: true })],
+      ['identity', '결제 칸 안의 본인인증', sheet(preview(), '결제', payBlocks('캐릭터 만들기', '5,900원', '후보를 그리기 시작하면 철회할 수 없어요', IDENT))],
+      ['expired', '30일이 지나 지움', [bar('미리 보기', '홈'), ['spacer'], msg('30일이 지나 미리 보기와 사진을 지웠어요.'), btn('새로 만들기'), ['spacer']]],
+      ['stale', '결제 뒤 단계면 SCR-145로', stale('그림 후보', '홈', 'SCR-145'), '화면을 새로 고쳤어요.'],
+      ['error', '불러오기 실패', loadErr('미리 보기', '특징표')]
+    ] },
+    { id: 'SCR-145', name: '그림 후보 고르기', path: '/create/:id/candidates', purpose: '결제 뒤 그린 후보 가운데 하나를 정면 그림으로 고르고, 표정 여섯 장이 그려지는 동안 기다려요. 웹 푸시를 처음 묻는 자리예요.', states: [
+      ['loading', '2×2 자리 회색', [bar('그림 후보', '홈'), ['tiles', { items: [{ sk: true }, { sk: true }, { sk: true }, { sk: true }] }]]],
+      ['drawing', '몇 분, 5초마다 다시 불러요. 알림 묻기', [bar('그림 후보', '홈'), ['tiles', { items: [{ wait: true }, { wait: true }, { wait: true }, { wait: true }] }], msg('그림 후보 4장을 그리고 있어요', '몇 분 걸려요. 화면을 닫아도 돼요'), ['note', { text: '다 그리면 알려 드릴까요?', btn: '알려 주세요', sec: true }]]],
+      ['normal', '하나를 고른 모습', cands()],
+      ['drawing-more', '있던 후보는 그대로 고를 수 있음', cands({ more: true })],
+      ['limit', '다시 그리기를 다 씀', cands({ limit: true })],
+      ['sheet', '고른 그림을 크게, 표정을 그리는 중', [bar('그림 후보', '홈'), ['pic', { label: '고른 그림', ratio: '1 / 1', w: 260 }], ['pc', 'AI가 그린 그림'], msg('표정을 그리고 있어요', '다 되면 이름을 지어 줘요'), ['note', { text: '다 그리면 알려 드릴까요?', btn: '알려 주세요', sec: true }]]],
+      ['operator', '운영자가 다시 그리거나 환불', [bar('그림 후보', '홈'), ['pic', { label: '고른 그림', ratio: '1 / 1', w: 260 }], msg('조금 더 걸려요. 다 되면 알려 드릴게요.')]],
+      ['failed', '후보를 못 그림, 결제 자동 취소', [bar('그림 후보', '홈'), ['spacer'], msg('그림을 그리지 못했어요. 결제는 자동으로 취소했어요.'), btn('주문 내역 보기'), sec('새로 만들기'), ['spacer']]],
+      ['stale', 'sheet_ready면 SCR-146, done이면 SCR-147', stale('이름 짓기', '홈', 'SCR-146 또는 SCR-147'), '화면을 새로 고쳤어요.'],
+      ['error', '불러오기 실패', loadErr('그림 후보', '홈')]
+    ] },
+    { id: 'SCR-146', name: '이름 짓기', path: '/create/:id/name', purpose: '완성된 캐릭터 시트를 보고 이름과 아이 소개를 적으면 아이가 첫 인사를 해요.', states: [
+      ['loading', '그림과 입력 다섯 줄 자리 회색', [bar('이름 짓기', '홈'), ['pic', { skel: true, ratio: '1 / 1', w: 160 }], ['fld', { label: '이름', sk: true }], ['fld', { label: '성격', sk: true }], ['fld', { label: '좋아하는 것', sk: true }], ['fld', { label: '싫어하는 것', sk: true }], ['fld', { label: '나를 부르는 말', sk: true }]]],
+      ['normal', '빈 칸, 만나러 가기 꺼짐', naming()],
+      ['saving', '첫 인사를 준비하는 중', naming({ filled: true, busy: true })],
+      ['invalid', '칸 아래 규칙 한 줄', naming({ filled: true, badName: true })],
+      ['stale', 'done이면 SCR-147', stale(P, '홈', 'SCR-147'), '화면을 새로 고쳤어요.'],
+      ['error', '쓴 글은 남김', naming({ filled: true, after: WERR })]
+    ] },
+    { id: 'SCR-147', name: '아이 화면', path: '/pets/:id', purpose: '아이와 글로 이야기하고, 모습과 오늘 한도를 보고, 통화·일기장·옷 입히기·설정으로 가요. 말풍선 종류는 맨 위 공통 규칙에 있어요.', states: [
+      ['loading', '머리, AI 띠, 모습, 말풍선, 입력 자리 회색', [bar('', '홈'), ['ai'], ['pic', { skel: true, ratio: '16 / 9' }], ['sk', ['40%']], ['bubs', [['sk', 'l', 60], ['sk', 'r', 40], ['sk', 'l', 70]]], ['spacer'], ['input', { off: true, hint: '' }]]],
+      ['normal', '살아 있는 아이, 한도 줄을 누르면 SCR-155', petView({ input: { value: '내일 몇 시에 갈까?' } })],
+      ['typing', '점 세 개, 보내기는 그대로 됨', petView({ chat: CHAT.concat([['r', '내일 몇 시에 갈까?'], ['typing']]) })],
+      ['first', '첫 인사 하나', petView({ chat: [['c', '11월 17일'], ['l', '엄마! 나 콩이야. 나 이름 생겼다! 오늘 뭐 했어?']], input: { value: '|' } })],
+      ['empty', '만들기 직후 잠깐', petView({ chat: [], center: msg('곧 인사하러 와요') })],
+      ['memorial', '꽃 표시, 추억 배경, 상점·충전 안내 없음', petView({ memorial: true, chat: [['l', '엄마 왔어? 오늘도 보고 싶었어'], ['r', '나도 보고 싶었어'], ['l', '나 거기서 잘 지내. 따뜻한 데서 낮잠 자']] })],
+      ['archived', '입력 칸 대신 꺼내기, 통화·옷 입히기 없음', petView({ archived: true })],
+      ['asleep', '메시지 300개를 넘김, 쓴 글은 남음', petView({ above: ['note', { text: P + '가 잠들었어요. 새벽 4시에 깨요.' }], input: { value: '내일 산책 갈까', off: true } })],
+      ['quota-empty', '0%, 살아 있는 아이는 충전하기(추억 모드는 \'오늘은 여기까지…\' 한 줄)', petView({ pct: 0, recharge: true })],
+      ['consent', '국외 이전 동의 띠, 입력 꺼짐', petView({ bands: [B_CONSENT], input: { off: true } })],
+      ['reconnecting', '3초 뒤 다시 붙고 빠진 말을 채움', petView({ bands: [['band', { text: '다시 연결하는 중이에요', small: true }]] })],
+      ['send-failed', '같은 clientId로 다시 보내기', petView({ chat: CHAT.concat([['fail', '내일 몇 시에 갈까?']]) })],
+      ['not-found', '없는 아이·남의 아이', nf('', '홈', '홈으로')],
+      ['error', '불러오기 실패', loadErr(P, '홈')],
+      ['offline', '연결 없음 띠, 입력 꺼짐', petView({ bands: [B_OFF], input: { off: true } })]
+    ] },
+    { id: 'SCR-148', name: '통화', path: '/pets/:id/call', purpose: '아이와 음성으로 통화하고, 한도가 다 되면 아이가 졸려서 자러 간다며 끊어요. 통화 중에는 시간과 한도를 보이지 않아요.', states: [
+      ['loading', '얼굴과 버튼 자리 회색', call([['face', { skel: true, size: 200 }], ['sk', ['60%']], off('')])],
+      ['ready', '정면 얼굴, 한도 안내, 전화 걸기', call([['face', { t: '정면(front)', size: 200 }], ['pc', '통화는 1분마다 오늘 한도를 써요 · 지금 60%'], btn('전화 걸기')])],
+      ['mic-denied', '브라우저 권한 거절', call([['face', { t: '정면', size: 160 }], msg('마이크를 허용해야 통화할 수 있어요', '주소창 왼쪽 자물쇠 → 마이크 → 허용'), btn('다시 해 보기')])],
+      ['connecting', '끊기만 됨. 연결되면 고정 녹음 \'AI로 만든 목소리예요\'', call([['face', { t: '정면', size: 200 }], ['spin', '연결하고 있어요'], sec('끊기')])],
+      ['talking', '말할 때 smile·excited, 들을 때 front', call([['face', { t: '말할 때 smile · 들을 때 front', size: 220 }], ['pc', P], ['spacer'], btn('끊기')])],
+      ['sleepy', '한도가 다 됨, 30초 안에 끊김', call([['face', { t: 'sleepy', size: 220 }], msg(P + '가 졸려서 자러 가요'), ['spacer'], btn('끊기')])],
+      ['ended', '자막은 대화에 접혀 들어감', call([['face', { t: '정면', size: 160 }], msg('통화했어요'), btn('대화로 돌아가기')])],
+      ['quota', '살아 있는 아이 brief 한 줄(recharge면 SCR-155가 올라옴, 추억 모드는 \'오늘은 여기까지…\')', call([['face', { t: '정면', size: 160 }], msg('오늘 한도를 다 썼어요. 새벽 4시에 다시 차요.'), off('전화 걸기'), sec('대화로 돌아가기')])],
+      ['busy', '다른 기기의 통화', call([['face', { t: '정면', size: 160 }], msg('이미 통화 중이에요.'), sec('대화로 돌아가기')])],
+      ['budget', '예산 띠', call([B_BUDGET, ['face', { t: '정면', size: 160 }], off('전화 걸기'), sec('대화로 돌아가기')])],
+      ['unavailable', '통화 서버 503, 잡은 한도는 서버가 돌려줌', call([['face', { t: '정면', size: 160 }], msg('지금은 통화를 걸 수 없어요.'), btn('다시 해 보기')])],
+      ['dropped', 'WebSocket 끊김', call([['face', { t: '정면', size: 160 }], msg('연결이 끊겼어요'), btn('다시 걸기'), sec('대화로 돌아가기')])],
+      ['permission', '보관한 아이(동의가 꺼졌으면 동의 띠)', call([['face', { t: '정면', size: 160 }], msg('보관한 아이예요. 꺼내면 다시 이야기할 수 있어요.'), btn('돌아가기')])],
+      ['error', '불러오기 실패', loadErr(P, '대화')]
+    ] },
+    { id: 'SCR-149', name: '일기장', path: '/pets/:id/diary', purpose: '아이가 쓴 그림일기를 달마다 보고 한 장을 골라 열어요.', states: [
+      ['loading', '달 줄과 카드 세 장 자리 회색', [bar('일기장', P), ['sk', ['50%']], ['cards', [{ sk: true }, { sk: true }, { sk: true }]]]],
+      ['normal', '쓰는 중·못 쓴 날 표시, 건너뛴 날은 없음', [bar('일기장', P), ['month', { text: '2026년 11월', nextOff: true }], ['cards', DIARY_CARDS]]],
+      ['empty', '그 달에 일기가 없음', [bar('일기장', P), ['month', { text: '2026년 10월' }], ['spacer'], msg('이 달에는 일기가 없어요.', P + '와 이야기한 날 밤에 일기를 써요.'), ['spacer']]],
+      ['farewell', '맨 위 마지막 장', [bar('일기장', P + ' ✿'), ['month', { text: '2026년 11월', nextOff: true }], ['cards', [{ t: '마지막 장 ✿', s: '11월 17일 · 엄마에게', tag: '마지막 장' }].concat(DIARY_CARDS)]]],
+      ['not-found', '없는 아이·남의 아이', nf('일기장', P, '홈으로')],
+      ['error', '불러오기 실패', loadErr('일기장', P)]
+    ] },
+    { id: 'SCR-150', name: '일기 한 장', path: '/pets/:id/diary/:date', purpose: '아이 시점 그림일기 한 장을 읽고, 테마·글꼴·스티커로 꾸미고, 새 그림을 그리거나 카드로 공유해요. 스티커 위치는 그림 칸 비율이라 폭이 바뀌어도 같은 자리예요.', states: [
+      ['loading', '날짜 줄, 그림 칸, 글 자리 회색', [bar('', '일기장'), ['sk', ['50%']], ['sk', ['70%']], ['pic', { skel: true }], ['sk', ['100%', '100%', '100%', '100%', '60%']]]],
+      ['normal', '꾸미기, 다시 그리기(남은 횟수), 공유, 앞뒤 날', page()],
+      ['pending', '아직 쓰는 중', [bar('11월 17일', '일기장'), ['spacer'], msg(P + '가 아직 쓰는 중이에요. 조금 뒤에 다시 와 주세요.'), ['nav', { nextOff: true }], ['spacer']]],
+      ['skipped', '이야기가 짧은 날', [bar('11월 13일', '일기장'), ['spacer'], msg('이날은 이야기가 짧아 일기를 쉬었어요.'), ['nav', {}], ['spacer']]],
+      ['failed', '쓰지 못한 날', [bar('11월 14일', '일기장'), ['spacer'], msg('이날은 일기를 쓰지 못했어요.'), ['nav', {}], ['spacer']]],
+      ['decorate', '보관함의 것만, 바로 미리 보임', page({ decorate: true })],
+      ['saving', '저장이 꺼지고 움직임', page({ decorate: true, saving: true })],
+      ['use-confirm', '처음 쓰는 산 아이템(철회 기한이 있을 때)', sheet(page({ decorate: true }), '이 테마를 쓸까요?', [['p', '이 테마를 쓰면 청약철회할 수 없어요. 쓸까요?'], ['btn2', [['쓸게요', {}], ['아니요', { sec: true }]]]])],
+      ['redrawing', '2초마다, 2분 넘으면 \'오래 걸리네요…\'', page({ picDim: true, overlay: '새 그림을 그리는 중이에요 ◌', actOff: true })],
+      ['redrawn', '이 화면에서 기다렸을 때만 한 번', page({ picLabel: '새 그림', stickers: false, limitTxt: '새 그림으로 다시 그리기 · 1번 남음' }), '새 그림이에요'],
+      ['redraw-failed', '그림은 그대로, 한도는 돌려줌', page({ picNote: ['note', { text: '그리지 못했어요. 한도는 돌려드렸어요.' }] })],
+      ['farewell', '꽃 틀, 꾸미기·다시 그리기 없음, 공유는 됨', [bar('마지막 장', '일기장'), ['rows', [{ t: '11월 17일 · 마지막 장 ✿', r: '꽃 틀', plain: true }]], ['h', '엄마에게'], ['p', '엄마, 나 콩이야. 같이 산책하던 공원 기억나? 나는 거기서 엄마 냄새 맡는 게 제일 좋았어. 이제 아프지 않아. 엄마가 웃으면 나도 좋아. 고마웠어. 많이 사랑해.'], sec('카드로 공유'), ['nav', { nextOff: true }]]],
+      ['archived', '보기와 공유만', page({ actions: false })],
+      ['share-error', '아직 다 쓰지 않은 일기(또는 공통 규칙)', page({ shareErr: '아직 다 쓰지 않은 일기예요' })],
+      ['stale', '저장이 409면 다시 불러 그 상태', page(), '화면을 새로 고쳤어요.'],
+      ['not-found', '없는 날·남의 아이', nf('', '일기장', '일기장으로')],
+      ['error', '불러오기 실패', loadErr('', '일기장')]
+    ] },
+    { id: 'SCR-151', name: '새 그림으로 다시 그리기', path: '/pets/:id/diary/:date#redraw', purpose: '일기 그림을 한도를 써서 새 그림으로 바꿔요. 바라는 장면을 짧게 적을 수 있어요. 일기 한 장 위에 올라오는 칸이에요.', states: [
+      ['normal', '메모, 한도 안내, 남은 횟수', sheet(page(), '새 그림으로 다시 그리기', [['p', '어떤 그림이면 좋을까요?'], ['fld', { hint: '예: 눈 오는 공원으로', multi: true, count: '0/100' }], ['pm', '새 그림은 오늘 한도를 써요 · 지금 60%'], btn('그리기 · 2번 남음')])],
+      ['loading', '한도 줄만 회색, 그리기는 켜짐', sheet(page(), '새 그림으로 다시 그리기', [['p', '어떤 그림이면 좋을까요?'], ['fld', { hint: '예: 눈 오는 공원으로', multi: true, count: '0/100' }], ['sk', ['60%']], btn('그리기 · 2번 남음')])],
+      ['sending', '그리기 꺼짐과 움직임', sheet(page(), '새 그림으로 다시 그리기', [['p', '어떤 그림이면 좋을까요?'], ['fld', { value: '눈 오는 공원으로', multi: true, count: '9/100' }], ['pm', '새 그림은 오늘 한도를 써요 · 지금 60%'], off('그리기 ◌')])],
+      ['quota', 'brief 한 줄(recharge면 SCR-155로 바뀜, 추억 모드는 \'오늘은 여기까지…\')', sheet(page(), '새 그림으로 다시 그리기', [['fld', { value: '눈 오는 공원으로', multi: true, count: '9/100' }], ['note', { text: '오늘 한도를 다 썼어요. 새벽 4시에 다시 차요.' }], off('그리기')])],
+      ['limit', '다시 그리기를 다 씀', sheet(page(), '새 그림으로 다시 그리기', [['fld', { value: '눈 오는 공원으로', multi: true, count: '9/100' }], ['note', { text: '다시 그리기를 다 썼어요.' }], off('그리기')])],
+      ['budget', '예산 쉼', sheet(page(), '새 그림으로 다시 그리기', [['fld', { value: '눈 오는 공원으로', multi: true, count: '9/100' }], ['note', { text: '오늘은 새 그림과 통화가 쉬어요. 글로는 계속 이야기할 수 있어요.' }], off('그리기')])],
+      ['consent', '국외 이전 동의 꺼짐', sheet(page(), '새 그림으로 다시 그리기', [['note', { text: '사진과 대화를 해외 AI 회사로 보내는 데 동의해야 쓸 수 있어요. 설정에서 바꿀 수 있어요.', btn: '설정에서 바꾸기' }], off('그리기')])],
+      ['stale', '칸을 닫고 SCR-150을 다시 불러 그 상태', page({ picDim: true, overlay: '새 그림을 그리는 중이에요 ◌', actOff: true }), '화면을 새로 고쳤어요.'],
+      ['error', '메모는 남김', sheet(page(), '새 그림으로 다시 그리기', cat([['fld', { value: '눈 오는 공원으로', multi: true, count: '9/100' }]], WERR, [btn('그리기 · 2번 남음')]))]
+    ] },
+    { id: 'SCR-152', name: '옷 입히기', path: '/pets/:id/closet', purpose: '보관함의 착용 아이템을 자리(머리·몸·목)마다 하나씩 입히고 벗겨요. 입은 것을 다시 누르면 벗어요.', states: [
+      ['loading', '모습 칸과 격자 자리 회색', [bar('옷 입히기', P), ['pic', { skel: true, ratio: '1 / 1', w: 220 }], ['seg', { items: ['머리', '몸', '목'], on: '머리' }], ['tiles', { c: 3, items: [{ sk: true }, { sk: true }, { sk: true }] }]]],
+      ['normal', '입은 것 ✓, 다른 아이가 입었으면 표시', closet()],
+      ['empty', '그 자리에 아이템 없음', closet({ slot: '목', empty: true })],
+      ['saving', '누른 아이템에 움직임', closet({ saving: true })],
+      ['use-confirm', '처음 입히는 산 아이템', sheet(closet(), '입힐까요?', [['p', '입히면 이 아이템은 청약철회할 수 없어요. 입힐까요?'], ['btn2', [['입힐게요', {}], ['아니요', { sec: true }]]]])],
+      ['memorial', '상점에서 더 보기 없음', closet({ memorial: true })],
+      ['archived', '보관한 아이', [bar('옷 입히기', P), ['spacer'], msg('보관한 아이예요.'), btn('돌아가기'), ['spacer']]],
+      ['layer-error', '그 아이템 그림만', closet({ layerErr: true, picLabel: '털모자 그림만' })],
+      ['not-found', '없는 아이', nf('옷 입히기', P, '홈으로')],
+      ['error', '불러오기 실패', loadErr('옷 입히기', P)]
+    ] },
+    { id: 'SCR-153', name: '아이 설정', path: '/pets/:id/settings', purpose: '이름과 아이 소개를 고치고, 추억 모드로 바꾸거나 되돌리고, 보관·내보내기·지우기를 해요.', states: [
+      ['loading', '줄 여섯 개 자리 회색', [bar('아이 설정', P), ['rows', [{ sk: true }, { sk: true }, { sk: true }, { sk: true }, { sk: true }, { sk: true }]]]],
+      ['normal', '살아 있는 아이', settings()],
+      ['memorial-confirm', '추억 모드로 바꾸기 전 안내', sheet(settings(), '추억 모드로 바꾸면', [['checks', [{ t: '먼저 말 걸지 않아요' }, { t: '일기 알림이 멈춰요' }, { t: '상점과 충전 안내가 보이지 않아요' }, { t: '7일 안에 되돌릴 수 있어요' }]], ['fld', { label: '무지개다리를 건넌 날(선택)', hint: '년 · 월 · 일' }], btn('추억 모드로 바꾸기'), sec('아니에요')])],
+      ['memorial', '되돌리기(기한 안), 작별 의식(아직이면), 보관하기', settings({ memorial: true })],
+      ['archived', '꺼내기, 내보내기, 지우기', settings({ archived: true })],
+      ['exporting', '5초마다, 웹 푸시로도', settings({ exportRow: { t: '기록 내보내기', r: '만들고 있어요 ◌' } })],
+      ['export-ready', '받기는 24시간', settings({ exportRow: { t: '기록 내보내기', act: '받기', sub: '11월 18일 오후 4시까지 받을 수 있어요' } })],
+      ['export-failed', '횟수는 세지 않음', settings({ exportRow: { t: '기록 내보내기', act: '다시 하기', sub: '내보내지 못했어요. 횟수는 세지 않았어요.', bold: true } })],
+      ['export-limit', '하루 1번', settings({ exportRow: { t: '기록 내보내기', off: true, sub: '오늘은 이미 내보냈어요.', bold: true } })],
+      ['delete-confirm', '아이 이름을 그대로 써야 켜짐', sheet(settings(), '아이 지우기', [['p', P + '의 그림·대화·기억·일기·꾸밈을 모두 지워요. 되돌릴 수 없어요. 주문 기록은 남아요'], ['fld', { label: '지우려면 아이 이름을 그대로 써 주세요', hint: P }], off('지우기')])],
+      ['stale', '다시 불러 그 상태', settings({ memorial: true }), '화면을 새로 고쳤어요.'],
+      ['not-found', '없는 아이', nf('아이 설정', '홈', '홈으로')],
+      ['error', '공통 규칙(불러오기 실패)', loadErr('아이 설정', P)]
+    ] },
+    { id: 'SCR-154', name: '작별 의식', path: '/pets/:id/farewell', purpose: '추억 모드 아이에게서 마지막 편지나 함께한 장면 한 장을 한 번 받아 일기장 마지막 장에 남기고, 보관할지 정해요.', states: [
+      ['loading', '글 두 줄과 카드 두 장 자리 회색', [bar('작별 의식', P + ' ✿'), ['sk', ['90%', '70%']], ['tiles', { txt: true, items: [{ sk: true }, { sk: true }] }]]],
+      ['normal', '편지·장면 고르기, 장면이면 장면 칸', [bar('작별 의식', P + ' ✿'), ['p', '작별 의식은 한 번만 할 수 있어요. ' + P + '가 남기는 마지막 장은 일기장에 남아요'], ['tiles', { txt: true, items: [{ i: '✉', l: '마지막 편지 받기', on: true }, { i: '▢', l: '함께한 장면 한 장' }] }], ['fld', { label: '장면(장면을 고르면, 100자)', hint: '비우면 좋아하는 것으로 그려요', multi: true, off: true }], btn('시작하기')]],
+      ['writing', '30초쯤, 느린 움직임', [bar('작별 의식', P + ' ✿'), ['face', { t: '정면', size: 160 }], ['spin', P + '가 쓰고 있어요']]],
+      ['done', '편지(또는 장면 그림), 일기장에 남김, 보관할지', [bar('작별 의식', P + ' ✿'), ['h', '엄마에게'], ['p', '엄마, 나 콩이야. 같이 산책하던 공원 기억나? 나는 거기서 엄마 냄새 맡는 게 제일 좋았어. 이제 아프지 않아. 엄마가 웃으면 나도 좋아. 고마웠어. 많이 사랑해.'], ['pm', '일기장 마지막 장에 남겼어요'], ['note', { text: '보관할까요? 보관하면 먼저 말 걸지 않고 일기와 그림만 볼 수 있어요', btn2: [['보관하기', {}], ['그대로 두기', { sec: true }]] }]]],
+      ['already', '이미 함', [bar('작별 의식', P + ' ✿'), ['spacer'], msg('작별 의식은 한 번만 할 수 있어요.'), btn('마지막 장 보기'), ['spacer']]],
+      ['failed', '횟수 안 셈', [bar('작별 의식', P + ' ✿'), ['spacer'], msg('지금은 쓰지 못했어요. 잠시 뒤 다시 해 주세요.'), btn('다시 하기'), ['spacer']]],
+      ['budget', '장면만 막힘', [bar('작별 의식', P + ' ✿'), ['tiles', { txt: true, items: [{ i: '✉', l: '마지막 편지 받기' }, { i: '▢', l: '함께한 장면 한 장', on: true }] }], ['note', { text: '오늘은 새 그림과 통화가 쉬어요. 편지는 지금 받을 수 있어요' }], off('시작하기')]],
+      ['permission', '살아 있는 아이(동의가 꺼졌으면 동의 띠)', [bar('작별 의식', P), ['spacer'], msg('추억 모드에서만 할 수 있어요.'), btn('돌아가기'), ['spacer']]],
+      ['error', '불러오기 실패', loadErr('작별 의식', P + ' ✿')]
+    ] },
+    { id: 'SCR-155', name: '한도 다 씀과 충전', path: '/pets/:id#recharge', purpose: '살아 있는 아이의 하루 한도가 모자랄 때 충전권과 구독을 한 번 보여 주고 사게 해요. 추억 모드에서는 열리지 않아요.', states: [
+      ['loading', '칸 안 회색', sheet(petView({ pct: 0 }), '오늘 한도를 다 썼어요', [['sk', ['60%', '100%']], off(''), off(''), off('')])],
+      ['normal', '409 prompt=recharge로 저절로 한 번', sheet(petView({ pct: 0 }), '오늘 한도를 다 썼어요', rechargeBlocks())],
+      ['open', '회원이 한도 줄을 눌러 엶', sheet(petView(), '오늘 한도 60%', rechargeBlocks({ open: true }))],
+      ['limit', '충전권 하루 3장', sheet(petView({ pct: 0 }), '오늘 한도를 다 썼어요', rechargeBlocks({ limit: true }))],
+      ['full', '한도가 가득함', sheet(petView(), '오늘 한도 100%', rechargeBlocks({ open: true, full: true }))],
+      ['subscribed', '구독 중', sheet(petView({ pct: 0 }), '오늘 한도를 다 썼어요', rechargeBlocks({ subscribed: true }))],
+      ['payments-off', '값은 보이고 버튼 꺼짐', sheet(petView({ pct: 0 }), '오늘 한도를 다 썼어요', rechargeBlocks({ payOff: true }))],
+      ['identity', '결제 칸 안의 본인인증', sheet(petView({ pct: 0 }), '결제', payBlocks('가득 채우기', '2,900원', '충전권은 사면 바로 채워져 철회할 수 없어요', IDENT))],
+      ['error', '공통 규칙', sheet(petView({ pct: 0 }), '오늘 한도를 다 썼어요', rechargeBlocks({ err: true }))]
+    ] },
+    { id: 'SCR-156', name: '신고', path: '/pets/:id#report', purpose: '아이의 말 한 줄이나 그림이 이상하면 이유를 골라 알려요. 아이 화면이나 일기 한 장 위에 올라오는 칸이에요.', states: [
+      ['normal', '이유를 골라야 켜짐', sheet(petView(), '신고', reportBlocks())],
+      ['loading', '불러올 데이터가 없어 이 상태는 없어요', [bar(P, '홈'), ['none', '불러올 데이터가 없어 이 상태는 없어요. 신고할 것은 연 화면이 넘겨요']]],
+      ['sending', '버튼 꺼짐', sheet(petView(), '신고', reportBlocks({ sel: '이상한 말', busy: true }))],
+      ['done', '칸이 닫히고 알림(또 신고해도 같은 알림)', petView(), '신고했어요. 확인해 볼게요.'],
+      ['limit', '하루 20건', sheet(petView(), '신고', reportBlocks({ sel: '이상한 말', after: [['note', { text: '오늘은 더 신고할 수 없어요. 내일 다시 해 주세요.' }]] }))],
+      ['error', '고른 이유와 메모는 남김', sheet(petView(), '신고', reportBlocks({ sel: '이상한 말', after: WERR }))]
+    ] },
+    { id: 'SCR-157', name: '상점', path: '/shop', purpose: '착용 아이템·스티커 팩·일기장 테마·테마 패키지를 정가로 보고 골라요. 살아 있는 아이가 없으면 탭이 숨어요.', states: [
+      ['loading', '탭과 카드 자리 회색', shop({ sk: true })],
+      ['normal', '정가, 한정, 가진 것', shop()],
+      ['empty', '팔고 있는 것이 없음', shop({ empty: true })],
+      ['payments-off', '값은 보이고 위에 안내', shop({ band: band('결제는 곧 열려요.') })],
+      ['permission', '살아 있는 아이 없이 주소로 직접 옴', [bar('상점'), ['spacer'], msg('함께 사는 아이가 있을 때 열려요.'), btn('홈으로'), ['spacer'], ['tabs', { on: '', items: ['홈', '내 정보'] }]]],
+      ['error', '불러오기 실패', loadErr('상점', null, { on: '상점' })]
+    ] },
+    { id: 'SCR-158', name: '아이템 보기', path: '/shop/:itemId', purpose: '사기 전에 착용 아이템을 내 아이에게 입혀 보거나 테마·스티커를 일기장에 대어 보고(서버 저장 없음), 원화 총액과 철회 조건을 보고 사요.', states: [
+      ['loading', '큰 미리 보기와 글 세 줄 자리 회색', [bar('', '상점'), ['pic', { skel: true, ratio: '1 / 1', w: 260 }], ['sk', ['50%', '70%', '40%']]]],
+      ['normal', '착용 아이템: 고른 아이 모습에 겹침', item()],
+      ['owned', '가지고 있음', item({ owned: true })],
+      ['payments-off', '사기 꺼짐', item({ payOff: true })],
+      ['identity', '결제 칸 안의 본인인증', sheet(item(), '결제', payBlocks('털모자', '1,200원', '산 지 7일 안이고 한 번도 입히거나 붙이지 않았으면 철회할 수 있어요', IDENT))],
+      ['sold-out', '판매가 끝남', [bar('', '상점'), ['spacer'], msg('판매가 끝났어요.'), btn('상점으로'), ['spacer']]],
+      ['layer-error', '아이템 그림만', item({ layerErr: true, picLabel: '털모자 그림만' })],
+      ['error', '불러오기 실패', loadErr('', '상점')]
+    ] },
+    { id: 'SCR-159', name: '내 정보', path: '/me', purpose: '회원 번호를 보고, 한도와 구독·주문으로 가고, 알림과 동의를 바꾸고, 로그아웃하거나 계정을 지워요.', states: [
+      ['loading', '줄 여덟 개 자리 회색', [bar('내 정보'), ['rows', [{ sk: true }, { sk: true }, { sk: true }, { sk: true }, { sk: true }, { sk: true }, { sk: true }, { sk: true }]], ['tabs', { on: '내 정보' }]]],
+      ['normal', '회원 번호(누르면 복사), 만들기권, 줄들, 계정 지우기', me()],
+      ['consents', '동의 칸을 펼침: 필수 셋은 스위치 없음, 국외 이전 스위치', me({ consents: true })],
+      ['consent-off-confirm', '국외 이전 끄기 확인', sheet(me({ consents: true }), '국외 이전 동의를 끌까요?', [['p', '끄면 새 대화·새 그림·통화가 멈춰요. 지금까지 만든 것은 볼 수 있어요'], ['btn2', [['끄기', {}], ['아니요', { sec: true }]]]])],
+      ['delete-confirm', '\'계정 지우기\'를 그대로 써야 켜짐', sheet(me(), '계정 지우기', [['p', '아이, 사진, 대화, 기억, 그림이 모두 지워지고 구독은 해지돼요. 주문 기록만 이름 없이 5년 남아요'], ['fld', { label: '지우려면 \'계정 지우기\'를 그대로 써 주세요', hint: '계정 지우기' }], off('지우기')])],
+      ['minor-locked', '결제·본인인증 꺼짐, 계정 지우기는 됨', me({ band: band('이 서비스는 만 19세 이상만 쓸 수 있어요.'), locked: true })],
+      ['error', '불러오기 실패', loadErr('내 정보', null, { on: '내 정보' })]
+    ] },
+    { id: 'SCR-160', name: '한도와 구독', path: '/me/plan', purpose: '오늘 한도와 충전권을 보고, 구독을 시작·해지하고, 바뀌는 구독 값에 동의해요. 해지는 시작과 같은 단계 수예요.', states: [
+      ['loading', '게이지와 카드 자리 회색', [bar('한도와 구독', '내 정보'), ['sk', ['60%', '100%']], ['cards', [{ sk: true }, { sk: true }]]]],
+      ['free', '무료 요금제', plan()],
+      ['subscribed', '구독 중', plan({ box: { t: '구독 중', p: ['다음 결제 12월 17일 · 9,900원', '하루 한도 2배'], btn: { label: '해지하기', sec: true } } })],
+      ['canceling', '기간 끝까지 2배, 해지 버튼 없음', plan({ box: { t: '구독 해지 예정', p: ['12월 17일까지 하루 한도 2배예요. 그 뒤 끝나요.'] } })],
+      ['price-change', '바뀌는 값에 동의(동의하면 \'동의했어요\')', plan({ band: band('12월 20일부터 월 10,900원으로 바뀌어요. 동의하지 않으면 그날 끝나요.', '동의하기'), box: { t: '구독 중', p: ['다음 결제 12월 17일 · 9,900원'], btn: { label: '해지하기', sec: true } } })],
+      ['payments-off', '구독·충전 버튼 꺼짐', plan({ payOff: true })],
+      ['identity', '결제 칸 안의 본인인증', sheet(plan(), '결제', payBlocks('구독 1개월', '9,900원', '결제 7일 안이고 늘어난 한도를 쓰지 않았으면 철회할 수 있어요', IDENT))],
+      ['stale', '다시 불러 그 상태', plan({ box: { t: '구독 중', p: ['다음 결제 12월 17일 · 9,900원'], btn: { label: '해지하기', sec: true } } }), '화면을 새로 고쳤어요.'],
+      ['error', '불러오기 실패', loadErr('한도와 구독', '내 정보')]
+    ] },
+    { id: 'SCR-161', name: '주문 내역', path: '/me/orders', purpose: '지난 주문과 그 상태를 보고, 조건이 맞으면 청약철회해요.', states: [
+      ['loading', '줄 네 개 자리 회색', [bar('주문 내역', '내 정보'), ['rows', [{ sk: true }, { sk: true }, { sk: true }, { sk: true }]]]],
+      ['normal', '철회 가능하면 버튼, 아니면 안내 한 줄', orders()],
+      ['empty', '주문 없음', [bar('주문 내역', '내 정보'), ['spacer'], msg('주문이 없어요.'), ['spacer']]],
+      ['confirm', '철회 확인', sheet(orders(), '청약철회할까요?', [['p', '철회하면 결제를 취소하고 보관함에서 빠져요'], ['btn2', [['철회하기', {}], ['아니요', { sec: true }]]]])],
+      ['refunded', '그 줄이 환불됨', orders({ first: { sub: '11월 17일 · 환불됨 · 주문 PO7F3K2' } }), '결제를 취소했어요'],
+      ['refund-pending', '결제 대행의 취소를 기다림', orders({ first: { sub: '처리 중이에요. 결제 대행의 취소를 기다리고 있어요.', bold: true } })],
+      ['not-allowed', '그 줄 아래 이유', orders({ first: { act: '청약철회', sub: '이 주문은 철회할 수 없어요: 한 번 입혔어요', bold: true } })],
+      ['error', '불러오기 실패', loadErr('주문 내역', '내 정보')]
+    ] },
+    { id: 'SCR-162', name: '결제 확인', path: '/pay/return', purpose: '결제 대행 창에서 돌아온 결과를 서버에 확인하고, 받은 것을 보여 준 뒤 원래 화면(pet_pay_return)으로 보내요.', states: [
+      ['confirming', '버튼 없음', [bar('결제 확인'), ['spacer'], ['spin', '결제를 확인하고 있어요'], ['spacer']]],
+      ['paid', '받은 것과 돌아가기', [bar('결제 확인'), ['spacer'], msg('결제했어요', '털모자가 보관함에 들어갔어요'), btn('돌아가기'), ['spacer']]],
+      ['pending', '3초마다, 1분까지', [bar('결제 확인'), ['spacer'], msg('결제는 됐어요. 받은 것을 넣고 있어요'), ['spin', '잠시만요'], ['spacer']]],
+      ['failed', '돈은 나가지 않음', [bar('결제 확인'), ['spacer'], msg('결제가 되지 않았어요. 돈은 나가지 않았어요.'), btn('돌아가기'), ['spacer']]],
+      ['canceled', '결제 창을 닫음, API를 부르지 않음', [bar('결제 확인'), ['spacer'], msg('결제를 취소했어요.'), btn('돌아가기'), ['spacer']]],
+      ['already', '웹훅이 먼저 처리: 주문 내역에서 찾아 #paid나 #failed', [bar('결제 확인'), ['spacer'], msg('결제했어요', '오늘 한도를 가득 채웠어요'), btn('돌아가기'), ['spacer']]],
+      ['not-found', '없는 주문', [bar('결제 확인'), ['spacer'], msg('찾을 수 없어요.'), btn('주문 내역'), ['spacer']]],
+      ['error', '확인 실패', [bar('결제 확인'), ['spacer'], msg('확인하지 못했어요. 결제는 주문 내역에서 볼 수 있어요.'), btn('다시 확인하기'), ['trace'], ['spacer']]]
+    ] }
+  ];
+
+  function fill(target, blocks, w) { blocks.forEach(function (b) { target.append(block(b, w)); }); }
+  function frame(state, w) {
+    var blocks = state[2], toast = state[3];
+    var ph = el('div', 'ph');
+    ph.style.width = w + 'px';
+    var inner = ph;
+    if (w > 600) { ph.classList.add('desk'); inner = el('div', 'c480'); ph.append(inner); }
+    if (blocks && blocks.under) {
+      ph.classList.add('fixed');
+      var dim = el('div', 'dimpage');
+      fill(dim, blocks.under, w);
+      inner.append(dim);
+      inner.append(el('div', 'shade'));
+      var sh = el('div', 'sheet');
+      sh.append(el('div', 'grab'));
+      var hd = el('div', 'sh-h'); hd.append(el('b', '', blocks.title)); hd.append(el('span', 'ib', '닫기')); sh.append(hd);
+      fill(sh, blocks.blocks, w);
+      inner.append(sh);
+    } else {
+      fill(inner, blocks, w);
+    }
+    if (toast) ph.append(el('div', 'toast', toast));
+    return ph;
+  }
+
+  var toc = document.getElementById('toc');
+  var root = document.getElementById('screens');
+  var all = [];
+  var total = 0;
+  SCREENS.forEach(function (s) {
+    var a = el('a'); a.href = '#' + (s.common ? 'common' : s.id.toLowerCase());
+    a.append(document.createTextNode((s.common ? '' : s.id + ' ') + s.name + ' ')); a.append(el('span', '', s.states.length + '개')); toc.append(a);
+    var sec = el('section', 'scr'); sec.id = s.common ? 'common' : s.id.toLowerCase();
+    var hd = el('header');
+    var h2 = el('h2'); h2.append(document.createTextNode((s.common ? '' : s.id + ' ') + s.name + ' ')); h2.append(el('code', '', s.path)); hd.append(h2);
+    hd.append(el('p', '', s.purpose));
+    sec.append(hd);
+    s.states.forEach(function (st, i) {
+      var fig = el('figure', 'st'); fig.id = s.common ? 'common-' + i : (s.id + '-' + st[0]).toLowerCase();
+      var cap = el('figcaption'); cap.append(el('b', '', s.common ? st[0] : s.id + '#' + st[0])); cap.append(el('span', '', st[1])); fig.append(cap);
+      var pair = el('div', 'pair');
+      var widths = (st[4] && st[4].wide) ? WIDTHS.concat([1280]) : WIDTHS;
+      widths.forEach(function (w) { var c = el('div', 'col'); c.append(el('small', '', w + 'px')); var f = frame(st, w); c.append(f); all.push(f); pair.append(c); });
+      fig.append(pair);
+      sec.append(fig);
+      if (!s.common) total++;
+    });
+    root.append(sec);
+  });
+  document.documentElement.dataset.states = String(total);
+
+  function folds() {
+    all.forEach(function (f) {
+      var old = f.querySelector(':scope > .fold'); if (old) old.remove();
+      if (f.scrollHeight > FOLD + 24 && !f.classList.contains('fixed')) {
+        var line = el('div', 'fold'); line.style.top = FOLD + 'px'; line.append(el('span', '', '첫 화면 끝(약 740px)')); f.append(line);
+      }
+    });
+  }
+  if (document.fonts && document.fonts.ready) { document.fonts.ready.then(folds); } else { folds(); }
+  window.addEventListener('load', folds);
+})();
+</script>

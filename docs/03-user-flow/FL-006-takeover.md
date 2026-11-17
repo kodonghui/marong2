@@ -1,7 +1,7 @@
 # FL-006 다른 화면에서 이어 받기
 
 Serves: REQ-017, REQ-018
-Screens: SCR-002
+Screens: SCR-001(화면 2의 통화 버튼·여기서 이어 받기), SCR-002
 
 ```mermaid
 flowchart TD

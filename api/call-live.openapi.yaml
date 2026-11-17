@@ -1,0 +1,337 @@
+# 마롱이 지금 통화 서버(Gemini 길) API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/call-cost.md(SPEC-174, SPEC-176), docs/app-ring.md(API-107). 코드: tools/vertex_live/server.py
+openapi: 3.1.0
+info:
+  title: 마롱이 지금 통화 서버 API
+  version: 0.1.0-draft
+  description: |-
+    지금 도는 통화 서버(`tools/vertex_live/server.py`, Gemini 길)의 계약 가운데 통화 비용 설계(2026-11-16)가 바꾸는 곳만 적었어요. 원본은 이 파일이고 코드는 이 파일을 따라가요(06단계).
+
+    - 같은 주소의 처음 통화 계약(`api/openapi.yaml`, API-001~012)은 OpenAI 길로 설계한 서버라 지금 서버와 모양이 달라요. 지금 서버의 통화 홈 상태와 웹소켓은 이 파일이 원본이에요.
+    - 모든 요청은 Cloudflare Access를 지나고, 터널이 `/chat/` 밖의 길을 이 서버(127.0.0.1:8792)로 보내요. 서버는 `Cf-Access-Jwt-Assertion`을 다시 확인하거나, 초대 쿠키 `marong_live`를 받아요.
+    - 바꾸지 않는 길(`/auth`, `/api/rtc`, `/rtc`, `/api/calls/{id}/end`, `/healthz`, 정적 파일)은 아직 이 계약에 없어요.
+
+    바꾸는 것(Claude 제안, 2026-11-16, 검토 대상).
+    1. `GET /api/me`에 `canCall`과 `blockedReason`을 더해요(SPEC-174). 금액·퍼센트·80% 경고는 없어요(친구 화면에는 막힐 때만 마롱이 말투로). 같은 처리기가 `GET /status`로도 답하고(지금 화면이 부르는 주소) 응답이 같아요.
+    2. `/live`가 새 통화면 예산을 보고, 이번 달 상태가 exhausted나 hard_stop이면 연결을 받은 뒤 `{"type":"budget_exhausted"}`를 보내고 닫아요. 브라우저 웹소켓은 HTTP 오류를 읽지 못해서 429가 아니라 메시지예요. 하던 통화의 다시 잇기, 검색 끊기 뒤 다시 붙기, 글로 갈아타기는 막지 않아요(REQ-049). 셀 수 없으면 막지 않아요(REQ-185).
+    3. 120%(hard_stop)에서는 마이크 소리를 구글로 보내지 않고 인사 한 턴 뒤 15초 안에 끝내요. 화면에는 지금 끊기와 같은 `hangup` 메시지로 알려요(SPEC-176). 끝 이유 `budget_hard_stop`은 DB에만 남아요.
+    4. 오류 본문을 aiohttp 기본 글에서 RFC 9457 Problem Details(`code`, `traceId`)로 바꿔요. 지금 화면은 상태 번호만 읽어서 깨지지 않아요(`static/app.js`의 refresh).
+
+    깨지는 변경: 없음. 캐시에 남은 옛 화면은 `budget_exhausted`를 모르고 끊긴 통화로 보여요(이 서버의 화면 파일은 no-store라 새로 불러오면 고쳐짐).
+
+    Open: 화면이 읽지 않는 진단 칸(`model`, `voice`, `route`, `project`, `build`, `diagnostics` 등)을 `/api/me`에서 뺄지는 이 설계 밖이라 따로 정해요.
+servers:
+- url: https://marong.corthex-hq.com
+  description: Cloudflare Access 뒤. 터널이 /chat/ 밖의 길을 이 서버로 보내요
+- url: http://127.0.0.1:8792
+  description: 서버 안에서 직접(배포 확인용)
+security:
+- cfAccess: []
+- inviteCookie: []
+paths:
+  /api/me:
+    get:
+      operationId: getLiveStatus
+      summary: 통화 홈 상태
+      description: 통화 홈이 열릴 때와 돌아올 때 불러요(지금 화면은 같은 처리기의 `/status`). canCall이 false면 통화 홈은 예산 상태(마롱이 말투, 다음 달에 다시, 글로는 얘기할 수 있어)를 보이고 걸기 버튼을 막아요(REQ-050). 예산 계산은 프로세스마다 30초 기억해서 상태가 30초까지 늦을 수 있어요(SPEC-173).
+      x-corthex:
+        id: API-124
+        spec:
+        - SPEC-174
+        - SPEC-002
+        omit:
+          '400': 입력이 없음
+          '403': 허용 목록 밖도 401(지금 서버 규칙)
+          '404': 경로가 id를 담지 않음
+          '409': 읽기만 함
+          '429': 읽기만 함
+      responses:
+        '200':
+          description: 통화 홈 상태
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveStatus'
+              examples:
+                normal:
+                  value:
+                    ready: true
+                    active: false
+                    canCall: true
+                    blockedReason: null
+                    memoryConnected: true
+                    name: 현경
+                    webRTC: true
+                budget:
+                  value:
+                    ready: true
+                    active: false
+                    canCall: false
+                    blockedReason: budget
+                    memoryConnected: true
+                    name: 현경
+                    webRTC: true
+                in-call:
+                  value:
+                    ready: true
+                    active: true
+                    canCall: true
+                    blockedReason: null
+                    memoryConnected: true
+                    name: 현경
+                    webRTC: true
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        default:
+          $ref: '#/components/responses/Internal'
+  /live:
+    get:
+      operationId: openLiveCall
+      summary: 통화 웹소켓
+      description: |-
+        통화 화면이 여는 웹소켓이에요. 로그인과 `Origin`을 보고, 이 서버에 통화가 없으면 연결을 받아 `LiveSession`을 시작해요. 약속 전화의 `ring`은 docs/app-ring.md의 규칙이에요.
+
+        이 설계로 더하거나 다시 쓰는 서버 메시지(그 밖의 `transcript`, `audio_*`, `turn`, `reconnecting` 등은 그대로).
+        - `{"type":"budget_exhausted"}` 새로 더함. 새 통화인데 이번 달 예산 상태가 exhausted나 hard_stop이에요. 보낸 뒤 서버가 닫아요. 통화 기록과 구글 연결은 만들지 않아요.
+        - `{"type":"hangup","pendingMs":1200}` 지금과 같음. 120%에서 인사 뒤 끝낼 때도 이 메시지예요(SPEC-176).
+        - `{"type":"ready","callId":"…","memoryConnected":true,"ring":false}`, `{"type":"call_busy"}` 지금과 같음.
+      x-corthex:
+        id: API-107
+        spec:
+        - SPEC-136
+        - SPEC-174
+        - SPEC-176
+        omit:
+          '400': 형식이 틀린 client와 ring은 무시함(새 client id, 보통 통화)
+          '401': 로그인이 없어도 403(지금 서버 규칙). 브라우저 웹소켓은 상태 번호를 읽지 못함
+          '404': 경로가 id를 담지 않음
+          '429': 예산은 연결 뒤 budget_exhausted 메시지로 알림
+      parameters:
+      - name: client
+        in: query
+        required: false
+        description: 화면이 만든 UUID. 다시 잇기와 WebRTC 짝을 찾아요. 틀리면 새로 만들어요
+        schema:
+          type: string
+          format: uuid
+          maxLength: 36
+      - name: rtc
+        in: query
+        required: false
+        description: 1이면 같은 client의 WebRTC 짝을 써요
+        schema:
+          type: string
+          enum:
+          - '1'
+      - name: ring
+        in: query
+        required: false
+        description: 약속 전화로 연 통화의 벨 id(API-107, TBL-102). 틀리면 보통 통화
+        schema:
+          type: string
+          format: uuid
+          maxLength: 36
+      - name: hangup
+        in: query
+        required: false
+        description: 1이면 이 화면이 hangup 메시지로 통화를 끝낼 수 있어요
+        schema:
+          type: string
+          enum:
+          - '1'
+      responses:
+        '101':
+          description: 웹소켓으로 바꿈. 그 뒤는 위의 메시지예요
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/CallActive'
+        default:
+          $ref: '#/components/responses/Internal'
+components:
+  x-corthex:
+    errors:
+      unauthenticated:
+        status: 401
+        meaning: Access 로그인 증명과 초대 쿠키가 없거나 맞지 않음(허용 목록 밖 포함)
+        message: 로그인하면 바로 이야기할 수 있어
+        client: 로그인 버튼을 보이고 걸기·보내기를 막음(지금 화면)
+      not_allowed:
+        status: 403
+        meaning: 웹소켓을 여는데 로그인 증명이 없거나 맞지 않음
+        message: 로그인하면 바로 이야기할 수 있어
+        client: 통화를 끝내고 통화 홈을 다시 불러 로그인 상태를 보임
+      cross_site:
+        status: 403
+        meaning: 다른 사이트에서 연 웹소켓
+        message: 이 화면에서 다시 걸어 줘
+        client: 통화를 끝냄. 자동으로 다시 열지 않음
+      call_active:
+        status: 409
+        meaning: 이 서버에 이미 통화가 하나 있음
+        message: 다른 창에서 통화 중이야. 그 통화를 마치면 여기서 걸 수 있어
+        client: 통화 홈을 다시 불러 통화 중 상태를 보임
+      internal:
+        status: 500
+        meaning: 예상하지 못한 서버 오류
+        message: 잠시 연결을 확인하고 있어
+        client: 연결 확인 중 상태, 잠시 뒤 다시
+    messages:
+      budget_exhausted:
+        meaning: 이번 달 통화 예산을 다 써서 새 통화를 받지 않음(웹소켓 메시지)
+        message: 이번 달 통화는 여기까지야. 다음 달에 또 걸어 줘! 글로는 계속 얘기할 수 있어
+        client: 통화를 끝내고 통화 홈 예산 상태를 보임. 자동으로 다시 걸지 않음. 글 대화 링크를 보임
+  securitySchemes:
+    cfAccess:
+      type: apiKey
+      in: header
+      name: Cf-Access-Jwt-Assertion
+      description: Cloudflare Access가 붙이는 JWT(RS256). 서버가 Access 공개키로 서명·aud·iss·exp를 확인하고 email을 허용 목록과 맞춰요. 브라우저가 직접 넣지 않아요.
+    inviteCookie:
+      type: apiKey
+      in: cookie
+      name: marong_live
+      description: 초대 토큰으로 `/auth`가 준 쿠키(30일). 기억에 연결되지 않은 통화예요(memoryConnected false)
+  responses:
+    Unauthenticated:
+      description: 로그인 증명이 없거나 맞지 않음
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            no-proof:
+              value:
+                type: https://marong.corthex-hq.com/problems/unauthenticated
+                title: Access 로그인 증명과 초대 쿠키가 없거나 맞지 않음
+                status: 401
+                code: unauthenticated
+                traceId: 0af7651916cd43dd
+    Forbidden:
+      description: 로그인이 없거나 다른 사이트에서 연 웹소켓
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            not-allowed:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-allowed
+                title: 웹소켓을 여는데 로그인 증명이 없거나 맞지 않음
+                status: 403
+                code: not_allowed
+                traceId: 00f067aa0ba902b7
+            cross-site:
+              value:
+                type: https://marong.corthex-hq.com/problems/cross-site
+                title: 다른 사이트에서 연 웹소켓
+                status: 403
+                code: cross_site
+                traceId: 00f067aa0ba902b7
+    CallActive:
+      description: 이 서버에 이미 통화가 있음
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            call-active:
+              value:
+                type: https://marong.corthex-hq.com/problems/call-active
+                title: 이 서버에 이미 통화가 하나 있음
+                status: 409
+                code: call_active
+                traceId: 7c3e1f2a9b8d4c60
+    Internal:
+      description: 예상하지 못한 서버 오류
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            internal:
+              value:
+                type: https://marong.corthex-hq.com/problems/internal
+                title: 예상하지 못한 서버 오류
+                status: 500
+                code: internal
+                traceId: 4bf92f3577b34da6
+  schemas:
+    Problem:
+      type: object
+      required:
+      - title
+      - status
+      - code
+      - traceId
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+          maxLength: 200
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          maxLength: 300
+        instance:
+          type: string
+          format: uri-reference
+        code:
+          type: string
+          enum:
+          - unauthenticated
+          - not_allowed
+          - cross_site
+          - call_active
+          - internal
+        traceId:
+          type: string
+          pattern: ^[0-9a-f]{16}$
+      additionalProperties: false
+    LiveStatus:
+      type: object
+      description: 통화 홈 상태. 지금 서버는 화면이 읽지 않는 진단 칸(model, voice, route, project, automaticReconnect, durationLimit, callCountLimit, build, diagnostics)도 함께 줘요. 이 설계는 그 칸을 바꾸지 않아요
+      required:
+      - ready
+      - active
+      - canCall
+      - blockedReason
+      - memoryConnected
+      - name
+      - webRTC
+      properties:
+        ready:
+          type: boolean
+          description: 서버가 통화를 받을 준비가 됐는지(지금은 늘 true)
+        active:
+          type: boolean
+          description: 이 서버에 통화가 하나 있는지(다른 창의 통화 포함)
+        canCall:
+          type: boolean
+          description: 새 통화를 걸 수 있는지. 이번 달 예산 상태가 exhausted나 hard_stop이면 false. 셀 수 없으면 true(REQ-185)
+        blockedReason:
+          type:
+          - string
+          - 'null'
+          enum:
+          - budget
+          - null
+          description: canCall이 false인 이유. 금액은 담지 않아요
+        memoryConnected:
+          type: boolean
+          description: 로그인한 친구가 기억에 연결된 통화 친구인지
+        name:
+          type:
+          - string
+          - 'null'
+          minLength: 1
+          maxLength: 40
+          description: 마롱이가 부르는 친구 이름. 기억에 연결되지 않았으면 null
+        webRTC:
+          type: boolean
+          description: 이 서버가 WebRTC 소리 길을 켰는지
+      additionalProperties: true

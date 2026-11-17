@@ -1,0 +1,6017 @@
+# 마롱이 반려동물 서비스 API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/pet.md(SPEC-310~369), DB: marong/pet/schema.sql(TBL-140~163), 표 설명: docs/05-erd/pet.md
+openapi: 3.1.0
+info:
+  title: 마롱이 반려동물 서비스 API
+  version: 0.1.0
+  description: '마롱이 반려동물 서비스(공개 서비스, 새 프로세스 `run_pet.py`, 새 DB `marong_pet`)의 모바일 웹(PWA)과 통화 서버가 쓰는 계약이에요. 설계: docs/04-functional-spec/pet.md(SPEC-310~369),
+    DB: marong/pet/schema.sql(TBL-140~163), 표 설명: docs/05-erd/pet.md. 원본은 이 파일이고 코드는 이 파일을 따라가요(06 단계). 2026-11-17 16:33 KST 0.1.0으로 얼림(D72, 동희님 ''추천대로 모두 정하기''). 01 질문 1~3이 추천안과 다르거나 결제 대행·본인확인 기관을 고르면 아래 Open 칸만 바꿔요.
+
+
+    - 로그인은 카카오·구글 OIDC이고 쿠키 `pet_session`이에요. 모든 값은 세션 회원으로만 읽고 바꿔요. 남의 것·없는 것·지운 것은 같은 404 `not_found`예요(SPEC-364).
+
+    - 쓰기 요청(POST·PUT·PATCH·DELETE)은 `Origin`이 서비스 주소여야 해요. 없으면 `Sec-Fetch-Site: same-origin`일 때만(SPEC-365). 결제 대행 웹훅, OIDC 콜백, /internal/은 예외예요.
+
+    - 오류는 RFC 9457 Problem Details에 `code`와 `traceId`를 더한 모양이에요. 코드 목록은 `components.x-corthex.errors`이고 화면 글은 명세 3.10과 같아요.
+
+    - 응답에 남은 한도 단위, 원가, 모델 이름, 공급자 `sub`, 생년월일이 없어요(SPEC-353, 366).
+
+    - 페이지(`/`, `/pets/…`, `/create`, `/shop`, `/me`)와 정적 파일(`/static/…`), 서비스 워커는 이 계약에 없어요. 화면은 07 사이트맵과 08 화면 정의에 있어요.
+
+
+    계약에서 정한 것(Claude 제안, 2026-11-17, 검토 대상).
+
+    1. 검증 오류는 400이에요(422는 쓰지 않음). 다른 마롱이 계약과 같아요. 경로 id의 형식이 틀리면 400, 없거나 남의 것이면 404예요.
+
+    2. 바꾸는 요청이 지금 상태와 같으면 200이고 아무것도 바뀌지 않아요(모드, 보관·꺼내기, 동의 값, 구독 해지).
+
+    3. 모델을 부르는 긴 일(특징표, 미리 보기, 후보, 표정, 다시 그리기, 내보내기)은 202이고 결과는 상태로 알려요. 실패도 HTTP 오류가 아니라 상태의 `failure`·`lastRedraw`로 와요. 바로 답하는 작별 의식만 503 `farewell_failed`예요.
+
+    4. 아이 답은 메시지 저장(201) 뒤 SSE로 와요. 모델 실패는 `system` 메시지 `reply_failed`이고, 거절·검사 실패는 정해 둔 답이에요(SPEC-327).
+
+    5. 하루 한도·예산·잠듦은 409이고 미리 보기·내보내기 하루 수와 요청 빈도는 429예요. `quota_exhausted`는 `prompt`로 화면이 할 일을 알려요(SPEC-354, 339).
+
+    6. 같은 요청 되풀이: 메시지는 `clientId`, 주문은 `idempotencyKey`, 결제 확인과 웹훅은 먼저 온 쪽, 통화 끝은 두 번째도 204예요.
+
+    7. 가입 대기 세션은 `signup`만 받아요. 다른 API는 401이에요.
+
+
+    Open: 결제 대행과 본인확인 기관을 고르면(02 질문 A·B) `Checkout.pg`, 웹훅 본문, 서명 헤더 이름을 그 회사 SDK에 맞춰요.'
+servers:
+- url: https://pet.example.com
+  description: 공개 도메인(동희님 준비물, SPEC-368). Cloudflare Tunnel, Access 없음
+- url: http://127.0.0.1:8797
+  description: 서버 안(통화 서버의 /internal/ 호출과 확인용)
+security:
+- memberSession: []
+paths:
+  /api/auth/{provider}/start:
+    get:
+      operationId: authStart
+      summary: 로그인 시작
+      description: 인가 주소로 보내요(PKCE, state·nonce는 10분 쿠키 `pet_oidc`). `openid` 범위만.
+      parameters:
+      - name: provider
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - kakao
+          - google
+      security: []
+      x-corthex:
+        id: API-150
+        spec:
+        - SPEC-310
+        omit:
+          '400': 해당 없음
+          '401': 로그인 전에 부름
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '404': 경로가 id를 담지 않음
+          '409': 상태와 부딪히지 않음
+      responses:
+        '302':
+          description: 다른 주소로 보냄
+          headers:
+            Location:
+              schema:
+                type: string
+                maxLength: 2000
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/auth/{provider}/callback:
+    get:
+      operationId: authCallback
+      summary: 로그인 돌아옴
+      description: 회원이면 회원 세션과 `/`로, 처음이면 가입 대기 세션(30분)과 `/signup`으로 보내요. 쿠키 `pet_session`(HttpOnly, Secure, SameSite=Lax). 실패도 302이고 세션 없이 `/?loginError=auth_state`(`state`
+        다름·만료) 또는 `/?loginError=auth_provider`(공급자 오류·토큰 확인 실패)로 보내요. 화면 글은 `components.x-corthex.errors`의 그 코드예요.
+      parameters:
+      - name: provider
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - kakao
+          - google
+      - name: code
+        in: query
+        required: true
+        schema:
+          type: string
+          maxLength: 512
+      - name: state
+        in: query
+        required: true
+        schema:
+          type: string
+          maxLength: 128
+      security: []
+      x-corthex:
+        id: API-151
+        spec:
+        - SPEC-310
+        omit:
+          '400': 브라우저가 여는 주소라 실패도 302예요(`/?loginError=auth_state`·`auth_provider`, SPEC-310)
+          '401': 로그인 전에 부름
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '404': 경로가 id를 담지 않음
+          '409': 상태와 부딪히지 않음
+      responses:
+        '302':
+          description: 다른 주소로 보냄
+          headers:
+            Location:
+              schema:
+                type: string
+                maxLength: 2000
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/auth/logout:
+    post:
+      operationId: logout
+      summary: 로그아웃
+      description: 그 세션을 지워요.
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-152
+        spec:
+        - SPEC-310
+        omit:
+          '400': 입력이 없음
+          '404': 경로가 id를 담지 않음
+          '409': 상태와 부딪히지 않음
+      responses:
+        '204':
+          description: 성공(본문 없음)
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/signup:
+    post:
+      operationId: signup
+      summary: 가입
+      description: 생년월일은 저장하지 않아요. 만 19세 미만이면 아무것도 저장하지 않고 가입 대기 세션을 지워요(403 `underage`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - birthDate
+              - agreeTerms
+              - agreePrivacy
+              - aiNoticeConfirmed
+              - overseasTransfer
+              properties:
+                birthDate:
+                  type: string
+                  format: date
+                agreeTerms:
+                  type: boolean
+                agreePrivacy:
+                  type: boolean
+                aiNoticeConfirmed:
+                  type: boolean
+                overseasTransfer:
+                  type: boolean
+                inviteCode:
+                  type: string
+                  pattern: ^[A-Z0-9]{8}$
+            examples:
+              adult:
+                value:
+                  birthDate: '2007-11-17'
+                  agreeTerms: true
+                  agreePrivacy: true
+                  aiNoticeConfirmed: true
+                  overseasTransfer: true
+                  inviteCode: INV12345
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-153
+        spec:
+        - SPEC-311
+        - SPEC-346
+        - SPEC-368
+        omit:
+          '404': 경로가 id를 담지 않음
+      responses:
+        '201':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+              examples:
+                member:
+                  value:
+                    memberNo: AB12CD34
+                    status: active
+                    identityVerified: false
+                    freeTickets: 0
+                    paymentsEnabled: false
+                    overseasTransfer: true
+                    business: null
+        '400':
+          description: '`consents_missing` · `invalid_input`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                consents_missing:
+                  $ref: '#/components/examples/consents_missing'
+                invalid_input:
+                  $ref: '#/components/examples/invalid_input'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: '`underage` · `invite_required` · `cross_site`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                underage:
+                  $ref: '#/components/examples/underage'
+                invite_required:
+                  $ref: '#/components/examples/invite_required'
+                cross_site:
+                  $ref: '#/components/examples/cross_site'
+        '409':
+          description: '`already_member`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                already_member:
+                  $ref: '#/components/examples/already_member'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/me:
+    get:
+      operationId: getMe
+      summary: 내 정보
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-154
+        spec:
+        - SPEC-311
+        - SPEC-312
+        - SPEC-361
+        - SPEC-362
+        omit:
+          '400': 입력이 없음
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '404': 경로가 id를 담지 않음
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+              examples:
+                member:
+                  value:
+                    memberNo: AB12CD34
+                    status: active
+                    identityVerified: true
+                    freeTickets: 1
+                    paymentsEnabled: true
+                    overseasTransfer: true
+                    business:
+                      상호: (예시 상호)
+                      사업자등록번호: 000-00-00000
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        default:
+          $ref: '#/components/responses/ServerError'
+    delete:
+      operationId: deleteAccount
+      summary: 계정 지우기
+      description: 세션을 모두 끊고 지우기 작업을 시작해요(24시간 안). 주문은 회원 없이 5년 남아요.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - confirm
+              properties:
+                confirm:
+                  type: string
+                  maxLength: 10
+            examples:
+              confirm:
+                value:
+                  confirm: 계정 지우기
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-155
+        spec:
+        - SPEC-314
+        - SPEC-359
+        omit:
+          '404': 경로가 id를 담지 않음
+          '409': 상태와 부딪히지 않음
+      responses:
+        '202':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+              examples:
+                accepted:
+                  value:
+                    ok: true
+        '400':
+          description: '`confirm_required` · `invalid_input`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                confirm_required:
+                  $ref: '#/components/examples/confirm_required'
+                invalid_input:
+                  $ref: '#/components/examples/invalid_input'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/me/consents:
+    get:
+      operationId: getConsents
+      summary: 동의 보기
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-156
+        spec:
+        - SPEC-312
+        omit:
+          '400': 입력이 없음
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '404': 경로가 id를 담지 않음
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Consents'
+              examples:
+                all:
+                  value:
+                    items:
+                    - kind: overseas_transfer
+                      value: true
+                      docVersion: 2026-11
+                      at: '2026-11-17T06:40:00Z'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/me/consents/{kind}:
+    put:
+      operationId: setConsent
+      summary: 동의 바꾸기
+      description: 줄을 더해 바꿔요. 같은 값이면 200 그대로. 바꿀 수 있는 것은 `overseas_transfer`뿐이고, 이용약관·개인정보·AI 고지를 끄려 하면 400 `use_delete_account`예요(계정 지우기로 안내).
+      parameters:
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - terms
+          - privacy
+          - ai_notice
+          - overseas_transfer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - value
+              properties:
+                value:
+                  type: boolean
+            examples:
+              'off':
+                value:
+                  value: false
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-157
+        spec:
+        - SPEC-312
+        omit:
+          '404': 경로가 id를 담지 않음
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Consents'
+              examples:
+                'off':
+                  value:
+                    items:
+                    - kind: overseas_transfer
+                      value: false
+                      docVersion: 2026-11
+                      at: '2026-11-17T06:40:00Z'
+        '400':
+          description: '`use_delete_account` · `invalid_input`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                use_delete_account:
+                  $ref: '#/components/examples/use_delete_account'
+                invalid_input:
+                  $ref: '#/components/examples/invalid_input'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/me/identity:
+    post:
+      operationId: verifyIdentity
+      summary: 본인인증 결과 보내기
+      description: '서버가 기관 API로 결과를 다시 받아 CI의 HMAC과 시각만 저장해요. Open: 본인확인 기관 선택(02 질문 B).'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - token
+              properties:
+                token:
+                  type: string
+                  maxLength: 500
+            examples:
+              token:
+                value:
+                  token: imp_000000000000
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-158
+        spec:
+        - SPEC-313
+        omit:
+          '404': 경로가 id를 담지 않음
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+              examples:
+                verified:
+                  value:
+                    memberNo: AB12CD34
+                    status: active
+                    identityVerified: true
+                    freeTickets: 0
+                    paymentsEnabled: true
+                    overseasTransfer: true
+                    business: null
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: '`underage` · `cross_site`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                underage:
+                  $ref: '#/components/examples/underage'
+                cross_site:
+                  $ref: '#/components/examples/cross_site'
+        '502':
+          description: '`identity_provider`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                identity_provider:
+                  $ref: '#/components/examples/identity_provider'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/me/push:
+    post:
+      operationId: addPushSubscription
+      summary: 웹 푸시 구독
+      description: 같은 endpoint면 200이 아니라 201로 같은 id(덮어씀). jobId 자리에 구독 id를 줘요.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - endpoint
+              - keys
+              properties:
+                endpoint:
+                  type: string
+                  pattern: ^https://[^\s]{1,2000}$
+                keys:
+                  type: object
+                  additionalProperties: false
+                  required:
+                  - p256dh
+                  - auth
+                  properties:
+                    p256dh:
+                      type: string
+                      maxLength: 200
+                    auth:
+                      type: string
+                      maxLength: 100
+            examples:
+              chrome:
+                value:
+                  endpoint: https://fcm.googleapis.com/fcm/send/abc
+                  keys:
+                    p256dh: BElz
+                    auth: k3x
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-159
+        spec:
+        - SPEC-337
+        omit:
+          '404': 경로가 id를 담지 않음
+          '409': 상태와 부딪히지 않음
+      responses:
+        '201':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+              examples:
+                saved:
+                  value:
+                    jobId: 00000000-0000-4000-8000-000000000011
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/me/push/{id}:
+    delete:
+      operationId: removePushSubscription
+      summary: 웹 푸시 구독 지우기
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-160
+        spec:
+        - SPEC-337
+        omit:
+          '409': 상태와 부딪히지 않음
+      responses:
+        '204':
+          description: 성공(본문 없음)
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/reports:
+    post:
+      operationId: createReport
+      summary: 신고
+      description: 같은 대상 두 번이면 200과 앞 신고 id(201 대신). 남의 것·없는 것은 404. jobId 자리에 신고 id를 줘요.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - targetType
+              - targetId
+              - reason
+              properties:
+                targetType:
+                  type: string
+                  enum:
+                  - message
+                  - picture
+                targetId:
+                  type: string
+                  format: uuid
+                reason:
+                  type: string
+                  enum:
+                  - strange
+                  - hurtful
+                  - sexual
+                  - dangerous
+                  - bad_picture
+                  - other
+                note:
+                  type: string
+                  maxLength: 200
+            examples:
+              message:
+                value:
+                  targetType: message
+                  targetId: 00000000-0000-4000-8000-000000000004
+                  reason: hurtful
+                  note: ''
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-161
+        spec:
+        - SPEC-315
+        omit:
+          '409': 상태와 부딪히지 않음
+      responses:
+        '201':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+              examples:
+                saved:
+                  value:
+                    jobId: 00000000-0000-4000-8000-000000000012
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          description: '`rate_limited`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                rate_limited:
+                  $ref: '#/components/examples/rate_limited'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/creations:
+    post:
+      operationId: startCreation
+      summary: 사진 올려 캐릭터 만들기 시작
+      description: 원본 바이트는 메모리에서만 다루고, EXIF를 빼고 사람 얼굴을 가린 사진만 저장해요.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - kind
+              - photos
+              properties:
+                kind:
+                  type: string
+                  enum:
+                  - living
+                  - memorial
+                photos:
+                  type: array
+                  minItems: 1
+                  maxItems: 3
+                  items:
+                    type: string
+                    format: binary
+                    maxLength: 8388608
+            examples:
+              three:
+                value:
+                  kind: living
+                  photos:
+                  - (JPEG)
+                  - (JPEG)
+                  - (JPEG)
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-162
+        spec:
+        - SPEC-316
+        - SPEC-317
+        omit:
+          '404': 경로가 id를 담지 않음
+      responses:
+        '202':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Creation'
+              examples:
+                photos:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000002
+                    kind: living
+                    state: photos
+                    traits: null
+                    multiplePets: false
+                    template: null
+                    preview: null
+                    candidates: []
+                    chosenId: null
+                    regenerationsLeft: 2
+                    failure: null
+                    priceKrw: 5900
+                    petId: null
+                    createdAt: '2026-11-17T06:40:00Z'
+                    expiresAt: '2026-12-17T06:40:00Z'
+        '400':
+          description: '`invalid_photo` · `invalid_input`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                invalid_photo:
+                  $ref: '#/components/examples/invalid_photo'
+                invalid_input:
+                  $ref: '#/components/examples/invalid_input'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '409':
+          description: '`consent_required` · `pet_limit` · `too_many_creations`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                consent_required:
+                  $ref: '#/components/examples/consent_required'
+                pet_limit:
+                  $ref: '#/components/examples/pet_limit'
+                too_many_creations:
+                  $ref: '#/components/examples/too_many_creations'
+        '413':
+          description: '`too_large`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                too_large:
+                  $ref: '#/components/examples/too_large'
+        '503':
+          description: '`photo_check_unavailable`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                photo_check_unavailable:
+                  $ref: '#/components/examples/photo_check_unavailable'
+        default:
+          $ref: '#/components/responses/ServerError'
+    get:
+      operationId: listCreations
+      summary: 진행 중 만들기 목록
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-163
+        spec:
+        - SPEC-326
+        omit:
+          '400': 입력이 없음
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '404': 경로가 id를 담지 않음
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreationList'
+              examples:
+                one:
+                  value:
+                    items:
+                    - id: 00000000-0000-4000-8000-000000000002
+                      kind: living
+                      state: traits
+                      traits:
+                        species: dog
+                        breedGuess: 푸들
+                        coatColors:
+                        - 갈색
+                        pattern: 단색
+                        patternNotes: ''
+                        earShape: 늘어진 귀
+                        eyeColor: 검은색
+                        build: 작음
+                        furLength: 곱슬
+                        distinctive: ''
+                      multiplePets: false
+                      template: null
+                      preview: null
+                      candidates: []
+                      chosenId: null
+                      regenerationsLeft: 2
+                      failure: null
+                      priceKrw: 5900
+                      petId: null
+                      createdAt: '2026-11-17T06:40:00Z'
+                      expiresAt: '2026-12-17T06:40:00Z'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/creations/{id}:
+    get:
+      operationId: getCreation
+      summary: 만들기 상태
+      description: 화면은 작업 중인 상태에서만 3초마다 불러요.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-164
+        spec:
+        - SPEC-326
+        - SPEC-318
+        - SPEC-322
+        omit:
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Creation'
+              examples:
+                traits:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000002
+                    kind: living
+                    state: traits
+                    traits:
+                      species: dog
+                      breedGuess: 푸들
+                      coatColors:
+                      - 갈색
+                      pattern: 단색
+                      patternNotes: ''
+                      earShape: 늘어진 귀
+                      eyeColor: 검은색
+                      build: 작음
+                      furLength: 곱슬
+                      distinctive: ''
+                    multiplePets: false
+                    template: null
+                    preview: null
+                    candidates: []
+                    chosenId: null
+                    regenerationsLeft: 2
+                    failure: null
+                    priceKrw: 5900
+                    petId: null
+                    createdAt: '2026-11-17T06:40:00Z'
+                    expiresAt: '2026-12-17T06:40:00Z'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/creations/{id}/traits:
+    patch:
+      operationId: editTraits
+      summary: 특징표 고치기
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Traits'
+            examples:
+              color:
+                value:
+                  coatColors:
+                  - 크림
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-165
+        spec:
+        - SPEC-319
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Creation'
+              examples:
+                edited:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000002
+                    kind: living
+                    state: traits
+                    traits:
+                      species: dog
+                      breedGuess: 푸들
+                      coatColors:
+                      - 갈색
+                      pattern: 단색
+                      patternNotes: ''
+                      earShape: 늘어진 귀
+                      eyeColor: 검은색
+                      build: 작음
+                      furLength: 곱슬
+                      distinctive: ''
+                    multiplePets: false
+                    template: null
+                    preview: null
+                    candidates: []
+                    chosenId: null
+                    regenerationsLeft: 2
+                    failure: null
+                    priceKrw: 5900
+                    petId: null
+                    createdAt: '2026-11-17T06:40:00Z'
+                    expiresAt: '2026-12-17T06:40:00Z'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`wrong_state`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                wrong_state:
+                  $ref: '#/components/examples/wrong_state'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/creations/{id}/confirm-traits:
+    post:
+      operationId: confirmTraits
+      summary: 특징표 확정
+      description: 몸 템플릿을 정해요(명세 3.5).
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-166
+        spec:
+        - SPEC-319
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Creation'
+              examples:
+                confirmed:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000002
+                    kind: living
+                    state: traits_confirmed
+                    traits:
+                      species: dog
+                      breedGuess: 푸들
+                      coatColors:
+                      - 갈색
+                      pattern: 단색
+                      patternNotes: ''
+                      earShape: 늘어진 귀
+                      eyeColor: 검은색
+                      build: 작음
+                      furLength: 곱슬
+                      distinctive: ''
+                    multiplePets: false
+                    template: dog_small
+                    preview: null
+                    candidates: []
+                    chosenId: null
+                    regenerationsLeft: 2
+                    failure: null
+                    priceKrw: 5900
+                    petId: null
+                    createdAt: '2026-11-17T06:40:00Z'
+                    expiresAt: '2026-12-17T06:40:00Z'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`wrong_state`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                wrong_state:
+                  $ref: '#/components/examples/wrong_state'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/creations/{id}/preview:
+    post:
+      operationId: drawPreview
+      summary: 미리 보기 그리기
+      description: 작업이 끝나면 상태가 `previewed`. 실패하면 `traits_confirmed`로 돌아오고 failure `preview_failed`(횟수 안 셈).
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-167
+        spec:
+        - SPEC-320
+      responses:
+        '202':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Creation'
+              examples:
+                drawing:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000002
+                    kind: living
+                    state: traits_confirmed
+                    traits:
+                      species: dog
+                      breedGuess: 푸들
+                      coatColors:
+                      - 갈색
+                      pattern: 단색
+                      patternNotes: ''
+                      earShape: 늘어진 귀
+                      eyeColor: 검은색
+                      build: 작음
+                      furLength: 곱슬
+                      distinctive: ''
+                    multiplePets: false
+                    template: dog_small
+                    preview: null
+                    candidates: []
+                    chosenId: null
+                    regenerationsLeft: 2
+                    failure: null
+                    priceKrw: 5900
+                    petId: null
+                    createdAt: '2026-11-17T06:40:00Z'
+                    expiresAt: '2026-12-17T06:40:00Z'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`wrong_state` · `busy` · `budget_paused` · `consent_required`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                wrong_state:
+                  $ref: '#/components/examples/wrong_state'
+                busy:
+                  $ref: '#/components/examples/busy'
+                budget_paused:
+                  $ref: '#/components/examples/budget_paused'
+                consent_required:
+                  $ref: '#/components/examples/consent_required'
+        '429':
+          description: '`preview_limit`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                preview_limit:
+                  $ref: '#/components/examples/preview_limit'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/creations/{id}/checkout:
+    post:
+      operationId: checkoutCreation
+      summary: 캐릭터 만들기 결제 시작
+      description: 만들기권을 쓰면 0원 주문이 바로 `fulfilled`이고 pg는 null, 후보 그리기가 시작돼요. 이미 결제된 만들기면 200과 그 주문.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - useFreeTicket
+              - idempotencyKey
+              properties:
+                useFreeTicket:
+                  type: boolean
+                idempotencyKey:
+                  type: string
+                  format: uuid
+            examples:
+              pay:
+                value:
+                  useFreeTicket: false
+                  idempotencyKey: 00000000-0000-4000-8000-000000000030
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-168
+        spec:
+        - SPEC-321
+        - SPEC-355
+        - SPEC-361
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Checkout'
+              examples:
+                pay:
+                  value:
+                    order:
+                      id: 00000000-0000-4000-8000-000000000006
+                      orderNo: P20261117-A1B2C3
+                      product: character_creation
+                      itemName: null
+                      amountKrw: 5900
+                      vatKrw: 536
+                      status: created
+                      createdAt: '2026-11-17T06:40:00Z'
+                      withdrawable: true
+                      withdrawalNote: 후보 그리기가 시작되면 철회할 수 없어요. 무료 미리 보기를 먼저 보여 드렸어요.
+                    pg:
+                      clientKey: test_ck_example
+                      orderName: 캐릭터 만들기
+                      amount: 5900
+                      billing: false
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`wrong_state` · `payments_off` · `identity_required`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                wrong_state:
+                  $ref: '#/components/examples/wrong_state'
+                payments_off:
+                  $ref: '#/components/examples/payments_off'
+                identity_required:
+                  $ref: '#/components/examples/identity_required'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/creations/{id}/regenerate:
+    post:
+      operationId: regenerateCandidates
+      summary: 후보 다시 만들기
+      description: 메모는 AI-31에 회원 메모 데이터로만 가요.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                note:
+                  type: string
+                  maxLength: 100
+            examples:
+              note:
+                value:
+                  note: 귀가 더 처졌어요
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-169
+        spec:
+        - SPEC-323
+      responses:
+        '202':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Creation'
+              examples:
+                drawing:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000002
+                    kind: living
+                    state: paid
+                    traits:
+                      species: dog
+                      breedGuess: 푸들
+                      coatColors:
+                      - 갈색
+                      pattern: 단색
+                      patternNotes: ''
+                      earShape: 늘어진 귀
+                      eyeColor: 검은색
+                      build: 작음
+                      furLength: 곱슬
+                      distinctive: ''
+                    multiplePets: false
+                    template: dog_small
+                    preview: null
+                    candidates: []
+                    chosenId: null
+                    regenerationsLeft: 1
+                    failure: null
+                    priceKrw: 5900
+                    petId: null
+                    createdAt: '2026-11-17T06:40:00Z'
+                    expiresAt: '2026-12-17T06:40:00Z'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`wrong_state` · `busy` · `regenerate_limit`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                wrong_state:
+                  $ref: '#/components/examples/wrong_state'
+                busy:
+                  $ref: '#/components/examples/busy'
+                regenerate_limit:
+                  $ref: '#/components/examples/regenerate_limit'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/creations/{id}/choose:
+    post:
+      operationId: chooseCandidate
+      summary: 정면 그림 고르기
+      description: 표정 6장을 그리고 `sheet_ready`가 되면 웹 푸시. 없는 후보 id는 404.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - candidateId
+              properties:
+                candidateId:
+                  type: string
+                  format: uuid
+            examples:
+              pick:
+                value:
+                  candidateId: 00000000-0000-4000-8000-000000000005
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-170
+        spec:
+        - SPEC-324
+      responses:
+        '202':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Creation'
+              examples:
+                chosen:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000002
+                    kind: living
+                    state: chosen
+                    traits:
+                      species: dog
+                      breedGuess: 푸들
+                      coatColors:
+                      - 갈색
+                      pattern: 단색
+                      patternNotes: ''
+                      earShape: 늘어진 귀
+                      eyeColor: 검은색
+                      build: 작음
+                      furLength: 곱슬
+                      distinctive: ''
+                    multiplePets: false
+                    template: dog_small
+                    preview: null
+                    candidates: []
+                    chosenId: null
+                    regenerationsLeft: 2
+                    failure: null
+                    priceKrw: 5900
+                    petId: null
+                    createdAt: '2026-11-17T06:40:00Z'
+                    expiresAt: '2026-12-17T06:40:00Z'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`wrong_state`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                wrong_state:
+                  $ref: '#/components/examples/wrong_state'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/creations/{id}/finish:
+    post:
+      operationId: finishCreation
+      summary: 이름과 아이 소개
+      description: 첫 인사(AI-32 greeting, 실패면 정해 둔 문장)가 대화에 들어가요.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - name
+              - intro
+              properties:
+                name:
+                  type: string
+                  pattern: ^[가-힣A-Za-z0-9 -]{1,12}$
+                intro:
+                  $ref: '#/components/schemas/Intro'
+            examples:
+              kong:
+                value:
+                  name: 콩이
+                  intro:
+                    personality:
+                    - 애교 많음
+                    likes: 산책, 닭가슴살
+                    dislikes: 목욕
+                    callMe: 누나
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-171
+        spec:
+        - SPEC-325
+      responses:
+        '201':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+              examples:
+                pet:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000003
+                    name: 콩이
+                    species: dog
+                    template: dog_small
+                    mode: living
+                    status: active
+                    intro:
+                      personality:
+                      - 애교 많음
+                      likes: 산책, 닭가슴살
+                      dislikes: 목욕
+                      callMe: 누나
+                    sheet:
+                      front: /api/media/00000000-0000-4000-8000-000000000005
+                      smile: /api/media/00000000-0000-4000-8000-000000000005
+                      excited: /api/media/00000000-0000-4000-8000-000000000005
+                      sleepy: /api/media/00000000-0000-4000-8000-000000000005
+                      surprised: /api/media/00000000-0000-4000-8000-000000000005
+                      sad: /api/media/00000000-0000-4000-8000-000000000005
+                      pout: /api/media/00000000-0000-4000-8000-000000000005
+                    outfit:
+                      head: 00000000-0000-4000-8000-000000000007
+                      body: null
+                      neck: null
+                    diaryStyle:
+                      themeId: null
+                      fontId: null
+                    memorialSince: null
+                    passedOn: null
+                    revertUntil: null
+                    shopEntry: true
+                    rechargePrompt: true
+                    farewellDone: false
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`wrong_state`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                wrong_state:
+                  $ref: '#/components/examples/wrong_state'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/pets:
+    get:
+      operationId: listPets
+      summary: 아이 목록
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-172
+        spec:
+        - SPEC-364
+        omit:
+          '400': 입력이 없음
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '404': 경로가 id를 담지 않음
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PetList'
+              examples:
+                one:
+                  value:
+                    items:
+                    - id: 00000000-0000-4000-8000-000000000003
+                      name: 콩이
+                      species: dog
+                      mode: living
+                      status: active
+                      front: /api/media/00000000-0000-4000-8000-000000000005
+                      lastMessageAt: '2026-11-17T06:40:00Z'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/pets/{id}:
+    get:
+      operationId: getPet
+      summary: 아이 보기
+      description: 추억 모드면 shopEntry·rechargePrompt가 false.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-173
+        spec:
+        - SPEC-331
+        - SPEC-339
+        omit:
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+              examples:
+                living:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000003
+                    name: 콩이
+                    species: dog
+                    template: dog_small
+                    mode: living
+                    status: active
+                    intro:
+                      personality:
+                      - 애교 많음
+                      likes: 산책, 닭가슴살
+                      dislikes: 목욕
+                      callMe: 누나
+                    sheet:
+                      front: /api/media/00000000-0000-4000-8000-000000000005
+                      smile: /api/media/00000000-0000-4000-8000-000000000005
+                      excited: /api/media/00000000-0000-4000-8000-000000000005
+                      sleepy: /api/media/00000000-0000-4000-8000-000000000005
+                      surprised: /api/media/00000000-0000-4000-8000-000000000005
+                      sad: /api/media/00000000-0000-4000-8000-000000000005
+                      pout: /api/media/00000000-0000-4000-8000-000000000005
+                    outfit:
+                      head: 00000000-0000-4000-8000-000000000007
+                      body: null
+                      neck: null
+                    diaryStyle:
+                      themeId: null
+                      fontId: null
+                    memorialSince: null
+                    passedOn: null
+                    revertUntil: null
+                    shopEntry: true
+                    rechargePrompt: true
+                    farewellDone: false
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/ServerError'
+    patch:
+      operationId: editPet
+      summary: 이름·아이 소개 고치기
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name:
+                  type: string
+                  pattern: ^[가-힣A-Za-z0-9 -]{1,12}$
+                intro:
+                  $ref: '#/components/schemas/Intro'
+            examples:
+              name:
+                value:
+                  name: 콩순이
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-174
+        spec:
+        - SPEC-325
+        omit:
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+              examples:
+                edited:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000003
+                    name: 콩순이
+                    species: dog
+                    template: dog_small
+                    mode: living
+                    status: active
+                    intro:
+                      personality:
+                      - 애교 많음
+                      likes: 산책, 닭가슴살
+                      dislikes: 목욕
+                      callMe: 누나
+                    sheet:
+                      front: /api/media/00000000-0000-4000-8000-000000000005
+                      smile: /api/media/00000000-0000-4000-8000-000000000005
+                      excited: /api/media/00000000-0000-4000-8000-000000000005
+                      sleepy: /api/media/00000000-0000-4000-8000-000000000005
+                      surprised: /api/media/00000000-0000-4000-8000-000000000005
+                      sad: /api/media/00000000-0000-4000-8000-000000000005
+                      pout: /api/media/00000000-0000-4000-8000-000000000005
+                    outfit:
+                      head: 00000000-0000-4000-8000-000000000007
+                      body: null
+                      neck: null
+                    diaryStyle:
+                      themeId: null
+                      fontId: null
+                    memorialSince: null
+                    passedOn: null
+                    revertUntil: null
+                    shopEntry: true
+                    rechargePrompt: true
+                    farewellDone: false
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/ServerError'
+    delete:
+      operationId: deletePet
+      summary: 아이 지우기
+      description: 그림·대화·기억·일기·꾸밈과 그 만들기를 지워요. 주문은 남아요.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - confirm
+              properties:
+                confirm:
+                  type: string
+                  pattern: ^[가-힣A-Za-z0-9 -]{1,12}$
+            examples:
+              confirm:
+                value:
+                  confirm: 콩이
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-175
+        spec:
+        - SPEC-341
+        omit:
+          '409': 상태와 부딪히지 않음
+      responses:
+        '204':
+          description: 성공(본문 없음)
+        '400':
+          description: '`confirm_required` · `invalid_input`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                confirm_required:
+                  $ref: '#/components/examples/confirm_required'
+                invalid_input:
+                  $ref: '#/components/examples/invalid_input'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/pets/{id}/messages:
+    get:
+      operationId: listMessages
+      summary: 대화 기록
+      description: 새것부터 50개, before로 더 옛것.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: before
+        in: query
+        required: false
+        schema:
+          type: string
+          pattern: ^[0-9]{1,19}$
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-176
+        spec:
+        - SPEC-327
+        omit:
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagePage'
+              examples:
+                page:
+                  value:
+                    items:
+                    - id: 00000000-0000-4000-8000-000000000004
+                      role: member
+                      kind: chat
+                      text: 오늘 산책 갔어
+                      composite: null
+                      clientId: 00000000-0000-4000-8000-000000000020
+                      createdAt: '2026-11-17T06:40:00Z'
+                    before: null
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/ServerError'
+    post:
+      operationId: sendMessage
+      summary: 메시지 보내기
+      description: 회원 메시지를 저장하고 답은 events로 와요. 같은 clientId는 200과 같은 메시지. 모델이 실패하면 HTTP 오류가 아니라 `system` 메시지 `reply_failed`가 events로 와요.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - text
+              - clientId
+              properties:
+                text:
+                  type: string
+                  minLength: 1
+                  maxLength: 1000
+                clientId:
+                  type: string
+                  format: uuid
+            examples:
+              walk:
+                value:
+                  text: 오늘 산책 갔어
+                  clientId: 00000000-0000-4000-8000-000000000020
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-177
+        spec:
+        - SPEC-327
+        - SPEC-328
+        - SPEC-330
+        - SPEC-312
+      responses:
+        '201':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+              examples:
+                saved:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000004
+                    role: member
+                    kind: chat
+                    text: 오늘 산책 갔어
+                    composite: null
+                    clientId: 00000000-0000-4000-8000-000000000020
+                    createdAt: '2026-11-17T06:40:00Z'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`consent_required` · `archived` · `asleep`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                consent_required:
+                  $ref: '#/components/examples/consent_required'
+                archived:
+                  $ref: '#/components/examples/archived'
+                asleep:
+                  $ref: '#/components/examples/asleep'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/pets/{id}/events:
+    get:
+      operationId: petEvents
+      summary: 아이 대화 이벤트(SSE)
+      description: '이벤트: `message`(Message 하나), `typing`(아이가 답을 쓰는 중), `ping`(25초마다). 서버가 끊으면 화면은 3초 뒤 다시 붙고 대화 기록으로 빠진 것을 채워요.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-178
+        spec:
+        - SPEC-327
+        - SPEC-330
+        - SPEC-332
+        - SPEC-333
+        omit:
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                reply:
+                  value: 'event: message
+
+                    data: {"id":"00000000-0000-4000-8000-000000000004","role":"pet","kind":"chat"}
+
+
+                    event: typing
+
+                    data: {}
+
+
+                    '
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/pets/{id}/mode:
+    post:
+      operationId: setMode
+      summary: 추억 모드로 바꾸기·되돌리기
+      description: 같은 모드면 200 그대로. 대화 내용으로 모드를 바꾸는 경로는 없어요.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - mode
+              properties:
+                mode:
+                  type: string
+                  enum:
+                  - living
+                  - memorial
+                passedOn:
+                  type: string
+                  format: date
+            examples:
+              memorial:
+                value:
+                  mode: memorial
+                  passedOn: '2026-11-10'
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-179
+        spec:
+        - SPEC-338
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+              examples:
+                memorial:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000003
+                    name: 콩이
+                    species: dog
+                    template: dog_small
+                    mode: memorial
+                    status: active
+                    intro:
+                      personality:
+                      - 애교 많음
+                      likes: 산책, 닭가슴살
+                      dislikes: 목욕
+                      callMe: 누나
+                    sheet:
+                      front: /api/media/00000000-0000-4000-8000-000000000005
+                      smile: /api/media/00000000-0000-4000-8000-000000000005
+                      excited: /api/media/00000000-0000-4000-8000-000000000005
+                      sleepy: /api/media/00000000-0000-4000-8000-000000000005
+                      surprised: /api/media/00000000-0000-4000-8000-000000000005
+                      sad: /api/media/00000000-0000-4000-8000-000000000005
+                      pout: /api/media/00000000-0000-4000-8000-000000000005
+                    outfit:
+                      head: 00000000-0000-4000-8000-000000000007
+                      body: null
+                      neck: null
+                    diaryStyle:
+                      themeId: null
+                      fontId: null
+                    memorialSince: '2026-11-17T06:40:00Z'
+                    passedOn: '2026-11-10'
+                    revertUntil: '2026-11-24T06:40:00Z'
+                    shopEntry: false
+                    rechargePrompt: false
+                    farewellDone: false
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`revert_window_passed` · `archived`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                revert_window_passed:
+                  $ref: '#/components/examples/revert_window_passed'
+                archived:
+                  $ref: '#/components/examples/archived'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/pets/{id}/farewell:
+    post:
+      operationId: farewell
+      summary: 작별 의식
+      description: 추억 모드만(살아 있는 아이면 409 `wrong_state`). 그림은 한도를 쓰지 않고, 예산 멈춤이면 그림만 409.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - kind
+              properties:
+                kind:
+                  type: string
+                  enum:
+                  - letter
+                  - picture
+                sceneNote:
+                  type: string
+                  maxLength: 100
+            examples:
+              letter:
+                value:
+                  kind: letter
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-180
+        spec:
+        - SPEC-340
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiaryEntry'
+              examples:
+                letter:
+                  value:
+                    date: '2026-11-17'
+                    kind: farewell
+                    status: ready
+                    title: 누나에게
+                    weather: 맑음
+                    body: 누나, 나 여기서 잘 지내. 고마웠어.
+                    mood: 신남
+                    composite: null
+                    picture: null
+                    redrawsLeft: 2
+                    drawing: false
+                    stickers: []
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`wrong_state` · `farewell_done` · `budget_paused` · `consent_required`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                wrong_state:
+                  $ref: '#/components/examples/wrong_state'
+                farewell_done:
+                  $ref: '#/components/examples/farewell_done'
+                budget_paused:
+                  $ref: '#/components/examples/budget_paused'
+                consent_required:
+                  $ref: '#/components/examples/consent_required'
+        '503':
+          description: '`farewell_failed`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                farewell_failed:
+                  $ref: '#/components/examples/farewell_failed'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/pets/{id}/archive:
+    post:
+      operationId: archivePet
+      summary: 보관
+      description: 같은 상태면 200 그대로.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-181
+        spec:
+        - SPEC-341
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+              examples:
+                archived:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000003
+                    name: 콩이
+                    species: dog
+                    template: dog_small
+                    mode: memorial
+                    status: archived
+                    intro:
+                      personality:
+                      - 애교 많음
+                      likes: 산책, 닭가슴살
+                      dislikes: 목욕
+                      callMe: 누나
+                    sheet:
+                      front: /api/media/00000000-0000-4000-8000-000000000005
+                      smile: /api/media/00000000-0000-4000-8000-000000000005
+                      excited: /api/media/00000000-0000-4000-8000-000000000005
+                      sleepy: /api/media/00000000-0000-4000-8000-000000000005
+                      surprised: /api/media/00000000-0000-4000-8000-000000000005
+                      sad: /api/media/00000000-0000-4000-8000-000000000005
+                      pout: /api/media/00000000-0000-4000-8000-000000000005
+                    outfit:
+                      head: 00000000-0000-4000-8000-000000000007
+                      body: null
+                      neck: null
+                    diaryStyle:
+                      themeId: null
+                      fontId: null
+                    memorialSince: '2026-11-17T06:40:00Z'
+                    passedOn: null
+                    revertUntil: null
+                    shopEntry: false
+                    rechargePrompt: false
+                    farewellDone: false
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`not_memorial`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                not_memorial:
+                  $ref: '#/components/examples/not_memorial'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/pets/{id}/unarchive:
+    post:
+      operationId: unarchivePet
+      summary: 꺼내기
+      description: 같은 상태면 200 그대로.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-182
+        spec:
+        - SPEC-341
+        omit:
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+              examples:
+                back:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000003
+                    name: 콩이
+                    species: dog
+                    template: dog_small
+                    mode: memorial
+                    status: active
+                    intro:
+                      personality:
+                      - 애교 많음
+                      likes: 산책, 닭가슴살
+                      dislikes: 목욕
+                      callMe: 누나
+                    sheet:
+                      front: /api/media/00000000-0000-4000-8000-000000000005
+                      smile: /api/media/00000000-0000-4000-8000-000000000005
+                      excited: /api/media/00000000-0000-4000-8000-000000000005
+                      sleepy: /api/media/00000000-0000-4000-8000-000000000005
+                      surprised: /api/media/00000000-0000-4000-8000-000000000005
+                      sad: /api/media/00000000-0000-4000-8000-000000000005
+                      pout: /api/media/00000000-0000-4000-8000-000000000005
+                    outfit:
+                      head: 00000000-0000-4000-8000-000000000007
+                      body: null
+                      neck: null
+                    diaryStyle:
+                      themeId: null
+                      fontId: null
+                    memorialSince: '2026-11-17T06:40:00Z'
+                    passedOn: null
+                    revertUntil: null
+                    shopEntry: false
+                    rechargePrompt: false
+                    farewellDone: false
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/pets/{id}/export:
+    post:
+      operationId: startExport
+      summary: 기록 내보내기
+      description: 다 되면 웹 푸시. 보관된 아이도 돼요.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-183
+        spec:
+        - SPEC-342
+        omit:
+          '409': 상태와 부딪히지 않음
+      responses:
+        '202':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Export'
+              examples:
+                queued:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000013
+                    status: queued
+                    readyUntil: null
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          description: '`export_limit`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                export_limit:
+                  $ref: '#/components/examples/export_limit'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/exports/{id}:
+    get:
+      operationId: getExport
+      summary: 내보내기 상태
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-184
+        spec:
+        - SPEC-342
+        omit:
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Export'
+              examples:
+                done:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000013
+                    status: done
+                    readyUntil: '2026-11-18T06:40:00Z'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/exports/{id}/download:
+    get:
+      operationId: downloadExport
+      summary: 내보낸 zip 받기
+      description: 24시간 뒤에는 404.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-185
+        spec:
+        - SPEC-342
+        omit:
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+              examples:
+                zip:
+                  value: (zip)
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/pets/{id}/diary:
+    get:
+      operationId: listDiary
+      summary: 일기장(한 달)
+      description: 그 달의 장과, 있으면 작별 장.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: month
+        in: query
+        required: true
+        schema:
+          type: string
+          pattern: ^20[0-9]{2}-(0[1-9]|1[0-2])$
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-186
+        spec:
+        - SPEC-335
+        - SPEC-340
+        omit:
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiaryList'
+              examples:
+                month:
+                  value:
+                    items:
+                    - date: '2026-11-17'
+                      kind: day
+                      status: ready
+                      title: 누나랑 공원
+                      weather: 맑음
+                      body: 오늘 누나랑 공원에 갔어. 낙엽 냄새가 좋았어.
+                      mood: 신남
+                      composite:
+                        backgroundId: home_livingroom
+                        expression: smile
+                        outfit:
+                          head: 00000000-0000-4000-8000-000000000007
+                          body: null
+                          neck: null
+                      picture: null
+                      redrawsLeft: 2
+                      drawing: false
+                      stickers: []
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/pets/{id}/diary/{date}:
+    get:
+      operationId: getDiary
+      summary: 일기 한 장
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: date
+        in: path
+        required: true
+        schema:
+          type: string
+          format: date
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-187
+        spec:
+        - SPEC-335
+        - SPEC-350
+        - SPEC-351
+        omit:
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiaryEntry'
+              examples:
+                day:
+                  value:
+                    date: '2026-11-17'
+                    kind: day
+                    status: ready
+                    title: 누나랑 공원
+                    weather: 맑음
+                    body: 오늘 누나랑 공원에 갔어. 낙엽 냄새가 좋았어.
+                    mood: 신남
+                    composite:
+                      backgroundId: home_livingroom
+                      expression: smile
+                      outfit:
+                        head: 00000000-0000-4000-8000-000000000007
+                        body: null
+                        neck: null
+                    picture: null
+                    redrawsLeft: 2
+                    drawing: false
+                    stickers: []
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/pets/{id}/diary/{date}/redraw:
+    post:
+      operationId: redrawDiary
+      summary: 새 그림으로 다시 그리기
+      description: 40 단위를 잡고 작업이 그려요. 성공하면 한도 확정과 picture, 실패하면 한도를 돌려주고 lastRedraw `failed`.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: date
+        in: path
+        required: true
+        schema:
+          type: string
+          format: date
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                note:
+                  type: string
+                  maxLength: 100
+            examples:
+              note:
+                value:
+                  note: 눈 오는 공원으로
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-188
+        spec:
+        - SPEC-336
+        - SPEC-353
+        - SPEC-354
+      responses:
+        '202':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiaryEntry'
+              examples:
+                drawing:
+                  value:
+                    date: '2026-11-17'
+                    kind: day
+                    status: ready
+                    title: 누나랑 공원
+                    weather: 맑음
+                    body: 오늘 누나랑 공원에 갔어. 낙엽 냄새가 좋았어.
+                    mood: 신남
+                    composite:
+                      backgroundId: home_livingroom
+                      expression: smile
+                      outfit:
+                        head: 00000000-0000-4000-8000-000000000007
+                        body: null
+                        neck: null
+                    picture: null
+                    redrawsLeft: 1
+                    drawing: true
+                    stickers: []
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`wrong_state` · `busy` · `redraw_limit` · `quota_exhausted` · `budget_paused` · `consent_required`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                wrong_state:
+                  $ref: '#/components/examples/wrong_state'
+                busy:
+                  $ref: '#/components/examples/busy'
+                redraw_limit:
+                  $ref: '#/components/examples/redraw_limit'
+                quota_exhausted:
+                  $ref: '#/components/examples/quota_exhausted'
+                quota_exhausted_memorial:
+                  $ref: '#/components/examples/quota_exhausted_memorial'
+                budget_paused:
+                  $ref: '#/components/examples/budget_paused'
+                consent_required:
+                  $ref: '#/components/examples/consent_required'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/pets/{id}/diary/{date}/stickers:
+    put:
+      operationId: setStickers
+      summary: 스티커 붙이기
+      description: 통째로 바꿔요. 보관함에 없는 스티커 팩은 404.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: date
+        in: path
+        required: true
+        schema:
+          type: string
+          format: date
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Stickers'
+            examples:
+              one:
+                value:
+                - packId: 00000000-0000-4000-8000-000000000008
+                  sticker: star
+                  x: 0.2
+                  y: 0.3
+                  scale: 1
+                  rotate: 0
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-189
+        spec:
+        - SPEC-351
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiaryEntry'
+              examples:
+                stuck:
+                  value:
+                    date: '2026-11-17'
+                    kind: day
+                    status: ready
+                    title: 누나랑 공원
+                    weather: 맑음
+                    body: 오늘 누나랑 공원에 갔어. 낙엽 냄새가 좋았어.
+                    mood: 신남
+                    composite:
+                      backgroundId: home_livingroom
+                      expression: smile
+                      outfit:
+                        head: 00000000-0000-4000-8000-000000000007
+                        body: null
+                        neck: null
+                    picture: null
+                    redrawsLeft: 2
+                    drawing: false
+                    stickers:
+                    - packId: 00000000-0000-4000-8000-000000000008
+                      sticker: star
+                      x: 0.2
+                      y: 0.3
+                      scale: 1
+                      rotate: 0
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`wrong_state`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                wrong_state:
+                  $ref: '#/components/examples/wrong_state'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/pets/{id}/diary/{date}/card.png:
+    get:
+      operationId: diaryCard
+      summary: 그림일기 공유 카드
+      description: 일기가 `ready`가 아니면 409.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: date
+        in: path
+        required: true
+        schema:
+          type: string
+          format: date
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-190
+        spec:
+        - SPEC-343
+        omit:
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+      responses:
+        '200':
+          description: 성공
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+              examples:
+                png:
+                  value: (PNG 1080×1350, 워터마크)
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`wrong_state`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                wrong_state:
+                  $ref: '#/components/examples/wrong_state'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/pets/{id}/outfit:
+    put:
+      operationId: setOutfit
+      summary: 입히기·벗기기
+      description: 보관함에 없거나 철회한 아이템은 404. 산 아이템을 이 아이에게 처음 입히면 아이템 반응 선톡(SPEC-333)과 주문의 '사용함'.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Outfit'
+            examples:
+              hat:
+                value:
+                  head: 00000000-0000-4000-8000-000000000007
+                  body: null
+                  neck: null
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-191
+        spec:
+        - SPEC-349
+        - SPEC-333
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+              examples:
+                worn:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000003
+                    name: 콩이
+                    species: dog
+                    template: dog_small
+                    mode: living
+                    status: active
+                    intro:
+                      personality:
+                      - 애교 많음
+                      likes: 산책, 닭가슴살
+                      dislikes: 목욕
+                      callMe: 누나
+                    sheet:
+                      front: /api/media/00000000-0000-4000-8000-000000000005
+                      smile: /api/media/00000000-0000-4000-8000-000000000005
+                      excited: /api/media/00000000-0000-4000-8000-000000000005
+                      sleepy: /api/media/00000000-0000-4000-8000-000000000005
+                      surprised: /api/media/00000000-0000-4000-8000-000000000005
+                      sad: /api/media/00000000-0000-4000-8000-000000000005
+                      pout: /api/media/00000000-0000-4000-8000-000000000005
+                    outfit:
+                      head: 00000000-0000-4000-8000-000000000007
+                      body: null
+                      neck: null
+                    diaryStyle:
+                      themeId: null
+                      fontId: null
+                    memorialSince: null
+                    passedOn: null
+                    revertUntil: null
+                    shopEntry: true
+                    rechargePrompt: true
+                    farewellDone: false
+        '400':
+          description: '`wrong_slot` · `invalid_input`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                wrong_slot:
+                  $ref: '#/components/examples/wrong_slot'
+                invalid_input:
+                  $ref: '#/components/examples/invalid_input'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`archived`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                archived:
+                  $ref: '#/components/examples/archived'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/pets/{id}/diary-style:
+    put:
+      operationId: setDiaryStyle
+      summary: 일기장 테마·글꼴
+      description: 보관함에 없으면 404.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - themeId
+              - fontId
+              properties:
+                themeId:
+                  oneOf:
+                  - type: string
+                    format: uuid
+                  - type: 'null'
+                fontId:
+                  oneOf:
+                  - type: string
+                    format: uuid
+                  - type: 'null'
+            examples:
+              theme:
+                value:
+                  themeId: 00000000-0000-4000-8000-000000000008
+                  fontId: null
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-192
+        spec:
+        - SPEC-350
+        omit:
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+              examples:
+                styled:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000003
+                    name: 콩이
+                    species: dog
+                    template: dog_small
+                    mode: living
+                    status: active
+                    intro:
+                      personality:
+                      - 애교 많음
+                      likes: 산책, 닭가슴살
+                      dislikes: 목욕
+                      callMe: 누나
+                    sheet:
+                      front: /api/media/00000000-0000-4000-8000-000000000005
+                      smile: /api/media/00000000-0000-4000-8000-000000000005
+                      excited: /api/media/00000000-0000-4000-8000-000000000005
+                      sleepy: /api/media/00000000-0000-4000-8000-000000000005
+                      surprised: /api/media/00000000-0000-4000-8000-000000000005
+                      sad: /api/media/00000000-0000-4000-8000-000000000005
+                      pout: /api/media/00000000-0000-4000-8000-000000000005
+                    outfit:
+                      head: 00000000-0000-4000-8000-000000000007
+                      body: null
+                      neck: null
+                    diaryStyle:
+                      themeId: 00000000-0000-4000-8000-000000000008
+                      fontId: null
+                    memorialSince: null
+                    passedOn: null
+                    revertUntil: null
+                    shopEntry: true
+                    rechargePrompt: true
+                    farewellDone: false
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/pets/{id}/calls:
+    post:
+      operationId: startCall
+      summary: 통화 시작
+      description: 30 단위를 잡고 60초 일회용 토큰을 줘요. 첫 소리는 'AI로 만든 목소리예요' 고정 녹음.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-193
+        spec:
+        - SPEC-344
+        - SPEC-353
+        - SPEC-354
+      responses:
+        '201':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallStart'
+              examples:
+                token:
+                  value:
+                    callId: 00000000-0000-4000-8000-000000000010
+                    token: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                    wsUrl: wss://pet.example.com/pet-call
+                    expiresAt: '2026-11-17T06:41:00Z'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`quota_exhausted` · `budget_paused` · `call_in_progress` · `archived` · `consent_required`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                quota_exhausted:
+                  $ref: '#/components/examples/quota_exhausted'
+                quota_exhausted_memorial:
+                  $ref: '#/components/examples/quota_exhausted_memorial'
+                budget_paused:
+                  $ref: '#/components/examples/budget_paused'
+                call_in_progress:
+                  $ref: '#/components/examples/call_in_progress'
+                archived:
+                  $ref: '#/components/examples/archived'
+                consent_required:
+                  $ref: '#/components/examples/consent_required'
+        '503':
+          description: '`call_unavailable`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                call_unavailable:
+                  $ref: '#/components/examples/call_unavailable'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/me/inventory:
+    get:
+      operationId: listInventory
+      summary: 보관함
+      parameters:
+      - name: kind
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - wear
+          - sticker_pack
+          - theme
+          - font
+          - theme_package
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-194
+        spec:
+        - SPEC-346
+        omit:
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '404': 경로가 id를 담지 않음
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Inventory'
+              examples:
+                wear:
+                  value:
+                    items:
+                    - itemId: 00000000-0000-4000-8000-000000000007
+                      kind: wear
+                      name: 털모자
+                      slot: head
+                      source: order
+                      wornBy:
+                      - 00000000-0000-4000-8000-000000000003
+                      contents: []
+                      withdrawableUntil: null
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/shop:
+    get:
+      operationId: listShop
+      summary: 상점
+      description: 글꼴은 단독으로 나오지 않아요. 결제가 꺼져 있으면 purchasable false.
+      parameters:
+      - name: kind
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - wear
+          - sticker_pack
+          - theme
+          - theme_package
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-195
+        spec:
+        - SPEC-347
+        omit:
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '404': 경로가 id를 담지 않음
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Shop'
+              examples:
+                wear:
+                  value:
+                    items:
+                    - id: 00000000-0000-4000-8000-000000000007
+                      kind: wear
+                      name: 털모자
+                      priceKrw: 1200
+                      slot: head
+                      limited: false
+                      saleEndsAt: null
+                      owned: false
+                      purchasable: true
+                      contents: []
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/items/{id}/layer:
+    get:
+      operationId: itemLayer
+      summary: 아이템 레이어 그림(미리 입혀 보기)
+      description: 사기 전에도 돼요. 판매 중인 착용 아이템만.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: template
+        in: query
+        required: true
+        schema:
+          type: string
+          enum:
+          - dog_small
+          - dog_large
+          - dog_long
+          - cat
+          - cat_round
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-196
+        spec:
+        - SPEC-348
+        omit:
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+              examples:
+                png:
+                  value: (PNG 1024×1024)
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/me/quota:
+    get:
+      operationId: getQuota
+      summary: 하루 한도 게이지
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-197
+        spec:
+        - SPEC-353
+        omit:
+          '400': 입력이 없음
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '404': 경로가 id를 담지 않음
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quota'
+              examples:
+                free:
+                  value:
+                    percent: 60
+                    resetsAt: '2026-11-17T19:00:00Z'
+                    plan: free
+                    recharge:
+                      halfKrw: 1500
+                      fullKrw: 2900
+                      leftToday: 3
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/orders:
+    post:
+      operationId: createOrder
+      summary: 주문 만들기
+      description: 값은 서버 가격표에서 가져와요. 같은 키는 200과 같은 주문. 캐릭터 만들기는 checkoutCreation으로. 판매 안 하는 아이템은 404.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - product
+              - idempotencyKey
+              properties:
+                product:
+                  type: string
+                  enum:
+                  - recharge_half
+                  - recharge_full
+                  - subscription_month
+                  - item
+                itemId:
+                  type: string
+                  format: uuid
+                idempotencyKey:
+                  type: string
+                  format: uuid
+            examples:
+              hat:
+                value:
+                  product: item
+                  itemId: 00000000-0000-4000-8000-000000000007
+                  idempotencyKey: 00000000-0000-4000-8000-000000000031
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-198
+        spec:
+        - SPEC-355
+        - SPEC-358
+        - SPEC-359
+      responses:
+        '201':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Checkout'
+              examples:
+                hat:
+                  value:
+                    order:
+                      id: 00000000-0000-4000-8000-000000000006
+                      orderNo: P20261117-A1B2C3
+                      product: item
+                      itemName: 털모자
+                      amountKrw: 1200
+                      vatKrw: 109
+                      status: created
+                      createdAt: '2026-11-17T06:40:00Z'
+                      withdrawable: true
+                      withdrawalNote: 산 지 7일 안에 한 번도 입히지 않았으면 철회할 수 있어요. 사기 전에 미리 입혀 볼 수 있어요.
+                    pg:
+                      clientKey: test_ck_example
+                      orderName: 털모자
+                      amount: 1200
+                      billing: false
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`payments_off` · `identity_required` · `already_owned` · `already_subscribed` · `quota_full` · `recharge_limit`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                payments_off:
+                  $ref: '#/components/examples/payments_off'
+                identity_required:
+                  $ref: '#/components/examples/identity_required'
+                already_owned:
+                  $ref: '#/components/examples/already_owned'
+                already_subscribed:
+                  $ref: '#/components/examples/already_subscribed'
+                quota_full:
+                  $ref: '#/components/examples/quota_full'
+                recharge_limit:
+                  $ref: '#/components/examples/recharge_limit'
+        '429':
+          description: '`rate_limited`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                rate_limited:
+                  $ref: '#/components/examples/rate_limited'
+        default:
+          $ref: '#/components/responses/ServerError'
+    get:
+      operationId: listOrders
+      summary: 주문 목록
+      description: 최근 100개.
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-199
+        spec:
+        - SPEC-355
+        - SPEC-360
+        omit:
+          '400': 입력이 없음
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '404': 경로가 id를 담지 않음
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderList'
+              examples:
+                one:
+                  value:
+                    items:
+                    - id: 00000000-0000-4000-8000-000000000006
+                      orderNo: P20261117-A1B2C3
+                      product: item
+                      itemName: 털모자
+                      amountKrw: 1200
+                      vatKrw: 109
+                      status: fulfilled
+                      createdAt: '2026-11-17T06:40:00Z'
+                      withdrawable: true
+                      withdrawalNote: 산 지 7일 안에 한 번도 입히지 않았으면 철회할 수 있어요. 사기 전에 미리 입혀 볼 수 있어요.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/orders/{id}/confirm:
+    post:
+      operationId: confirmOrder
+      summary: 결제 확인
+      description: 결제 대행 승인 API로 금액·주문 번호를 확인해요. 웹훅이 먼저 처리했으면 200 그대로. 금액이 다르거나 결제 실패면 200과 status `failed`.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - paymentKey
+              - amount
+              properties:
+                paymentKey:
+                  type: string
+                  maxLength: 200
+                amount:
+                  type: integer
+                  minimum: 0
+                  maximum: 100000
+            examples:
+              ok:
+                value:
+                  paymentKey: pk_example
+                  amount: 1200
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-200
+        spec:
+        - SPEC-356
+        - SPEC-357
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+              examples:
+                fulfilled:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000006
+                    orderNo: P20261117-A1B2C3
+                    product: item
+                    itemName: 털모자
+                    amountKrw: 1200
+                    vatKrw: 109
+                    status: fulfilled
+                    createdAt: '2026-11-17T06:40:00Z'
+                    withdrawable: true
+                    withdrawalNote: 산 지 7일 안에 한 번도 입히지 않았으면 철회할 수 있어요. 사기 전에 미리 입혀 볼 수 있어요.
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`wrong_state`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                wrong_state:
+                  $ref: '#/components/examples/wrong_state'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/orders/{id}/withdraw:
+    post:
+      operationId: withdrawOrder
+      summary: 청약철회
+      description: 결제 대행 취소가 실패하면 200과 status `refund_pending`.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-201
+        spec:
+        - SPEC-360
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+              examples:
+                refunded:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000006
+                    orderNo: P20261117-A1B2C3
+                    product: item
+                    itemName: 털모자
+                    amountKrw: 1200
+                    vatKrw: 109
+                    status: refunded
+                    createdAt: '2026-11-17T06:40:00Z'
+                    withdrawable: false
+                    withdrawalNote: 산 지 7일 안에 한 번도 입히지 않았으면 철회할 수 있어요. 사기 전에 미리 입혀 볼 수 있어요.
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`withdrawal_not_allowed`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                withdrawal_not_allowed:
+                  $ref: '#/components/examples/withdrawal_not_allowed'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/pg/webhook:
+    post:
+      operationId: pgWebhook
+      summary: 결제 대행 웹훅
+      description: 'Open: 본문 모양은 결제 대행을 고른 뒤 맞춰요(02 질문 A). 두 번째로 온 것도 200.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              required:
+              - eventType
+              properties:
+                eventType:
+                  type: string
+                  maxLength: 50
+            examples:
+              paid:
+                value:
+                  eventType: PAYMENT_STATUS_CHANGED
+      security:
+      - pgSignature: []
+      x-corthex:
+        id: API-202
+        spec:
+        - SPEC-356
+        - SPEC-359
+        omit:
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '404': 경로가 id를 담지 않음
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+              examples:
+                ok:
+                  value:
+                    ok: true
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/BadSignature'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/subscription:
+    get:
+      operationId: getSubscription
+      summary: 구독 보기
+      description: 구독이 없으면 status `none`.
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-203
+        spec:
+        - SPEC-359
+        omit:
+          '400': 입력이 없음
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '404': 경로가 id를 담지 않음
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+              examples:
+                active:
+                  value:
+                    status: active
+                    priceKrw: 9900
+                    periodEnd: '2026-12-17T00:00:00Z'
+                    nextChargeAt: '2026-12-17T00:00:00Z'
+                    newPrice: null
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/subscription/cancel:
+    post:
+      operationId: cancelSubscription
+      summary: 구독 해지
+      description: 기간 끝까지 200 단위. 이미 해지 중이면 200 그대로, 구독이 없으면 409 `wrong_state`.
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-204
+        spec:
+        - SPEC-359
+        omit:
+          '400': 입력이 없음
+          '404': 경로가 id를 담지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+              examples:
+                canceling:
+                  value:
+                    status: canceling
+                    priceKrw: 9900
+                    periodEnd: '2026-12-17T00:00:00Z'
+                    nextChargeAt: null
+                    newPrice: null
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '409':
+          description: '`wrong_state`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                wrong_state:
+                  $ref: '#/components/examples/wrong_state'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/subscription/price-consent:
+    post:
+      operationId: agreeNewPrice
+      summary: 구독 값 변경 동의
+      description: 바뀔 값이 없으면 409 `wrong_state`.
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-205
+        spec:
+        - SPEC-359
+        omit:
+          '400': 입력이 없음
+          '404': 경로가 id를 담지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+              examples:
+                agreed:
+                  value:
+                    status: active
+                    priceKrw: 9900
+                    periodEnd: '2026-12-17T00:00:00Z'
+                    nextChargeAt: '2026-12-17T00:00:00Z'
+                    newPrice:
+                      priceKrw: 10900
+                      from: '2026-12-20'
+                      agreed: true
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '409':
+          description: '`wrong_state`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                wrong_state:
+                  $ref: '#/components/examples/wrong_state'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /api/media/{id}:
+    get:
+      operationId: getMedia
+      summary: 회원 그림
+      description: '세션 회원의 것만. `Cache-Control: private, max-age=31536000, immutable`. WebP도 같은 경로(Content-Type이 다름).'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - memberSession: []
+      x-corthex:
+        id: API-206
+        spec:
+        - SPEC-364
+        omit:
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+              examples:
+                png:
+                  value: (PNG)
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /internal/calls/verify:
+    post:
+      operationId: verifyCallToken
+      summary: 통화 토큰 확인(통화 서버)
+      description: 한 번만 돼요. 없거나 60초가 지난 토큰은 404. 지시문(AI-35)은 이 응답으로만 통화 서버에 가요.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - token
+              properties:
+                token:
+                  type: string
+                  pattern: ^[A-Za-z0-9_-]{43}$
+            examples:
+              token:
+                value:
+                  token: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      security:
+      - internalSecret: []
+      x-corthex:
+        id: API-207
+        spec:
+        - SPEC-344
+        omit:
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '404': 경로가 id를 담지 않음
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                - callId
+                - voice
+                - instructions
+                properties:
+                  callId:
+                    type: string
+                    format: uuid
+                  voice:
+                    type: string
+                    enum:
+                    - dog
+                    - cat
+                  instructions:
+                    type: string
+                    maxLength: 20000
+              examples:
+                ok:
+                  value:
+                    callId: 00000000-0000-4000-8000-000000000010
+                    voice: dog
+                    instructions: (AI-35 지시문)
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/BadSignature'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /internal/calls/{id}/minute:
+    post:
+      operationId: chargeCallMinute
+      summary: 통화 1분 쓰기(통화 서버)
+      description: exhausted면 통화 서버가 자러 간다는 인사를 넣고 30초 뒤 끊어요.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - internalSecret: []
+      x-corthex:
+        id: API-208
+        spec:
+        - SPEC-345
+        omit:
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                - status
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - ok
+                    - exhausted
+              examples:
+                ok:
+                  value:
+                    status: ok
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/BadSignature'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /internal/calls/{id}/end:
+    post:
+      operationId: endCall
+      summary: 통화 끝(통화 서버)
+      description: '자막은 대화에 `kind: call`로 들어가 그림일기 하루 모음에 쓰여요. 두 번째 부름은 204 그대로.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - reason
+              - unchargedMinutes
+              - transcript
+              properties:
+                reason:
+                  type: string
+                  enum:
+                  - member
+                  - quota
+                  - error
+                unchargedMinutes:
+                  type: integer
+                  minimum: 0
+                  maximum: 240
+                  description: 내부 API 실패로 못 쓴 분(끝날 때 한 번에 씀)
+                transcript:
+                  type: array
+                  maxItems: 400
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required:
+                    - role
+                    - text
+                    - at
+                    properties:
+                      role:
+                        type: string
+                        enum:
+                        - member
+                        - pet
+                      text:
+                        type: string
+                        maxLength: 1000
+                      at:
+                        type: string
+                        format: date-time
+            examples:
+              end:
+                value:
+                  reason: member
+                  unchargedMinutes: 0
+                  transcript:
+                  - role: member
+                    text: 콩아 뭐 해?
+                    at: '2026-11-17T06:40:00Z'
+      security:
+      - internalSecret: []
+      x-corthex:
+        id: API-209
+        spec:
+        - SPEC-345
+        - SPEC-335
+        omit:
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '409': 상태와 부딪히지 않음
+      responses:
+        '204':
+          description: 성공(본문 없음)
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/BadSignature'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/ServerError'
+  /healthz:
+    get:
+      operationId: health
+      summary: 살아 있음
+      security: []
+      x-corthex:
+        id: API-210
+        spec:
+        - SPEC-368
+        omit:
+          '400': 입력이 없음
+          '401': 로그인 전에 부름
+          '403': 회원마다 보이는 것이 다르지 않음. 남의 것은 404(SPEC-364)
+          '404': 경로가 id를 담지 않음
+          '409': 상태와 부딪히지 않음
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+              examples:
+                ok:
+                  value:
+                    ok: true
+        default:
+          $ref: '#/components/responses/ServerError'
+components:
+  schemas:
+    Problem:
+      type: object
+      additionalProperties: false
+      required:
+      - type
+      - title
+      - status
+      - code
+      - detail
+      - traceId
+      properties:
+        type:
+          type: string
+          maxLength: 200
+        title:
+          type: string
+          maxLength: 100
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        code:
+          type: string
+          enum:
+          - already_member
+          - already_owned
+          - already_subscribed
+          - archived
+          - asleep
+          - auth_provider
+          - auth_state
+          - bad_signature
+          - budget_paused
+          - busy
+          - call_in_progress
+          - call_unavailable
+          - confirm_required
+          - consent_required
+          - consents_missing
+          - cross_site
+          - export_limit
+          - farewell_done
+          - farewell_failed
+          - identity_provider
+          - identity_required
+          - invalid_input
+          - invalid_photo
+          - invite_required
+          - not_found
+          - not_memorial
+          - payments_off
+          - pet_limit
+          - photo_check_unavailable
+          - preview_limit
+          - quota_exhausted
+          - quota_full
+          - rate_limited
+          - recharge_limit
+          - redraw_limit
+          - regenerate_limit
+          - revert_window_passed
+          - server_error
+          - too_large
+          - too_many_creations
+          - unauthenticated
+          - underage
+          - use_delete_account
+          - withdrawal_not_allowed
+          - wrong_slot
+          - wrong_state
+        detail:
+          type: string
+          maxLength: 300
+        instance:
+          type: string
+          maxLength: 300
+        traceId:
+          type: string
+          pattern: ^[0-9a-f]{32}$
+        prompt:
+          type: string
+          enum:
+          - recharge
+          - brief
+          - none
+          description: quota_exhausted만(SPEC-354, 339)
+        resetsAt:
+          type: string
+          format: date-time
+          description: 'preview_limit·export_limit·quota_exhausted: 다음 04:00 KST'
+        wakesAt:
+          type: string
+          format: date-time
+          description: 'asleep: 다음 04:00 KST'
+        photo:
+          type: integer
+          minimum: 1
+          maximum: 3
+          description: 'invalid_photo: 몇 번째 사진'
+        reason:
+          type: string
+          maxLength: 100
+          description: 'withdrawal_not_allowed·consent_required: 이유 한 줄'
+    Id:
+      type: string
+      format: uuid
+    Me:
+      type: object
+      additionalProperties: false
+      required:
+      - memberNo
+      - status
+      - identityVerified
+      - freeTickets
+      - paymentsEnabled
+      - overseasTransfer
+      - business
+      properties:
+        memberNo:
+          type: string
+          pattern: ^[A-Z0-9]{8}$
+        status:
+          type: string
+          enum:
+          - active
+          - minor_locked
+        identityVerified:
+          type: boolean
+        freeTickets:
+          type: integer
+          minimum: 0
+          maximum: 20
+        paymentsEnabled:
+          type: boolean
+        overseasTransfer:
+          type: boolean
+        business:
+          oneOf:
+          - type: object
+            additionalProperties:
+              type: string
+              maxLength: 200
+            description: 결제가 켜졌을 때 상점·결제 화면 아래의 사업자 정보(SPEC-362)
+          - type: 'null'
+    Consents:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - kind
+            - value
+            - docVersion
+            - at
+            properties:
+              kind:
+                type: string
+                enum:
+                - terms
+                - privacy
+                - ai_notice
+                - overseas_transfer
+              value:
+                type: boolean
+              docVersion:
+                type: string
+                maxLength: 20
+              at:
+                type: string
+                format: date-time
+    Traits:
+      type: object
+      additionalProperties: false
+      properties:
+        species:
+          type: string
+          enum:
+          - dog
+          - cat
+          - other
+        breedGuess:
+          type: string
+          maxLength: 30
+        coatColors:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+            - 흰색
+            - 검은색
+            - 갈색
+            - 크림
+            - 회색
+            - 황토
+            - 주황
+            - 은색
+        pattern:
+          type: string
+          enum:
+          - 단색
+          - 얼룩
+          - 줄무늬
+          - 턱시도
+          - 포인트
+          - 삼색
+          - 브린들
+        patternNotes:
+          type: string
+          maxLength: 60
+        earShape:
+          type: string
+          enum:
+          - 선 귀
+          - 접힌 귀
+          - 늘어진 귀
+          - 반쯤 선 귀
+        eyeColor:
+          type: string
+          enum:
+          - 갈색
+          - 검은색
+          - 파란색
+          - 초록색
+          - 노란색
+          - 짝눈
+        build:
+          type: string
+          enum:
+          - 작음
+          - 중간
+          - 큼
+          - 긴 몸
+          - 통통함
+        furLength:
+          type: string
+          enum:
+          - 짧음
+          - 중간
+          - 긺
+          - 곱슬
+        distinctive:
+          type: string
+          maxLength: 60
+    Creation:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - kind
+      - state
+      - traits
+      - multiplePets
+      - template
+      - preview
+      - candidates
+      - chosenId
+      - regenerationsLeft
+      - failure
+      - priceKrw
+      - petId
+      - createdAt
+      - expiresAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum:
+          - living
+          - memorial
+        state:
+          type: string
+          enum:
+          - photos
+          - traits
+          - traits_confirmed
+          - previewed
+          - paid
+          - candidates
+          - chosen
+          - sheet_ready
+          - done
+          - sheet_needs_operator
+          - rejected
+          - failed_traits
+          - failed_candidates
+          - expired
+        traits:
+          oneOf:
+          - $ref: '#/components/schemas/Traits'
+          - type: 'null'
+        multiplePets:
+          type: boolean
+        template:
+          oneOf:
+          - type: string
+            enum:
+            - dog_small
+            - dog_large
+            - dog_long
+            - cat
+            - cat_round
+          - type: 'null'
+        preview:
+          oneOf:
+          - type: string
+            pattern: ^/(api/media|static)/[A-Za-z0-9._/-]{1,200}$
+          - type: 'null'
+        candidates:
+          type: array
+          maxItems: 12
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - id
+            - url
+            - round
+            properties:
+              id:
+                type: string
+                format: uuid
+              url:
+                type: string
+                pattern: ^/(api/media|static)/[A-Za-z0-9._/-]{1,200}$
+              round:
+                type: integer
+                minimum: 0
+                maximum: 2
+        regenerationsLeft:
+          type: integer
+          minimum: 0
+          maximum: 2
+        failure:
+          oneOf:
+          - type: string
+            enum:
+            - not_dog_or_cat
+            - pet_not_visible
+            - traits_failed
+            - preview_failed
+            - candidates_failed
+            - expired
+          - type: 'null'
+        chosenId:
+          oneOf:
+          - type: string
+            format: uuid
+            description: 고른 정면 그림 후보 id(`chosen` 뒤)
+          - type: 'null'
+        priceKrw:
+          type: integer
+          minimum: 0
+          maximum: 100000
+          description: 캐릭터 만들기 원화 총액(부가세 포함, 결제 전 화면에 보임, SPEC-355)
+        petId:
+          oneOf:
+          - type: string
+            format: uuid
+            description: '`done`이면 생긴 아이 id'
+          - type: 'null'
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+    CreationList:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/Creation'
+    Intro:
+      type: object
+      additionalProperties: false
+      required:
+      - personality
+      - likes
+      - dislikes
+      - callMe
+      properties:
+        personality:
+          type: array
+          maxItems: 3
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+            - 활발함
+            - 얌전함
+            - 겁이 많음
+            - 먹보
+            - 애교 많음
+            - 고집 셈
+            - 호기심 많음
+            - 느긋함
+        likes:
+          type: string
+          maxLength: 60
+        dislikes:
+          type: string
+          maxLength: 60
+        callMe:
+          type: string
+          minLength: 1
+          maxLength: 10
+    Outfit:
+      type: object
+      additionalProperties: false
+      required:
+      - head
+      - body
+      - neck
+      properties:
+        head:
+          oneOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+        body:
+          oneOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+        neck:
+          oneOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+    Composite:
+      type: object
+      additionalProperties: false
+      required:
+      - backgroundId
+      - expression
+      - outfit
+      properties:
+        backgroundId:
+          type: string
+          pattern: ^[a-z0-9_]{1,40}$
+        expression:
+          type: string
+          enum:
+          - front
+          - smile
+          - excited
+          - sleepy
+          - surprised
+          - sad
+          - pout
+        outfit:
+          $ref: '#/components/schemas/Outfit'
+    PetSummary:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - name
+      - species
+      - mode
+      - status
+      - front
+      - lastMessageAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          pattern: ^[가-힣A-Za-z0-9 -]{1,12}$
+        species:
+          type: string
+          enum:
+          - dog
+          - cat
+        mode:
+          type: string
+          enum:
+          - living
+          - memorial
+        status:
+          type: string
+          enum:
+          - active
+          - archived
+        front:
+          type: string
+          pattern: ^/(api/media|static)/[A-Za-z0-9._/-]{1,200}$
+        lastMessageAt:
+          oneOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+    PetList:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          maxItems: 5
+          items:
+            $ref: '#/components/schemas/PetSummary'
+    Pet:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - name
+      - species
+      - template
+      - mode
+      - status
+      - intro
+      - sheet
+      - outfit
+      - diaryStyle
+      - memorialSince
+      - passedOn
+      - revertUntil
+      - shopEntry
+      - rechargePrompt
+      - farewellDone
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          pattern: ^[가-힣A-Za-z0-9 -]{1,12}$
+        species:
+          type: string
+          enum:
+          - dog
+          - cat
+        template:
+          type: string
+          enum:
+          - dog_small
+          - dog_large
+          - dog_long
+          - cat
+          - cat_round
+          description: 몸 템플릿. 화면이 아이템 레이어(API-196 `template`)를 고를 때 써요
+        mode:
+          type: string
+          enum:
+          - living
+          - memorial
+        status:
+          type: string
+          enum:
+          - active
+          - archived
+        intro:
+          $ref: '#/components/schemas/Intro'
+        sheet:
+          type: object
+          additionalProperties: false
+          required:
+          - front
+          - smile
+          - excited
+          - sleepy
+          - surprised
+          - sad
+          - pout
+          properties:
+            front:
+              type: string
+              pattern: ^/(api/media|static)/[A-Za-z0-9._/-]{1,200}$
+            smile:
+              type: string
+              pattern: ^/(api/media|static)/[A-Za-z0-9._/-]{1,200}$
+            excited:
+              type: string
+              pattern: ^/(api/media|static)/[A-Za-z0-9._/-]{1,200}$
+            sleepy:
+              type: string
+              pattern: ^/(api/media|static)/[A-Za-z0-9._/-]{1,200}$
+            surprised:
+              type: string
+              pattern: ^/(api/media|static)/[A-Za-z0-9._/-]{1,200}$
+            sad:
+              type: string
+              pattern: ^/(api/media|static)/[A-Za-z0-9._/-]{1,200}$
+            pout:
+              type: string
+              pattern: ^/(api/media|static)/[A-Za-z0-9._/-]{1,200}$
+        outfit:
+          $ref: '#/components/schemas/Outfit'
+        diaryStyle:
+          type: object
+          additionalProperties: false
+          required:
+          - themeId
+          - fontId
+          properties:
+            themeId:
+              oneOf:
+              - type: string
+                format: uuid
+              - type: 'null'
+            fontId:
+              oneOf:
+              - type: string
+                format: uuid
+              - type: 'null'
+        memorialSince:
+          oneOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+        passedOn:
+          oneOf:
+          - type: string
+            format: date
+          - type: 'null'
+        revertUntil:
+          oneOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+        shopEntry:
+          type: boolean
+          description: 추억 모드면 false(SPEC-339)
+        rechargePrompt:
+          type: boolean
+        farewellDone:
+          type: boolean
+    Message:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - role
+      - kind
+      - text
+      - composite
+      - clientId
+      - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum:
+          - member
+          - pet
+          - system
+        kind:
+          type: string
+          enum:
+          - chat
+          - greeting
+          - proactive
+          - item_reaction
+          - call
+          - reply_failed
+          - crisis_notice
+        text:
+          type: string
+          maxLength: 2000
+        composite:
+          oneOf:
+          - $ref: '#/components/schemas/Composite'
+          - type: 'null'
+        clientId:
+          oneOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+        createdAt:
+          type: string
+          format: date-time
+    MessagePage:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - before
+      properties:
+        items:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/Message'
+        before:
+          oneOf:
+          - type: string
+            pattern: ^[0-9]{1,19}$
+          - type: 'null'
+    Sticker:
+      type: object
+      additionalProperties: false
+      required:
+      - packId
+      - sticker
+      - x
+      - y
+      - scale
+      - rotate
+      properties:
+        packId:
+          type: string
+          format: uuid
+        sticker:
+          type: string
+          pattern: ^[a-z0-9_-]{1,40}$
+        x:
+          type: number
+          minimum: 0
+          maximum: 1
+        y:
+          type: number
+          minimum: 0
+          maximum: 1
+        scale:
+          type: number
+          minimum: 0.5
+          maximum: 2
+        rotate:
+          type: number
+          minimum: -45
+          maximum: 45
+    Stickers:
+      type: array
+      maxItems: 10
+      items:
+        $ref: '#/components/schemas/Sticker'
+    DiaryEntry:
+      type: object
+      additionalProperties: false
+      required:
+      - date
+      - kind
+      - status
+      - title
+      - weather
+      - body
+      - mood
+      - composite
+      - picture
+      - redrawsLeft
+      - drawing
+      - stickers
+      properties:
+        date:
+          type: string
+          format: date
+        kind:
+          type: string
+          enum:
+          - day
+          - farewell
+        status:
+          type: string
+          enum:
+          - pending
+          - ready
+          - skipped
+          - failed
+        title:
+          oneOf:
+          - type: string
+            maxLength: 30
+          - type: 'null'
+        weather:
+          oneOf:
+          - type: string
+            maxLength: 20
+          - type: 'null'
+        body:
+          oneOf:
+          - type: string
+            maxLength: 600
+          - type: 'null'
+        mood:
+          oneOf:
+          - type: string
+            maxLength: 20
+          - type: 'null'
+        composite:
+          oneOf:
+          - $ref: '#/components/schemas/Composite'
+          - type: 'null'
+        picture:
+          oneOf:
+          - type: string
+            pattern: ^/(api/media|static)/[A-Za-z0-9._/-]{1,200}$
+          - type: 'null'
+        redrawsLeft:
+          type: integer
+          minimum: 0
+          maximum: 2
+        drawing:
+          type: boolean
+          description: 새 그림을 그리는 중. 실패하면 false로 돌아오고 lastRedraw가 failed
+        lastRedraw:
+          type: string
+          enum:
+          - ok
+          - failed
+        stickers:
+          $ref: '#/components/schemas/Stickers'
+    DiaryList:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          maxItems: 32
+          items:
+            $ref: '#/components/schemas/DiaryEntry'
+    InventoryItem:
+      type: object
+      additionalProperties: false
+      required:
+      - itemId
+      - kind
+      - name
+      - slot
+      - source
+      - wornBy
+      - contents
+      - withdrawableUntil
+      properties:
+        itemId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum:
+          - wear
+          - sticker_pack
+          - theme
+          - font
+          - theme_package
+        name:
+          type: string
+          maxLength: 30
+        slot:
+          oneOf:
+          - type: string
+            enum:
+            - head
+            - body
+            - neck
+          - type: 'null'
+        source:
+          type: string
+          enum:
+          - free_default
+          - order
+          - package
+        wornBy:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            format: uuid
+        contents:
+          type: array
+          maxItems: 40
+          items:
+            type: string
+            pattern: ^[a-z0-9_]{1,40}$
+          description: 스티커 팩의 스티커 이름들, 테마 패키지에 든 아이템 이름들. 그림 파일은 `/static/items/<itemId>/`(계약 밖)
+        withdrawableUntil:
+          oneOf:
+          - type: string
+            format: date-time
+            description: 산 것이고 아직 쓰지 않아 청약철회할 수 있으면 그 끝 시각. 화면은 처음 쓰기 전에 철회할 수 없게 된다고 알려요(명세 3.8)
+          - type: 'null'
+    Inventory:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/InventoryItem'
+    ShopItem:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - kind
+      - name
+      - priceKrw
+      - slot
+      - limited
+      - saleEndsAt
+      - owned
+      - purchasable
+      - contents
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum:
+          - wear
+          - sticker_pack
+          - theme
+          - theme_package
+        name:
+          type: string
+          maxLength: 30
+        priceKrw:
+          type: integer
+          minimum: 1
+          maximum: 100000
+        slot:
+          oneOf:
+          - type: string
+            enum:
+            - head
+            - body
+            - neck
+          - type: 'null'
+        limited:
+          type: boolean
+        saleEndsAt:
+          oneOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+        owned:
+          type: boolean
+        purchasable:
+          type: boolean
+        contents:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - id
+            - kind
+            - name
+            properties:
+              id:
+                type: string
+                format: uuid
+              kind:
+                type: string
+                enum:
+                - wear
+                - sticker_pack
+                - theme
+                - font
+              name:
+                type: string
+                maxLength: 30
+    Shop:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/ShopItem'
+    Quota:
+      type: object
+      additionalProperties: false
+      required:
+      - percent
+      - resetsAt
+      - plan
+      - recharge
+      properties:
+        percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: 남은 ÷ 한도, 내림. 단위 수는 주지 않아요(SPEC-353)
+        resetsAt:
+          type: string
+          format: date-time
+        plan:
+          type: string
+          enum:
+          - free
+          - subscription
+        recharge:
+          type: object
+          additionalProperties: false
+          required:
+          - halfKrw
+          - fullKrw
+          - leftToday
+          description: 충전권 값(원화 총액)과 오늘 더 살 수 있는 장 수(SPEC-358)
+          properties:
+            halfKrw:
+              type: integer
+              minimum: 0
+              maximum: 100000
+            fullKrw:
+              type: integer
+              minimum: 0
+              maximum: 100000
+            leftToday:
+              type: integer
+              minimum: 0
+              maximum: 3
+    Order:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - orderNo
+      - product
+      - itemName
+      - amountKrw
+      - vatKrw
+      - status
+      - createdAt
+      - withdrawable
+      - withdrawalNote
+      properties:
+        id:
+          type: string
+          format: uuid
+        orderNo:
+          type: string
+          pattern: ^P[0-9]{8}-[A-Z0-9]{6}$
+        product:
+          type: string
+          enum:
+          - character_creation
+          - recharge_half
+          - recharge_full
+          - subscription_month
+          - item
+        itemName:
+          oneOf:
+          - type: string
+            maxLength: 30
+          - type: 'null'
+        amountKrw:
+          type: integer
+          minimum: 0
+          maximum: 100000
+        vatKrw:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        status:
+          type: string
+          enum:
+          - created
+          - paid
+          - fulfilled
+          - failed
+          - refund_pending
+          - refunded
+        createdAt:
+          type: string
+          format: date-time
+        withdrawable:
+          type: boolean
+        withdrawalNote:
+          type: string
+          maxLength: 200
+          description: 명세 3.8의 그 상품 글(결제 단추 앞에 보임)
+    OrderList:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/Order'
+    Checkout:
+      type: object
+      additionalProperties: false
+      required:
+      - order
+      - pg
+      properties:
+        order:
+          $ref: '#/components/schemas/Order'
+        pg:
+          oneOf:
+          - type: object
+            additionalProperties: false
+            required:
+            - clientKey
+            - orderName
+            - amount
+            - billing
+            description: '결제 대행 창을 여는 값. Open: 결제 대행을 고른 뒤 그 SDK 이름으로 맞춰요(02 질문 A)'
+            properties:
+              clientKey:
+                type: string
+                maxLength: 200
+              orderName:
+                type: string
+                maxLength: 100
+              amount:
+                type: integer
+                minimum: 0
+                maximum: 100000
+              billing:
+                type: boolean
+                description: '구독: 빌링 키 등록 창'
+          - type: 'null'
+    Subscription:
+      type: object
+      additionalProperties: false
+      required:
+      - status
+      - priceKrw
+      - periodEnd
+      - nextChargeAt
+      - newPrice
+      properties:
+        status:
+          type: string
+          enum:
+          - none
+          - active
+          - canceling
+          - ended
+        priceKrw:
+          type: integer
+          minimum: 1
+          maximum: 100000
+          description: 월 값(원화 총액). 구독이 없을 때도 지금 값을 줘요
+        periodEnd:
+          oneOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+        nextChargeAt:
+          oneOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+        newPrice:
+          oneOf:
+          - type: object
+            additionalProperties: false
+            required:
+            - priceKrw
+            - from
+            - agreed
+            properties:
+              priceKrw:
+                type: integer
+                minimum: 1
+                maximum: 100000
+              from:
+                type: string
+                format: date
+              agreed:
+                type: boolean
+          - type: 'null'
+    Job:
+      type: object
+      additionalProperties: false
+      required:
+      - jobId
+      properties:
+        jobId:
+          type: string
+          format: uuid
+    Export:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - status
+      - readyUntil
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+          - queued
+          - running
+          - done
+          - failed
+        readyUntil:
+          oneOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+    CallStart:
+      type: object
+      additionalProperties: false
+      required:
+      - callId
+      - token
+      - wsUrl
+      - expiresAt
+      properties:
+        callId:
+          type: string
+          format: uuid
+        token:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{43}$
+        wsUrl:
+          type: string
+          pattern: ^wss://[a-z0-9.-]{1,100}/pet-call$
+        expiresAt:
+          type: string
+          format: date-time
+    Ok:
+      type: object
+      additionalProperties: false
+      required:
+      - ok
+      properties:
+        ok:
+          type: boolean
+          const: true
+  responses:
+    BadSignature:
+      description: '`bad_signature`'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            bad_signature:
+              $ref: '#/components/examples/bad_signature'
+    CrossSite:
+      description: '`cross_site`'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            cross_site:
+              $ref: '#/components/examples/cross_site'
+    InvalidInput:
+      description: '`invalid_input`'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            invalid_input:
+              $ref: '#/components/examples/invalid_input'
+    NotFound:
+      description: '`not_found`'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            not_found:
+              $ref: '#/components/examples/not_found'
+    ServerError:
+      description: 그 밖의 오류
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            server_error:
+              $ref: '#/components/examples/server_error'
+    Unauthenticated:
+      description: '`unauthenticated`'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unauthenticated:
+              $ref: '#/components/examples/unauthenticated'
+  examples:
+    already_member:
+      value:
+        type: https://pet.example.com/problems/already-member
+        title: 이미 가입한 OIDC 계정
+        status: 409
+        code: already_member
+        detail: 이미 가입했어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    already_owned:
+      value:
+        type: https://pet.example.com/problems/already-owned
+        title: 이미 가진 아이템
+        status: 409
+        code: already_owned
+        detail: 이미 가지고 있어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    already_subscribed:
+      value:
+        type: https://pet.example.com/problems/already-subscribed
+        title: 이미 구독 중
+        status: 409
+        code: already_subscribed
+        detail: 이미 구독 중이에요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    archived:
+      value:
+        type: https://pet.example.com/problems/archived
+        title: 보관된 아이
+        status: 409
+        code: archived
+        detail: 보관한 아이예요. 꺼내면 다시 이야기할 수 있어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    asleep:
+      value:
+        type: https://pet.example.com/problems/asleep
+        title: 오늘 회원 메시지 300개 넘음
+        status: 409
+        code: asleep
+        detail: 콩이가 잠들었어요. 새벽 4시에 깨요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        wakesAt: '2026-11-17T19:00:00Z'
+    bad_signature:
+      value:
+        type: https://pet.example.com/problems/bad-signature
+        title: 결제 대행 웹훅 서명이나 내부 API 비밀 헤더가 틀림
+        status: 401
+        code: bad_signature
+        detail: 요청을 처리할 수 없어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    budget_paused:
+      value:
+        type: https://pet.example.com/problems/budget-paused
+        title: '이번 달 원가 예산 100%: 새 그림과 통화를 쉼'
+        status: 409
+        code: budget_paused
+        detail: 오늘은 새 그림과 통화가 쉬어요. 글로는 계속 이야기할 수 있어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    busy:
+      value:
+        type: https://pet.example.com/problems/busy
+        title: 그 만들기·일기를 그리는 중
+        status: 409
+        code: busy
+        detail: 지금 그리는 중이에요. 조금만 기다려 주세요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    call_in_progress:
+      value:
+        type: https://pet.example.com/problems/call-in-progress
+        title: 회원의 통화가 이미 있음
+        status: 409
+        code: call_in_progress
+        detail: 이미 통화 중이에요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    call_unavailable:
+      value:
+        type: https://pet.example.com/problems/call-unavailable
+        title: 공개 서비스용 통화 서버 없음, 잡은 한도는 돌려줌
+        status: 503
+        code: call_unavailable
+        detail: 지금은 통화를 걸 수 없어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    confirm_required:
+      value:
+        type: https://pet.example.com/problems/confirm-required
+        title: 확인 글이 다름
+        status: 400
+        code: confirm_required
+        detail: 입력을 확인해 주세요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    consent_required:
+      value:
+        type: https://pet.example.com/problems/consent-required
+        title: 국외 이전 동의가 꺼져 있어 모델을 부르는 일을 막음
+        status: 409
+        code: consent_required
+        detail: 사진과 대화를 해외 AI 회사로 보내는 데 동의해야 쓸 수 있어요. 설정에서 바꿀 수 있어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    consents_missing:
+      value:
+        type: https://pet.example.com/problems/consents-missing
+        title: 가입의 필수 동의(이용약관·개인정보·AI 고지)가 거짓
+        status: 400
+        code: consents_missing
+        detail: 필수 항목에 동의해야 가입할 수 있어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    cross_site:
+      value:
+        type: https://pet.example.com/problems/cross-site
+        title: 쓰기 요청의 Origin이 서비스 주소가 아님
+        status: 403
+        code: cross_site
+        detail: 요청을 처리할 수 없어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    export_limit:
+      value:
+        type: https://pet.example.com/problems/export-limit
+        title: 그 아이를 오늘 이미 내보냄
+        status: 429
+        code: export_limit
+        detail: 오늘은 이미 내보냈어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        resetsAt: '2026-11-17T19:00:00Z'
+    farewell_done:
+      value:
+        type: https://pet.example.com/problems/farewell-done
+        title: 작별 의식을 이미 함
+        status: 409
+        code: farewell_done
+        detail: 작별 의식은 한 번만 할 수 있어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    farewell_failed:
+      value:
+        type: https://pet.example.com/problems/farewell-failed
+        title: 작별 편지·그림 모델 실패, 횟수 안 셈
+        status: 503
+        code: farewell_failed
+        detail: 지금은 쓰지 못했어요. 잠시 뒤 다시 해 주세요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    identity_provider:
+      value:
+        type: https://pet.example.com/problems/identity-provider
+        title: 본인확인 기관 오류
+        status: 502
+        code: identity_provider
+        detail: 본인인증을 마치지 못했어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    identity_required:
+      value:
+        type: https://pet.example.com/problems/identity-required
+        title: 첫 결제 전 본인인증이 없음
+        status: 409
+        code: identity_required
+        detail: 첫 결제 전에 본인인증을 한 번 해 주세요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    invalid_input:
+      value:
+        type: https://pet.example.com/problems/invalid-input
+        title: 형식·길이·범위·목록 밖 값
+        status: 400
+        code: invalid_input
+        detail: 입력을 확인해 주세요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    invalid_photo:
+      value:
+        type: https://pet.example.com/problems/invalid-photo
+        title: 열 수 없는 사진, 형식·8MB·4096px 넘음
+        status: 400
+        code: invalid_photo
+        detail: 2번째 사진을 열 수 없어요. JPEG나 PNG, 8MB 이하로 올려 주세요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        photo: 2
+    invite_required:
+      value:
+        type: https://pet.example.com/problems/invite-required
+        title: 가입 방식이 invite인데 초대 코드가 없거나 틀림·다 씀
+        status: 403
+        code: invite_required
+        detail: 지금은 초대받은 분만 가입할 수 있어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    not_found:
+      value:
+        type: https://pet.example.com/problems/not-found
+        title: 없거나 남의 것이거나 지운 것(같은 본문)
+        status: 404
+        code: not_found
+        detail: 찾을 수 없어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    not_memorial:
+      value:
+        type: https://pet.example.com/problems/not-memorial
+        title: 살아 있는 아이는 보관하지 않음
+        status: 409
+        code: not_memorial
+        detail: 함께 사는 아이는 보관하지 않아요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    payments_off:
+      value:
+        type: https://pet.example.com/problems/payments-off
+        title: 결제가 아직 꺼져 있음
+        status: 409
+        code: payments_off
+        detail: 결제는 곧 열려요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    pet_limit:
+      value:
+        type: https://pet.example.com/problems/pet-limit
+        title: 아이 5마리
+        status: 409
+        code: pet_limit
+        detail: 아이는 5마리까지 만들 수 있어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    photo_check_unavailable:
+      value:
+        type: https://pet.example.com/problems/photo-check-unavailable
+        title: 사람 얼굴 가리기 모델을 못 불러옴(사진을 밖으로 보내지 않음)
+        status: 503
+        code: photo_check_unavailable
+        detail: 사진을 확인하지 못했어요. 잠시 뒤 다시 해 주세요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    preview_limit:
+      value:
+        type: https://pet.example.com/problems/preview-limit
+        title: 오늘 미리 보기 3장
+        status: 429
+        code: preview_limit
+        detail: 오늘 미리 보기를 다 봤어요. 새벽 4시 뒤에 다시 볼 수 있어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        resetsAt: '2026-11-17T19:00:00Z'
+    quota_exhausted:
+      value:
+        type: https://pet.example.com/problems/quota-exhausted
+        title: '하루 한도가 모자람. prompt: recharge(그날 처음, 살아 있는 아이)·brief·none(추억 모드)'
+        status: 409
+        code: quota_exhausted
+        detail: 오늘 한도를 다 썼어요. 새벽 4시에 다시 차요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        prompt: recharge
+        resetsAt: '2026-11-17T19:00:00Z'
+    quota_exhausted_memorial:
+      value:
+        type: https://pet.example.com/problems/quota-exhausted
+        title: '하루 한도가 모자람. prompt: recharge(그날 처음, 살아 있는 아이)·brief·none(추억 모드)'
+        status: 409
+        code: quota_exhausted
+        detail: 오늘은 여기까지, 새벽 4시 뒤에 또 이야기해요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        prompt: none
+        resetsAt: '2026-11-17T19:00:00Z'
+    quota_full:
+      value:
+        type: https://pet.example.com/problems/quota-full
+        title: 한도가 가득해 충전권이 필요 없음
+        status: 409
+        code: quota_full
+        detail: 지금은 한도가 가득해요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    rate_limited:
+      value:
+        type: https://pet.example.com/problems/rate-limited
+        title: 요청이 너무 잦음(신고 하루 20건, 만든 주문 5개 등)
+        status: 429
+        code: rate_limited
+        detail: 잠시 뒤 다시 해 주세요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    recharge_limit:
+      value:
+        type: https://pet.example.com/problems/recharge-limit
+        title: 충전권 하루 3장
+        status: 409
+        code: recharge_limit
+        detail: 충전권은 하루 3장까지예요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    redraw_limit:
+      value:
+        type: https://pet.example.com/problems/redraw-limit
+        title: 일기 다시 그리기 2번 다 씀
+        status: 409
+        code: redraw_limit
+        detail: 다시 그리기를 다 썼어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    regenerate_limit:
+      value:
+        type: https://pet.example.com/problems/regenerate-limit
+        title: 다시 만들기 2번 다 씀
+        status: 409
+        code: regenerate_limit
+        detail: 다시 그리기를 다 썼어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    revert_window_passed:
+      value:
+        type: https://pet.example.com/problems/revert-window-passed
+        title: 추억 모드로 바꾼 지 7일 넘음
+        status: 409
+        code: revert_window_passed
+        detail: 추억 모드로 바꾼 지 7일이 지나 되돌릴 수 없어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    server_error:
+      value:
+        type: https://pet.example.com/problems/server-error
+        title: 예상하지 못한 오류
+        status: 500
+        code: server_error
+        detail: 잠시 뒤 다시 해 주세요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    too_large:
+      value:
+        type: https://pet.example.com/problems/too-large
+        title: 본문이 25MB 넘음
+        status: 413
+        code: too_large
+        detail: 사진이 너무 커요. 다시 골라 주세요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    too_many_creations:
+      value:
+        type: https://pet.example.com/problems/too-many-creations
+        title: 진행 중 만들기 3개
+        status: 409
+        code: too_many_creations
+        detail: 만들고 있는 아이가 있어요. 먼저 마치거나 지워 주세요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    unauthenticated:
+      value:
+        type: https://pet.example.com/problems/unauthenticated
+        title: 세션이 없거나 끝남
+        status: 401
+        code: unauthenticated
+        detail: 다시 로그인해 주세요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    underage:
+      value:
+        type: https://pet.example.com/problems/underage
+        title: 만 19세 미만
+        status: 403
+        code: underage
+        detail: 이 서비스는 만 19세 이상만 쓸 수 있어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    use_delete_account:
+      value:
+        type: https://pet.example.com/problems/use-delete-account
+        title: 필수 동의는 끌 수 없음
+        status: 400
+        code: use_delete_account
+        detail: 필수 동의를 거두려면 계정을 지워 주세요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    withdrawal_not_allowed:
+      value:
+        type: https://pet.example.com/problems/withdrawal-not-allowed
+        title: 청약철회 조건이 맞지 않음(명세 3.8). reason에 이유
+        status: 409
+        code: withdrawal_not_allowed
+        detail: '이 주문은 철회할 수 없어요: 한 번 입혔어요'
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        reason: used
+    wrong_slot:
+      value:
+        type: https://pet.example.com/problems/wrong-slot
+        title: 착용 아이템의 자리가 다름
+        status: 400
+        code: wrong_slot
+        detail: 입력을 확인해 주세요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    wrong_state:
+      value:
+        type: https://pet.example.com/problems/wrong-state
+        title: 만들기·주문 상태가 그 요청과 맞지 않음
+        status: 409
+        code: wrong_state
+        detail: 지금은 할 수 없어요.
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+  securitySchemes:
+    memberSession:
+      type: apiKey
+      in: cookie
+      name: pet_session
+      description: 로그인 세션(SPEC-310). 가입 대기 세션은 signup만 받아요
+    internalSecret:
+      type: apiKey
+      in: header
+      name: X-Pet-Internal
+      description: 통화 서버와 나누는 비밀 값(환경 변수). /internal/은 127.0.0.1에서만
+    pgSignature:
+      type: apiKey
+      in: header
+      name: X-PG-Signature
+      description: 'Open: 결제 대행의 웹훅 서명 헤더 이름(02 질문 A)'
+  x-corthex:
+    errors:
+      already_member:
+        status: 409
+        meaning: 이미 가입한 OIDC 계정
+        message: 이미 가입했어요.
+        client: 홈으로
+      already_owned:
+        status: 409
+        meaning: 이미 가진 아이템
+        message: 이미 가지고 있어요.
+        client: 보관함으로
+      already_subscribed:
+        status: 409
+        meaning: 이미 구독 중
+        message: 이미 구독 중이에요.
+        client: 구독 화면으로
+      archived:
+        status: 409
+        meaning: 보관된 아이
+        message: 보관한 아이예요. 꺼내면 다시 이야기할 수 있어요.
+        client: 꺼내기 단추
+      asleep:
+        status: 409
+        meaning: 오늘 회원 메시지 300개 넘음
+        message: '{이름}가 잠들었어요. 새벽 4시에 깨요.'
+        client: 입력창과 쓴 글을 그대로 두고 wakesAt 표시
+      auth_provider:
+        status: 502
+        meaning: 로그인 공급자 오류나 id_token 확인 실패
+        message: 로그인을 마치지 못했어요. 다시 해 주세요.
+        client: 로그인 다시
+      auth_state:
+        status: 400
+        meaning: 로그인 state·nonce가 다르거나 10분이 지남
+        message: 로그인을 마치지 못했어요. 다시 해 주세요.
+        client: 로그인 다시
+      bad_signature:
+        status: 401
+        meaning: 결제 대행 웹훅 서명이나 내부 API 비밀 헤더가 틀림
+        message: 요청을 처리할 수 없어요.
+        client: (서버 사이) 다시 보내지 않음
+      budget_paused:
+        status: 409
+        meaning: '이번 달 원가 예산 100%: 새 그림과 통화를 쉼'
+        message: 오늘은 새 그림과 통화가 쉬어요. 글로는 계속 이야기할 수 있어요.
+        client: 글 대화로 안내
+      busy:
+        status: 409
+        meaning: 그 만들기·일기를 그리는 중
+        message: 지금 그리는 중이에요. 조금만 기다려 주세요.
+        client: 그리는 중 표시
+      call_in_progress:
+        status: 409
+        meaning: 회원의 통화가 이미 있음
+        message: 이미 통화 중이에요.
+        client: 안내만
+      call_unavailable:
+        status: 503
+        meaning: 공개 서비스용 통화 서버 없음, 잡은 한도는 돌려줌
+        message: 지금은 통화를 걸 수 없어요.
+        client: 다시 해 보기
+      confirm_required:
+        status: 400
+        meaning: 확인 글이 다름
+        message: 입력을 확인해 주세요.
+        client: 확인 칸 표시
+      consent_required:
+        status: 409
+        meaning: 국외 이전 동의가 꺼져 있어 모델을 부르는 일을 막음
+        message: 사진과 대화를 해외 AI 회사로 보내는 데 동의해야 쓸 수 있어요. 설정에서 바꿀 수 있어요.
+        client: 동의 설정으로 가는 단추
+      consents_missing:
+        status: 400
+        meaning: 가입의 필수 동의(이용약관·개인정보·AI 고지)가 거짓
+        message: 필수 항목에 동의해야 가입할 수 있어요.
+        client: 빠진 동의 칸 표시
+      cross_site:
+        status: 403
+        meaning: 쓰기 요청의 Origin이 서비스 주소가 아님
+        message: 요청을 처리할 수 없어요.
+        client: 새로 고침
+      export_limit:
+        status: 429
+        meaning: 그 아이를 오늘 이미 내보냄
+        message: 오늘은 이미 내보냈어요.
+        client: resetsAt까지 단추 막음
+      farewell_done:
+        status: 409
+        meaning: 작별 의식을 이미 함
+        message: 작별 의식은 한 번만 할 수 있어요.
+        client: 일기장 마지막 장으로
+      farewell_failed:
+        status: 503
+        meaning: 작별 편지·그림 모델 실패, 횟수 안 셈
+        message: 지금은 쓰지 못했어요. 잠시 뒤 다시 해 주세요.
+        client: 다시 해 보기
+      identity_provider:
+        status: 502
+        meaning: 본인확인 기관 오류
+        message: 본인인증을 마치지 못했어요.
+        client: 다시 해 보기
+      identity_required:
+        status: 409
+        meaning: 첫 결제 전 본인인증이 없음
+        message: 첫 결제 전에 본인인증을 한 번 해 주세요.
+        client: 본인확인 기관 창 열기
+      invalid_input:
+        status: 400
+        meaning: 형식·길이·범위·목록 밖 값
+        message: 입력을 확인해 주세요.
+        client: 칸 옆에 표시
+      invalid_photo:
+        status: 400
+        meaning: 열 수 없는 사진, 형식·8MB·4096px 넘음
+        message: '{n}번째 사진을 열 수 없어요. JPEG나 PNG, 8MB 이하로 올려 주세요.'
+        client: 그 사진 칸 표시
+      invite_required:
+        status: 403
+        meaning: 가입 방식이 invite인데 초대 코드가 없거나 틀림·다 씀
+        message: 지금은 초대받은 분만 가입할 수 있어요.
+        client: 초대 코드 칸 표시
+      not_found:
+        status: 404
+        meaning: 없거나 남의 것이거나 지운 것(같은 본문)
+        message: 찾을 수 없어요.
+        client: 목록으로
+      not_memorial:
+        status: 409
+        meaning: 살아 있는 아이는 보관하지 않음
+        message: 함께 사는 아이는 보관하지 않아요.
+        client: 안내만
+      payments_off:
+        status: 409
+        meaning: 결제가 아직 꺼져 있음
+        message: 결제는 곧 열려요.
+        client: 안내만
+      pet_limit:
+        status: 409
+        meaning: 아이 5마리
+        message: 아이는 5마리까지 만들 수 있어요.
+        client: 안내만
+      photo_check_unavailable:
+        status: 503
+        meaning: 사람 얼굴 가리기 모델을 못 불러옴(사진을 밖으로 보내지 않음)
+        message: 사진을 확인하지 못했어요. 잠시 뒤 다시 해 주세요.
+        client: 다시 해 보기 단추
+      preview_limit:
+        status: 429
+        meaning: 오늘 미리 보기 3장
+        message: 오늘 미리 보기를 다 봤어요. 새벽 4시 뒤에 다시 볼 수 있어요.
+        client: resetsAt까지 단추 막음
+      quota_exhausted:
+        status: 409
+        meaning: '하루 한도가 모자람. prompt: recharge(그날 처음, 살아 있는 아이)·brief·none(추억 모드)'
+        message: 오늘 한도를 다 썼어요. 새벽 4시에 다시 차요.
+        client: 'prompt대로: 충전 시트, 한 줄, 또는 추억 모드 글'
+      quota_full:
+        status: 409
+        meaning: 한도가 가득해 충전권이 필요 없음
+        message: 지금은 한도가 가득해요.
+        client: 안내만
+      rate_limited:
+        status: 429
+        meaning: 요청이 너무 잦음(신고 하루 20건, 만든 주문 5개 등)
+        message: 잠시 뒤 다시 해 주세요.
+        client: 잠시 뒤 다시
+      recharge_limit:
+        status: 409
+        meaning: 충전권 하루 3장
+        message: 충전권은 하루 3장까지예요.
+        client: 안내만
+      redraw_limit:
+        status: 409
+        meaning: 일기 다시 그리기 2번 다 씀
+        message: 다시 그리기를 다 썼어요.
+        client: 단추 숨김
+      regenerate_limit:
+        status: 409
+        meaning: 다시 만들기 2번 다 씀
+        message: 다시 그리기를 다 썼어요.
+        client: 단추 숨김
+      revert_window_passed:
+        status: 409
+        meaning: 추억 모드로 바꾼 지 7일 넘음
+        message: 추억 모드로 바꾼 지 7일이 지나 되돌릴 수 없어요.
+        client: 안내만
+      server_error:
+        status: 500
+        meaning: 예상하지 못한 오류
+        message: 잠시 뒤 다시 해 주세요.
+        client: 다시 해 보기
+      too_large:
+        status: 413
+        meaning: 본문이 25MB 넘음
+        message: 사진이 너무 커요. 다시 골라 주세요.
+        client: 사진 다시 고르기
+      too_many_creations:
+        status: 409
+        meaning: 진행 중 만들기 3개
+        message: 만들고 있는 아이가 있어요. 먼저 마치거나 지워 주세요.
+        client: 진행 중 목록으로
+      unauthenticated:
+        status: 401
+        meaning: 세션이 없거나 끝남
+        message: 다시 로그인해 주세요.
+        client: 로그인 화면으로
+      underage:
+        status: 403
+        meaning: 만 19세 미만
+        message: 이 서비스는 만 19세 이상만 쓸 수 있어요.
+        client: 안내만 보이고 더 진행하지 않음
+      use_delete_account:
+        status: 400
+        meaning: 필수 동의는 끌 수 없음
+        message: 필수 동의를 거두려면 계정을 지워 주세요.
+        client: 계정 지우기 안내
+      withdrawal_not_allowed:
+        status: 409
+        meaning: 청약철회 조건이 맞지 않음(명세 3.8). reason에 이유
+        message: '이 주문은 철회할 수 없어요: {이유}'
+        client: 이유 표시
+      wrong_slot:
+        status: 400
+        meaning: 착용 아이템의 자리가 다름
+        message: 입력을 확인해 주세요.
+        client: 그 자리 표시
+      wrong_state:
+        status: 409
+        meaning: 만들기·주문 상태가 그 요청과 맞지 않음
+        message: 지금은 할 수 없어요.
+        client: 상태를 다시 읽음

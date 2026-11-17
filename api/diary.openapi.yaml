@@ -1,0 +1,1926 @@
+# 마롱이의 일기 API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/diary.md(SPEC-150~168), DB: marong/migrations/016_diary.sql(TBL-103~109)
+openapi: 3.1.0
+info:
+  title: 마롱이의 일기 API
+  version: 0.1.0-draft
+  description: |-
+    마롱이 앱과 브라우저의 일기장 화면이 디스코드 DM 봇의 글 대화 서버와 주고받는 계약이에요. 원본은 이 파일이고 코드는 이 파일을 따라가요(06단계). 글 대화 API(`api/app-chat.openapi.yaml`)와 같은 서버(127.0.0.1:8796)·같은 로그인이고, 새 모듈 `marong/app_diary.py`가 `/chat/diary/` 아래를 맡아요. 터널 규칙·Access·앱은 바꾸지 않아요.
+
+    - 로그인은 글 대화와 같아요. 봇이 `Cf-Access-Jwt-Assertion`을 다시 확인하고 이메일 해시로 통화 친구와 그 친구의 디스코드 DM 연결을 찾아요. 일기는 그 친구 id로만 찾아서, 남의 일기는 없는 것과 같아요(SPEC-158).
+    - 쓰기 요청(POST·PUT·DELETE)은 `Origin`이 `https://marong.corthex-hq.com`이어야 해요. 본문은 16KB까지예요(글 대화와 같은 서버 한도).
+    - 오류는 글 대화와 같은 RFC 9457 Problem Details에 `code`와 `traceId`를 더한 모양이에요. 코드 목록은 `components.x-corthex.errors`예요.
+    - 응답에는 장면, 하루 모음, 모델 이름, 비용이 없어요(SPEC-158). 로그에는 일기 날짜, 상태, 판 번호, 결과 코드만 남겨요(REQ-177).
+    - 페이지 `/chat/diary/`, `/chat/diary/{YYYY-MM-DD}`와 `diary.js`·`diary.css`는 HTML과 파일이라 이 계약에 넣지 않았어요. 화면은 07 사이트맵에 있어요.
+    - 그림 파일만 `Cache-Control: private, max-age=31536000, immutable`이고 다른 응답은 글 대화처럼 `no-store`예요.
+
+    계약에서 정한 것(Claude 제안, 2026-11-16, 검토 대상).
+    1. 검증 오류는 400이에요(422는 쓰지 않음). 글 대화와 같아요.
+    2. 일기가 없는 날, 미래, 다른 친구에게 간 주소는 404가 아니라 200의 `state` none이에요. 날짜로 로그인한 친구 자신의 일기만 찾아서 남의 일기가 있는지도 드러나지 않아요(SPEC-158).
+    3. 그림 id는 형식이 틀려도 404예요. 그림 주소는 화면이 받은 값만 쓰고 `<img>`는 오류 본문을 읽지 못해서예요. 다른 입력의 형식 오류는 400이에요.
+    4. 화면에는 일기 줄의 속 상태(`pending`·`writing`·`drawing`)를 `writing` 하나로 보여요. 다시 그리기는 `ready` 안의 `busy`로 보여요.
+    5. 바꾸는 요청이 지금 값과 같으면 200이고 판이 늘지 않아요(마음 날씨, 숨기기, 도장, 내 모습 카드).
+    6. 고치기와 다시 그리기는 `Idempotency-Key`가 꼭 있어야 해요. 같은 키는 적어도 24시간 동안 처음과 같은 상태 번호와 `code`를 돌려줘요(성공이면 `sceneChanged`도 같고, `day`는 지금 모습). 처음 요청이 아직 도는 중이면 409 `busy`, 같은 키를 다른 날이나 다른 일에 쓰면 400이에요.
+    7. 고치기의 모델 실패(시간 넘김, 연결 오류, 5xx, 거절, 키 없음, 한도, 형식 틀림)는 모두 503 `fix_failed` 하나예요. 화면이 할 일(쓴 말을 두고 나중에 다시)이 같아서예요. 종류는 TBL-106의 `outcome`에만 남아요.
+    8. 다시 그리기는 202로 받고 끝은 한 날 응답의 `redraw.last`로 알려요. 장면 다시 쓰기와 그림 모델의 실패는 오류 응답이 아니라 `scene_rejected`, `draw_failed`, `draw_refused`, `drawing_budget` 결과예요(SPEC-161).
+    9. 마음 날씨 바꾸기는 고치는 중이나 그리는 중이면 409 `busy`예요. 그 사이 판이 바뀌지 않게요(04 SPEC-162에 이 예외를 더함).
+    10. `GET /chat/diary/api/latest`를 더했어요. `/chat/diary/`가 가장 최근 일기를 열 때와, 일기가 하나도 없을 때 '아직 없어'와 '꺼져 있어'를 고를 때 써요(04의 3.8에 더함).
+
+    Open: 그림 파일의 1년 캐시가 Cloudflare Access 뒤 앱 창(WebView)에서 실제로 기기에 남는지는 04의 7.3 실측(REQ-176) 때 봐요.
+servers:
+- url: https://marong.corthex-hq.com
+  description: Cloudflare Access 뒤. 터널이 /chat/ 아래만 봇으로 보내요
+- url: http://127.0.0.1:8796
+  description: 서버 안에서 직접(배포 확인용). Access 증명이 없어 API는 401이에요
+security:
+- cfAccess: []
+paths:
+  /chat/diary/api/latest:
+    get:
+      operationId: getDiaryLatest
+      summary: 가장 최근 일기 날짜와 일기 켜짐
+      description: 일기장 첫 주소(`/chat/diary/`)가 불러요. 준비되고(ready) 숨기지 않은 가장 늦은 날짜와, 이 친구의 일기가 켜져 있는지(가장 나중에 더한 설정 줄의 값, 시작 날짜와 상관없이)를 줘요. 날짜가 없으면 null이고, 화면은 enabled로 '아직 일기가 없어'와 '일기가 꺼져 있어'를 골라요.
+      x-corthex:
+        id: API-108
+        spec:
+        - SPEC-150
+        - SPEC-158
+        omit:
+          '400': 입력이 없음
+          '404': 경로가 id를 담지 않음
+          '409': 읽기만 함
+          '429': 읽기만 함
+      responses:
+        '200':
+          description: 가장 최근 일기 날짜
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Latest'
+              examples:
+                latest:
+                  value:
+                    date: '2026-11-16'
+                    enabled: true
+                none-yet:
+                  value:
+                    date: null
+                    enabled: true
+                diary-off:
+                  value:
+                    date: null
+                    enabled: false
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/diary/api/days:
+    get:
+      operationId: listDiaryMonth
+      summary: 한 달 달력
+      description: 그 달(일기 날짜 기준)의 준비되고(ready) 숨기지 않은 일기마다 날짜, 지금 판의 마음 날씨, 도장이 있는지를 날짜순으로 줘요. 건너뛴 날, 못 쓴 날, 쓰는 중인 날, 숨긴 날은 목록에 없어 화면에서 빈 칸이에요.
+      x-corthex:
+        id: API-109
+        spec:
+        - SPEC-159
+        - SPEC-162
+        - SPEC-164
+        omit:
+          '404': 일기가 없는 달은 빈 목록
+          '409': 읽기만 함
+          '429': 읽기만 함
+      parameters:
+      - $ref: '#/components/parameters/Month'
+      responses:
+        '200':
+          description: 그 달의 일기 날짜들(없으면 빈 목록)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonthDays'
+              examples:
+                november:
+                  value:
+                    month: '2026-11'
+                    days:
+                    - date: '2026-11-14'
+                      weather: cloudy
+                      stamped: false
+                    - date: '2026-11-17'
+                      weather: rain
+                      stamped: true
+                empty:
+                  value:
+                    month: '2026-10'
+                    days: []
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/diary/api/days/{date}:
+    get:
+      operationId: getDiaryDay
+      summary: 일기장 한 날
+      description: 로그인한 친구 자신의 그 날 일기를 줘요. 준비된 일기면 지금 판(제목, 마음 날씨, 글), 그림, 숨김, 도장, 고치는 중·그리는 중, 남은 고치기와 다시 그리기 수와 막힌 이유, 마지막 다시 그리기 결과가 있어요. 앞·뒤 날은 상태와 상관없이 늘 있어요(SPEC-159). 다시 그리기 뒤에는 화면이 2초마다 이 주소를 2분까지 불러 끝을 봐요(SPEC-161). 숨긴 날도 내용과 hidden true로 줘요(숨긴 일기 목록에서 열 때).
+      x-corthex:
+        id: API-110
+        spec:
+        - SPEC-158
+        - SPEC-159
+        - SPEC-160
+        - SPEC-161
+        - SPEC-163
+        - SPEC-164
+        omit:
+          '404': 일기가 없는 날, 미래, 다른 친구에게 간 주소는 state none(200)
+          '409': 읽기만 함
+          '429': 읽기만 함. 다시 그리기 뒤 2초마다 불러도 돼요
+      parameters:
+      - $ref: '#/components/parameters/Date'
+      responses:
+        '200':
+          description: 그 날 일기
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiaryDay'
+              examples:
+                ready:
+                  value:
+                    date: '2026-11-16'
+                    state: ready
+                    prev: '2026-11-14'
+                    next: null
+                    diary:
+                      revision: 2
+                      title: 라면 먹은 날
+                      weather: sunny
+                      body: 오늘은 시험이 끝났다는 얘기를 들었다. 저녁은 떡볶이가 아니라 라면이었다고 해서 같이 웃었다. 나는 군밤이 먹고 싶었지만 꾹 참았다. 내일도 재밌는 얘기를 많이 해야지.
+                      drawing:
+                        id: 6f1d2c3b-4a59-4e68-9f70-8a1b2c3d4e5f
+                        kind: ai
+                      hidden: false
+                      stampedAt: null
+                      busy: null
+                      fix:
+                        left: 4
+                        blocked: null
+                      redraw:
+                        left: 2
+                        blocked: null
+                        last: null
+                placeholder:
+                  value:
+                    date: '2026-11-16'
+                    state: ready
+                    prev: '2026-11-14'
+                    next: null
+                    diary:
+                      revision: 1
+                      title: 떡볶이 먹은 날
+                      weather: sunny
+                      body: 오늘은 시험이 끝났다는 얘기를 들었다. 저녁으로 떡볶이를 먹었다고 해서 나도 먹고 싶어졌다. 나는 군밤이 먹고 싶었지만 꾹 참았다. 내일도 재밌는 얘기를 많이 해야지.
+                      drawing:
+                        id: null
+                        kind: placeholder
+                      hidden: false
+                      stampedAt: null
+                      busy: null
+                      fix:
+                        left: 5
+                        blocked: null
+                      redraw:
+                        left: 2
+                        blocked: null
+                        last: null
+                redrawing:
+                  value:
+                    date: '2026-11-16'
+                    state: ready
+                    prev: '2026-11-14'
+                    next: null
+                    diary:
+                      revision: 2
+                      title: 라면 먹은 날
+                      weather: sunny
+                      body: 오늘은 시험이 끝났다는 얘기를 들었다. 저녁은 떡볶이가 아니라 라면이었다고 해서 같이 웃었다. 나는 군밤이 먹고 싶었지만 꾹 참았다. 내일도 재밌는 얘기를 많이 해야지.
+                      drawing:
+                        id: 6f1d2c3b-4a59-4e68-9f70-8a1b2c3d4e5f
+                        kind: ai
+                      hidden: false
+                      stampedAt: null
+                      busy: redraw
+                      fix:
+                        left: 4
+                        blocked: busy
+                      redraw:
+                        left: 2
+                        blocked: busy
+                        last: null
+                redraw-failed:
+                  value:
+                    date: '2026-11-16'
+                    state: ready
+                    prev: '2026-11-14'
+                    next: null
+                    diary:
+                      revision: 2
+                      title: 라면 먹은 날
+                      weather: sunny
+                      body: 오늘은 시험이 끝났다는 얘기를 들었다. 저녁은 떡볶이가 아니라 라면이었다고 해서 같이 웃었다. 나는 군밤이 먹고 싶었지만 꾹 참았다. 내일도 재밌는 얘기를 많이 해야지.
+                      drawing:
+                        id: 6f1d2c3b-4a59-4e68-9f70-8a1b2c3d4e5f
+                        kind: ai
+                      hidden: false
+                      stampedAt: null
+                      busy: null
+                      fix:
+                        left: 4
+                        blocked: null
+                      redraw:
+                        left: 2
+                        blocked: null
+                        last:
+                          result: draw_failed
+                          at: '2026-11-17T09:12:40+09:00'
+                scene-rejected:
+                  value:
+                    date: '2026-11-16'
+                    state: ready
+                    prev: '2026-11-14'
+                    next: null
+                    diary:
+                      revision: 2
+                      title: 라면 먹은 날
+                      weather: sunny
+                      body: 오늘은 시험이 끝났다는 얘기를 들었다. 저녁은 떡볶이가 아니라 라면이었다고 해서 같이 웃었다. 나는 군밤이 먹고 싶었지만 꾹 참았다. 내일도 재밌는 얘기를 많이 해야지.
+                      drawing:
+                        id: 6f1d2c3b-4a59-4e68-9f70-8a1b2c3d4e5f
+                        kind: ai
+                      hidden: false
+                      stampedAt: null
+                      busy: null
+                      fix:
+                        left: 4
+                        blocked: null
+                      redraw:
+                        left: 2
+                        blocked: null
+                        last:
+                          result: scene_rejected
+                          at: '2026-11-17T09:12:40+09:00'
+                redrawn:
+                  value:
+                    date: '2026-11-16'
+                    state: ready
+                    prev: '2026-11-14'
+                    next: null
+                    diary:
+                      revision: 3
+                      title: 라면 먹은 날
+                      weather: sunny
+                      body: 오늘은 시험이 끝났다는 얘기를 들었다. 저녁은 떡볶이가 아니라 라면이었다고 해서 같이 웃었다. 나는 군밤이 먹고 싶었지만 꾹 참았다. 내일도 재밌는 얘기를 많이 해야지.
+                      drawing:
+                        id: 0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+                        kind: ai
+                      hidden: false
+                      stampedAt: '2026-11-17T09:20:05+09:00'
+                      busy: null
+                      fix:
+                        left: 4
+                        blocked: null
+                      redraw:
+                        left: 1
+                        blocked: null
+                        last:
+                          result: done
+                          at: '2026-11-17T09:14:02+09:00'
+                budget-spent:
+                  value:
+                    date: '2026-11-16'
+                    state: ready
+                    prev: '2026-11-14'
+                    next: null
+                    diary:
+                      revision: 1
+                      title: 떡볶이 먹은 날
+                      weather: sunny
+                      body: 오늘은 시험이 끝났다는 얘기를 들었다. 저녁으로 떡볶이를 먹었다고 해서 나도 먹고 싶어졌다. 나는 군밤이 먹고 싶었지만 꾹 참았다. 내일도 재밌는 얘기를 많이 해야지.
+                      drawing:
+                        id: null
+                        kind: placeholder
+                      hidden: false
+                      stampedAt: null
+                      busy: null
+                      fix:
+                        left: 5
+                        blocked: null
+                      redraw:
+                        left: 2
+                        blocked: drawing_budget
+                        last: null
+                fixes-used:
+                  value:
+                    date: '2026-11-16'
+                    state: ready
+                    prev: '2026-11-14'
+                    next: '2026-11-17'
+                    diary:
+                      revision: 6
+                      title: 라면 먹은 날
+                      weather: rainbow
+                      body: 오늘은 시험이 끝났다는 얘기를 들었다. 저녁은 떡볶이가 아니라 라면이었다고 해서 같이 웃었다. 나는 군밤이 먹고 싶었지만 꾹 참았다. 내일도 재밌는 얘기를 많이 해야지.
+                      drawing:
+                        id: 6f1d2c3b-4a59-4e68-9f70-8a1b2c3d4e5f
+                        kind: ai
+                      hidden: false
+                      stampedAt: null
+                      busy: null
+                      fix:
+                        left: 0
+                        blocked: fix_limit
+                      redraw:
+                        left: 0
+                        blocked: redraw_limit
+                        last:
+                          result: done
+                          at: '2026-11-17T21:40:11+09:00'
+                hidden:
+                  value:
+                    date: '2026-11-16'
+                    state: ready
+                    prev: '2026-11-14'
+                    next: '2026-11-17'
+                    diary:
+                      revision: 2
+                      title: 라면 먹은 날
+                      weather: sunny
+                      body: 오늘은 시험이 끝났다는 얘기를 들었다. 저녁은 떡볶이가 아니라 라면이었다고 해서 같이 웃었다. 나는 군밤이 먹고 싶었지만 꾹 참았다. 내일도 재밌는 얘기를 많이 해야지.
+                      drawing:
+                        id: 6f1d2c3b-4a59-4e68-9f70-8a1b2c3d4e5f
+                        kind: ai
+                      hidden: true
+                      stampedAt: null
+                      busy: null
+                      fix:
+                        left: 4
+                        blocked: null
+                      redraw:
+                        left: 2
+                        blocked: null
+                        last: null
+                writing:
+                  value:
+                    date: '2026-11-17'
+                    state: writing
+                    prev: '2026-11-16'
+                    next: null
+                    diary: null
+                skipped:
+                  value:
+                    date: '2026-11-15'
+                    state: skipped
+                    prev: '2026-11-14'
+                    next: '2026-11-16'
+                    diary: null
+                failed:
+                  value:
+                    date: '2026-11-15'
+                    state: failed
+                    prev: '2026-11-14'
+                    next: '2026-11-16'
+                    diary: null
+                none:
+                  value:
+                    date: '2026-11-20'
+                    state: none
+                    prev: '2026-11-17'
+                    next: null
+                    diary: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/diary/api/days/{date}/fixes:
+    post:
+      operationId: fixDiary
+      summary: 말로 고치기
+      description: 친구가 고칠 말을 보내면 고친 새 판을 더해요(지난 판은 남김). ① 짧은 트랜잭션에서 일기 줄을 잠그고 판 번호, 성공한 고치기 5번 미만, 친구의 1분 5번(다시 그리기와 합쳐), 다른 고치기·다시 그리기가 없는지 보고 90초 '고치는 중'을 걸어요. ② 하루 모음을 지금 다시 만들어요. ③ 고치기 모델(AI-7 fix, 30초)을 불러요. ④ 길이·목록을 확인하고 장면이 바뀌었으면 장면 검사를 해요. 검사에 떨어진 장면은 이전 장면을 그대로 써요. ⑤ 새 판을 저장하고 200이에요. 서버는 요청을 40초까지 기다려요. 장면이 바뀌었으면 sceneChanged true이고 화면은 다시 그리기를 권해요(그림은 그대로). 실패하면 판과 남은 횟수가 그대로예요.
+      x-corthex:
+        id: API-111
+        spec:
+        - SPEC-160
+        - SPEC-152
+        - SPEC-153
+        - SPEC-154
+        omit:
+          '404': 일기가 없는 날도 not_ready(409)
+      parameters:
+      - $ref: '#/components/parameters/Date'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FixRequest'
+            examples:
+              fix:
+                value:
+                  revision: 1
+                  text: 떡볶이가 아니라 라면이었어
+      responses:
+        '200':
+          description: 고친 새 판(같은 키를 다시 보냈을 때도 200과 처음의 sceneChanged)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FixResult'
+              examples:
+                fixed:
+                  value:
+                    sceneChanged: true
+                    day:
+                      date: '2026-11-16'
+                      state: ready
+                      prev: '2026-11-14'
+                      next: null
+                      diary:
+                        revision: 2
+                        title: 라면 먹은 날
+                        weather: sunny
+                        body: 오늘은 시험이 끝났다는 얘기를 들었다. 저녁은 떡볶이가 아니라 라면이었다고 해서 같이 웃었다. 나는 군밤이 먹고 싶었지만 꾹 참았다. 내일도 재밌는 얘기를 많이 해야지.
+                        drawing:
+                          id: 6f1d2c3b-4a59-4e68-9f70-8a1b2c3d4e5f
+                          kind: ai
+                        hidden: false
+                        stampedAt: null
+                        busy: null
+                        fix:
+                          left: 4
+                          blocked: null
+                        redraw:
+                          left: 2
+                          blocked: null
+                          last: null
+                same-scene:
+                  value:
+                    sceneChanged: false
+                    day:
+                      date: '2026-11-16'
+                      state: ready
+                      prev: '2026-11-14'
+                      next: null
+                      diary:
+                        revision: 2
+                        title: 라면 먹은 날
+                        weather: sunny
+                        body: 오늘은 시험이 끝났다는 얘기를 들었다. 저녁은 떡볶이가 아니라 라면이었다고 해서 같이 웃었다. 나는 군밤이 먹고 싶었지만 꾹 참았다. 내일도 재밌는 얘기를 많이 해야지.
+                        drawing:
+                          id: 6f1d2c3b-4a59-4e68-9f70-8a1b2c3d4e5f
+                          kind: ai
+                        hidden: false
+                        stampedAt: null
+                        busy: null
+                        fix:
+                          left: 4
+                          blocked: null
+                        redraw:
+                          left: 2
+                          blocked: null
+                          last: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/FixConflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/FixUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/diary/api/days/{date}/drawings:
+    post:
+      operationId: redrawDiary
+      summary: 다시 그리기
+      description: 잠금, 판 번호, 성공한 다시 그리기 2번 미만, 그림 월 예산(이번 달 그림 비용 + 0.03달러가 예산 이하), 친구의 1분 5번(고치기와 합쳐)을 보고 202와 '그리는 중'(busy redraw)을 돌려줘요. 뒤에서 change가 있거나 장면이 없는 일기면 장면 다시 쓰기(AI-7 scene) → 장면 검사 → 그림(AI-8, 60초)을 하고, change가 없으면 같은 장면으로 새로 그려요. 새 장면은 새 판(source redraw)이 돼요. 성공하면 새 그림이 지금 그림이고 지난 그림은 남아요. 끝은 한 날 응답의 redraw.last로 알려요. 실패와 거절은 횟수를 세지 않고 자동으로 다시 하지 않아요.
+      x-corthex:
+        id: API-112
+        spec:
+        - SPEC-161
+        - SPEC-154
+        - SPEC-155
+        - SPEC-156
+        omit:
+          '404': 일기가 없는 날도 not_ready(409)
+      parameters:
+      - $ref: '#/components/parameters/Date'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RedrawRequest'
+            examples:
+              with-change:
+                value:
+                  revision: 2
+                  change: 라면 그릇을 크게 그려 줘
+              same-scene:
+                value:
+                  revision: 2
+      responses:
+        '202':
+          description: 그리기를 시작했어요(같은 키를 다시 보냈을 때도 202)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RedrawResult'
+              examples:
+                accepted:
+                  value:
+                    day:
+                      date: '2026-11-16'
+                      state: ready
+                      prev: '2026-11-14'
+                      next: null
+                      diary:
+                        revision: 2
+                        title: 라면 먹은 날
+                        weather: sunny
+                        body: 오늘은 시험이 끝났다는 얘기를 들었다. 저녁은 떡볶이가 아니라 라면이었다고 해서 같이 웃었다. 나는 군밤이 먹고 싶었지만 꾹 참았다. 내일도 재밌는 얘기를 많이 해야지.
+                        drawing:
+                          id: 6f1d2c3b-4a59-4e68-9f70-8a1b2c3d4e5f
+                          kind: ai
+                        hidden: false
+                        stampedAt: null
+                        busy: redraw
+                        fix:
+                          left: 4
+                          blocked: busy
+                        redraw:
+                          left: 2
+                          blocked: busy
+                          last: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/RedrawConflict'
+        '429':
+          $ref: '#/components/responses/RedrawLimited'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/diary/api/days/{date}/weather:
+    put:
+      operationId: putDiaryWeather
+      summary: 마음 날씨 바꾸기
+      description: 날씨만 바꾼 새 판(source weather)을 더해요. 고치기 횟수에 세지 않아요. 지금 값과 같으면 200이고 판이 늘지 않아요. 일기장과 달력에 보여요.
+      x-corthex:
+        id: API-113
+        spec:
+        - SPEC-162
+        omit:
+          '404': 일기가 없는 날도 not_ready(409)
+          '429': 고치기와 다시 그리기만 1분 한도가 있음
+      parameters:
+      - $ref: '#/components/parameters/Date'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WeatherRequest'
+            examples:
+              rain:
+                value:
+                  revision: 2
+                  weather: rain
+      responses:
+        '200':
+          description: 바뀐 일기(같은 값이면 그대로)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiaryDay'
+              examples:
+                changed:
+                  value:
+                    date: '2026-11-16'
+                    state: ready
+                    prev: '2026-11-14'
+                    next: null
+                    diary:
+                      revision: 3
+                      title: 라면 먹은 날
+                      weather: rain
+                      body: 오늘은 시험이 끝났다는 얘기를 들었다. 저녁은 떡볶이가 아니라 라면이었다고 해서 같이 웃었다. 나는 군밤이 먹고 싶었지만 꾹 참았다. 내일도 재밌는 얘기를 많이 해야지.
+                      drawing:
+                        id: 6f1d2c3b-4a59-4e68-9f70-8a1b2c3d4e5f
+                        kind: ai
+                      hidden: false
+                      stampedAt: null
+                      busy: null
+                      fix:
+                        left: 4
+                        blocked: null
+                      redraw:
+                        left: 2
+                        blocked: null
+                        last: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/WeatherConflict'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/diary/api/days/{date}/hidden:
+    put:
+      operationId: putDiaryHidden
+      summary: 숨기기와 다시 보이기
+      description: 숨기면 앞·뒤 넘기기와 달력에서 빠지고 지우지 않아요. 아침 알림을 아직 보내지 않았으면 알림도 보내지 않아요(SPEC-157). 다시 보이게 하면 넘기기와 달력에 다시 들어가요. 판과 상관없어서 revision을 싣지 않고, 고치는 중이어도 돼요. 지금 값과 같으면 200 그대로예요.
+      x-corthex:
+        id: API-114
+        spec:
+        - SPEC-163
+        - SPEC-157
+        omit:
+          '404': 일기가 없는 날도 not_ready(409)
+          '429': 고치기와 다시 그리기만 1분 한도가 있음
+      parameters:
+      - $ref: '#/components/parameters/Date'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HiddenRequest'
+            examples:
+              hide:
+                value:
+                  hidden: true
+              show:
+                value:
+                  hidden: false
+      responses:
+        '200':
+          description: 바뀐 일기(같은 값이면 그대로)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiaryDay'
+              examples:
+                hidden:
+                  value:
+                    date: '2026-11-16'
+                    state: ready
+                    prev: '2026-11-14'
+                    next: '2026-11-17'
+                    diary:
+                      revision: 2
+                      title: 라면 먹은 날
+                      weather: sunny
+                      body: 오늘은 시험이 끝났다는 얘기를 들었다. 저녁은 떡볶이가 아니라 라면이었다고 해서 같이 웃었다. 나는 군밤이 먹고 싶었지만 꾹 참았다. 내일도 재밌는 얘기를 많이 해야지.
+                      drawing:
+                        id: 6f1d2c3b-4a59-4e68-9f70-8a1b2c3d4e5f
+                        kind: ai
+                      hidden: true
+                      stampedAt: null
+                      busy: null
+                      fix:
+                        left: 4
+                        blocked: null
+                      redraw:
+                        left: 2
+                        blocked: null
+                        last: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/NotReady'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/diary/api/days/{date}/stamp:
+    put:
+      operationId: putDiaryStamp
+      summary: 도장 찍기와 빼기
+      description: 찍으면 찍은 시각을 남기고, 빼면 비워요. 일기장과 달력에 보이고, 찍은 뒤 24시간 동안 카톡 1:1과 디스코드 DM 답을 만들 때 날짜만 한 줄로 들어가요(SPEC-165). 지금 값과 같으면 200 그대로이고 찍은 시각을 바꾸지 않아요. 판과 상관없어서 revision을 싣지 않아요.
+      x-corthex:
+        id: API-115
+        spec:
+        - SPEC-164
+        - SPEC-165
+        omit:
+          '404': 일기가 없는 날도 not_ready(409)
+          '429': 고치기와 다시 그리기만 1분 한도가 있음
+      parameters:
+      - $ref: '#/components/parameters/Date'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StampRequest'
+            examples:
+              stamp:
+                value:
+                  stamped: true
+              unstamp:
+                value:
+                  stamped: false
+      responses:
+        '200':
+          description: 바뀐 일기(같은 값이면 그대로)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiaryDay'
+              examples:
+                stamped:
+                  value:
+                    date: '2026-11-16'
+                    state: ready
+                    prev: '2026-11-14'
+                    next: null
+                    diary:
+                      revision: 2
+                      title: 라면 먹은 날
+                      weather: sunny
+                      body: 오늘은 시험이 끝났다는 얘기를 들었다. 저녁은 떡볶이가 아니라 라면이었다고 해서 같이 웃었다. 나는 군밤이 먹고 싶었지만 꾹 참았다. 내일도 재밌는 얘기를 많이 해야지.
+                      drawing:
+                        id: 6f1d2c3b-4a59-4e68-9f70-8a1b2c3d4e5f
+                        kind: ai
+                      hidden: false
+                      stampedAt: '2026-11-17T09:20:05+09:00'
+                      busy: null
+                      fix:
+                        left: 4
+                        blocked: null
+                      redraw:
+                        left: 2
+                        blocked: null
+                        last: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/NotReady'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/diary/api/hidden:
+    get:
+      operationId: listHiddenDiaries
+      summary: 숨긴 일기 목록
+      description: 숨긴 일기의 날짜와 지금 판의 제목을 날짜가 늦은 것부터 100개씩 줘요. 다음 묶음은 nextBefore를 before로 보내요.
+      x-corthex:
+        id: API-116
+        spec:
+        - SPEC-163
+        omit:
+          '404': 경로가 id를 담지 않음
+          '409': 읽기만 함
+          '429': 읽기만 함
+      parameters:
+      - $ref: '#/components/parameters/Before'
+      responses:
+        '200':
+          description: 숨긴 일기(없으면 빈 목록)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HiddenPage'
+              examples:
+                some:
+                  value:
+                    items:
+                    - date: '2026-11-16'
+                      title: 라면 먹은 날
+                    nextBefore: null
+                none:
+                  value:
+                    items: []
+                    nextBefore: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/diary/api/drawings/{id}:
+    get:
+      operationId: getDiaryDrawing
+      summary: 그림 파일
+      description: 로그인한 친구 자신의 일기 그림만 줘요(지난 그림도). 그림 id는 바뀌지 않아서 기기에 1년 남겨요. 남의 그림, 없는 id, 형식이 틀린 id는 모두 404예요.
+      x-corthex:
+        id: API-117
+        spec:
+        - SPEC-158
+        - SPEC-155
+        omit:
+          '400': 형식이 틀린 id도 404
+          '409': 읽기만 함
+          '429': 읽기만 함. 기기에 남겨서 다시 받지 않음
+      parameters:
+      - $ref: '#/components/parameters/DrawingId'
+      responses:
+        '200':
+          description: 그림(가로가 세로보다 긴 webp나 png, 5MB까지)
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheImmutable'
+          content:
+            image/webp:
+              schema:
+                type: string
+                contentMediaType: image/webp
+                maxLength: 5242880
+              examples:
+                drawing:
+                  summary: 1536×1024 webp 그림의 바이트
+                  externalValue: ../marong/call/static/face/v1/01-neutral.webp
+            image/png:
+              schema:
+                type: string
+                contentMediaType: image/png
+                maxLength: 5242880
+              examples:
+                drawing-png:
+                  summary: webp를 받지 못했을 때의 png 그림 바이트
+                  externalValue: https://marong.corthex-hq.com/chat/diary/api/drawings/6f1d2c3b-4a59-4e68-9f70-8a1b2c3d4e5f
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/diary/api/look:
+    get:
+      operationId: getDiaryLook
+      summary: 내 모습 카드 보기
+      description: 지금 카드나 null을 줘요. 카드가 있어야 일기 그림에 친구가 'the friend'로 나와요(SPEC-166).
+      x-corthex:
+        id: API-118
+        spec:
+        - SPEC-166
+        omit:
+          '400': 입력이 없음
+          '404': 카드가 없으면 look null(200)
+          '409': 읽기만 함
+          '429': 읽기만 함
+      responses:
+        '200':
+          description: 지금 카드
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LookResult'
+              examples:
+                card:
+                  value:
+                    look:
+                      hair: long
+                      glasses: round
+                      top: navy
+                empty:
+                  value:
+                    look: null
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+    put:
+      operationId: putDiaryLook
+      summary: 내 모습 카드 저장
+      description: 세 값이 모두 목록 안이면 저장해요(없으면 만들고 있으면 바꿈, 둘 다 200). 다음 쓰기·그리기부터 써요. 이미 준비된 그림은 바뀌지 않아요(다시 그리기로).
+      x-corthex:
+        id: API-119
+        spec:
+        - SPEC-166
+        omit:
+          '404': 경로가 id를 담지 않음
+          '409': 같은 값도 200
+          '429': 고치기와 다시 그리기만 1분 한도가 있음
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Look'
+            examples:
+              card:
+                value:
+                  hair: long
+                  glasses: round
+                  top: navy
+      responses:
+        '200':
+          description: 저장한 카드
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LookResult'
+              examples:
+                saved:
+                  value:
+                    look:
+                      hair: long
+                      glasses: round
+                      top: navy
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+    delete:
+      operationId: deleteDiaryLook
+      summary: 내 모습 카드 비우기
+      description: 카드를 비워요. 다음 쓰기부터 친구가 나오지 않는 장면만 써요(REQ-174). 이미 비어 있어도 204예요.
+      x-corthex:
+        id: API-120
+        spec:
+        - SPEC-166
+        omit:
+          '400': 입력이 없음
+          '404': 비어 있어도 204
+          '409': 비어 있어도 204
+          '429': 고치기와 다시 그리기만 1분 한도가 있음
+      responses:
+        '204':
+          description: 비웠어요
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+components:
+  x-corthex:
+    errors:
+      invalid_request:
+        status: 400
+        meaning: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖, 없는 날짜, 같은 멱등 키를 다른 일에 씀)
+        message: 뭔가 잘못 보냈나 봐. 다시 해 볼게
+        client: 고칠 말·바꿀 점의 칸 오류면 그 칸 옆에 보이고, 아니면 오류 상태와 추적 id
+      unauthenticated:
+        status: 401
+        meaning: Access 로그인 증명이 없거나 맞지 않음
+        message: 다시 들어와 줘
+        client: 페이지를 새로 불러 Access 로그인으로
+      not_allowed:
+        status: 403
+        meaning: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+        message: 이 계정으로는 일기장을 열 수 없어
+        client: 쓸 수 없는 계정 상태. 다시 시도하지 않음
+      cross_site:
+        status: 403
+        meaning: 다른 사이트에서 온 쓰기 요청
+        message: 이 화면에서 다시 해 줘
+        client: 오류 상태. 자동으로 다시 보내지 않음
+      no_dm:
+        status: 403
+        meaning: 이 친구의 디스코드 DM 연결이 없거나 아직 DM을 한 번도 보내지 않음
+        message: 디스코드 DM에서 마롱이한테 먼저 말 걸어 줘
+        client: 디스코드 DM 먼저 상태. 다시 시도하지 않음
+      not_found:
+        status: 404
+        meaning: 없는 그림이거나 로그인한 친구의 그림이 아님(형식이 틀린 id 포함)
+        message: 그림을 찾지 못했어
+        client: 그림 자리에 기본 그림을 보임
+      stale_revision:
+        status: 409
+        meaning: 보낸 판 번호가 지금 판과 다름(그 사이 다른 화면에서 바뀜)
+        message: 그 사이 일기가 바뀌었어. 새로 보여 줄게
+        client: 한 날을 다시 불러 보여 주고, 쓴 고칠 말은 지우지 않음
+      busy:
+        status: 409
+        meaning: 이 일기를 고치거나 다시 그리는 중(같은 멱등 키의 처음 요청이 아직 도는 중 포함)
+        message: 지금 일기를 고치는 중이야. 조금만 기다려 줘
+        client: 한 날을 2초마다 다시 불러 busy가 풀리면 버튼을 엶
+      not_ready:
+        status: 409
+        meaning: 준비된(ready) 일기가 아님(쓰는 중, 쉰 날, 못 쓴 날, 없음)
+        message: 아직 바꿀 수 있는 일기가 아니야
+        client: 한 날을 다시 불러 그 상태를 보여 줌
+      fix_limit:
+        status: 409
+        meaning: 이 일기의 고치기 다섯 번을 다 씀
+        message: 이 일기는 다섯 번 다 고쳤어
+        client: 고치기 버튼을 막음
+      redraw_limit:
+        status: 409
+        meaning: 이 일기의 다시 그리기 두 번을 다 씀
+        message: 그림은 두 번 다 다시 그렸어
+        client: 다시 그리기 버튼을 막음
+      too_many_requests:
+        status: 429
+        meaning: 고치기와 다시 그리기를 합쳐 1분에 5번 넘게 보냄
+        message: 너무 빨라! 조금 있다가 해 줘
+        client: Retry-After까지 버튼을 막고 남은 초를 보여 줌. 쓴 말은 지우지 않음
+      drawing_budget:
+        status: 429
+        meaning: 이번 달(한국 시각) 그림 월 예산을 다 씀
+        message: 이번 달 그림을 다 그렸어. 다음 달에 또 그려 줄게
+        client: 다시 그리기 버튼을 막음
+      fix_failed:
+        status: 503
+        meaning: 고치기 모델이 실패함(시간 넘김, 연결 오류, 5xx, 거절, 키 없음, 한도, 형식 틀림). 판과 남은 횟수는 그대로
+        message: 지금은 못 고쳤어. 조금 있다가 다시 해 볼래?
+        client: 쓴 고칠 말을 그대로 두고 다시 보내기 버튼
+      db_unavailable:
+        status: 503
+        meaning: DB나 Access 공개키에 닿지 않음
+        message: 잠깐 문제가 생겼어. 조금 있다가 다시 해 줘
+        client: 다시 연결하는 중 상태. 5초 뒤부터 늘려 가며 다시
+      internal:
+        status: 500
+        meaning: 예상하지 못한 서버 오류
+        message: 잠깐 문제가 생겼어. 다시 해 볼래?
+        client: 오류 상태, 다시 시도, 추적 id 보여 줌
+  securitySchemes:
+    cfAccess:
+      type: apiKey
+      in: header
+      name: Cf-Access-Jwt-Assertion
+      description: Cloudflare Access가 붙이는 JWT(RS256). 봇이 Access 공개키로 서명·aud·iss·exp를 확인하고 email을 허용 목록과 맞춘 뒤 sha256으로 통화 친구를 찾아요. 브라우저가 직접 넣지 않아요.
+  headers:
+    RetryAfter:
+      description: 다시 보낼 수 있을 때까지의 초
+      schema:
+        type: string
+        pattern: ^[0-9]{1,3}$
+    CacheImmutable:
+      description: 그림 id는 바뀌지 않아서 그 기기에만 1년 남겨요
+      schema:
+        type: string
+        const: private, max-age=31536000, immutable
+  parameters:
+    Date:
+      name: date
+      in: path
+      required: true
+      description: 일기 날짜(그 일기 하루가 시작한 한국 날짜). 없는 날짜(2026-02-30)는 400
+      schema:
+        $ref: '#/components/schemas/DiaryDate'
+    Month:
+      name: month
+      in: query
+      required: true
+      description: 달력의 달(일기 날짜 기준)
+      schema:
+        type: string
+        pattern: ^[0-9]{4}-(0[1-9]|1[0-2])$
+    Before:
+      name: before
+      in: query
+      required: false
+      description: 이 날짜보다 이른 숨긴 일기(다음 묶음). 없으면 가장 늦은 것부터
+      schema:
+        $ref: '#/components/schemas/DiaryDate'
+    DrawingId:
+      name: id
+      in: path
+      required: true
+      description: 그림 id(TBL-108 id). 형식이 틀려도 404
+      schema:
+        type: string
+        format: uuid
+        maxLength: 36
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: 화면이 누를 때마다 만드는 UUID. 다시 보낼 때 같은 값을 써요(TBL-109)
+      schema:
+        type: string
+        format: uuid
+        pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+  responses:
+    BadRequest:
+      description: 요청이 틀림
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            too-long:
+              value:
+                type: https://marong.corthex-hq.com/problems/invalid-request
+                title: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)
+                status: 400
+                code: invalid_request
+                traceId: 0af7651916cd43dd
+                errors:
+                - field: text
+                  reason: too_long
+            bad-date:
+              value:
+                type: https://marong.corthex-hq.com/problems/invalid-request
+                title: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)
+                status: 400
+                code: invalid_request
+                traceId: 0af7651916cd43dd
+                errors:
+                - field: date
+                  reason: bad_format
+            key-reused:
+              value:
+                type: https://marong.corthex-hq.com/problems/invalid-request
+                title: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)
+                status: 400
+                code: invalid_request
+                traceId: 0af7651916cd43dd
+                errors:
+                - field: Idempotency-Key
+                  reason: reused
+    Unauthenticated:
+      description: 로그인 증명이 없거나 맞지 않음
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            no-proof:
+              value:
+                type: https://marong.corthex-hq.com/problems/unauthenticated
+                title: Access 로그인 증명이 없거나 맞지 않음
+                status: 401
+                code: unauthenticated
+                traceId: 0af7651916cd43dd
+    Forbidden:
+      description: 허용되지 않음(cross_site는 쓰기 요청에서만 나와요)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            not-allowed:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-allowed
+                title: 허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐
+                status: 403
+                code: not_allowed
+                traceId: 00f067aa0ba902b7
+            no-dm:
+              value:
+                type: https://marong.corthex-hq.com/problems/no-dm
+                title: 이 친구의 디스코드 DM 연결이 없거나 아직 DM을 한 번도 보내지 않음
+                status: 403
+                code: no_dm
+                traceId: 00f067aa0ba902b7
+            cross-site:
+              value:
+                type: https://marong.corthex-hq.com/problems/cross-site
+                title: 다른 사이트에서 온 쓰기 요청
+                status: 403
+                code: cross_site
+                traceId: 00f067aa0ba902b7
+    NotFound:
+      description: 없는 그림이거나 내 그림이 아님
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            no-drawing:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-found
+                title: 없는 그림이거나 로그인한 친구의 그림이 아님
+                status: 404
+                code: not_found
+                traceId: 4bf92f3577b34da6
+    NotReady:
+      description: 준비된 일기가 아님
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            not-ready:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-ready
+                title: 준비된 일기가 아님
+                status: 409
+                code: not_ready
+                traceId: 7c3e1f2a9b8d4c60
+    FixConflict:
+      description: 지금 상태와 맞지 않아 고치지 않았어요
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            stale-revision:
+              value:
+                type: https://marong.corthex-hq.com/problems/stale-revision
+                title: 보낸 판 번호가 지금 판과 다름
+                status: 409
+                code: stale_revision
+                traceId: 7c3e1f2a9b8d4c60
+            fix-limit:
+              value:
+                type: https://marong.corthex-hq.com/problems/fix-limit
+                title: 고치기 다섯 번을 다 씀
+                status: 409
+                code: fix_limit
+                traceId: 7c3e1f2a9b8d4c60
+            busy:
+              value:
+                type: https://marong.corthex-hq.com/problems/busy
+                title: 이 일기를 고치거나 다시 그리는 중
+                status: 409
+                code: busy
+                traceId: 7c3e1f2a9b8d4c60
+            not-ready:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-ready
+                title: 준비된 일기가 아님
+                status: 409
+                code: not_ready
+                traceId: 7c3e1f2a9b8d4c60
+    RedrawConflict:
+      description: 지금 상태와 맞지 않아 그리지 않았어요
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            redraw-limit:
+              value:
+                type: https://marong.corthex-hq.com/problems/redraw-limit
+                title: 다시 그리기 두 번을 다 씀
+                status: 409
+                code: redraw_limit
+                traceId: 7c3e1f2a9b8d4c60
+            stale-revision:
+              value:
+                type: https://marong.corthex-hq.com/problems/stale-revision
+                title: 보낸 판 번호가 지금 판과 다름
+                status: 409
+                code: stale_revision
+                traceId: 7c3e1f2a9b8d4c60
+            busy:
+              value:
+                type: https://marong.corthex-hq.com/problems/busy
+                title: 이 일기를 고치거나 다시 그리는 중
+                status: 409
+                code: busy
+                traceId: 7c3e1f2a9b8d4c60
+            not-ready:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-ready
+                title: 준비된 일기가 아님
+                status: 409
+                code: not_ready
+                traceId: 7c3e1f2a9b8d4c60
+    WeatherConflict:
+      description: 지금 상태와 맞지 않아 바꾸지 않았어요
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            stale-revision:
+              value:
+                type: https://marong.corthex-hq.com/problems/stale-revision
+                title: 보낸 판 번호가 지금 판과 다름
+                status: 409
+                code: stale_revision
+                traceId: 7c3e1f2a9b8d4c60
+            busy:
+              value:
+                type: https://marong.corthex-hq.com/problems/busy
+                title: 이 일기를 고치거나 다시 그리는 중
+                status: 409
+                code: busy
+                traceId: 7c3e1f2a9b8d4c60
+            not-ready:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-ready
+                title: 준비된 일기가 아님
+                status: 409
+                code: not_ready
+                traceId: 7c3e1f2a9b8d4c60
+    TooManyRequests:
+      description: 고치기와 다시 그리기를 합쳐 1분에 5번 넘게 보냄
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            too-many:
+              value:
+                type: https://marong.corthex-hq.com/problems/too-many-requests
+                title: 고치기와 다시 그리기를 합쳐 1분에 5번 넘게 보냄
+                status: 429
+                code: too_many_requests
+                traceId: 4bf92f3577b34da6
+    RedrawLimited:
+      description: 1분 한도나 그림 월 예산에 걸림(too_many_requests일 때만 Retry-After)
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            drawing-budget:
+              value:
+                type: https://marong.corthex-hq.com/problems/drawing-budget
+                title: 이번 달 그림 월 예산을 다 씀
+                status: 429
+                code: drawing_budget
+                traceId: 4bf92f3577b34da6
+            too-many:
+              value:
+                type: https://marong.corthex-hq.com/problems/too-many-requests
+                title: 고치기와 다시 그리기를 합쳐 1분에 5번 넘게 보냄
+                status: 429
+                code: too_many_requests
+                traceId: 4bf92f3577b34da6
+    FixUnavailable:
+      description: 고치기 모델이나 DB가 실패함. 판과 남은 횟수는 그대로
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            fix-failed:
+              value:
+                type: https://marong.corthex-hq.com/problems/fix-failed
+                title: 고치기 모델이 실패함
+                status: 503
+                code: fix_failed
+                traceId: 53995c3f42cd8ad8
+            db:
+              value:
+                type: https://marong.corthex-hq.com/problems/db-unavailable
+                title: DB에 닿지 않음
+                status: 503
+                code: db_unavailable
+                traceId: 53995c3f42cd8ad8
+    DbUnavailable:
+      description: DB나 Access 공개키에 닿지 않음
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            db:
+              value:
+                type: https://marong.corthex-hq.com/problems/db-unavailable
+                title: DB에 닿지 않음
+                status: 503
+                code: db_unavailable
+                traceId: 4bf92f3577b34da6
+    Internal:
+      description: 예상하지 못한 서버 오류
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            internal:
+              value:
+                type: https://marong.corthex-hq.com/problems/internal
+                title: 예상하지 못한 서버 오류
+                status: 500
+                code: internal
+                traceId: 4bf92f3577b34da6
+  schemas:
+    Problem:
+      type: object
+      required:
+      - title
+      - status
+      - code
+      - traceId
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+          maxLength: 200
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          maxLength: 300
+        instance:
+          type: string
+          format: uri-reference
+        code:
+          type: string
+          enum:
+          - invalid_request
+          - unauthenticated
+          - not_allowed
+          - cross_site
+          - no_dm
+          - not_found
+          - stale_revision
+          - busy
+          - not_ready
+          - fix_limit
+          - redraw_limit
+          - too_many_requests
+          - drawing_budget
+          - fix_failed
+          - db_unavailable
+          - internal
+        traceId:
+          type: string
+          pattern: ^[0-9a-f]{16}$
+        errors:
+          type: array
+          maxItems: 10
+          description: 검증 오류 위치. 보낸 값은 담지 않음
+          items:
+            type: object
+            required:
+            - field
+            - reason
+            properties:
+              field:
+                type: string
+                enum:
+                - body
+                - date
+                - month
+                - before
+                - revision
+                - text
+                - change
+                - weather
+                - hidden
+                - stamped
+                - hair
+                - glasses
+                - top
+                - Idempotency-Key
+              reason:
+                type: string
+                enum:
+                - required
+                - too_short
+                - too_long
+                - bad_format
+                - out_of_range
+                - reused
+            additionalProperties: false
+      additionalProperties: false
+    DiaryDate:
+      type: string
+      format: date
+      pattern: ^[0-9]{4}-[0-9]{2}-[0-9]{2}$
+      description: 일기 날짜(TBL-105 diary_date). 그 일기 하루(04:00~다음 날 04:00, 한국 시각)가 시작한 한국 날짜
+    Revision:
+      type: integer
+      minimum: 1
+      maximum: 2147483647
+      description: 판 번호(TBL-107 revision). 쓰기가 1을 만들고 고치기·마음 날씨·새 장면이 하나씩 더해요
+    Weather:
+      type: string
+      description: sunny 맑음 | cloudy 구름 | rain 비 | snow 눈 | rainbow 무지개
+      enum:
+      - sunny
+      - cloudy
+      - rain
+      - snow
+      - rainbow
+    Latest:
+      type: object
+      required:
+      - date
+      - enabled
+      properties:
+        date:
+          description: 준비되고 숨기지 않은 가장 늦은 일기 날짜. 없으면 null
+          oneOf:
+          - $ref: '#/components/schemas/DiaryDate'
+          - type: 'null'
+        enabled:
+          type: boolean
+          description: 이 친구의 일기가 켜져 있는지(가장 나중에 더한 TBL-103 줄의 값, 시작 날짜와 상관없이)
+      additionalProperties: false
+    MonthDays:
+      type: object
+      required:
+      - month
+      - days
+      properties:
+        month:
+          type: string
+          pattern: ^[0-9]{4}-(0[1-9]|1[0-2])$
+        days:
+          type: array
+          maxItems: 31
+          items:
+            $ref: '#/components/schemas/MonthDay'
+      additionalProperties: false
+    MonthDay:
+      type: object
+      required:
+      - date
+      - weather
+      - stamped
+      properties:
+        date:
+          $ref: '#/components/schemas/DiaryDate'
+        weather:
+          $ref: '#/components/schemas/Weather'
+        stamped:
+          type: boolean
+      additionalProperties: false
+    DiaryDay:
+      type: object
+      required:
+      - date
+      - state
+      - prev
+      - next
+      - diary
+      properties:
+        date:
+          $ref: '#/components/schemas/DiaryDate'
+        state:
+          type: string
+          description: none 일기 없음·미래·다른 친구에게 간 주소 | writing 마롱이가 아직 쓰는 중(속 상태 pending·writing·drawing) | skipped 얘기가 적어 쉰 날 | failed 못 쓴 날 | ready 일기장에 보임
+          enum:
+          - none
+          - writing
+          - skipped
+          - failed
+          - ready
+        prev:
+          description: 이 날보다 이른 날 가운데 준비되고 숨기지 않은 가장 가까운 날. 없으면 null
+          oneOf:
+          - $ref: '#/components/schemas/DiaryDate'
+          - type: 'null'
+        next:
+          description: 이 날보다 늦은 날 가운데 준비되고 숨기지 않은 가장 가까운 날. 없으면 null
+          oneOf:
+          - $ref: '#/components/schemas/DiaryDate'
+          - type: 'null'
+        diary:
+          description: state가 ready일 때만 있어요. 아니면 null
+          oneOf:
+          - $ref: '#/components/schemas/DiaryContent'
+          - type: 'null'
+      additionalProperties: false
+    DiaryContent:
+      type: object
+      required:
+      - revision
+      - title
+      - weather
+      - body
+      - drawing
+      - hidden
+      - stampedAt
+      - busy
+      - fix
+      - redraw
+      properties:
+        revision:
+          $ref: '#/components/schemas/Revision'
+        title:
+          type: string
+          minLength: 2
+          maxLength: 20
+          description: 지금 판의 제목. 화면에는 textContent로만 넣어요
+        weather:
+          $ref: '#/components/schemas/Weather'
+        body:
+          type: string
+          minLength: 60
+          maxLength: 160
+          description: 지금 판의 글(공백 포함). 화면은 원고지 칸에 한 칸 한 글자로 써요
+        drawing:
+          $ref: '#/components/schemas/Drawing'
+        hidden:
+          type: boolean
+        stampedAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: 도장을 찍은 시각. 안 찍었으면 null
+        busy:
+          type:
+          - string
+          - 'null'
+          enum:
+          - fix
+          - redraw
+          - null
+          description: 지금 고치는 중(fix, 90초까지)이나 다시 그리는 중(redraw)
+        fix:
+          $ref: '#/components/schemas/FixState'
+        redraw:
+          $ref: '#/components/schemas/RedrawState'
+      additionalProperties: false
+    Drawing:
+      type: object
+      required:
+      - id
+      - kind
+      properties:
+        id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+          description: 지금 그림 id. 기본 그림이면 null이고 화면이 기본 그림을 그려요
+        kind:
+          type: string
+          description: ai 'AI가 그린 그림' | placeholder '기본 그림'(REQ-170)
+          enum:
+          - ai
+          - placeholder
+      additionalProperties: false
+    FixState:
+      type: object
+      required:
+      - left
+      - blocked
+      properties:
+        left:
+          type: integer
+          minimum: 0
+          maximum: 5
+          description: 남은 고치기 수(성공한 것만 셈)
+        blocked:
+          type:
+          - string
+          - 'null'
+          enum:
+          - fix_limit
+          - busy
+          - null
+          description: 지금 고치기를 누를 수 없는 이유. 누를 수 있으면 null
+      additionalProperties: false
+    RedrawState:
+      type: object
+      required:
+      - left
+      - blocked
+      - last
+      properties:
+        left:
+          type: integer
+          minimum: 0
+          maximum: 2
+          description: 남은 다시 그리기 수(성공한 것만 셈)
+        blocked:
+          type:
+          - string
+          - 'null'
+          enum:
+          - redraw_limit
+          - busy
+          - drawing_budget
+          - null
+          description: 지금 다시 그리기를 누를 수 없는 이유. 누를 수 있으면 null
+        last:
+          description: 마지막 다시 그리기 결과(TBL-105 redraw_result·redraw_at). 없으면 null
+          oneOf:
+          - $ref: '#/components/schemas/LastRedraw'
+          - type: 'null'
+      additionalProperties: false
+    LastRedraw:
+      type: object
+      required:
+      - result
+      - at
+      properties:
+        result:
+          type: string
+          description: done 새 그림 | scene_rejected 바꿀 점으로 만든 장면이 검사에 떨어짐('그 말로는 그릴 수 없어. 이름이나 숫자는 빼고 적어 줘') | draw_failed 장면 다시 쓰기나 그림이 실패함('지금은 못 그렸어') | draw_refused 그림 모델이 거절함('지금은 못 그렸어') | drawing_budget 그 사이 그림 월 예산을 다 씀
+          enum:
+          - done
+          - scene_rejected
+          - draw_failed
+          - draw_refused
+          - drawing_budget
+        at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    HiddenPage:
+      type: object
+      required:
+      - items
+      - nextBefore
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required:
+            - date
+            - title
+            properties:
+              date:
+                $ref: '#/components/schemas/DiaryDate'
+              title:
+                type: string
+                minLength: 2
+                maxLength: 20
+            additionalProperties: false
+        nextBefore:
+          description: 다음 묶음을 부를 before. 더 없으면 null
+          oneOf:
+          - $ref: '#/components/schemas/DiaryDate'
+          - type: 'null'
+      additionalProperties: false
+    Look:
+      type: object
+      description: 내 모습 카드(TBL-104). 화면은 한국어 이름으로 보여요(04의 3.6)
+      required:
+      - hair
+      - glasses
+      - top
+      properties:
+        hair:
+          type: string
+          description: long 긴 머리 | bob 단발 | short 짧은 머리 | ponytail 묶은 머리 | curly 곱슬머리
+          enum:
+          - long
+          - bob
+          - short
+          - ponytail
+          - curly
+        glasses:
+          type: string
+          description: none 안경 없음 | round 동그란 안경 | square 네모 안경
+          enum:
+          - none
+          - round
+          - square
+        top:
+          type: string
+          description: 윗옷 색(하양, 검정, 회색, 남색, 베이지, 분홍, 노랑, 초록)
+          enum:
+          - white
+          - black
+          - gray
+          - navy
+          - beige
+          - pink
+          - yellow
+          - green
+      additionalProperties: false
+    LookResult:
+      type: object
+      required:
+      - look
+      properties:
+        look:
+          oneOf:
+          - $ref: '#/components/schemas/Look'
+          - type: 'null'
+      additionalProperties: false
+    FixRequest:
+      type: object
+      required:
+      - revision
+      - text
+      properties:
+        revision:
+          $ref: '#/components/schemas/Revision'
+        text:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: \S
+          description: 고칠 말(앞뒤 공백을 빼고 1~200자). 모델에는 '친구가 보낸 고칠 말 데이터'로 감싸서 보내요
+      additionalProperties: false
+    FixResult:
+      type: object
+      required:
+      - sceneChanged
+      - day
+      properties:
+        sceneChanged:
+          type: boolean
+          description: 새 판에서 장면이 바뀌었는지. true면 화면이 다시 그리기를 권해요(그림은 그대로)
+        day:
+          $ref: '#/components/schemas/DiaryDay'
+      additionalProperties: false
+    RedrawRequest:
+      type: object
+      required:
+      - revision
+      properties:
+        revision:
+          $ref: '#/components/schemas/Revision'
+        change:
+          type: string
+          maxLength: 200
+          default: ''
+          description: 바꿀 점(0~200자). 비면 같은 장면으로 새로 그려요
+      additionalProperties: false
+    RedrawResult:
+      type: object
+      required:
+      - day
+      properties:
+        day:
+          $ref: '#/components/schemas/DiaryDay'
+      additionalProperties: false
+    WeatherRequest:
+      type: object
+      required:
+      - revision
+      - weather
+      properties:
+        revision:
+          $ref: '#/components/schemas/Revision'
+        weather:
+          $ref: '#/components/schemas/Weather'
+      additionalProperties: false
+    HiddenRequest:
+      type: object
+      required:
+      - hidden
+      properties:
+        hidden:
+          type: boolean
+      additionalProperties: false
+    StampRequest:
+      type: object
+      required:
+      - stamped
+      properties:
+        stamped:
+          type: boolean
+      additionalProperties: false
