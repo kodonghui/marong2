@@ -4,6 +4,7 @@ import os
 import re
 from calendar import monthrange
 from datetime import date, datetime
+from pathlib import Path
 
 from aiohttp import web
 
@@ -12,6 +13,11 @@ from .diary import KST, diary_day, drawing_allowed, image_budget
 from .diary_models import GLASSES, HAIR, WEATHER
 
 _PREFIX = "/chat/diary/api"
+_PAGE = "/chat/diary/"
+_STATIC = Path(__file__).with_name("app_chat_static") / "diary"
+_FILES = {"diary.css": "text/css", "tokens.css": "text/css",
+          "diary.js": "text/javascript", "sheets.js": "text/javascript",
+          "Gaegu-Regular.woff2": "font/woff2", "Gaegu-OFL.txt": "text/plain"}
 _DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _MONTH = re.compile(r"[0-9]{4}-[0-9]{2}")
 _VISIBLE = "state='ready' AND NOT hidden"
@@ -40,6 +46,13 @@ class AppDiary:
         self.chat = chat
         self.store = chat.store
         self.draw_budget = image_budget(os.getenv("MARONG_DIARY_IMAGE_BUDGET_USD"))
+
+    async def page(self, req):
+        return web.FileResponse(_STATIC / "index.html", headers={"Content-Type": "text/html; charset=utf-8"})
+
+    async def file(self, req):
+        name = req.match_info["name"]
+        return web.FileResponse(_STATIC / name, headers={"Content-Type": _FILES[name]})
 
     async def latest(self, req):
         friend = (await self.chat._who(req))["friend_id"]
@@ -264,3 +277,7 @@ class AppDiary:
         app.router.add_get(_PREFIX + "/look", self.look, allow_head=False)
         app.router.add_put(_PREFIX + "/look", self.put_look)
         app.router.add_delete(_PREFIX + "/look", self.clear_look)
+        files = "|".join(re.escape(name) for name in _FILES)
+        app.router.add_get(_PAGE + f"{{name:{files}}}", self.file)
+        app.router.add_get(_PAGE, self.page)
+        app.router.add_get(_PAGE + "{date}", self.page)

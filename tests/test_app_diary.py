@@ -197,6 +197,16 @@ async def run(db):
     paths = ("/latest", "/days?month=2026-11", "/days/2026-11-15", "/hidden", f"/drawings/{DRAWING}")
     try:
         async with TestClient(TestServer(chat.web_app())) as http:
+            home = await http.get("/chat/diary/")
+            dated = await http.get("/chat/diary/2026-11-17")
+            assert home.status == dated.status == 200
+            assert (await home.read()) == (await dated.read())
+            for file, content_type in (("diary.js", "text/javascript"), ("sheets.js", "text/javascript"),
+                                       ("diary.css", "text/css"), ("tokens.css", "text/css"),
+                                       ("Gaegu-Regular.woff2", "font/woff2")):
+                asset = await http.get("/chat/diary/" + file)
+                assert asset.status == 200 and asset.content_type == content_type and await asset.read()
+
             async def get(path, headers=None):
                 return await http.get(PREFIX + path, headers=headers or {})
 
