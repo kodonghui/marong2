@@ -3,7 +3,7 @@
 import asyncio
 from datetime import datetime, timedelta
 
-from marong.friend_card import FriendCards, KST, ModelRun, card_sentence
+from marong.friend_card import CardError, FriendCards, KST, ModelRun, card_sentence, question_choices, text_choice
 from marong.store import Store
 from pg import TestDB
 from test_persona_schema import prepare
@@ -85,6 +85,52 @@ async def scenario(db, store):
     for private in (TEXT, original, rewrite, args["quote"], "생성된 비밀"):
         assert private not in logs
 
+    async def rejected(friend, id, value, code, at=now):
+        try:
+            await cards.answer_question(friend, id, value, room="fixture-room-a", via="button", at=at)
+        except CardError as error:
+            assert str(error) == code
+        else:
+            raise AssertionError(code)
+
+    async def choose(question, value, via, at=now):
+        return await cards.answer_question(2, question["id"], value, room="fixture-room-b", via=via, at=at)
+
+    first, extra = await asyncio.gather(cards.first_question(2, "fixture-room-b", now),
+                                        cards.first_question(2, "fixture-room-b", now))
+    first, extra = (extra, first) if first is None else (first, extra)
+    assert first["step"] == 1 and extra is None and len(question_choices(1)) == 6
+    assert text_choice(1, "1") == "listen" and text_choice(1, "그냥 들어주기") == "listen"
+    assert text_choice(1, "7") is None
+    assert not await cards.attach_question(2, first["id"], mid2)  # a user message cannot carry the card
+    reply = await store.add_message("fixture-room-b", "assistant", "시험 답장", reply_to=mid2)
+    assert await cards.attach_question(2, first["id"], reply)
+    await rejected(1, first["id"], "listen", "card_not_found")
+    await rejected(2, first["id"], "wrong", "invalid_input")
+    replies = await asyncio.gather(choose(first, "listen", "button"), choose(first, "listen", "screen"))
+    assert {r["applied"] for r in replies} == {True, False}
+    second = replies[0]["next"]
+    assert second["step"] == 2 and replies[1]["next"]["id"] == second["id"]
+    await rejected(2, first["id"], "solve", "card_closed")
+    third = (await choose(second, text_choice(2, "물어볼 때만"), "text"))["next"]
+    final = await choose(third, "gentle", "screen")
+    assert final["effect"] == "card_set" and final["sentence"] == card_sentence((await cards.read(2))["card"])
+    await cards.set(2, {"honesty": "direct"}, source="screen")
+    assert (await choose(third, "gentle", "screen"))["sentence"] == final["sentence"]
+    assert not await cards.open_question(2, "fixture-room-b", now)
+
+    friend, = db.admin("INSERT INTO marong.friends(name) VALUES ('fixture-expire') RETURNING id")[0]
+    waiting = await cards.first_question(friend, "fixture-room-a", now)
+    deadline = now + timedelta(hours=24)
+    assert not await cards.expire_question(friend, deadline - timedelta(seconds=1))
+    await rejected(friend, waiting["id"], "solve", "card_closed", deadline)
+    assert await cards.expire_question(friend, deadline)
+    assert not await cards.expire_question(friend, deadline)
+    fallback = (await cards.read(friend))["card"]
+    assert (fallback["support"], fallback["advice"], fallback["honesty"], fallback["source"]) == (
+        "ask", "asked", "gentle", "default",
+    )
+
 
 async def run(db):
     store = Store(db.app_url)
@@ -102,4 +148,4 @@ if __name__ == "__main__":
         asyncio.run(run(db))
     finally:
         db.close()
-    print("TC-257 sentence fixture, TC-278 concurrency and ownership, TC-279 numeric auditing verified")
+    print("TC-257/258 question storage, 24h default; TC-278 ownership and overlap; TC-279 numeric auditing")
