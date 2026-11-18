@@ -1789,6 +1789,53 @@ if (require.main === module) {
     await visible(page.getByText(/환불됨/));
   });
 
+  test('SCR-161 keeps a pending withdrawal through reload and removes a refused action', async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 430, height: 760}});
+    t.after(() => page.close());
+    const response = Promise.withResolvers();
+    t.after(response.resolve);
+    let status = 'fulfilled';
+    let refusal = false;
+    const order = {id: orderId, orderNo: 'P20261117-ABC123', product: 'item', itemName: '털모자',
+      amountKrw: 1200, createdAt: '2026-11-17T06:40:00Z'};
+    const current = () => ({...order, status, withdrawable: status === 'fulfilled'});
+    await page.route('**/api/orders', async route => {
+      await response.promise;
+      await route.fulfill({json: {items: [current()]}});
+    });
+    await page.route('**/api/orders/*/withdraw', route => {
+      if (refusal) return route.fulfill({status: 409, json: {code: 'withdrawal_not_allowed', reason: 'used',
+        detail: '이 주문은 철회할 수 없어요: 한 번 입혔어요'}});
+      status = 'refund_pending';
+      return route.fulfill({json: current()});
+    });
+    await page.goto(origin + '/me/orders');
+    await page.waitForFunction(() => document.querySelectorAll('#page .skeleton').length === 4);
+    assert.equal(await page.locator('#page').getAttribute('aria-busy'), 'true');
+    response.resolve();
+    const open = page.getByRole('button', {name: '청약철회', exact: true});
+    async function withdraw() {
+      await open.click();
+      await page.getByRole('dialog').getByRole('button', {name: '청약철회', exact: true}).click();
+    }
+    await withdraw();
+    const pending = page.getByText('처리 중이에요. 결제 대행의 취소를 기다리고 있어요.', {exact: true});
+    await visible(pending);
+    assert.equal(await open.count(), 0);
+    await page.reload();
+    await visible(pending);
+    assert.equal(await open.count(), 0);
+
+    status = 'fulfilled';
+    refusal = true;
+    await page.reload();
+    await withdraw();
+    await visible(page.getByText('이 주문은 철회할 수 없어요: 한 번 입혔어요', {exact: true}));
+    await visible(page.getByText(/지급됨/));
+    assert.equal(await open.count(), 0);
+  });
+
   test('SCR-162 handles completed, preconfirmed, and canceled payment returns', async t => {
     for (const payment of ['fulfilled', 'already', 'canceled']) {
       const {origin, writes} = await fixture(t, {payment});
@@ -1801,6 +1848,29 @@ if (require.main === module) {
         assert.deepEqual(writes, payment === 'canceled' ? [] : [{paymentKey: 'fixture', amount: 1200}]);
       } finally { await page.close(); }
     }
+  });
+
+  test('SCR-162 confirms a paid order through one read after three seconds', async t => {
+    const {origin,writes} = await fixture(t, {payment: 'paid'});
+    const page = await browser.newPage({viewport: {width: 360, height: 760}});
+    t.after(() => page.close());
+    await page.clock.install();
+    let reads = 0;
+    await page.route('**/api/orders', route => {
+      reads += 1;
+      return route.continue();
+    });
+    await page.addInitScript(() => {
+      sessionStorage.setItem('pet_pay_return', '/shop?kind=wear');
+    });
+    await page.goto(origin + '/pay/return?orderId=' + orderId + '&amount=1200&paymentKey=fixture');
+    await visible(page.getByText('결제는 됐어요. 받은 것을 넣고 있어요', {exact: true}));
+    assert.equal(reads, 0);
+    await page.clock.fastForward(3_000);
+    await visible(page.getByText('결제했어요', {exact: true}));
+    assert.equal(reads, 1);
+    assert.deepEqual(writes, [{paymentKey: 'fixture', amount: 1200}]);
+    assert.equal(await page.getByRole('link', {name: '돌아가기', exact: true}).getAttribute('href'), '/shop?kind=wear');
   });
 
   test('SCR-153–154 confirms memorial mode, creates a farewell page, and protects deletion', async t => {

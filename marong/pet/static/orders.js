@@ -1,4 +1,4 @@
-import {action, api, button, currency, dateLabel, el, errorText, Failure, header, link, notice, show, showTabs, text} from './pet.js';
+import {action, api, button, currency, dateLabel, el, errorText, Failure, header, link, notice, page, show, showTabs, text} from './pet.js';
 import {business} from './shop.js';
 
 const ORDERS = '/me/orders';
@@ -24,24 +24,27 @@ function showOrder(order) {
     text(`${dateLabel(order.createdAt)} · ${STATUS[order.status]}`),
     el('small', {}, order.orderNo));
   if (order.withdrawable) {
+    const open = button('청약철회', () => modal.showModal(), 'plain');
     const confirm = button('청약철회', () => action(confirm, outcome, async () => {
       try {
         const updated = await api(`/api/orders/${order.id}/withdraw`, {method: 'POST'});
         const next = showOrder(updated);
-        next.append(text(updated.status === 'refunded' ? '결제를 취소했어요'
-          : '처리 중이에요. 결제 대행의 취소를 기다리고 있어요.'));
+        if (updated.status === 'refunded') next.append(text('결제를 취소했어요'));
         modal.close();
         card.replaceWith(next);
       } catch (error) {
         if (error.code !== 'withdrawal_not_allowed') throw error;
         modal.close();
+        open.remove();
         errorText(error, result);
       }
     }), 'danger');
     const outcome = el('div', {'aria-live': 'polite'});
     const modal = el('dialog', {class: 'sheet stack'}, el('h2', {}, '청약철회'),
       text('철회하면 결제를 취소하고 보관함에서 빠져요'), outcome, confirm, button('닫기', () => modal.close()));
-    card.append(button('청약철회', () => modal.showModal(), 'plain'), modal);
+    card.append(open, modal);
+  } else if (order.status === 'refund_pending') {
+    card.append(text('처리 중이에요. 결제 대행의 취소를 기다리고 있어요.'));
   } else if (order.withdrawalNote) card.append(text(order.withdrawalNote, 'muted'));
   card.append(result);
   return card;
@@ -51,6 +54,7 @@ export async function orders() {
   header('주문 내역', {label: '내 정보', url: '/me'});
   showTabs(null);
   show(...Array.from({length: 4}, () => el('div', {class: 'skeleton', 'aria-hidden': 'true'})));
+  page.setAttribute('aria-busy', 'true');
   const {items} = await api('/api/orders');
   show(...(items.length ? items.map(showOrder) : [notice('주문이 없어요.')]));
 }
@@ -237,7 +241,8 @@ export async function paymentReturn() {
   const orderLink = () => link('주문 내역', ORDERS);
 
   async function confirm() {
-    show(notice('결제를 확인하고 있어요'));
+    show(notice('결제를 확인하고 있어요', el('span', {class: 'busy', 'aria-hidden': 'true', 'aria-busy': 'true'})));
+    page.setAttribute('aria-busy', 'true');
     try {
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id || '')
           || !paymentKey || paymentKey.length > 200 || !/^\d{1,6}$/.test(amount || '') || Number(amount) > 100_000) {
@@ -257,9 +262,10 @@ export async function paymentReturn() {
       }
       if (order.status !== 'paid') throw Error('unexpected payment state');
       show(notice('결제는 됐어요. 받은 것을 넣고 있어요', orderLink()));
-      const deadline = Date.now() + 60_000;
-      while (Date.now() < deadline) {
+      const deadline = performance.now() + 60_000;
+      while (performance.now() + 3000 <= deadline) {
         await wait(3000);
+        if (performance.now() > deadline) break;
         if (receipt(await recentOrder(id), back)) return;
       }
     } catch (error) {
