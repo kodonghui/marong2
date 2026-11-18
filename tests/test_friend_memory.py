@@ -1,12 +1,14 @@
 """TC-330 with isolated PostgreSQL, the service roles and a fake graph node."""
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from unittest.mock import patch
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.conninfo import make_conninfo
 
+from marong.friend_card import KST
+from marong.friend_memory import MemoryExtraction, apply_ops, expire_loops
 from marong.graphs.memory import LEASE, MemoryQueue, checkpoint_pool, compile_graph
 from marong.store import Store
 from pg import ROOT, TestDB
@@ -111,6 +113,72 @@ async def check_queue(db):
         assert second["message_ids"] == [large["next_message_id"], due_id]
         await queue.finish(second, "ok")
 
+        await store.add_message("fixture:group", "assistant", "Earlier group context")
+        message = await store.add_message("fixture:group", "user", "나는 요즘 딸기가 좋아", "fixture:group")
+        hidden = await store.add_message("fixture:group", "user", "Forgotten fixture", "fixture:group")
+        [(forget,)] = db.admin("""INSERT INTO marong.memory_forgets(friend_id,via,request_key)
+            VALUES (%s,'screen','forgotten-fixture') RETURNING id""", (friend,))
+        db.admin("""INSERT INTO marong.forget_marks(forget_id,friend_id,target_type,target_id,state)
+            VALUES (%s,%s,'message',%s,'forgotten')""", (forget, friend, hidden))
+        work = await queue.claim("text")
+        assert work["message_ids"] == [message]
+        item = {"kind": "preference", "text": "딸기를 좋아함", "sensitive": None,
+                "scope": "friend", "share": "known", "valid_until": None}
+        op = {"op": "add", "item": item, "message_id": message, "quote": "딸기가 좋아"}
+
+        async def infer(payload):
+            [statement] = payload["messages"]
+            assert statement["channel"] == "kakao_group" and statement["room"] == "fixture:group"
+            assert "Earlier group context" in statement["context"]
+            assert "Forgotten fixture" not in repr(payload)
+            return {"ops": [op, {**op, "quote": "없는 말"}, {**op, "message_id": hidden},
+                            {**op, "item": {**item, "scope": "room:fixture:dm"}},
+                            {**op, "op": "retract", "target_id": 42, "item": item}]}
+
+        extraction = MemoryExtraction(store.pool, infer)
+        graph = compile_graph(queue, extraction.prepare, extraction.persist, checkpointer=None)
+        await graph.ainvoke(work)
+        [(current, room, channel, source, msg)] = db.admin("""SELECT id,room_key,channel,source,message_id
+            FROM marong.memory_items WHERE friend_id=%s""", (friend,))
+        assert (room, channel, source, msg) == ("fixture:group", "kakao_group", "text", message)
+        private = await store.add_message("fixture:dm", "user", "딸기는 이제 안 먹어", "fixture:dm",
+                                          meta={"transport": "app"})
+        private_work = await queue.claim("text")
+        forbidden = {"op": "retract", "message_id": private, "quote": "이제 안 먹어", "target_id": current}
+
+        async def no_cross_room(conn, state):
+            assert await apply_ops(conn, state, {"ops": [forbidden]}) == (0, 1)
+
+        assert await queue.finish(private_work, "ok", no_cross_room)
+        assert db.admin("SELECT status FROM marong.memory_items WHERE id=%s", (current,)) == [("current",)]
+        newer = await store.add_message("fixture:group", "user", "요즘은 사과가 더 좋아", "fixture:group")
+        replacement_work = await queue.claim("text")
+        changed = {"op": "supersede", "target_id": current, "item": {**item, "text": "사과가 더 좋음"},
+                   "message_id": newer, "quote": "사과가 더 좋아"}
+
+        async def supersede(conn, state):
+            assert await apply_ops(conn, state, {"ops": [changed]}) == (1, 0)
+
+        assert await queue.finish(replacement_work, "ok", supersede)
+        assert db.admin("SELECT status,replaces_id FROM marong.memory_items ORDER BY id") == [
+            ("superseded", None), ("current", current)]
+        loop_message = await store.add_message("fixture:dm", "user", "면접 일정 픽스됐어", "fixture:dm")
+        loop_work = await queue.claim("text")
+        due_day = datetime.now(KST).date() + timedelta(days=2)
+        operation = {"op": "loop_open", "text": "면접", "due": due_day.isoformat(), "sensitivity": "mid",
+                     "message_id": loop_message, "quote": "면접 일정 픽스됐어"}
+
+        async def open_loop(conn, state):
+            assert await apply_ops(conn, state, {"ops": [operation, operation]}) == (2, 0)
+
+        assert await queue.finish(loop_work, "ok", open_loop)
+        [(due, expires)] = db.admin("SELECT due,expires_at FROM marong.open_loops WHERE status='open'")
+        assert due == due_day
+        assert expires == datetime.combine(due_day + timedelta(days=7), time.min, KST)
+        assert not await expire_loops(store.pool, expires - timedelta(microseconds=1))
+        assert await expire_loops(store.pool, expires) == 1
+        assert db.admin("SELECT status FROM marong.open_loops") == [("expired",)]
+
         [(caller,)] = db.admin("INSERT INTO call.callers(friend_id) VALUES (%s) RETURNING id", (friend,))
         [(call,)] = db.admin("""INSERT INTO call.calls(caller_id,client_id,prompt_version,voice,status,
             ended_at,end_reason,organize_status) VALUES
@@ -140,7 +208,16 @@ async def check_queue(db):
             call_queue = MemoryQueue(call_store.pool, clock=lambda: when)
             call_work = await call_queue.claim("call")
             assert call_work["call_ids"] == [str(call)] and call_work["message_ids"] == []
-            assert await call_queue.finish(call_work, "ok")
+            [(turn,)] = db.admin("SELECT id FROM call.turns WHERE call_id=%s", (call,))
+            learned = {"op": "add", "item": {**item, "kind": "fact", "text": "Synthetic caption fact"},
+                       "message_id": turn, "quote": "Synthetic caption"}
+
+            async def learn_call(conn, state):
+                assert await apply_ops(conn, state, {"ops": [learned]}) == (1, 0)
+
+            assert await call_queue.finish(call_work, "ok", learn_call)
+            assert db.admin("""SELECT channel,message_id,call_turn_id FROM marong.memory_items
+                WHERE source='call'""") == [("call", None, turn)]
             assert not await call_queue.claim("call")
         finally:
             await call_store.close()
@@ -157,3 +234,4 @@ if __name__ == "__main__":
     finally:
         db.close()
     print("TC-330: debounced text, call eligibility, concurrent claims, lease recovery, fencing and ID-only checkpoints passed")
+    print("TC-331–334: synthetic extraction, room scope, replacement, call provenance and loop expiry passed")

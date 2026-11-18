@@ -95,6 +95,7 @@ class MemoryQueue:
         source = state["source"]
         token = state["token"]
         async with self.pool.connection() as conn, conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock(%s)", (friend,))
             cursor = await conn.execute(
                 """SELECT watermark,calls,due_at,attempts FROM marong.memory_jobs
                 WHERE friend_id=%s AND source=%s AND token=%s AND lease_until>%s FOR UPDATE""",
@@ -119,7 +120,8 @@ class MemoryQueue:
                 calls = [call for call in calls if str(call) not in completed_calls]
                 due = now if calls else None
             if apply is not None and outcome in {"ok", "rejected"}:
-                await apply(conn, state)
+                if await apply(conn, state) == "rejected":
+                    outcome = "rejected"
             updated = await conn.execute(
                 """UPDATE marong.memory_jobs SET watermark=%s,calls=%s,due_at=%s,attempts=%s,
                 token=NULL,lease_until=NULL,last_outcome=%s,updated_at=%s
@@ -140,7 +142,7 @@ def compile_graph(queue, prepare, persist, *, checkpointer):
         result = await prepare(state)
 
         async def apply(conn, current):
-            await persist(conn, current, result)
+            return await persist(conn, current, result)
 
         await queue.finish(state, "ok", apply)
         return {}
@@ -154,8 +156,12 @@ def compile_graph(queue, prepare, persist, *, checkpointer):
 
 async def run_queue(queue, graph, source):
     """Run only when the approved extractor and result validator are wired in."""
+    from ..friend_memory import expire_loops
+
     while True:
         try:
+            if source == "text":
+                await expire_loops(queue.pool, queue.clock())
             state = await queue.claim(source)
             if state is not None:
                 thread = f"memory:{source}:{state['friend_id']}:{state['token']}"
