@@ -15,6 +15,7 @@ from marong.pet.auth import AuthConfig, register as register_auth
 from marong.pet.cost import Budget
 from marong.pet.delete import register as register_delete
 from marong.pet.http import CONFIG, POOL, guard, read_media
+from marong.pet.inventory import register as register_inventory
 from marong.pet.quota import register as register_quota
 from marong.pet.push import VapidSender, register as register_push
 from marong.pet.settings import Settings, SettingsError
@@ -54,6 +55,7 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
     app.router.add_get("/api/media/{id}", read_media, allow_head=False)
     register_auth(app, auth_config if auth_config is not None else AuthConfig.read(os.environ))
     register_account(app)
+    register_inventory(app)
     register_quota(app)
     register_push(app, sender=push_sender)
     register_delete(app, revoke=revoke_billing_key)
