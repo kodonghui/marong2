@@ -386,7 +386,7 @@ class AppChat:
     async def _answer(self, who: dict, saved_id: int, text: str, key: str, preference) -> None:
         with trace_step("app_turn", surface="app_chat") as trace:
             if trace:
-                trace.io(inputs={"message": {"role": "user", "content": text}})
+                trace.app_message(who["friend_id"], text)
                 self.reply_traces[saved_id] = (time.monotonic(), trace)
                 if len(self.reply_traces) > 256:
                     self.reply_traces.popitem(last=False)
@@ -418,7 +418,7 @@ class AppChat:
                 return
             if trace:
                 trace.record(result="ok")
-                trace.io(outputs={"reply": {"role": "assistant", "content": reply}})
+                trace.app_reply(reply)
             log.info("app_chat_replied")
             # The friend closed the chat before the answer came: tell their phone (SPEC-120). Never Discord.
             if not self.waiters.get(who["friend_id"]) and self.push.enabled:

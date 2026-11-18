@@ -1,4 +1,4 @@
-"""Send only tool execution metadata to LangSmith, off the request thread."""
+"""Send diagnostic traces to LangSmith, off the request thread."""
 
 import asyncio
 from contextlib import contextmanager
@@ -8,6 +8,7 @@ from functools import lru_cache
 import json
 import logging
 import os
+from pathlib import Path
 from queue import Full, Queue
 import re
 from threading import Thread
@@ -53,6 +54,16 @@ ERRORS = {"timeout", "cancelled", "invalid_input", "provider_http_error",
           "connection_error", "exception", "storage_error"}
 MODEL_NAME = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,95}\Z")
 MASKED = "[가림]"
+OWNER_APP_IO_FILE = Path("/etc/marong-tool-trace/owner-app-io")
+OWNER_APP_IO_CREDENTIAL = re.compile(
+    r"(?:\b(?:hms-|sk-|ghp_|lsv2_|AIza|xox[baprs]-)[\w-]{10,}"
+    r"|\bBearer\s+[\w.=-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)",
+    re.IGNORECASE,
+)
+OWNER_SCHEDULE_TOOLS = {"schedule_list", "schedule_add", "schedule_cancel"}
+OWNER_SCHEDULE_FIELDS = {"start", "end", "title", "remind_at", "repeat", "say", "call", "event_at", "action"}
+OWNER_MODEL_STAGES = {"model_request", "model_attempt"}
+OWNER_REPLY_STAGES = {"reply_prepare", "reply_save", "reply_push", "app_http_delivery"}
 ROLES = {"system", "developer", "user", "assistant", "tool"}
 BLOCK_TYPES = {"text", "image", "thinking", "redacted_thinking", "tool_use", "tool_result",
                "server_tool_use", "web_search_tool_result", "web_fetch_tool_result", "function",
@@ -60,13 +71,13 @@ BLOCK_TYPES = {"text", "image", "thinking", "redacted_thinking", "tool_use", "to
 TOOL_NAMES = LABELS["tool"] | {"web_search", "web_fetch"}
 PAYLOAD_FIELDS = {
     "account", "args", "arguments", "body", "call", "choices", "content", "date", "description", "end",
-    "findings", "finish_reason", "friend_id", "function", "id", "input", "input_schema", "is_error", "items",
+    "event_at", "findings", "finish_reason", "friend_id", "function", "id", "input", "input_schema", "is_error", "items",
     "kwargs", "limit", "max_tokens", "message", "messages", "model", "name", "parameters", "properties",
     "query", "records", "recalled", "recent", "remind_at", "repeat", "reply", "reply_to", "request",
     "required", "response", "role", "room_key", "say", "since_id", "skip_summary_ids", "start", "status",
     "status_code", "summaries", "system", "text", "title", "tool_call_id", "tool_calls", "tool_use_id",
     "tools", "transport", "type", "value", "before_id", "created_at", "due_at", "end_time", "meta",
-    "notes", "source_id", "source_type",
+    "notes", "source_id", "source_type", "action",
 }
 INPUT_FACTS = {"surface", "round", "tool", "offered", "requested", "results_attempted", "attempt", "delivery"}
 MAX_PAYLOAD_ITEMS = 100
@@ -75,7 +86,7 @@ active = ContextVar("active_marong_trace", default=None)
 log = logging.getLogger(__name__)
 
 
-def _masked(value, depth=0, field=None):
+def _masked(value, depth=0, field=None, *, owner=None, path=()):
     """Keep protocol structure, allowlisted labels and counts, and drop arbitrary keys and values."""
     if value is None:
         return None
@@ -93,17 +104,21 @@ def _masked(value, depth=0, field=None):
                          or "input_schema" in value or field == "function")):
                 result[key] = entry
             else:
-                result[key] = _masked(entry, depth + 1, key)
+                result[key] = _masked(entry, depth + 1, key, owner=owner, path=(*path, key) if owner else ())
         if len(result) < len(value):
             result["_masked_fields"] = len(value) - len(result)
         return result
     if isinstance(value, (list, tuple)):
         if len(value) <= MAX_PAYLOAD_ITEMS:
-            return [_masked(item, depth + 1, field) for item in value]
+            return [_masked(item, depth + 1, field, owner=owner, path=path) for item in value]
         half = MAX_PAYLOAD_ITEMS // 2
-        return ([_masked(item, depth + 1, field) for item in value[:half]]
+        return ([_masked(item, depth + 1, field, owner=owner, path=path) for item in value[:half]]
                 + [{"_omitted_items": len(value) - MAX_PAYLOAD_ITEMS}]
-                + [_masked(item, depth + 1, field) for item in value[-half:]])
+                + [_masked(item, depth + 1, field, owner=owner, path=path) for item in value[-half:]])
+    if owner:
+        visible = owner(value, path)
+        if visible is not None:
+            return visible
     if type(value) is str:
         if (field == "role" and value in ROLES) or (field == "type" and value in BLOCK_TYPES):
             return value
@@ -114,8 +129,17 @@ def _masked(value, depth=0, field=None):
                 pass
             else:
                 if isinstance(decoded, dict):
-                    return _masked(decoded, depth + 1)
+                    return _masked(decoded, depth + 1, owner=owner, path=path)
     return MASKED
+
+
+def _show_owner_app_io(friend_id):
+    if type(friend_id) is not int:
+        return False
+    try:
+        return OWNER_APP_IO_FILE.read_text(encoding="utf-8").strip() == str(friend_id)
+    except (OSError, UnicodeError):
+        return False
 
 
 class Span:
@@ -125,6 +149,7 @@ class Span:
         order = start.strftime("%Y%m%dT%H%M%S%fZ") + identifier
         self.root = parent.root if parent else self
         self.finished = False
+        self._owner_app_io = False
         self.runs = parent.runs if parent and not self.root.finished else []
         self.data = {
             "id": identifier, "name": stage,
@@ -158,10 +183,55 @@ class Span:
     def io(self, *, inputs=None, outputs=None):
         if self.root.data["name"] != "app_turn":
             return
+        owner = self._owner_value if self.root._owner_app_io else None
         if inputs is not None:
-            self.data["inputs"].update(_masked(inputs))
+            self.data["inputs"].update(_masked(inputs, owner=owner))
         if outputs is not None:
-            self.data["outputs"].update(_masked(outputs))
+            self.data["outputs"].update(_masked(outputs, owner=owner))
+
+    def app_message(self, friend_id, text):
+        self.io(inputs={"message": {"role": "user", "content": text}})
+        if self.data["name"] == "app_turn" and _show_owner_app_io(friend_id):
+            self._owner_app_io = True
+            self._owner_message = text
+            self._owner_tool_results = set()
+            self.data["tags"] = ["owner-app-io"]
+            self.data["inputs"]["message"]["content"] = OWNER_APP_IO_CREDENTIAL.sub(MASKED, text)
+
+    def app_reply(self, text):
+        self.io(outputs={"reply": {"role": "assistant", "content": text}})
+        if self._owner_app_io:
+            self.data["outputs"]["reply"]["content"] = OWNER_APP_IO_CREDENTIAL.sub(MASKED, text)
+
+    def _owner_value(self, value, path):
+        """Expose this turn's text and the authenticated account's schedule values."""
+        stage = self.data["name"]
+        field = path[-1]
+        schedule_tool = self.data["outputs"].get("tool") in OWNER_SCHEDULE_TOOLS
+        if ((stage == "tool_dispatch" and schedule_tool and path[0] == "arguments")
+                or (stage == "calendar_tool" and path[0] == "arguments")
+                or (stage in {"schedules_context", "calendar_context", "schedule_storage"} and path[0] == "records")):
+            if field in OWNER_SCHEDULE_FIELDS and type(value) in (str, bool):
+                return OWNER_APP_IO_CREDENTIAL.sub(MASKED, value) if type(value) is str else value
+            if field in OWNER_SCHEDULE_FIELDS and type(value) is datetime:
+                return value.isoformat()
+        if type(value) is not str:
+            return None
+        if stage == "tool_dispatch" and schedule_tool and path == ("response", "content"):
+            self.root._owner_tool_results.add(value)
+            return OWNER_APP_IO_CREDENTIAL.sub(MASKED, value)
+        if stage in OWNER_REPLY_STAGES and field in {"reply", "content"}:
+            return OWNER_APP_IO_CREDENTIAL.sub(MASKED, value)
+        if stage in OWNER_MODEL_STAGES and path[0] == "response" and field in {"content", "text"}:
+            return OWNER_APP_IO_CREDENTIAL.sub(MASKED, value)
+        if stage in OWNER_MODEL_STAGES | {"context"} and "messages" in path and field in {"content", "text"}:
+            if value in self.root._owner_tool_results:
+                return OWNER_APP_IO_CREDENTIAL.sub(MASKED, value)
+            message = self.root._owner_message
+            # The agent can prefix a timestamp and merge consecutive user messages into one block.
+            if message and value.endswith(message):
+                return (MASKED if value != message else "") + OWNER_APP_IO_CREDENTIAL.sub(MASKED, message)
+        return None
 
     def model(self, provider, model):
         if provider in {"anthropic", "deepseek"} and isinstance(model, str) and MODEL_NAME.fullmatch(model):

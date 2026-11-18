@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import sys
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -80,6 +81,44 @@ class ToolTraceTest(unittest.IsolatedAsyncioTestCase):
         deadline = asyncio.get_running_loop().time() + 2
         incoming = Incoming(PRIVATE_FIXTURE, PRIVATE_FIXTURE, PRIVATE_FIXTURE)
         return await agent.ask([], [{"role": "user", "content": PRIVATE_FIXTURE}], incoming, deadline)
+
+    def test_owner_app_message_and_reply_are_visible_only_for_configured_account(self):
+        with TemporaryDirectory() as directory:
+            config = Path(directory) / "owner-app-io"
+            with patch.object(text_trace, "OWNER_APP_IO_FILE", config):
+                def send(friend_id):
+                    with text_trace.step("app_turn", surface="app_chat") as span:
+                        span.app_message(friend_id, "Show this exact test message")
+                        with text_trace.step("tool_dispatch", span, tool="schedule_list") as tool:
+                            tool.io(inputs={"arguments": {"start": "2026-11-26", "id": PRIVATE_FIXTURE}})
+                            tool.io(outputs={"response": {"type": "tool_result", "content": "No events found"}})
+                        with text_trace.app_step("model_request") as model:
+                            model.io(inputs={"request": {"system": PRIVATE_FIXTURE, "messages": [
+                                {"role": "user", "content": PRIVATE_FIXTURE + "\nShow this exact test message"},
+                                {"role": "user", "content": [{"type": "tool_result", "content": "No events found"}]},
+                            ]}})
+                        span.app_reply("Exact test reply. Bearer " + PRIVATE_FIXTURE)
+                    return self.capture.traces[-1]
+
+                config.write_text("1\n", encoding="utf-8")
+                other, other_tool, _ = send(2)
+                self.assertEqual(other["inputs"]["message"]["content"], text_trace.MASKED)
+                self.assertEqual(other_tool["outputs"]["response"]["content"], text_trace.MASKED)
+                owner, tool, model = send(1)
+                self.assertEqual(owner["inputs"]["message"]["content"], "Show this exact test message")
+                self.assertEqual(owner["outputs"]["reply"]["content"], "Exact test reply. " + text_trace.MASKED)
+                self.assertEqual(owner["tags"], ["owner-app-io"])
+                self.assertEqual(tool["inputs"]["arguments"], {"start": "2026-11-26", "id": text_trace.MASKED})
+                self.assertEqual(tool["outputs"]["response"]["content"], "No events found")
+                request = model["inputs"]["request"]
+                self.assertEqual(request["system"], text_trace.MASKED)
+                self.assertEqual(request["messages"][0]["content"], text_trace.MASKED + "Show this exact test message")
+                self.assertEqual(request["messages"][1]["content"][0]["content"], "No events found")
+                following, *_ = send(1)
+                self.assertEqual(following["outputs"]["reply"], owner["outputs"]["reply"])
+                config.write_text("", encoding="utf-8")
+                disabled, *_ = send(1)
+                self.assertEqual(disabled["inputs"]["message"]["content"], text_trace.MASKED)
 
     def test_masked_app_payload_keeps_only_known_shape(self):
         fixture = {
