@@ -167,6 +167,29 @@ class DiaryWithPostgres(unittest.TestCase):
                         "other-friend", "next-day-only"):
             self.assertNotIn(private, value)
 
+        # Stage 3 may be installed after the diary. Both schema states use the bot role.
+        for migration in sorted((ROOT / "marong/migrations").glob("01[1-9]*.sql")):
+            self.db.admin(migration.read_text(encoding="utf-8"), None)
+        self.db.admin("""
+            INSERT INTO marong.messages(room_key,role,content,created_at,reply_to)
+                SELECT room_key,'assistant','quoted-reply','2026-11-16 04:01+09',id
+                FROM marong.messages WHERE content='Kakao fixture';
+            WITH receipt AS (
+                INSERT INTO marong.memory_forgets(friend_id,via,request_key,messages)
+                    VALUES (1,'screen','diary-fixture',2) RETURNING id
+            )
+            INSERT INTO marong.forget_marks(forget_id,friend_id,target_type,target_id,state)
+                SELECT receipt.id,1,'message',m.id,'forgotten'
+                  FROM receipt CROSS JOIN marong.messages m WHERE m.content='Kakao fixture'
+                UNION ALL
+                SELECT receipt.id,1,'call_turn',t.id,'forgotten'
+                  FROM receipt CROSS JOIN call.turns t WHERE t.content='Call fixture';
+        """, None)
+        value = asyncio.run(read()).value
+        self.assertIn("[사진]", value)
+        for forgotten in ("Kakao fixture", "quoted-reply", "Call fixture"):
+            self.assertNotIn(forgotten, value)
+
     def test_diary_admin_on_off_rerun_and_month(self):
         output = io.StringIO()
         with psycopg.connect(self.db.app_url, row_factory=dict_row) as conn, redirect_stdout(output):

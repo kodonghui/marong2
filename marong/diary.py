@@ -59,15 +59,24 @@ WITH private_rooms AS (
           SELECT 1 FROM call.source_exclusions x JOIN call.callers owner ON owner.id = x.caller_id
           WHERE owner.friend_id = %(friend)s AND x.source_type = 'kakao_message' AND x.source_id = m.id::text
       )
+      {text_marks}
     UNION ALL
     SELECT t.started_at, 'call', t.role, t.content, t.call_id, t.id
     FROM call.transcript_report t
     JOIN call.calls c ON c.id = t.call_id JOIN call.callers owner ON owner.id = c.caller_id
     WHERE owner.friend_id = %(friend)s AND t.finalized AND NOT t.interrupted
       AND t.started_at >= %(start)s AND t.started_at < %(end)s
+      {call_marks}
 )
 SELECT at, source, role, content, call_id FROM day_lines ORDER BY at, source, id
 """
+
+_TEXT_MARKS = """AND NOT EXISTS (
+    SELECT 1 FROM marong.forget_marks f WHERE f.target_type = 'message' AND f.target_id IN (m.id, m.reply_to)
+)"""
+_CALL_MARKS = """AND NOT EXISTS (
+    SELECT 1 FROM marong.forget_marks f WHERE f.target_type = 'call_turn' AND f.target_id = t.id
+)"""
 
 
 def diary_day(at: datetime) -> date:
@@ -194,7 +203,11 @@ def bundle_lines(lines) -> DayBundle:
 async def read_day_bundle(conn, friend_id: int, day: date) -> DayBundle:
     start = datetime.combine(day, DIARY_START, KST)
     async with conn.cursor(row_factory=dict_row) as cursor:
-        await cursor.execute(_DAY_MESSAGES, {"friend": friend_id, "start": start, "end": start + timedelta(days=1)})
+        await cursor.execute("SELECT to_regclass('marong.forget_marks') IS NOT NULL AS has_marks")
+        has_marks = (await cursor.fetchone())["has_marks"]
+        query = _DAY_MESSAGES.format(text_marks=_TEXT_MARKS if has_marks else "",
+                                     call_marks=_CALL_MARKS if has_marks else "")
+        await cursor.execute(query, {"friend": friend_id, "start": start, "end": start + timedelta(days=1)})
         return bundle_lines(DiaryLine(**row) for row in await cursor.fetchall())
 
 
