@@ -1227,6 +1227,40 @@ if (require.main === module) {
     }
   });
 
+  test('SCR-144 keeps the preview limit after reload and restores the button at the server reset time', async t => {
+    const {origin} = await fixture(t, {creationState: 'traits_confirmed'});
+    const page = await browser.newPage({viewport: {width: 360, height: 844}});
+    t.after(() => page.close());
+    await page.clock.install({time: new Date('2026-11-17T18:59:45Z')});
+    const resetsAt = '2026-11-17T19:00:00Z';
+    let requests = 0;
+    await page.route('**/api/creations/*/preview', route => {
+      requests += 1;
+      if (requests > 1) return route.continue();
+      return route.fulfill({status: 429, json: {code: 'preview_limit', resetsAt}});
+    });
+    await page.goto(`${origin}/create/${creationId}/preview`);
+    const draw = page.getByRole('button', {name: '미리 보기 그리기', exact: true});
+    const limit = page.getByText('오늘 미리 보기를 다 봤어요. 새벽 4시 뒤에 다시 볼 수 있어요.', {exact: true});
+    await draw.click();
+    await visible(limit);
+    assert.equal(await draw.isDisabled(), true);
+
+    await page.reload();
+    await visible(limit);
+    assert.equal(await draw.isDisabled(), true);
+    assert.equal(requests, 1);
+    const remaining = await page.evaluate(reset => Date.parse(reset) - Date.now(), resetsAt);
+    assert.ok(remaining > 1_000);
+    await page.clock.fastForward(remaining + 100);
+    await limit.waitFor({state: 'detached'});
+    assert.equal(await draw.isEnabled(), true);
+    assert.equal(requests, 1);
+    await draw.click();
+    await visible(page.getByRole('status').filter({hasText: '그리고 있어요'}));
+    assert.equal(requests, 2);
+  });
+
   test('SCR-144 resumes an interrupted preview lookup when the browser restores the page', async t => {
     const {origin,writes} = await fixture(t, {creationState: 'traits_confirmed'});
     const page = await browser.newPage({viewport: {width: 360, height: 780}});

@@ -407,14 +407,32 @@ async function preview(job, me) {
   if (sessionStorage.getItem(drawingKey)) { drawInProgress(); return; }
   const outlet = output();
   if (!job.preview) {
+    const limitKey = `pet:preview-limit:${me.memberNo}`;
     let paused = false;
+    function showLimit(resetsAt) {
+      const delay = Date.parse(resetsAt) - Date.now();
+      paused = draw.disabled = true;
+      outlet.replaceChildren(banner('오늘 미리 보기를 다 봤어요. 새벽 4시 뒤에 다시 볼 수 있어요.'));
+      if (delay > 0 && delay <= 2_147_483_647) {
+        sessionStorage.setItem(limitKey, resetsAt);
+        setTimeout(() => {
+          sessionStorage.removeItem(limitKey);
+          paused = draw.disabled = false;
+          outlet.replaceChildren();
+        }, delay);
+      }
+    }
     const draw = button(job.failure === 'preview_failed' ? '다시 그리기' : '미리 보기 그리기', async () => {
       await action(draw, outlet, async () => {
         try {
           if (await changeCreation(job, 'preview', {method: 'POST', body: {}}) === null) return;
           sessionStorage.setItem(drawingKey, '1');
         } catch (error) {
-          if (['preview_limit', 'budget_paused', 'consent_required'].includes(error.code)) {
+          if (error.code === 'preview_limit') {
+            showLimit(error.resetsAt);
+            return;
+          }
+          if (['budget_paused', 'consent_required'].includes(error.code)) {
             paused = true;
             outlet.replaceChildren(error.code === 'consent_required' ? consentNotice() : banner(error.message));
             return;
@@ -427,6 +445,9 @@ async function preview(job, me) {
     }, 'primary');
     show(picture(null, ''), text(job.failure === 'preview_failed' ? '미리 보기를 그리지 못했어요. 횟수는 세지 않았어요.'
       : '미리 보기는 무료예요. 하루 3장까지 그려요'), outlet, draw);
+    const storedReset = sessionStorage.getItem(limitKey);
+    if (Date.parse(storedReset) > Date.now()) showLimit(storedReset);
+    else sessionStorage.removeItem(limitKey);
     return;
   }
   const destination = `/create/${job.id}/candidates`;

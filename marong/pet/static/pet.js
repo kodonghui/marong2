@@ -88,6 +88,7 @@ export class Failure extends Error {
     this.photo = details.photo;
     this.prompt = details.prompt;
     this.wakesAt = details.wakesAt;
+    this.resetsAt = details.resetsAt;
   }
 }
 
