@@ -1016,6 +1016,64 @@ if (require.main === module) {
     assert.deepEqual(writes, [{candidateId}]);
   });
 
+  test('SCR-145 selects and enlarges a candidate and handles an exhausted redraw', async t => {
+    const {origin} = await fixture(t, {creationState: 'candidates'});
+    const page = await browser.newPage({viewport: {width: 360, height: 800}});
+    t.after(() => page.close());
+    const sent = [];
+    await page.route('**/api/creations/*/regenerate', route => {
+      sent.push(route.request().postDataJSON());
+      return route.fulfill({status: 409, json: {code: 'regenerate_limit'}});
+    });
+    await page.goto(`${origin}/create/${creationId}/candidates`);
+    const choose = page.getByRole('button', {name: '이 그림으로 할게요'});
+    assert.equal(await choose.isDisabled(), true);
+    const candidate = page.getByRole('img', {name: 'AI가 그린 후보', exact: true});
+    await candidate.click();
+    const selection = page.getByRole('radio', {name: 'AI가 그린 후보 AI가 그린 그림'});
+    assert.equal(await selection.isChecked(), true);
+    assert.equal(await choose.isEnabled(), true);
+    assert.equal(await page.locator('.candidate-option .candidate-check').isVisible(), true);
+    assert.equal(await page.locator('.candidate-option').evaluate(card =>
+      getComputedStyle(card).borderColor === getComputedStyle(card.querySelector('.candidate-check')).color), true);
+    assert.equal(await page.getByRole('dialog', {name: '그림 크게 보기'}).isVisible(), false);
+    await candidate.click();
+    const zoom = page.getByRole('dialog', {name: '그림 크게 보기'});
+    await visible(zoom.getByRole('img', {name: '크게 본 후보 그림'}));
+    await zoom.getByRole('button', {name: '닫기'}).click();
+    assert.equal(await selection.isChecked(), true);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+
+    const redraw = page.getByRole('button', {name: /다시 그려 주세요/});
+    await redraw.click();
+    await page.getByLabel('어떻게 바꿀까요?').fill('시험 메모');
+    await page.getByRole('dialog').getByRole('button', {name: '다시 그리기'}).click();
+    await visible(page.getByText('다시 그리기를 다 썼어요.', {exact: true}));
+    assert.equal(await redraw.isDisabled(), true);
+    assert.equal(await choose.isEnabled(), true);
+    assert.deepEqual(sent, [{note: '시험 메모'}]);
+  });
+
+  test('SCR-145 waits five seconds between candidate and expression status checks', {timeout: 20_000}, async t => {
+    const {origin} = await fixture(t, {creationState: 'paid'});
+    const page = await browser.newPage();
+    t.after(() => page.close());
+    const reads = [];
+    await page.route(`**/api/creations/${creationId}`, route => {
+      reads.push(performance.now());
+      const state = reads.length === 1 ? 'paid' : reads.length === 2 ? 'chosen' : 'sheet_ready';
+      return route.fulfill({json: {id: creationId, state, kind: 'living', regenerationsLeft: 2,
+        traits, candidates: [], chosenId: state === 'paid' ? null : candidateId}});
+    });
+    await page.goto(`${origin}/create/${creationId}/candidates`);
+    await visible(page.getByText('그림 후보 4장을 그리고 있어요. 몇 분 걸려요. 화면을 닫아도 돼요'));
+    await visible(page.getByText('표정을 그리고 있어요. 다 되면 이름을 지어 줘요'));
+    await page.waitForURL('**/name');
+    await visible(page.getByLabel('이름', {exact: true}));
+    assert.ok(reads[1] - reads[0] >= 4900, 'candidate poll starts after five seconds');
+    assert.ok(reads[2] - reads[1] >= 4900, 'expression poll starts after five seconds');
+  });
+
   test('SCR-146 keeps the draft across reloads and shows progress until naming succeeds', async t => {
     const finish = Promise.withResolvers();
     t.after(finish.resolve);
@@ -1039,11 +1097,16 @@ if (require.main === module) {
     await submit.click();
     await visible(page.getByText('첫 인사를 준비하고 있어요'));
     assert.equal(await submit.isDisabled(), true);
+    await callMe.fill('형');
+    assert.equal(await submit.isDisabled(), true);
+    await page.locator('form').evaluate(form => form.requestSubmit());
     finish.resolve();
     await page.waitForURL(`**/pets/${petId}`);
     await visible(page.getByText('누나, 나 왔어!'));
     assert.equal(await page.evaluate(key => sessionStorage.getItem(key), `pet:profile:${creationId}`), null);
     assert.deepEqual(writes[0].intro.personality, ['느긋함']);
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].intro.callMe, '누나');
   });
 
   test('SCR-142 encodes photo fallback locally at 1600px JPEG 0.9 and explains unsupported HEIC', async t => {

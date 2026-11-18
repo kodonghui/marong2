@@ -63,6 +63,10 @@ progress { width: 100%; accent-color: var(--accent) }
 .picture[aria-invalid="true"] { border-color: var(--danger) }
 .hero { width: min(100%, 320px); margin-inline: auto; aspect-ratio: 4 / 3 }
 .grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px }
+.candidate-option { position: relative; border: 1px solid var(--line); border-radius: 14px; padding: 8px }
+.candidate-option:has(input:checked) { border-color: var(--accent) }
+.candidate-check { display: none; position: absolute; top: 8px; right: 8px; color: var(--accent) }
+.candidate-option:has(input:checked) .candidate-check { display: block }
 .slots { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px }
 .button, button:not(.plain) { display: inline-flex; justify-content: center; align-items: center; text-align: center; gap: 6px; min-height: 48px; background: var(--raised); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 8px 13px; text-decoration: none; cursor: pointer }
 .primary, button.primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 700 }

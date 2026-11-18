@@ -33,7 +33,7 @@ async function changeCreation(job, operation, options, {refreshBusy = false} = {
   }
 }
 
-function waitForUpdate(id, onData) {
+function waitForUpdate(id, onData, interval = 2_000) {
   const began = Date.now();
   let timer;
   let fetching = false;
@@ -53,7 +53,7 @@ function waitForUpdate(id, onData) {
       const data = await api(`/api/creations/${id}`);
       fetching = false;
       if (onData(data)) stop();
-      else schedule(Date.now() - began >= 30_000 ? 5_000 : 2_000);
+      else schedule(Date.now() - began >= 30_000 ? 5_000 : interval);
     } catch {
       fetching = false;
       schedule(5_000);
@@ -62,7 +62,7 @@ function waitForUpdate(id, onData) {
   function visibility() { schedule(0); }
   document.addEventListener('visibilitychange', visibility);
   window.addEventListener('pagehide', stop, {once: true});
-  schedule(2_000);
+  schedule(interval);
   return stop;
 }
 
@@ -440,32 +440,58 @@ function candidates(job, me) {
   } else {
     let selected;
     const outlet = output();
+    const choiceGroup = el('fieldset', {class: 'grid', 'aria-label': '그림 후보'});
     const choose = button('이 그림으로 할게요', () => action(choose, outlet, async () => {
-      const next = await changeCreation(job, 'choose',
-        {method: 'POST', body: {candidateId: selected}}, {refreshBusy: true});
-      if (next?.state) location.replace(creationPath(next));
+      choiceGroup.disabled = true;
+      try {
+        const next = await changeCreation(job, 'choose',
+          {method: 'POST', body: {candidateId: selected}}, {refreshBusy: true});
+        if (next?.state) location.replace(creationPath(next));
+      } finally { choiceGroup.disabled = false; }
     }), 'primary');
     choose.disabled = true;
-    const cards = job.candidates.map(item => el('label', {class: 'stack'},
-      el('input', {type: 'radio', name: 'candidate', value: item.id, disabled: job.state !== 'candidates',
-        onchange: () => { selected = item.id; choose.disabled = false; }}), picture(item.url, 'AI가 그린 후보'),
-      el('small', {}, 'AI가 그린 그림')));
+    const zoom = el('dialog', {class: 'sheet stack', 'aria-label': '그림 크게 보기'});
+    const cards = job.candidates.map(item => {
+      const control = el('input', {type: 'radio', name: 'candidate', value: item.id, disabled: job.state !== 'candidates',
+        onchange: () => { selected = item.id; choose.disabled = false; }});
+      const card = el('label', {class: 'candidate-option stack'}, control, picture(item.url, 'AI가 그린 후보'),
+        el('small', {}, 'AI가 그린 그림'), el('span', {class: 'candidate-check', 'aria-hidden': 'true'}, '✓'));
+      function enlarge(event) {
+        if (choiceGroup.disabled || selected !== item.id || event.target.closest('button')) return;
+        event.preventDefault();
+        zoom.replaceChildren(picture(item.url, '크게 본 후보 그림'), button('닫기', () => zoom.close()));
+        zoom.showModal();
+      }
+      card.addEventListener('click', enlarge);
+      control.addEventListener('keydown', event => { if (event.key === 'Enter') enlarge(event); });
+      return card;
+    });
+    choiceGroup.append(...cards);
     const note = el('textarea', {maxlength: 100, rows: 3});
     const remakeOutlet = output();
-    const retry = button('다시 그려 주세요', () => action(retry, remakeOutlet, async () => {
-      const next = await changeCreation(job, 'regenerate',
-        {method: 'POST', body: {note: note.value.trim()}}, {refreshBusy: true});
-      if (next) location.replace(creationPath(next));
+    const limit = text('다시 그리기를 다 썼어요.', 'muted');
+    limit.hidden = Boolean(job.regenerationsLeft);
+    const retry = button('다시 그리기', () => action(retry, remakeOutlet, async () => {
+      try {
+        const next = await changeCreation(job, 'regenerate',
+          {method: 'POST', body: {note: note.value.trim()}}, {refreshBusy: true});
+        if (next) location.replace(creationPath(next));
+      } catch (error) {
+        if (error.code !== 'regenerate_limit') throw error;
+        sheet.close();
+        redraw.disabled = true;
+        limit.hidden = false;
+      }
     }), 'primary');
-    const sheet = el('dialog', {class: 'sheet stack'}, el('label', {}, '어떻게 다시 그릴까요?', note), remakeOutlet,
+    const sheet = el('dialog', {class: 'sheet stack'}, el('label', {}, '어떻게 바꿀까요?', note), remakeOutlet,
       retry, button('닫기', () => sheet.close()));
     const redraw = button(`다시 그려 주세요 · ${job.regenerationsLeft}번 남음`, () => sheet.showModal());
     redraw.disabled = !job.regenerationsLeft;
     show(job.state === 'paid' ? notice('그림 후보 4장을 그리고 있어요. 몇 분 걸려요. 화면을 닫아도 돼요') : null,
-      el('div', {class: 'grid'}, cards), job.state === 'candidates' ? choose : null,
+      choiceGroup, job.state === 'candidates' ? choose : null,
       job.state === 'candidates' ? redraw : null,
-      job.state === 'candidates' && !job.regenerationsLeft ? text('다시 그리기를 다 썼어요.', 'muted') : null,
-      alerts, outlet, sheet);
+      job.state === 'candidates' ? limit : null,
+      alerts, outlet, sheet, zoom);
   }
   if (job.state === 'paid' || job.state === 'chosen') {
     waitForUpdate(job.id, next => {
@@ -473,7 +499,7 @@ function candidates(job, me) {
       if (stages[next.state]?.[0] === 'candidates') candidates(next, me);
       else location.replace(creationPath(next));
       return true;
-    });
+    }, 5_000);
   }
 }
 
@@ -501,14 +527,15 @@ function namePet(job) {
     return {...Object.fromEntries(values), personality: values.getAll('personality')};
   }
   function update() {
+    if (submit.hasAttribute('aria-busy')) return;
     const data = draft();
     submit.disabled = !/^[가-힣A-Za-z0-9 -]{1,12}$/.test(data.name.trim()) || !data.callMe.trim();
   }
   update();
   form.addEventListener('input', () => { sessionStorage.setItem(key, JSON.stringify(draft())); update(); });
-  form.addEventListener('submit', event => {
+  form.addEventListener('submit', async event => {
     event.preventDefault();
-    action(submit, outlet, async () => {
+    await action(submit, outlet, async () => {
       const {name, ...intro} = draft();
       greeting.hidden = false;
       try {
@@ -518,6 +545,7 @@ function namePet(job) {
         location.assign(`/pets/${pet.id}`);
       } finally { greeting.hidden = true; }
     });
+    update();
   });
   show(banner(AI_NOTICE), picture(`/api/media/${job.chosenId}`, '고른 정면 그림'),
     job.kind === 'memorial' ? el('small', {}, '❀ 추억') : null, el('h2', {}, '이름을 지어 주세요'), form);
