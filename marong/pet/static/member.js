@@ -49,6 +49,10 @@ export async function petScreen(id) {
     if (row.id) seen.add(row.id);
     if (row.kind === 'call') return el('details', {class: 'bubble system'},
       el('summary', {}, `통화했어요 · ${dateLabel(row.createdAt)}`), text(row.text));
+    if (row.role === 'system' && row.kind === 'crisis_notice') {
+      const number = row.text.match(/\b(?:109|119)\b/)?.[0];
+      return el('p', {class: 'bubble system'}, number ? el('a', {href: `tel:${number}`}, row.text) : row.text);
+    }
     if (row.role !== 'pet' || !row.id) return el('p', {class: `bubble ${row.role}`}, row.text);
     const message = text(row.text);
     const report = reportControl({targetType: 'message', targetId: row.id, preview: row.text}, '신고', reported, message);

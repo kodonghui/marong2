@@ -36,7 +36,7 @@ async function body(request) {
 
 async function fixture(t, {signedIn = true, consent = true, invite = false, reportLimited = false, payment = 'fulfilled',
   closetMode, paymentsEnabled = false, layerFailure = false, outfitFailure = false, orderRetry = false,
-  diaryDecor = false, subscription, exhaustedRedraw = false, diaryDays = false} = {}) {
+  diaryDecor = false, subscription, exhaustedRedraw = false, diaryDays = false, chatNotices = []} = {}) {
   let member = signedIn;
   let state;
   let selected = null;
@@ -170,7 +170,7 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
       if (reportLimited) return json(res, {code: 'rate_limited', detail: '오늘은 더 신고할 수 없어요. 내일 다시 해 주세요.'}, 429);
       return json(res, {jobId: candidateId}, 201);
     }
-    if (pathname === `/api/pets/${petId}/messages`) return json(res, {items: [{
+    if (pathname === `/api/pets/${petId}/messages`) return json(res, {items: [...chatNotices, {
       id: candidateId, role: 'pet', kind: 'greeting', text: '누나, 나 왔어!',
     }], before: null});
     if (pathname === `/api/pets/${petId}/calls` && req.method === 'POST') {
@@ -300,6 +300,22 @@ if (require.main === module) {
       assert.deepEqual(errors, []);
     });
   }
+
+  test('SCR-147 links approved numbers only from separate system notices', async t => {
+    const {origin} = await fixture(t, {chatNotices: [
+      {id: 'emergency', role: 'system', kind: 'crisis_notice', text: '이미 다쳤으면 119'},
+      {id: 'guidance', role: 'system', kind: 'crisis_notice', text: '자살예방상담전화 109 · 24시간'},
+      {id: 'message', role: 'member', kind: 'chat', text: '109번 이야기를 들었어.'},
+    ]});
+    const page = await browser.newPage({viewport: {width: 360, height: 820}});
+    t.after(() => page.close());
+    await page.goto(`${origin}/pets/${petId}`);
+    const messages = page.getByRole('log', {name: '메시지'});
+    const links = messages.locator('.bubble.system a');
+    await visible(messages.getByRole('link', {name: '이미 다쳤으면 119'}));
+    assert.deepEqual(await links.evaluateAll(items => items.map(item => item.getAttribute('href'))), ['tel:109', 'tel:119']);
+    assert.equal(await messages.getByText('109번 이야기를 들었어.').evaluate(item => item.tagName), 'P');
+  });
 
   test('SCR-148 at 390px: mic denial, disclosure, PCM, quota ending and return', async t => {
     const app = await fixture(t);
