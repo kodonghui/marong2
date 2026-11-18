@@ -15,6 +15,7 @@ from marong.forget_rewrite import RETRY, rewrite_one
 from marong.friend_card import KST
 from marong.friend_forget import forget_selected
 from marong.friend_memory import MemoryExtraction, apply_ops, expire_loops, list_for_turn, memory_page
+from marong.graphs.checkpoints import setup_checkpoints
 from marong.graphs.memory import LEASE, MemoryQueue, checkpoint_pool, compile_graph, run_text_memory
 from marong.store import Store
 from pg import ROOT, TestDB
@@ -85,9 +86,10 @@ async def check_queue(db):
             cursor = await conn.execute("SELECT token::text FROM marong.memory_jobs WHERE friend_id=%s", (friend,))
             assert (await cursor.fetchone())["token"] == state["token"]
 
-        async with checkpoint_pool(db.app_url) as pool:
+        async with checkpoint_pool(db.app_url) as pool, checkpoint_pool(db.app_url) as another:
             saver = AsyncPostgresSaver(pool)
-            await saver.setup()
+            await asyncio.wait_for(asyncio.gather(
+                setup_checkpoints(pool, saver), setup_checkpoints(another, AsyncPostgresSaver(another))), 10)
             graph = compile_graph(queue, inspect_ids, persist, checkpointer=saver)
             config = {"configurable": {"thread_id": f"memory:text:{friend}:{replacement['token']}"}}
             assert await graph.ainvoke(replacement, config) == replacement

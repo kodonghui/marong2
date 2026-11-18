@@ -8,8 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal, TypedDict
 from uuid import uuid4
 
-from psycopg.rows import dict_row
-from psycopg_pool import AsyncConnectionPool
+from .checkpoints import checkpoint_pool, setup_checkpoints
 
 IDLE = timedelta(seconds=60)
 LEASE = timedelta(minutes=10)
@@ -187,14 +186,6 @@ async def run_queue(queue, graph, source, *, checkpoint_scope=None):
         await asyncio.sleep(10)
 
 
-def checkpoint_pool(dsn):
-    return AsyncConnectionPool(
-        dsn, open=False, min_size=1, max_size=2, check=AsyncConnectionPool.check_connection,
-        kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row,
-                "options": "-c search_path=talk_graph,public"},
-    )
-
-
 async def run_text_memory(store, dsn, llm, model):
     from langsmith import tracing_context
 
@@ -209,11 +200,7 @@ async def run_text_memory(store, dsn, llm, model):
         try:
             async with checkpoint_pool(dsn) as pool:
                 saver = TextMemorySaver(pool, store.pool)
-                async with store.pool.connection() as conn, conn.transaction():
-                    await conn.execute(
-                        "SELECT pg_advisory_xact_lock(hashtextextended('talk_graph:setup',0))"
-                    )
-                    await saver.setup()
+                await setup_checkpoints(pool, saver)
                 graph = compile_graph(queue, extraction.prepare, extraction.persist, checkpointer=saver)
                 with tracing_context(enabled=False):
                     await run_queue(queue, graph, "text", checkpoint_scope=saver.job)
