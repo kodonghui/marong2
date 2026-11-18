@@ -1,12 +1,13 @@
 """TC-416 transport: fixed first audio, retries, goodbye and one shutdown report."""
 
 import asyncio
+from pathlib import Path
 from uuid import uuid4
 
 from aiohttp import WSMsgType, WSServerHandshakeError
 from aiohttp.test_utils import TestClient, TestServer
 
-from pet_call import FAREWELL, FRAME, GatewayConfig, PetVoice, build_setup, make_app
+from pet_call import FAREWELL, FRAME, GatewayConfig, PetVoice, build_setup, make_app, notice_pcm
 
 
 PUBLIC = "https://pet.fixture.test"
@@ -40,6 +41,8 @@ async def scenario():
     cfg = GatewayConfig(PUBLIC, "http://127.0.0.1:8095", "fixture" * 8,
                         "fixture", "us-central1", "DogVoice", "CatVoice")
     calls = Calls()
+    recorded = notice_pcm(Path(__file__).with_name("assets") / "pet-call-notice.wav")
+    assert 48_000 < len(recorded) < 240_000 and any(recorded)
     audio = b"\x01\x02" * 250
     sent = []
 

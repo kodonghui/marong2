@@ -2,3 +2,4 @@ static/face/
 __pycache__/
 *.pcm
 *.wav
+!assets/pet-call-notice.wav
