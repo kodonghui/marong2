@@ -721,6 +721,7 @@ async def check_voice_forget(db):
     from uuid import uuid4
     from call_memory import MemoryStore, Principal
     from memory_tools import TranscriptRecorder, execute_tool
+    from organizer import Organizer
 
     [(friend,), (other,)] = db.admin("""
         INSERT INTO marong.friends(name) VALUES ('call forget fixture'),('call forget isolation') RETURNING id
@@ -800,9 +801,38 @@ async def check_voice_forget(db):
                 assert await store.list_memories(principal) == []
                 assert await bot.call_context(*both) == {}
                 assert all(turn["content"] != "합성 산호 의자" for turn in (await store.detail(principal, call))["turns"])
-                await store.start_segment(principal, call, client, "fixture")
+                current_segment = await store.start_segment(principal, call, client, "fixture")
                 assert (await store.forget_friend(principal, call, segment, "old-segment",
                                                   selection))["result"] == "not_saved"
+
+                race_turn = await store.save_turn(principal, call, current_segment, "race", "user", "합성 새벽 다리")
+                [(race_item,)] = db.admin("""
+                    INSERT INTO marong.memory_items(friend_id,kind,text,channel,call_turn_id,quote,heard_at,source)
+                    VALUES (%s,'fact','합성 새벽 다리','call',%s,'합성 새벽 다리',now(),'call') RETURNING id
+                """, (friend, race_turn))
+                await store.finish(principal, call, True, client_id=client)
+                state = {"call_id": call, "caller_id": caller}
+
+                async def forget_while_organizing(turns):
+                    assert "합성 산호 의자" not in repr(turns)
+                    assert "합성 새벽 다리" in repr(turns)
+                    await forget_selected(bot.pool, friend, "item", race_item, "organizer-race", via="screen")
+                    return {"memories": [{"quote": "합성 새벽 다리"}]}, {}
+
+                organizer = Organizer(store, forget_while_organizing)
+                try:
+                    await organizer.organize({**state, **await organizer.load(state)})
+                    raise AssertionError("a concurrent forget must prevent an old summary")
+                except ValueError as error:
+                    assert str(error) == "context_changed"
+
+                async def organize_remaining(turns):
+                    assert all(turn["id"] not in {source, race_turn} for turn in turns)
+                    return {"memories": []}, {}
+
+                organizer.extractor = organize_remaining
+                assert await organizer.organize({**state, **await organizer.load(state)}) == {"saved": 0}
+                assert await store.list_memories(principal) == []
         finally:
             await recorder.close()
     finally:

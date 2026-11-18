@@ -111,15 +111,17 @@ class Organizer:
             return {'call_id':str(row['id']),'caller_id':row['caller_id'],'revision':0,'saved':0}
 
     async def load(self,state):
-        row=await self.store.one('SELECT context_revision FROM call.callers WHERE id=%s',(state['caller_id'],))
+        row=await self.store.one(f'SELECT {self.store.context_version()} AS revision FROM call.callers WHERE id=%s',
+                                 (state['caller_id'],))
         if not row:raise ValueError('caller_missing')
-        return {'revision':row['context_revision']}
+        return {'revision':row['revision']}
 
     async def organize(self,state):
         call_id=state['call_id'];started=time.monotonic()
         turns=await self.store.all("""SELECT t.id,t.role,t.content FROM call.turns t JOIN call.calls c ON c.id=t.call_id
           WHERE t.call_id=%s AND c.caller_id=%s AND c.deleted_at IS NULL AND t.finalized
-          AND NOT t.interrupted AND t.forgotten_at IS NULL ORDER BY t.seq DESC LIMIT 1000""",(call_id,state['caller_id']))
+          AND NOT t.interrupted AND t.forgotten_at IS NULL""" + self.store.keep_source("call_turn", "t.id") +
+          " ORDER BY t.seq DESC LIMIT 1000",(call_id,state['caller_id']))
         turns.reverse();trimmed=False
         while sum(len(t['content']) for t in turns)>150000:turns.pop(0);trimmed=True
         users=[t for t in turns if t['role']=='user']
@@ -132,9 +134,13 @@ class Organizer:
             turn=next((t for t in users if quoted(quote,t['content'])),None)
             if turn and quote not in [v[0] for v in verified]:verified.append((quote,turn['id']))
         async with self.store.pool.connection() as c,c.transaction():
-            cur=await c.execute('SELECT context_revision FROM call.callers WHERE id=%s FOR UPDATE',(state['caller_id'],))
+            if self.store.friend_marks:
+                await c.execute("SELECT pg_advisory_xact_lock(friend_id) FROM call.callers WHERE id=%s",
+                                (state["caller_id"],))
+            cur=await c.execute(f'SELECT {self.store.context_version()} AS revision FROM call.callers WHERE id=%s FOR UPDATE',
+                                (state['caller_id'],))
             owner=await cur.fetchone()
-            if not owner or owner['context_revision']!=state['revision']:raise ValueError('context_changed')
+            if not owner or owner['revision']!=state['revision']:raise ValueError('context_changed')
             cur=await c.execute('SELECT organize_status FROM call.calls WHERE id=%s AND caller_id=%s AND deleted_at IS NULL FOR UPDATE',(call_id,state['caller_id']))
             row=await cur.fetchone()
             if not row:return {'saved':0}

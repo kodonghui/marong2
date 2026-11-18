@@ -132,12 +132,16 @@ class MemoryStore:
             JOIN marong.friends f ON f.id=c.friend_id WHERE l.email_sha256=%s AND c.enabled""", (email_hash,))
         return Principal(row['caller_id'], row['friend_id'], row['name'], row['context_revision']) if row else None
 
-    async def revision(self, p):
+    def context_version(self):
         version = "context_revision"
         if self.friend_marks:
             version += ("+coalesce((SELECT max(f.id) FROM marong.memory_forgets f "
                         "WHERE f.friend_id=call.callers.friend_id AND (f.items>0 OR f.messages>0)),0)")
-        row = await self.one(f'SELECT {version} AS revision FROM call.callers WHERE id=%s AND enabled', (p.caller_id,))
+        return version
+
+    async def revision(self, p):
+        row = await self.one(f'SELECT {self.context_version()} AS revision FROM call.callers WHERE id=%s AND enabled',
+                             (p.caller_id,))
         return row['revision'] if row else -1
 
     def friend_memory_enabled(self):
