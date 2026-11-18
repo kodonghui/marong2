@@ -120,8 +120,9 @@ async def notify(pool, member, pet, kind, *, send):
         cursor = await conn.execute(
             """SELECT s.*,p.name FROM pet.push_subscriptions s
             JOIN pet.members m ON m.id=s.member_id AND m.status='active'
-            JOIN pet.pets p ON p.member_id=s.member_id AND p.id=%s AND p.mode='living' AND p.status='active'
-            WHERE s.member_id=%s ORDER BY s.id""", (pet, member),
+            JOIN pet.pets p ON p.member_id=s.member_id AND p.id=%s
+              AND (%s='export' OR (p.mode='living' AND p.status='active'))
+            WHERE s.member_id=%s ORDER BY s.id""", (pet, kind, member),
         )
         targets = await cursor.fetchall()
     delivered = 0

@@ -98,7 +98,7 @@ CLOCK = web.AppKey("pet_report_clock")
 
 def register(app, *, clock=None):
     app[CLOCK] = clock or (lambda: datetime.now(KST))
-    app.router.add_post("/api/reports", save)
+    app.router.add_post("/api/reports", save, name="pet_report")
 
     async def worker(_app):
         task = asyncio.create_task(report_loop(app[POOL], app[CLOCK]))

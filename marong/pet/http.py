@@ -34,10 +34,10 @@ ERRORS = {
     "already_member": (409, "이미 가입한 회원", "이미 가입했어요."),
     "use_delete_account": (400, "필수 동의는 끌 수 없음", "필수 동의를 거두려면 계정을 지워 주세요."),
     "quota_exhausted": (409, "하루 한도 소진", "오늘 한도를 다 썼어요. 새벽 4시에 다시 차요."),
-    "rate_limited": (429, "하루 요청 한도", "오늘은 더 신고할 수 없어요. 내일 다시 해 주세요."),
     "archived": (409, "보관한 아이", "보관한 아이예요. 꺼내면 다시 이야기할 수 있어요."),
     "not_memorial": (409, "살아 있는 아이 보관", "함께 사는 아이는 보관하지 않아요."),
     "revert_window_passed": (409, "추억 모드 되돌리기 기한이 지남", "추억 모드로 바꾼 지 7일이 지나 되돌릴 수 없어요."),
+    "export_limit": (429, "아이마다 하루 한 번 내보내기", "오늘은 이미 내보냈어요."),
     "asleep": (409, "회원의 오늘 메시지가 300개", "{name}가 잠들었어요. 새벽 4시에 깨요."),
     "confirm_required": (400, "지우기 확인 문구가 다름", "입력을 확인해 주세요."),
     "invalid_photo": (400, "열 수 없는 사진, 형식·8MB·4096px 넘음",
@@ -77,6 +77,8 @@ def problem_response(req, error):
         detail = detail.format(photo=extra["photo"])
     if error.code == "quota_exhausted" and error.extra.get("prompt") == "none":
         detail = "오늘은 여기까지, 새벽 4시 뒤에 또 이야기해요."
+    if error.code == "rate_limited" and req.match_info.route.name == "pet_report":
+        detail = "오늘은 더 신고할 수 없어요. 내일 다시 해 주세요."
     if error.code == "asleep":
         detail = detail.format(name=extra.pop("name"))
     type_url = req.app[CONFIG].origin + "/problems/" + error.code.replace("_", "-")
