@@ -2,7 +2,8 @@
 
 import asyncio
 from calendar import monthrange
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from uuid import NAMESPACE_URL, uuid5
 
 from aiohttp import web
 
@@ -11,6 +12,7 @@ from .log import logger
 from .quota import KST, _day
 
 MONTHLY_PRICE_KRW = 9900
+RENEWAL_RULE = "2026-11-renewal"
 
 
 def view(row):
@@ -70,6 +72,92 @@ async def activate_paid(conn, order, encrypted_key, at):
     return subscription
 
 
+def renewal_due(row, at):
+    scheduled = row["retry_at"] or row["next_charge_at"]
+    return (row["status"] == "active" and row["billing_key_enc"] is not None
+            and row["next_charge_at"] is not None and scheduled <= at)
+
+
+async def cancel_renewal(conn, row, at, revoke):
+    cursor = await conn.execute("""
+        UPDATE pet.subscriptions SET status='canceling',canceled_at=%s,next_charge_at=NULL,retry_at=NULL
+        WHERE id=%s RETURNING *
+    """, (at, row["id"]))
+    return await finish_cancellation(conn, await cursor.fetchone(), at, revoke)
+
+
+async def reserve_renewal(pool, member, at, revoke):
+    from .billing import insert_order, orders
+
+    async with pool.connection() as conn, conn.transaction():
+        await active_owner(conn, member)
+        row = await current(conn, member, lock=True)
+        if not row or not renewal_due(row, at):
+            return None
+        scheduled = row["next_charge_at"].astimezone(KST).date()
+        changed_price = row["new_price_from"] is not None and row["new_price_from"] <= scheduled
+        if changed_price and row["new_price_agreed_at"] is None:
+            await cancel_renewal(conn, row, at, revoke)
+            return None
+        target = f"marong-pet/renewal/{row['id']}/{row['period_end'].astimezone(KST).date()}"
+        key = uuid5(NAMESPACE_URL, target)
+        cursor = await orders(conn, "o.member_id=%s AND o.idempotency_key=%s", (member, key))
+        invoice = await cursor.fetchone()
+        if invoice is None:
+            amount = row["new_price_krw"] if changed_price else row["price_krw"]
+            invoice = await insert_order(conn, member, "subscription_month", None, key, at,
+                                         amount=amount, item_name=None)
+            await conn.execute("UPDATE pet.orders SET withdrawal_rule=%s WHERE id=%s",
+                               (RENEWAL_RULE, invoice["id"]))
+        return row["id"], row["period_end"], invoice
+
+
+async def renew_one(pool, member, at, gateway, revoke):
+    # Commit the invoice first so retries use the same order number with the gateway.
+    reserved = await reserve_renewal(pool, member, at, revoke)
+    if reserved is None:
+        return False
+    subscription, old_end, invoice = reserved
+    async with pool.connection() as conn, conn.transaction():
+        await active_owner(conn, member)
+        row = await current(conn, member, lock=True)
+        if (invoice["status"] != "created" or not row or row["id"] != subscription or row["period_end"] != old_end
+                or not renewal_due(row, at)):
+            return False
+        amount = invoice["amount_krw"]
+        try:
+            payment = await asyncio.wait_for(
+                gateway.charge(row["billing_key_enc"], invoice["order_no"], amount), timeout=12,
+            )
+        except Exception:
+            payment = None
+        if not payment or not payment.paid or payment.order_no != invoice["order_no"] or payment.amount != amount:
+            if row["retry_at"] is None:
+                await conn.execute("UPDATE pet.subscriptions SET retry_at=%s WHERE id=%s",
+                                   (at + timedelta(days=1), subscription))
+            else:
+                if payment is not None and not payment.paid:
+                    await conn.execute("UPDATE pet.orders SET status='failed' WHERE id=%s", (invoice["id"],))
+                else:
+                    logger.warning("pet_renewal_unconfirmed")
+                await cancel_renewal(conn, row, at, revoke)
+            return False
+        end, charge = next_period(old_end)
+        scheduled = row["next_charge_at"].astimezone(KST).date()
+        new_applied = row["new_price_from"] is not None and row["new_price_from"] <= scheduled
+        await conn.execute("""
+            UPDATE pet.subscriptions SET period_start=least(%s,period_end),period_end=%s,next_charge_at=%s,
+              retry_at=NULL,price_krw=%s,new_price_krw=CASE WHEN %s THEN NULL ELSE new_price_krw END,
+              new_price_from=CASE WHEN %s THEN NULL ELSE new_price_from END,
+              new_price_agreed_at=CASE WHEN %s THEN NULL ELSE new_price_agreed_at END WHERE id=%s
+        """, (at, end, charge, amount, new_applied, new_applied, new_applied, subscription))
+        await conn.execute("""
+            UPDATE pet.orders SET status='fulfilled',paid_at=%s,fulfilled_at=%s,pg_tx_id=%s WHERE id=%s
+        """, (at, at, payment.transaction, invoice["id"]))
+        await _day(conn, member, at)
+        return True
+
+
 async def apply_price_consent(conn, member, at):
     await active_owner(conn, member)
     row = await current(conn, member, lock=True)
@@ -89,11 +177,7 @@ async def request_cancel(conn, member, at, revoke):
     if row is None or row["status"] == "ended":
         raise Problem("wrong_state")
     if row["status"] == "active":
-        cursor = await conn.execute("""
-            UPDATE pet.subscriptions SET status='canceling',canceled_at=%s,next_charge_at=NULL,retry_at=NULL
-            WHERE id=%s RETURNING *
-        """, (at, row["id"]))
-        row = await cursor.fetchone()
+        return await cancel_renewal(conn, row, at, revoke)
     return await finish_cancellation(conn, row, at, revoke)
 
 
@@ -137,7 +221,24 @@ async def reconcile_cancellations(pool, at, revoke):
                 await finish_cancellation(conn, row, at, revoke)
 
 
-def register(app, revoke):
+async def reconcile_renewals(pool, at, gateway, revoke):
+    async with pool.connection() as conn:
+        cursor = await conn.execute("""
+            SELECT s.member_id FROM pet.subscriptions s JOIN pet.members m ON m.id=s.member_id
+            WHERE s.status='active' AND m.status='active' AND s.billing_key_enc IS NOT NULL
+              AND coalesce(s.retry_at,s.next_charge_at)<=%s
+            ORDER BY coalesce(s.retry_at,s.next_charge_at),s.id LIMIT 20
+        """, (at,))
+        rows = await cursor.fetchall()
+    for row in rows:
+        try:
+            await renew_one(pool, row["member_id"], at, gateway, revoke)
+        except Problem as error:
+            if error.code != "unauthenticated":
+                raise
+
+
+def register(app, revoke, *, renewal_gateway=None):
     async def show(req):
         member = await require_member(req)
         async with app[POOL].connection() as conn:
@@ -166,7 +267,10 @@ def register(app, revoke):
             while True:
                 await asyncio.sleep(60)
                 try:
-                    await reconcile_cancellations(application[POOL], datetime.now(timezone.utc), revoke)
+                    at = datetime.now(timezone.utc)
+                    await reconcile_cancellations(application[POOL], at, revoke)
+                    if renewal_gateway is not None:
+                        await reconcile_renewals(application[POOL], at, renewal_gateway, revoke)
                 except Exception:
                     logger.warning("pet_subscription_reconcile_failed")
 
