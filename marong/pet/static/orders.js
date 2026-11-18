@@ -100,21 +100,41 @@ function purchaseControl(product, label, amount, member, render, blocked) {
 
 export async function rechargeSheet(pet, automatic = false) {
   if (pet.mode !== 'living' || pet.status !== 'active') return;
-  const outlet = el('div', {class: 'stack', 'aria-busy': 'true'},
-    el('div', {class: 'stack recharge-loading', 'aria-hidden': 'true'},
-      el('div', {class: 'skeleton recharge-loading-gauge'}),
-      el('div', {class: 'recharge-loading-options'},
-        Array.from({length: 3}, () => el('div', {class: 'skeleton'})))));
+  const outlet = el('div', {class: 'stack'});
   const close = button('괜찮아요', () => dialog.close(), 'plain');
   const dialog = el('dialog', {class: 'sheet stack', 'aria-label': '충전권'}, outlet, close);
   dialog.addEventListener('close', () => dialog.remove(), {once: true});
   document.querySelector('#page').append(dialog);
   dialog.showModal();
-  try {
-    const [member, quota, plan] = await Promise.all([
-      api('/api/me'), api('/api/me/quota'), api('/api/subscription'),
-    ]);
-    if (!dialog.open) return;
+  await load();
+
+  async function load() {
+    outlet.setAttribute('aria-busy', 'true');
+    outlet.replaceChildren(
+      el('div', {class: 'stack recharge-loading', 'aria-hidden': 'true'},
+        el('div', {class: 'skeleton recharge-loading-gauge'}),
+        el('div', {class: 'recharge-loading-options'},
+          Array.from({length: 3}, () => el('div', {class: 'skeleton'})))));
+    try {
+      const [member, quota, plan] = await Promise.all([
+        api('/api/me'), api('/api/me/quota'), api('/api/subscription'),
+      ]);
+      if (!dialog.open) return;
+      render(member, quota, plan);
+    } catch (error) {
+      if (!dialog.open) return;
+      errorText(error, outlet);
+      if (error.status === 0 || error.status === 429 || error.status >= 500) {
+        const retry = button('다시 해 보기', load, 'primary');
+        outlet.append(retry);
+        retry.focus();
+      }
+    } finally {
+      outlet.removeAttribute('aria-busy');
+    }
+  }
+
+  function render(member, quota, plan) {
     const status = el('div', {'aria-live': 'polite'});
     const controls = el('div', {class: 'row'});
     const charge = Object.entries(RECHARGE).map(([product, [label, amount]]) =>
@@ -136,10 +156,6 @@ export async function rechargeSheet(pet, automatic = false) {
       status,
     );
     if (!member.paymentsEnabled) outlet.append(notice('결제는 곧 열려요.'));
-  } catch (error) {
-    errorText(error, outlet);
-  } finally {
-    outlet.removeAttribute('aria-busy');
   }
 }
 

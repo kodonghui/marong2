@@ -2395,6 +2395,26 @@ if (require.main === module) {
     assert.equal(await recharge.count(), 0);
   });
 
+  test('SCR-155 reloads the same dialog after an explicit retry', async t => {
+    const {origin} = await fixture(t, {paymentsEnabled: true});
+    const page = await browser.newPage();
+    t.after(() => page.close());
+    let attempts = 0;
+    await page.route('**/api/subscription', route => {
+      if (++attempts > 1) return route.continue();
+      return route.fulfill({status: 503, json: {traceId: 'recharge-retry'}});
+    });
+    await page.goto(origin + '/pets/' + petId);
+    await page.getByRole('button', {name: /충전하기/}).click();
+    const dialog = page.getByRole('dialog', {name: '충전권'});
+    await visible(dialog.getByText('recharge-retry', {exact: true}));
+    assert.equal(attempts, 1);
+    await dialog.getByRole('button', {name: '다시 해 보기'}).click();
+    await visible(dialog.getByText('오늘 한도 60% · 새벽 4시에 다시 차요'));
+    assert.equal(attempts, 2);
+    assert.equal(await page.getByRole('dialog', {name: '충전권'}).count(), 1);
+  });
+
   test('SCR-156 accepts a reason and retains input when the daily cap is reached', async t => {
     for (const reportLimited of [false, true]) {
       const {origin, writes} = await fixture(t, {reportLimited});
@@ -2428,6 +2448,41 @@ if (require.main === module) {
         } else await visible(page.getByText('신고했어요. 확인해 볼게요.'));
       } finally { await page.close(); }
     }
+  });
+
+  test('SCR-156 restores a rejected report after sign-in and retries an unavailable response by request', async t => {
+    const {origin, writes} = await fixture(t);
+    const page = await browser.newPage();
+    t.after(() => page.close());
+    let attempts = 0;
+    await page.route('**/api/reports', route => {
+      attempts++;
+      if (attempts === 1) return route.fulfill({status: 401, json: {code: 'unauthenticated'}});
+      if (attempts === 2) return route.fulfill({status: 503, json: {traceId: 'report-retry'}});
+      return route.continue();
+    });
+    const url = origin + '/pets/' + petId;
+    await page.goto(url);
+    const makeReport = page.getByRole('button', {name: '신고', exact: true});
+    const dialog = page.getByRole('dialog', {name: '무엇이 문제인가요?'});
+    const send = dialog.getByRole('button', {name: '신고하기'});
+    await makeReport.click();
+    await dialog.getByLabel('상처 주는 말').check();
+    await dialog.getByLabel('메모').fill('합성 시험');
+    await Promise.all([page.waitForURL(origin + '/'), send.click()]);
+    await page.waitForURL(url);
+    await visible(dialog);
+    assert.equal(await dialog.getByLabel('메모').inputValue(), '합성 시험');
+    assert.equal(await dialog.getByLabel('상처 주는 말').isChecked(), true);
+    assert.equal(await page.evaluate(() => sessionStorage.getItem('pet:report-draft')), null);
+    assert.equal(attempts, 1);
+    await send.click();
+    await visible(dialog.getByText('report-retry', {exact: true}));
+    assert.equal(attempts, 2);
+    await dialog.getByRole('button', {name: '다시 해 보기'}).click();
+    await visible(page.getByText('신고했어요. 확인해 볼게요.'));
+    assert.equal(attempts, 3);
+    assert.deepEqual(writes, [{targetType: 'message', targetId: candidateId, reason: 'hurtful', note: '합성 시험'}]);
   });
 
   test('SCR-161 reads the current order and updates only after the API confirms withdrawal', async t => {

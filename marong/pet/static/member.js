@@ -2,7 +2,7 @@ import {action, AI_NOTICE, api, banner, button, CONSENT, DELETE_RECEIPT, el, err
   page, show, showTabs, text} from './pet.js';
 
 import {outfitOf, petLayers} from './closet.js';
-import {mediaId, reportControl} from './report.js';
+import {mediaId, REPORT_DRAFT, reportControl} from './report.js';
 import {rechargeSheet} from './orders.js';
 import {pushControl} from './push-control.js';
 
@@ -399,6 +399,7 @@ export async function account() {
         }
         sessionStorage.removeItem('pet_next');
         sessionStorage.removeItem('pet_pay_return');
+        sessionStorage.removeItem(REPORT_DRAFT);
         localStorage.removeItem(`pet:push:${me.memberNo}`);
         sessionStorage.setItem(DELETE_RECEIPT, '1');
         location.replace('/');
