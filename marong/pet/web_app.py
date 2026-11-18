@@ -8,6 +8,11 @@ from aiohttp import web
 from .push import SENDER
 
 STATIC = Path(__file__).with_name("static")
+DIARY_STATIC = STATIC.parents[1] / "app_chat_static" / "diary"
+DIARY_ASSETS = {
+    "Gaegu-Regular.woff2": "font/woff2",
+    "Gaegu-OFL.txt": "text/plain; charset=utf-8",
+}
 VOICE_STATIC = STATIC.parents[2] / "tools" / "vertex_live" / "static"
 BACKGROUNDS = STATIC.parents[2] / "design" / "pet" / "backgrounds"
 WORKLETS = {"call-capture.js": "capture.js", "call-playback.js": "playback.js"}
@@ -37,6 +42,11 @@ def register(app, *, legal_dir=None, item_dir=None):
 
     async def asset(request):
         name = request.match_info["file"]
+        if name in DIARY_ASSETS:
+            path = DIARY_STATIC / name
+            if not path.is_file():
+                raise web.HTTPNotFound()
+            return web.FileResponse(path, headers={**HEADERS, "Content-Type": DIARY_ASSETS[name]})
         path = VOICE_STATIC / WORKLETS[name] if name in WORKLETS else STATIC / name
         if (name not in ASSETS and name not in WORKLETS) or not path.is_file():
             raise web.HTTPNotFound()

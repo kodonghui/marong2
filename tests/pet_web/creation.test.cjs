@@ -919,6 +919,7 @@ if (require.main === module) {
     await page.getByLabel('일', {exact: true}).fill('4');
     const submit = page.getByRole('button', {name: '가입하기'});
     assert.equal(await submit.isDisabled(), true);
+    assert.ok(await page.locator('label.check').first().evaluate(label => label.offsetHeight) >= 44);
     for (const label of ['이용약관', '개인정보 처리방침', 'AI 고지']) await page.getByRole('checkbox', {name: label}).check();
     assert.equal(await page.locator('input[type=checkbox][required]').count(), 3);
     await submit.click();
@@ -1517,9 +1518,40 @@ if (require.main === module) {
     t.after(() => page.close());
     await page.goto(`${origin}/pets/${petId}/diary?month=2026-11`);
     await page.getByRole('link', {name: /산책 간 날/}).click();
-    await visible(page.getByText('오늘은 공원에서 낙엽을 밟았어.'));
+    assert.equal(await page.locator('.diary-body .sr-only').textContent(), '오늘은 공원에서 낙엽을 밟았어.');
     await page.getByRole('button', {name: /새 그림으로 다시 그리기/}).click();
     await visible(page.getByRole('dialog').getByText('어떤 그림이면 좋을까요?'));
+    assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true);
+  });
+
+  test('SCR-150 uses the approved paper colors and readable manuscript at both mobile widths', async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 360, height: 820}});
+    t.after(() => page.close());
+    const route = '/pets/' + petId + '/diary/2026-11-17';
+    const entry = await (await page.request.get(origin + '/api' + route)).json();
+    const body = '새싹🌰\n푸른 숲에서 놀았어.';
+    await page.route('**/api' + route, request => request.fulfill({json: {...entry, body}}));
+    await page.clock.setFixedTime(new Date('2026-11-17T01:00:00+09:00'));
+    await page.goto(origin + route);
+    const paper = page.locator('.diary-paper');
+    const grid = paper.locator('.diary-manuscript');
+    await visible(grid.locator('span').first());
+    assert.equal(await grid.getAttribute('aria-hidden'), 'true');
+    assert.equal(await paper.locator('.diary-body .sr-only').textContent(), body);
+    assert.equal(await grid.locator('span').nth(2).textContent(), '🌰');
+    assert.equal(await grid.locator('span').nth(10).textContent(), '푸');
+    assert.equal(await grid.locator('span[data-first-row]').count(), 10);
+    assert.equal(await grid.locator('span').first().evaluate(cell => cell.getBoundingClientRect().width), 32);
+    assert.equal(await paper.evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(217, 207, 188)');
+    assert.equal(await paper.locator('.diary-art-frame').evaluate(node => getComputedStyle(node).borderTopWidth), '2px');
+
+    await page.setViewportSize({width: 430, height: 820});
+    await page.waitForFunction(() => document.querySelectorAll('.diary-manuscript [data-first-row]').length === 12);
+    assert.equal(await grid.locator('span').nth(12).textContent(), '푸');
+    await page.clock.setFixedTime(new Date('2026-11-17T09:00:00+09:00'));
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    assert.equal(await paper.evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(255, 253, 247)');
     assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true);
   });
 
@@ -1950,6 +1982,7 @@ if (require.main === module) {
         const modal = page.getByRole('dialog');
         const send = modal.getByRole('button', {name: '신고하기'});
         assert.equal(await modal.getByRole('radio').count(), 6);
+        assert.ok(await modal.locator('.report-choices > label').first().evaluate(label => label.offsetHeight) >= 44);
         assert.equal(await send.isDisabled(), true);
         await modal.getByLabel('상처 주는 말').check();
         await modal.getByLabel('메모').fill('합성 시험');

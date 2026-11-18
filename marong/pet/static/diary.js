@@ -11,6 +11,36 @@ const outcomes = {
   failed: '이날은 일기를 쓰지 못했어요.',
 };
 
+function manuscript(value) {
+  const grid = el('div', {class: 'diary-manuscript', 'aria-hidden': 'true'});
+  const body = el('div', {class: 'diary-body'}, text(value, 'sr-only'), grid);
+  const segmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter('ko', {granularity: 'grapheme'}) : null;
+  const lines = value.split(/\r?\n/).map(line => segmenter
+    ? Array.from(segmenter.segment(line), part => part.segment) : Array.from(line));
+  let columns = 0;
+  function draw() {
+    if (!grid.isConnected) { observer?.disconnect(); return; }
+    const cell = Number.parseFloat(getComputedStyle(grid).getPropertyValue('--diary-cell'));
+    const width = grid.clientWidth;
+    if (!width || !cell) return;
+    const count = Math.max(1, Math.floor(width / cell));
+    if (columns === count) return;
+    columns = count;
+    grid.style.setProperty('--columns', count);
+    const cells = lines.flatMap(line => {
+      const blanks = Math.max(count, Math.ceil(line.length / count) * count) - line.length;
+      return [...line, ...Array(blanks).fill('')];
+    });
+    grid.replaceChildren(...cells.map((letter, index) => el('span', {
+      'data-first-column': index % columns === 0, 'data-first-row': index < columns,
+    }, letter)));
+  }
+  const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(draw) : null;
+  if (observer) observer.observe(grid);
+  else requestAnimationFrame(draw);
+  return body;
+}
+
 function monthFrom(value) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) return today().slice(0, 7);
   return value;
@@ -211,9 +241,10 @@ function sheet(pet, href, path, entry, pages, status) {
     + (entry.drawing ? ' drawing' : '')},
     artworkView, el('div', {class: 'diary-stickers'}));
   const paper = el('article', {class: 'diary-paper stack'},
-    el('small', {}, entry.kind === 'farewell' ? '❀ 마지막 장' : dateLabel(entry.date)),
-    el('h2', {}, entry.title), entry.weather ? el('small', {}, entry.weather) : null, frame,
-    artworkView ? el('small', {}, 'AI가 그린 그림') : null, text(entry.body || '', 'diary-body'));
+    el('div', {class: 'row diary-line'}, el('small', {class: 'grow'}, entry.kind === 'farewell' ? '❀ 마지막 장' : dateLabel(entry.date)),
+      entry.weather ? el('small', {}, entry.weather) : null),
+    el('h2', {class: 'diary-line'}, entry.title), frame,
+    artworkView ? el('small', {}, 'AI가 그린 그림') : null, manuscript(entry.body || ''));
   const editor = el('div');
   const decorate = button('꾸미기', () => action(decorate, outcome, async () => {
     await decorateDiary(pet, path, entry, paper, frame, editor,
