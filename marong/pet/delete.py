@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from aiohttp import web
 
 from .http import CONFIG, COOKIE, POOL, Problem, body_json, require_member
+from .creations import cleanup as cleanup_creations
 from .jobs import JobQueue
 from .log import logger, member_ref
 from .quota import release_expired
@@ -50,6 +51,10 @@ async def _erase(pool, job, root, revoke):
         if not await claimed.fetchone():
             return
         member = job["member_id"]
+        await conn.execute("""
+            UPDATE pet.members SET status='deleting',deleting_since=now(),sub_hash=NULL
+            WHERE id=%s AND status='minor_locked' AND minor_locked_at<=now()-interval '7 days'
+        """, (member,))
         owned = await conn.execute("SELECT id FROM pet.members WHERE id=%s AND status='deleting' FOR UPDATE", (member,))
         if not await owned.fetchone():
             await conn.execute("DELETE FROM pet.jobs WHERE id=%s", (job["id"],))
@@ -67,6 +72,7 @@ async def _erase(pool, job, root, revoke):
                 raise RuntimeError("invalid_storage_path")
             await asyncio.to_thread(path.unlink, missing_ok=True)
         await conn.execute("DELETE FROM pet.jobs WHERE member_id=%s", (member,))
+        await conn.execute("DELETE FROM pet.settings WHERE starts_with(key,%s)", (f"ticket_grant:{member}:",))
         await conn.execute("DELETE FROM pet.members WHERE id=%s", (member,))
 
 
@@ -80,7 +86,7 @@ async def erase_next(pool, root, *, revoke=None):
     except Exception:
         await queue.fail(job, "account_delete_retry", retry_after=RETRY, attempts=MAX_ATTEMPTS)
         if datetime.now(timezone.utc) - job["queued_at"] >= timedelta(hours=24):
-            logger.error("pet_delete_overdue member=%s", member_ref(job["member_id"]))
+            logger.error("pet_delete_overdue member=%s", member_ref(str(job["member_id"])))
     return True
 
 
@@ -88,20 +94,26 @@ def register(app, *, revoke=None):
     app.router.add_delete("/api/me", request_delete)
 
     async def maintenance(app):
+        stop = asyncio.Event()
+
         async def run():
-            while True:
+            while not stop.is_set():
                 try:
                     await erase_next(app[POOL], app[CONFIG].media_dir, revoke=revoke)
                     await release_expired(app[POOL], datetime.now(timezone.utc))
+                    await cleanup_creations(app[POOL], app[CONFIG].media_dir)
                 except Exception:
                     logger.error("pet_maintenance_failed")
-                await asyncio.sleep(30)
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=30)
+                except TimeoutError:
+                    pass
 
         worker = asyncio.create_task(run())
         try:
             yield
         finally:
-            worker.cancel()
-            await asyncio.gather(worker, return_exceptions=True)
+            stop.set()
+            await worker
 
     app.cleanup_ctx.append(maintenance)

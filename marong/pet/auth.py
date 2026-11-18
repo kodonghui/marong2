@@ -195,6 +195,8 @@ class Auth:
                 "SELECT id,status FROM pet.members WHERE provider=%s AND sub_hash=%s FOR UPDATE", (name, digest),
             )
             member = await cur.fetchone()
+            if member and member["status"] == "minor_locked":
+                return _release_state(web.HTTPFound("/?loginError=underage"))
             if member and member["status"] != "active":
                 return _release_state(web.HTTPFound("/?loginError=auth_provider"))
             life = MEMBER if member else PENDING

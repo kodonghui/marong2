@@ -38,6 +38,25 @@ ERRORS = {
     "archived": (409, "보관한 아이", "보관한 아이예요. 꺼내면 다시 이야기할 수 있어요."),
     "asleep": (409, "회원의 오늘 메시지가 300개", "{name}가 잠들었어요. 새벽 4시에 깨요."),
     "confirm_required": (400, "지우기 확인 문구가 다름", "입력을 확인해 주세요."),
+    "invalid_photo": (400, "열 수 없는 사진, 형식·8MB·4096px 넘음",
+                      "{photo}번째 사진을 열 수 없어요. JPEG나 PNG, 8MB 이하로 올려 주세요."),
+    "pet_limit": (409, "아이 5마리", "아이는 5마리까지 만들 수 있어요."),
+    "too_many_creations": (409, "진행 중 만들기 3개", "만들고 있는 아이가 있어요. 먼저 마치거나 지워 주세요."),
+    "too_large": (413, "본문이 25MB 넘음", "사진이 너무 커요. 다시 골라 주세요."),
+    "photo_check_unavailable": (503, "사람 얼굴 가리기 모델을 못 불러옴(사진을 밖으로 보내지 않음)",
+                                "사진을 확인하지 못했어요. 잠시 뒤 다시 해 주세요."),
+    "wrong_state": (409, "만들기·주문 상태가 그 요청과 맞지 않음", "지금은 할 수 없어요."),
+    "busy": (409, "그 만들기·일기를 그리는 중", "지금 그리는 중이에요. 조금만 기다려 주세요."),
+    "preview_limit": (429, "오늘 미리 보기 3장", "오늘 미리 보기를 다 봤어요. 새벽 4시 뒤에 다시 볼 수 있어요."),
+    "payments_off": (409, "결제가 아직 꺼져 있음", "결제는 곧 열려요."),
+    "identity_required": (409, "첫 결제 전 본인인증이 없음", "첫 결제 전에 본인인증을 한 번 해 주세요."),
+    "identity_provider": (502, "본인확인 기관 오류", "본인인증을 마치지 못했어요."),
+    "already_owned": (409, "이미 가진 아이템", "이미 가지고 있어요."),
+    "bad_signature": (401, "결제 대행 웹훅 서명이나 내부 API 비밀 헤더가 틀림", "요청을 처리할 수 없어요."),
+    "rate_limited": (429, "요청이 너무 잦음(신고 하루 20건, 만든 주문 5개 등)", "잠시 뒤 다시 해 주세요."),
+    "quota_full": (409, "한도가 가득해 충전권이 필요 없음", "지금은 한도가 가득해요."),
+    "recharge_limit": (409, "충전권 하루 3장", "충전권은 하루 3장까지예요."),
+    "regenerate_limit": (409, "다시 만들기 2번 다 씀", "다시 그리기를 다 썼어요."),
     "server_error": (500, "예상하지 못한 오류", "잠시 뒤 다시 해 주세요."),
 }
 
@@ -52,6 +71,8 @@ class Problem(Exception):
 def problem_response(req, error):
     status, title, detail = ERRORS[error.code]
     extra = dict(error.extra)
+    if error.code == "invalid_photo":
+        detail = detail.format(photo=extra["photo"])
     if error.code == "quota_exhausted" and error.extra.get("prompt") == "none":
         detail = "오늘은 여기까지, 새벽 4시 뒤에 또 이야기해요."
     if error.code == "asleep":
