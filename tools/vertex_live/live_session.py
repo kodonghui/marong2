@@ -60,6 +60,7 @@ class LiveSession:
         self.goodbye_done=asyncio.Event();self.last_model_audio=0.;self.close_reason=None
         # Google Search: call_search.SearchBudget shared by this process, or None (no search, no guide).
         self.search=search;self.searches=0;self.search_live=False;self.planned_reconnect=False
+        self.forget_ack = None
         self.activity_at=0.;self.turn_done_at=None;self.turn_started_at=0.;self.playback_end=0.
         # ring: the ring id the page was opened with (/?ring=), or None. ring_info: the promise this call answers.
         # ring_topic: the picture card of a hello call, sent once with the first 'ready' (SPEC-268, SPEC-269).
@@ -219,6 +220,8 @@ class LiveSession:
             self.call_id,self.logical_resumed=await self.store.start_call(
                 self.p,self.client_id,self.voice,BUILD,
                 entrypoint='discord' if self.entry_transport=='discord' else 'web')
+            if getattr(self.store, "friend_marks", False):
+                self.revision = await self.store.revision(self.p)
             await self.claim_ring()
             if os.getenv('MARONG_SAFETY')=='on':
                 from call_safety import CallSafety
@@ -282,7 +285,16 @@ class LiveSession:
             except Exception:self.d['transportLogFailed']=True
             try:
                 revision=await self.store.revision(self.p)
-                if revision!=self.revision:self.revision=revision;self.reset.set()
+                if revision != self.revision or self.forget_ack:
+                    if self.forget_ack:
+                        expected, started = self.forget_ack
+                        now = time.monotonic()
+                        if expected == revision and now - started < 5 and (
+                            self.turn_done_at is None or self.turn_done_at < started or now < self.playback_end
+                        ):
+                            continue
+                    self.revision = revision
+                    self.reset.set()
             except Exception:pass
 
     def search_mode(self):
@@ -307,6 +319,8 @@ class LiveSession:
             await self.emit({'type':'audio_reset','epoch':self.epoch})
             if self.reset.is_set():
                 self.handle=None;self.pending.clear();self.resume.clear();self.recorder.parts.clear();self.reset.clear()
+                self.forget_ack = None
+                self.available.set()
                 if self.store and self.p:self.revision=await self.store.revision(self.p)
             seed='';self.segment=None;friend_instruction=''
             if self.store and self.p:
@@ -327,6 +341,8 @@ class LiveSession:
                         if mode:options['search']=mode
                         if self.ring_info:options['ring']=self.ring_info
                         if friend_instruction:options['friend_instruction']=friend_instruction
+                        if self.store and hasattr(self.store, 'friend_memory_enabled'):
+                            options['friend_memory'] = self.store.friend_memory_enabled()
                         await upstream.send_json(self.setup(self.handle,seed,bool(self.p and self.segment),**options))
                         first=await upstream.receive(timeout=20)
                         if first.type not in (WSMsgType.TEXT,WSMsgType.BINARY) or 'setupComplete' not in json.loads(first.data):
@@ -416,6 +432,9 @@ class LiveSession:
         async def sender():
             while True:
                 await self.available.wait();self.available.clear()
+                if self.forget_ack:
+                    self.audio.clear()
+                    continue
                 while not self.controls.empty():await send(await self.controls.get())
                 while self.audio:
                     at,pcm=self.audio.popleft()
@@ -437,6 +456,11 @@ class LiveSession:
                 result=await asyncio.wait_for(execute_tool(self.store,self.p,self.call_id,self.segment,name,call.get('args',{}),self.segment+':'+identifier if self.segment else identifier,self.recorder),6)
             except asyncio.CancelledError:raise
             except Exception:result={'result':'not_saved','reason':'temporary_error'}
+            if name == "memory_forget" and result.get("ok"):
+                try:
+                    self.forget_ack = (await self.store.revision(self.p), time.monotonic())
+                except Exception:
+                    self.reset.set()
             await send({'toolResponse':{'functionResponses':[{'id':identifier,'name':name,'response':result}]}})
 
         async def receiver():
@@ -514,6 +538,8 @@ class LiveSession:
             done,_=await asyncio.wait(tasks,return_when=asyncio.FIRST_COMPLETED)
             for task in done:task.result()
         finally:
+            if self.forget_ack and not self.stop.is_set():
+                self.reset.set()
             for task in tasks:task.cancel()
             for task in tool_tasks.values():task.cancel()
             await asyncio.gather(*tasks,*tool_tasks.values(),return_exceptions=True)

@@ -13,6 +13,11 @@ UNSENT = timedelta(minutes=2)
 
 async def settle(conn, friend, at):
     await conn.execute("""
+        UPDATE marong.chat_cards c SET status='replaced'
+        FROM marong.memory_items m WHERE c.friend_id=%s AND c.kind='memory_ok'
+            AND c.status='open' AND c.memory_item_id=m.id AND m.status='forgotten'
+    """, (friend,))
+    await conn.execute("""
         UPDATE marong.chat_cards SET status='replaced'
         WHERE friend_id=%s AND kind='memory_ok' AND status='open'
             AND message_id IS NULL AND created_at<=%s
@@ -47,6 +52,9 @@ async def maintain(pool, at):
             SELECT DISTINCT friend_id FROM (
                 SELECT friend_id FROM marong.chat_cards WHERE kind='memory_ok' AND status='open'
                     AND (expires_at<=%s OR (message_id IS NULL AND created_at<=%s))
+                UNION ALL
+                SELECT c.friend_id FROM marong.chat_cards c JOIN marong.memory_items m ON m.id=c.memory_item_id
+                WHERE c.kind='memory_ok' AND c.status='open' AND m.status='forgotten'
                 UNION ALL
                 SELECT m.friend_id FROM marong.memory_items m
                 WHERE m.status='pending_ok' AND EXISTS (
@@ -103,10 +111,15 @@ async def answer(pool, friend, ident, value, *, room, via, at):
             params = (friend, ident)
         query = await conn.execute("""
             SELECT * FROM marong.chat_cards WHERE friend_id=%s AND id=%s AND kind='memory_ok'
+            AND (status='answered' OR NOT EXISTS (SELECT 1 FROM marong.memory_items m
+                WHERE m.id=marong.chat_cards.memory_item_id AND m.status='forgotten'))
         """ + scope, params)
         row = await query.fetchone()
         if not row:
-            raise CardError("card_not_found")
+            hidden = await conn.execute("""
+                SELECT 1 FROM marong.chat_cards WHERE friend_id=%s AND id=%s AND kind='memory_ok'
+            """ + scope, params)
+            raise CardError("card_closed" if await hidden.fetchone() else "card_not_found")
         applied = row["status"] == "open" and row["expires_at"] > at and row["message_id"] is not None
         if applied:
             query = await conn.execute("""

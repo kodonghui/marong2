@@ -693,13 +693,19 @@ class Store:
                 caller = await cur.fetchone()
                 if not caller:
                     return {}
+                marked_call_copy = """ AND NOT EXISTS (
+                    SELECT 1 FROM call.transcript_report t JOIN marong.forget_marks f
+                      ON f.target_type='call_turn' AND f.target_id=t.id
+                    WHERE t.call_id=c.id"""
+                keep_card = marked_call_copy + ")" if self._has_forget_marks else ""
+                keep_memory = marked_call_copy + " AND (m.turn_id IS NULL OR m.turn_id=t.id))" if self._has_forget_marks else ""
                 cur = await c.execute("""SELECT 'card' AS source,c.id::text AS id,k.summary AS content FROM call.cards k
                     JOIN call.calls c ON c.id=k.call_id WHERE c.caller_id=%s AND c.deleted_at IS NULL
-                    AND k.forgotten_at IS NULL ORDER BY c.started_at DESC LIMIT 2""", (caller['id'],))
+                    AND k.forgotten_at IS NULL""" + keep_card + " ORDER BY c.started_at DESC LIMIT 2", (caller['id'],))
                 cards = await cur.fetchall()
                 cur = await c.execute("""SELECT 'memory' AS source,m.id::text AS id,m.content FROM call.memories m
                     JOIN call.calls c ON c.id=m.call_id WHERE m.caller_id=%s AND m.status='active'
-                    AND c.deleted_at IS NULL ORDER BY m.created_at DESC LIMIT 10""", (caller['id'],))
+                    AND c.deleted_at IS NULL""" + keep_memory + " ORDER BY m.created_at DESC LIMIT 10", (caller['id'],))
                 memories = await cur.fetchall()
                 rows = memories + cards
                 if not rows:

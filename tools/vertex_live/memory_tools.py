@@ -11,6 +11,15 @@ DECLARATIONS=[
   'parameters':{'type':'OBJECT','properties':{'query':{'type':'STRING','description':'찾을 짧은 한국어 주제'}},'required':['query']}},
  {'name':'current_time','description':'현재 한국 날짜·요일·시간을 확인한다.','parameters':{'type':'OBJECT','properties':{}}}
 ]
+FORGET_MEMORY = {
+    "name": "memory_forget",
+    "description": ("친구가 지금 한 말로 자기 기억을 잊어 달라고 했을 때만 쓴다. "
+                    "그 말의 정확한 인용과 찾을 말 조각 또는 recall의 friend_memory id가 필요하다."),
+    "parameters": {"type": "OBJECT", "required": ["quote"], "properties": {
+        "quote": {"type": "STRING"}, "fragment": {"type": "STRING"}, "item_id": {"type": "INTEGER"},
+    }},
+}
+
 # Only offered to clients that can end the call (live_session.LiveSession.hangup).
 END_CALL={'name':'end_call','description':'친구가 지금 이 통화를 끊어 달라거나 꺼 달라고 분명히 말했을 때만 부른다. 짧은 작별 인사를 한 문장 한 다음 부른다. 조용하거나 피곤해 보이거나 얘기가 끝난 것 같다는 이유로는 절대 부르지 않는다.',
   'parameters':{'type':'OBJECT','properties':{}}}
@@ -75,6 +84,14 @@ class TranscriptRecorder:
     async def flush(self):
         await asyncio.wait_for(self.queue.join(),4)
 
+    async def flush_user_turn(self):
+        if "user" in self.parts:
+            self.boundary("user")
+            task = self.settlers.get("user")
+            if task:
+                await asyncio.wait_for(asyncio.shield(task), 1)
+        await self.flush()
+
     async def close(self):
         for task in self.settlers.values():task.cancel()
         await asyncio.gather(*self.settlers.values(),return_exceptions=True)
@@ -91,6 +108,11 @@ async def execute_tool(store,p,call_id,segment,name,args,key,recorder):
         return {'result':'time','time':datetime.now(ZoneInfo('Asia/Seoul')).isoformat(),'timezone':'Asia/Seoul'}
     if not store or not p:return {'result':'not_saved','reason':'memory_unavailable'}
     if not isinstance(args,dict):return {'result':'refused'}
+    if name == "memory_forget":
+        if not getattr(store, "friend_memory_enabled", lambda: False)():
+            return {"result": "not_saved", "ok": False}
+        await recorder.flush_user_turn()
+        return await store.forget_friend(p, call_id, segment, key, args)
     await recorder.flush()
     if name=='recall':return await store.recall(p,str(args.get('query','')))
     return {'result':'refused'}

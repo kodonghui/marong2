@@ -717,6 +717,99 @@ async def check_forget_dialogue(db):
         await store.close()
 
 
+async def check_voice_forget(db):
+    from uuid import uuid4
+    from call_memory import MemoryStore, Principal
+    from memory_tools import TranscriptRecorder, execute_tool
+
+    [(friend,), (other,)] = db.admin("""
+        INSERT INTO marong.friends(name) VALUES ('call forget fixture'),('call forget isolation') RETURNING id
+    """)
+    [(caller,)] = db.admin("INSERT INTO call.callers(friend_id) VALUES (%s) RETURNING id", (friend,))
+    db.admin("INSERT INTO marong.rooms(room_key,is_channel) VALUES ('fixture:voice-forget',true)")
+    both = ("fixture:voice-forget", "fixture:voice-forget")
+    db.admin("INSERT INTO marong.people(user_key,friend_id) VALUES (%s,%s)", (both[0], friend))
+    principal = Principal(caller, friend, "fixture")
+    bot = Store(db.app_url, call_bridge=True)
+    store = MemoryStore(make_conninfo(db.admin_url, user="marong_call"))
+    await bot.open(wait=True)
+    await store.open()
+    try:
+        original = await bot.add_message(both[0], "user", "합성 초록 우산", both[1])
+        [(item,), (isolated,)] = db.admin("""
+            INSERT INTO marong.memory_items(friend_id,kind,text,channel,message_id,quote,heard_at,source)
+            VALUES (%s,'fact','합성 초록 우산','app',%s,'합성 초록 우산',now(),'text'),
+                   (%s,'fact','다른 초록 우산','app',%s,'다른 초록 우산',now(),'text') RETURNING id
+        """, (friend, original, other, original))
+        client = str(uuid4())
+        call, _ = await store.start_call(principal, client, "fixture", "fixture")
+        segment = await store.start_segment(principal, call, client, "fixture")
+
+        async def save(*args):
+            return await store.save_turn(principal, call, segment, *args)
+
+        recorder = TranscriptRecorder(save, lambda *_: None)
+        try:
+            phrase = "초록 우산 잊어 줘"
+            selection = {"quote": phrase, "fragment": "초록 우산"}
+            with patch.dict("os.environ", {"MARONG_FRIEND_MEMORY": "shadow"}):
+                assert (await execute_tool(store, principal, call, segment, "memory_forget",
+                                           selection, "inactive", recorder))["result"] == "not_saved"
+                assert all(row["source"] != "friend_memory" for row in
+                           (await store.recall(principal, "초록 우산"))["items"])
+            with patch.dict("os.environ", {"MARONG_FRIEND_MEMORY": "on"}):
+                recalled = await store.recall(principal, "초록 우산")
+                assert [row["text"] for row in recalled["items"] if row["source"] == "friend_memory"] == ["합성 초록 우산"]
+                assert "합성 초록 우산" in await store.seed(principal, call)
+                before = await store.revision(principal)
+
+                await save("negation", "user", "초록 우산 잊지 마", True, False)
+                denied = await store.forget_friend(principal, call, segment, "negative", selection)
+                assert denied == {"result": "refused"}
+
+                await save("foreign", "user", phrase, True, False)
+                denied = await store.forget_friend(principal, call, segment, "foreign",
+                                                   {"quote": phrase, "item_id": isolated})
+                assert denied == {"result": "none_matched"}
+                assert await store.revision(principal) == before
+                recorder.feed("user", phrase)
+                receipt = await execute_tool(store, principal, call, segment, "memory_forget",
+                                             selection, "apply", recorder)
+                assert receipt == {"result": "forgotten", "ok": True, "forgot": 1, "messages": 1}
+                assert await store.forget_friend(principal, call, segment, "apply", selection) == receipt
+                assert await store.revision(principal) > before
+                assert "합성 초록 우산" not in await store.seed(principal, call)
+                assert all(row["text"] != "합성 초록 우산" for row in (await store.recall(principal, "초록 우산"))["items"])
+                assert db.admin("SELECT status FROM marong.memory_items WHERE id IN (%s,%s) ORDER BY id",
+                                (item, isolated)) == [("forgotten",), ("current",)]
+                assert db.admin("SELECT content FROM marong.messages WHERE id=%s", (original,)) == [("합성 초록 우산",)]
+
+                source = await save("old-voice", "user", "합성 산호 의자", True, False)
+                db.admin("""
+                    INSERT INTO marong.memory_items(friend_id,kind,text,channel,call_turn_id,quote,heard_at,source)
+                    VALUES (%s,'fact','합성 산호 의자','call',%s,'합성 산호 의자',now(),'call')
+                """, (friend, source))
+                assert (await store.remember(principal, call, segment, "legacy-copy", "합성 산호 의자"))["result"] == "saved"
+                assert (await bot.call_context(*both))["items"][0]["text"] == "합성 산호 의자"
+                await save("forget-voice", "user", "산호 의자 잊어 줘", True, False)
+                result = await store.forget_friend(principal, call, segment, "forget-voice",
+                                                   {"quote": "산호 의자 잊어 줘", "fragment": "산호 의자"})
+                assert result["ok"]
+                assert "합성 산호 의자" not in await store.seed(principal, call)
+                assert (await store.recall(principal, "합성 산호 의자"))["items"] == []
+                assert await store.list_memories(principal) == []
+                assert await bot.call_context(*both) == {}
+                assert all(turn["content"] != "합성 산호 의자" for turn in (await store.detail(principal, call))["turns"])
+                await store.start_segment(principal, call, client, "fixture")
+                assert (await store.forget_friend(principal, call, segment, "old-segment",
+                                                  selection))["result"] == "not_saved"
+        finally:
+            await recorder.close()
+    finally:
+        await store.close()
+        await bot.close()
+
+
 if __name__ == "__main__":
     db = TestDB()
     try:
@@ -727,6 +820,7 @@ if __name__ == "__main__":
         asyncio.run(check_forget_transaction(db))
         asyncio.run(check_reply_context(db))
         asyncio.run(check_forget_dialogue(db))
+        asyncio.run(check_voice_forget(db))
     finally:
         db.close()
     print("TC-330: debounced text, call eligibility, concurrent claims, lease recovery, fencing and ID-only checkpoints passed")
@@ -744,3 +838,4 @@ if __name__ == "__main__":
     print("TC-336 dialogue: owner intent, ambiguity, original-only marking, idempotency and commit-before-ack")
 
     print("TC-336 report: excluded original and reply plus marked call without raw-table changes")
+    print("TC-342: call-role consent, two-way recall hiding, transcript settlement, revision and segment fencing passed")

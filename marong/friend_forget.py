@@ -86,10 +86,11 @@ async def forget_source_locked(conn, friend, message, turn, heard_at, key, via):
         UPDATE marong.open_loops SET status='forgotten',text=NULL,quote=NULL,forget_id=%s,
             closed_at=coalesce(closed_at,now()) WHERE id=ANY(%s::bigint[])
     """, (forget_id, ids["loop"]))
-    await conn.execute("""
-        UPDATE marong.chat_cards SET status='replaced'
-        WHERE memory_item_id=ANY(%s::bigint[]) AND status='open'
-    """, (ids["item"],))
+    if via != "call":
+        await conn.execute("""
+            UPDATE marong.chat_cards SET status='replaced'
+            WHERE memory_item_id=ANY(%s::bigint[]) AND status='open'
+        """, (ids["item"],))
     await conn.execute("SELECT marong.forget_embeddings(%s)", (forget_id,))
     return {"forgot": count, "messages": messages}
 
