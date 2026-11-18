@@ -4,7 +4,7 @@ import asyncio
 import json
 from datetime import datetime, time, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from anthropic import APIConnectionError
 from httpx import Request
@@ -325,7 +325,8 @@ async def check_call_worker(db):
             with patch("organizer.aiohttp.ClientSession") as session, \
                     patch("organizer.google_headers", new=AsyncMock(return_value={})), \
                     patch.dict("os.environ", {"MARONG_MEMORY_MODEL": "fixture-call"}):
-                http = session.return_value.__aenter__.return_value
+                http = MagicMock()
+                session.return_value.__aenter__.return_value = http
                 result = http.post.return_value.__aenter__.return_value
                 result.status = 200
                 result.json = AsyncMock(return_value={"candidates": [{
