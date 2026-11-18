@@ -116,11 +116,14 @@ async def add_source_mark(conn, forget_id, friend, kind, ident):
 
 async def hide_notes(conn, forget_id, friend, heard_at):
     await conn.execute("""
-        INSERT INTO marong.forget_marks(forget_id,friend_id,target_type,target_id,state)
+        INSERT INTO marong.forget_marks AS mark(forget_id,friend_id,target_type,target_id,state)
         SELECT %s,%s,'note',n.id,'hidden' FROM marong.notes n JOIN marong.people p USING(user_key)
         WHERE p.friend_id=%s AND n.created_at>=%s
         UNION ALL
         SELECT %s,%s,'shared_note',n.id,'hidden' FROM marong.shared_notes n
         WHERE n.friend_id=%s AND n.created_at>=%s
-        ON CONFLICT(target_type,target_id) DO NOTHING
+        ORDER BY 3,4
+        ON CONFLICT(target_type,target_id) DO UPDATE
+            SET forget_id=excluded.forget_id,attempts=0,updated_at=now()
+            WHERE mark.state='hidden'
     """, (forget_id, friend, friend, heard_at, forget_id, friend, friend, heard_at))

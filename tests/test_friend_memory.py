@@ -11,6 +11,7 @@ from httpx import Request
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.conninfo import make_conninfo
 
+from marong.forget_rewrite import RETRY, rewrite_one
 from marong.friend_card import KST
 from marong.friend_forget import forget_selected
 from marong.friend_memory import MemoryExtraction, apply_ops, expire_loops, list_for_turn, memory_page
@@ -436,6 +437,40 @@ async def check_forget_transaction(db):
         assert db.admin("SELECT count(*) FROM marong.embeddings WHERE room_key=%s", (room,)) == [(0,)]
         assert db.admin("SELECT content FROM marong.messages WHERE id=%s", (message,)) == [("가상 기록",)]
         assert db.admin("SELECT count(*) FROM marong.memory_forgets WHERE friend_id=%s", (owner,)) == [(2,)]
+
+        at = datetime.now(timezone.utc)
+        rewrites = []
+
+        async def output(original, forgotten):
+            assert forgotten == ["가상 기록"]
+            rewrites.append(original)
+            if original == "가상 공유":
+                return "공개 일정"
+            if original == "가상 메모" or at == started:
+                return "가상 기록"
+            if at == started + RETRY:
+                return "원문보다 훨씬 길게 쓴 일정"
+            return "예정"
+
+        started = at
+        for attempt in range(3):
+            while await rewrite_one(store.pool, output, clock=lambda: at):
+                pass
+            if attempt < 2:
+                assert not await store.summaries(room, 10)
+                assert not await store.notes(room)
+                assert db.admin("""SELECT attempts,updated_at FROM marong.forget_marks
+                    WHERE target_type='summary' AND target_id=%s""", (summary,)) == [(attempt + 1, at + RETRY)]
+            at += RETRY
+        assert rewrites.count("가상 요약") == rewrites.count("가상 메모") == 3
+        assert rewrites.count("가상 공유") == 1
+        assert [entry["content"] for entry in await store.summaries(room, 10)] == ["예정"]
+        assert [entry["content"] for entry in (await store.keyword_hits(room, ["예정"], message + 1, []))[0]] == ["예정"]
+        assert not (await store.keyword_hits(room, ["가상"], message + 1, []))[0]
+        assert [entry["content"] for entry in await store.notes(room)] == [""]
+        assert db.admin("SELECT content FROM marong.summaries WHERE id=%s", (summary,)) == [("가상 요약",)]
+        assert db.admin("SELECT state,attempts FROM marong.forget_marks WHERE target_type='note' AND target_id=%s",
+                        (note,)) == [("dropped", 3)]
     finally:
         await store.close()
 
@@ -457,3 +492,5 @@ if __name__ == "__main__":
     print("TC-341: the call organizer saved a sourced open loop after legacy organization failed")
 
     print("TC-336 transaction: ownership, sibling text and loops, source marks, vector removal and concurrent receipts")
+
+    print("TC-337: validated rewrites, 10-minute retries, clean keyword reads and blank fallback")

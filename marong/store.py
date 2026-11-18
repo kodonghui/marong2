@@ -152,15 +152,22 @@ class Store:
         result = await conn.execute("SELECT to_regclass('marong.forget_marks') IS NOT NULL AS ready")
         self._has_forget_marks = (await result.fetchone())["ready"]
 
-    def _forget_guard(self, kind_sql: str, source_id: str) -> str:
+    def _summary_text(self) -> str:
+        if not self._has_forget_marks:
+            return "s.content"
+        return ("coalesce((SELECT fm.replacement FROM marong.forget_marks fm WHERE "
+                "fm.target_type='summary' AND fm.target_id=s.id AND fm.state='rewritten'),s.content)")
+
+    def _forget_guard(self, kind_sql: str, source_id: str, rewritten: bool = False) -> str:
         if not self._has_forget_marks:
             return ""
+        state = " AND fm.state<>'rewritten'" if rewritten else ""
         return (f" AND NOT EXISTS (SELECT 1 FROM marong.forget_marks fm "
-                f"WHERE fm.target_type={kind_sql} AND fm.target_id={source_id}) ")
+                f"WHERE fm.target_type={kind_sql} AND fm.target_id={source_id}{state}) ")
 
-    def _call_guard(self, kind: str, source_id: str, room: str, requested: str = '%(room)s', expression=False) -> str:
+    def _call_guard(self, kind: str, source_id: str, room: str, requested: str = '%(room)s', expression=False, *, rewritten=False) -> str:
         k = kind if expression else "'" + kind + "'"
-        forget = self._forget_guard(k, source_id)
+        forget = self._forget_guard(k, source_id, rewritten)
         if not self.call_bridge:
             return forget
         return (forget + f" AND NOT call.kakao_hidden({k},{source_id},{room}) "
@@ -296,6 +303,7 @@ class Store:
             return [], 0
         params = {"room": room_key, "before": before_id, "skip": list(skip_summary_ids),
                   "pats": [like_pattern(x) for x in terms], "limit": limit}
+        summary_text = self._summary_text()
         rows = await self._all(
             "SELECT * FROM ("
             "  SELECT 'message' AS source_type, m.id AS source_id, m.role, m.user_key, p.name, m.content, m.created_at "
@@ -304,11 +312,11 @@ class Store:
             "  AND m.meta->>'delivered' IS DISTINCT FROM 'false' AND m.content ILIKE ANY(%(pats)s) "
             + self._call_guard('message','m.id','m.room_key') +
             "  UNION ALL "
-            "  SELECT 'summary', s.id, NULL, NULL, NULL, s.content, s.created_at FROM marong.summaries s "
-            "  WHERE s.room_key IN " + self._reply_rooms("%(room)s") + " AND s.content <> '' "
-            "  AND NOT (s.id = ANY(%(skip)s::bigint[])) AND s.content ILIKE ANY(%(pats)s) "
+            f"  SELECT 'summary', s.id, NULL, NULL, NULL, {summary_text}, s.created_at FROM marong.summaries s "
+            "  WHERE s.room_key IN " + self._reply_rooms("%(room)s") + f" AND {summary_text} <> '' "
+            "  AND NOT (s.id = ANY(%(skip)s::bigint[])) " + f" AND {summary_text} ILIKE ANY(%(pats)s) "
             + self._summary_keyword_filter()
-            + self._call_guard('summary','s.id','s.room_key') +
+            + self._call_guard('summary','s.id','s.room_key',rewritten=True) +
             ") k ORDER BY created_at DESC LIMIT %(limit)s", params)
         total = await self._one(
             "SELECT (SELECT count(*) FROM marong.messages m WHERE m.room_key IN " + self._reply_rooms("%(room)s")
@@ -342,9 +350,12 @@ class Store:
     async def summaries(self, room_key: str, limit: int) -> list[dict]:
         """방(묶인 방들 함께)의 최근 요약(오래된 것부터). until 은 요약한 구간의 마지막 메시지 시각."""
         rows = await self._all(
-            "SELECT s.id, s.first_id, s.last_id, s.content, m.created_at AS until FROM marong.summaries s "
+            f"SELECT s.id, s.first_id, s.last_id, {self._summary_text()} AS content, "
+            "m.created_at AS until FROM marong.summaries s "
             "JOIN marong.messages m ON m.id = s.last_id "
-            "WHERE s.room_key IN " + scope("%(room)s") + self._call_guard('summary','s.id','s.room_key') + " ORDER BY s.last_id DESC LIMIT %(limit)s",
+            "WHERE s.room_key IN " + scope("%(room)s")
+            + self._call_guard("summary", "s.id", "s.room_key", rewritten=True)
+            + " ORDER BY s.last_id DESC LIMIT %(limit)s",
             {"room": room_key, "limit": limit})
         return rows[::-1]
 

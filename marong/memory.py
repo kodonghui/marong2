@@ -14,6 +14,7 @@ import re
 
 from .config import Settings
 from .embed import Embeddings
+from .forget_rewrite import infer, rewrite_one
 from .fmt import day_line, short_key, short_time
 from .llm import LLM, brief, text_of
 from .safety import SHARE_BLOCK
@@ -185,11 +186,16 @@ class MemoryWorker:
     async def step(self) -> bool:
         """한 번 돌고, 할 일이 더 남았으면 True."""
         await self.store.link_unlinked()
+        rewrote = False
+        if getattr(self.store, "friend_memory_enabled", False):
+            async def rewrite(original, forgotten):
+                return await infer(self.llm, self.s.anthropic_model, original, forgotten)
+            rewrote = await rewrite_one(self.store.pool, rewrite)
         more = await self.summarize_due()
         more = await self.note_due() or more
         shared = await self.share_due()
         await self.embed_pending()
-        return more or shared
+        return more or shared or rewrote
 
     async def embed_pending(self, max_batches: int = 20) -> int:
         if not self.emb.ready:
