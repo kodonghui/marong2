@@ -1,4 +1,4 @@
-import {action, api, banner, button, CONSENT, dateLabel, el, errorText, header,
+import {action, api, banner, button, CONSENT, dateLabel, DELETE_RECEIPT, el, errorText, header,
   link, notice, page, picture, resumeAfterSignIn, show, showTabs, text, today} from './pet.js';
 import {creationPath, stageLabel} from './creation.js';
 
@@ -7,12 +7,17 @@ const signedOutNotice = 'AI가 만든 캐릭터와 이야기하는 서비스예�
 
 function signedOut() {
   const url = new URL(location.href);
-  const loginError = url.searchParams.has('loginError');
-  if (loginError) {
+  const loginError = url.searchParams.get('loginError');
+  const hasLoginError = url.searchParams.has('loginError');
+  if (hasLoginError) {
     url.searchParams.delete('loginError');
     history.replaceState(null, '', url);
   }
-  show(loginError ? banner('로그인을 마치지 못했어요. 다시 해 주세요.') : null,
+  const deleted = sessionStorage.getItem(DELETE_RECEIPT);
+  sessionStorage.removeItem(DELETE_RECEIPT);
+  show(deleted ? banner('24시간 안에 지워요') : null,
+    hasLoginError ? banner(loginError === 'underage' ? '이 서비스는 만 19세 이상만 쓸 수 있어요.'
+      : '로그인을 마치지 못했어요. 다시 해 주세요.') : null,
     picture('/static/pet-welcome.webp', '나란히 앉은 개와 고양이', 'hero'),
     el('section', {class: 'stack notice'},
       el('h2', {}, '우리 아이 사진으로 그림 캐릭터를 만들고 이야기해요'),

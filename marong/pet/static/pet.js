@@ -31,6 +31,7 @@ export const button = (label, click, kind = '') => el('button', {type: 'button',
 export const text = (value, style) => el('p', {class: style}, value);
 export const banner = (value, action) => el('aside', {class: 'banner stack'}, text(value), action);
 export const AI_NOTICE = 'AI가 만든 캐릭터예요';
+export const DELETE_RECEIPT = 'pet:account-delete-receipt';
 export const CONSENT = '사진과 대화를 해외 AI 회사로 보내는 데 동의해야 쓸 수 있어요. 설정에서 바꿀 수 있어요.';
 export const RETRY = '잠시 뒤 다시 해 주세요.';
 

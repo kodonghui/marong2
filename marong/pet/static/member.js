@@ -1,4 +1,4 @@
-import {action, AI_NOTICE, api, banner, button, CONSENT, el, errorText, header, link, notice,
+import {action, AI_NOTICE, api, banner, button, CONSENT, DELETE_RECEIPT, el, errorText, Failure, header, link, notice,
   page, show, showTabs, text} from './pet.js';
 
 import {outfitOf, petLayers} from './closet.js';
@@ -8,6 +8,7 @@ import {pushControl} from './push-control.js';
 
 const HOME = {label: '홈', url: '/'};
 const LEGAL = '/static/legal/';
+const consentDate = new Intl.DateTimeFormat('ko-KR', {timeZone: 'Asia/Seoul', dateStyle: 'long'});
 const callTime = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', hour: 'numeric', hour12: true,
 });
@@ -310,48 +311,93 @@ export async function petScreen(id) {
 
 export async function account() {
   header('내 정보', HOME);
+  showTabs(null);
+  show(...Array.from({length: 8}, () => el('div', {class: 'skeleton', 'aria-hidden': 'true'})));
+  page.setAttribute('aria-busy', 'true');
   const [me, {items: pets}, {items: consents}] = await Promise.all([
     api('/api/me'), api('/api/pets'), api('/api/me/consents'),
   ]);
-  showTabs('/me', pets.some(pet => pet.shopEntry === true));
+  const locked = me.status === 'minor_locked';
+  showTabs('/me', !locked && pets.some(pet => pet.shopEntry === true));
   const names = {terms: '이용약관', privacy: '개인정보 처리방침', ai_notice: 'AI 고지', overseas_transfer: '국외 이전'};
   const outcome = el('div', {'aria-live': 'polite'});
   const consent = button(me.overseasTransfer ? '국외 이전 동의 끄기' : '국외 이전 동의 켜기', () => dialog.showModal());
+  consent.disabled = locked;
   const confirm = button(me.overseasTransfer ? '끄기' : '동의하기', () => action(confirm, outcome, async () => {
     await api('/api/me/consents/overseas_transfer', {method: 'PUT', body: {value: !me.overseasTransfer}});
-    location.replace('/me#consents');
+    history.replaceState(null, '', '/me#consents');
     location.reload();
   }), 'primary');
-  const dialog = el('dialog', {class: 'sheet stack'},
+  const dialog = el('dialog', {class: 'sheet stack', 'aria-label': '국외 이전 동의'},
     me.overseasTransfer ? text('끄면 새 대화·새 그림·통화가 멈춰요. 지금까지 만든 것은 볼 수 있어요')
-      : link('받는 곳 보기', LEGAL + 'overseas.html', 'plain'),
+      : el('a', {class: 'plain', href: LEGAL + 'overseas.html', target: '_blank', rel: 'noopener'}, '받는 곳 보기'),
     outcome, confirm, button('닫기', () => dialog.close()));
+  const rows = Object.entries(names).map(([kind, name]) => {
+    const row = consents.find(item => item.kind === kind);
+    if (!row) return null;
+    const date = new Date(row.at);
+    const when = row.at && !Number.isNaN(date.getTime()) ? ` · ${consentDate.format(date)}` : '';
+    return text(`${name} · ${row.value ? '동의함' : '동의 안 함'}${when}`);
+  });
   const panel = el('details', {id: 'consents', class: 'card stack', open: location.hash === '#consents'},
-    el('summary', {}, '동의'), ...consents.map(row => text(`${names[row.kind]} · ${row.value ? '동의함' : '동의 안 함'}`)),
-    text('필수 동의는 계정을 지워 거둘 수 있어요.', 'muted'), consent, dialog);
+    el('summary', {}, '동의'), rows, text('필수 동의는 계정을 지워 거둘 수 있어요.', 'muted'), consent, dialog);
   const logout = button('로그아웃', async () => {
     try { await api('/api/auth/logout', {method: 'POST', body: {}}); }
     finally { location.replace('/'); }
   });
-  const confirmText = el('input', {'aria-label': '확인 문구'});
+  const confirmPhrase = '계정 지우기';
+  const confirmText = el('input', {'aria-label': '확인 문구', maxlength: 10});
   const deleteOutlet = el('div', {'aria-live': 'polite'});
-  const deleteButton = button('지우기', () => action(deleteButton, deleteOutlet, async () => {
-    await api('/api/me', {method: 'DELETE', body: {confirm: confirmText.value}});
-    location.replace('/');
-  }), 'danger');
-  deleteButton.disabled = true;
-  confirmText.addEventListener('input', () => { deleteButton.disabled = confirmText.value !== '계정 지우기'; });
-  const deletion = el('dialog', {class: 'sheet stack'}, el('h2', {}, '계정 지우기'),
+  const closeDeletion = button('닫기', () => deletion.close());
+  const deleteButton = button('지우기', async () => {
+    if (confirmText.value !== confirmPhrase) return;
+    await action(deleteButton, deleteOutlet, async () => {
+      confirmText.disabled = closeDeletion.disabled = true;
+      try {
+        const receipt = await api('/api/me', {method: 'DELETE', body: {confirm: confirmPhrase}});
+        if (receipt?.ok !== true) throw new Failure(500);
+        for (const pet of pets) {
+          for (const key of ['chat', 'sleep', 'export', 'settings-refresh']) sessionStorage.removeItem(`pet:${key}:${pet.id}`);
+        }
+        sessionStorage.removeItem('pet_next');
+        sessionStorage.removeItem('pet_pay_return');
+        localStorage.removeItem(`pet:push:${me.memberNo}`);
+        sessionStorage.setItem(DELETE_RECEIPT, '1');
+        location.replace('/');
+      } catch (error) {
+        if (error.code !== 'confirm_required') throw error;
+        deleteOutlet.replaceChildren(text('글이 맞지 않아요', 'error'));
+      } finally { confirmText.disabled = closeDeletion.disabled = false; }
+    });
+    updateDelete();
+  }, 'danger');
+  function updateDelete() {
+    deleteButton.disabled = confirmText.value !== confirmPhrase || deleteButton.hasAttribute('aria-busy');
+  }
+  updateDelete();
+  confirmText.addEventListener('input', updateDelete);
+  const deletion = el('dialog', {class: 'sheet stack', 'aria-labelledby': 'delete-account-heading'},
+    el('h2', {id: 'delete-account-heading'}, confirmPhrase),
     text('아이, 사진, 대화, 기억, 그림이 모두 지워지고 구독은 해지돼요. 주문 기록만 이름 없이 5년 남아요'),
-    el('label', {}, '계정 지우기', confirmText), deleteOutlet, deleteButton, button('닫기', () => deletion.close()));
-  show(me.status === 'minor_locked' ? banner('이 서비스는 만 19세 이상만 쓸 수 있어요.') : null,
+    el('label', {}, confirmPhrase, confirmText), deleteOutlet, deleteButton, closeDeletion);
+  deletion.addEventListener('cancel', event => {
+    if (deleteButton.hasAttribute('aria-busy')) event.preventDefault();
+  });
+  const startDeletion = button(confirmPhrase, () => {
+    confirmText.value = '';
+    deleteOutlet.replaceChildren();
+    updateDelete();
+    deletion.showModal();
+  }, 'plain danger');
+  show(locked ? banner('이 서비스는 만 19세 이상만 쓸 수 있어요.') : null,
     el('section', {class: 'card stack'}, el('h2', {}, '회원 번호'),
       button(me.memberNo, () => navigator.clipboard?.writeText(me.memberNo).catch(() => {}), 'plain'),
       text('문의할 때 알려 주세요', 'muted'),
       me.freeTickets ? text(`무료 만들기권 ${me.freeTickets}장`) : null,
       text(`본인인증 · ${me.identityVerified ? '했어요' : '안 했어요'}`)),
-    link('한도와 구독', '/me/plan'), link('주문 내역', '/me/orders'), pushControl(me), panel,
+    locked ? el('button', {disabled: true}, '한도와 구독') : link('한도와 구독', '/me/plan'),
+    link('주문 내역', '/me/orders'), pushControl(me), panel,
     el('div', {class: 'row'}, link('이용약관', LEGAL + 'terms.html', 'plain'),
       link('개인정보 처리방침', LEGAL + 'privacy.html', 'plain')), logout,
-    button('계정 지우기', () => deletion.showModal(), 'plain danger'), deletion);
+    startDeletion, deletion);
 }

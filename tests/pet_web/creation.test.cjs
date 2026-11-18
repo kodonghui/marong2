@@ -1572,6 +1572,127 @@ if (require.main === module) {
     assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true);
   });
 
+  test('SCR-159 shows Korean consent dates and confirms only the overseas change', async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage({viewport:{width:360,height:790},timezoneId:'America/Los_Angeles'});
+    t.after(() => page.close());
+    let value = true;
+    const writes = [];
+    const recorded = () => ['terms','privacy','ai_notice','overseas_transfer'].map(kind => ({
+      kind, value: kind === 'overseas_transfer' ? value : true, at:'2026-11-17T17:00:00Z',
+    }));
+    await page.route('**/api/me', route => route.fulfill({json:{
+      status:'active',memberNo:'AB12CD34',overseasTransfer:value,freeTickets:1,
+    }}));
+    await page.route('**/api/me/consents', route => route.fulfill({json:{items:recorded()}}));
+    await page.route('**/api/me/consents/*', route => {
+      assert.match(route.request().url(), /\/overseas_transfer$/);
+      const update = route.request().postDataJSON();
+      writes.push(update);
+      value = update.value;
+      return route.fulfill({json:{items:recorded()}});
+    });
+    await page.goto(origin + '/me#consents');
+    await visible(page.getByText('이용약관 · 동의함 · 2026년 11월 18일',{exact:true}));
+    await visible(page.getByText('개인정보 처리방침 · 동의함 · 2026년 11월 18일',{exact:true}));
+    await visible(page.getByText('AI 고지 · 동의함 · 2026년 11월 18일',{exact:true}));
+    const dialog = page.getByRole('dialog',{name:'국외 이전 동의'});
+    await page.getByRole('button',{name:'국외 이전 동의 끄기'}).click();
+    await visible(dialog.getByText('끄면 새 대화·새 그림·통화가 멈춰요. 지금까지 만든 것은 볼 수 있어요'));
+    await dialog.getByRole('button',{name:'닫기'}).click();
+    assert.deepEqual(writes,[]);
+    await page.getByRole('button',{name:'국외 이전 동의 끄기'}).click();
+    await dialog.getByRole('button',{name:'끄기',exact:true}).click();
+    await visible(page.getByText('국외 이전 · 동의 안 함 · 2026년 11월 18일',{exact:true}));
+    assert.equal(new URL(page.url()).hash,'#consents');
+    await page.getByRole('button',{name:'국외 이전 동의 켜기'}).click();
+    const destination = dialog.getByRole('link',{name:'받는 곳 보기'});
+    assert.equal(await destination.getAttribute('href'),'/static/legal/overseas.html');
+    assert.equal(await destination.getAttribute('target'),'_blank');
+    await dialog.getByRole('button',{name:'동의하기',exact:true}).click();
+    await visible(page.getByText('국외 이전 · 동의함 · 2026년 11월 18일',{exact:true}));
+    assert.deepEqual(writes,[{value:false},{value:true}]);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),true);
+  });
+
+  test('SCR-159 requires exact deletion confirmation and shows a one-time receipt only after acceptance', {timeout:15_000}, async t => {
+    const {origin} = await fixture(t,{closetMode:'living'});
+    const page = await browser.newPage({viewport:{width:430,height:790}});
+    t.after(() => page.close());
+    const started = Promise.withResolvers();
+    const hold = Promise.withResolvers();
+    t.after(hold.resolve);
+    let accepted = false;
+    const deletes = [];
+    await page.route('**/api/me', async route => {
+      if (route.request().method() === 'GET') return accepted
+        ? route.fulfill({status:401,json:{code:'unauthenticated'}}) : route.continue();
+      deletes.push(route.request().postDataJSON());
+      if (deletes.length === 1) return route.fulfill({status:400,json:{code:'confirm_required'}});
+      started.resolve();
+      await hold.promise;
+      accepted = true;
+      return route.fulfill({status:202,json:{ok:true}});
+    });
+    await page.goto(origin + '/me');
+    await page.evaluate(own => {
+      sessionStorage.setItem('pet:chat:' + own,'시험 초안');
+      sessionStorage.setItem('pet:chat:not-owned','다른 회원 시험 초안');
+      localStorage.setItem('pet:push:AB12CD34','test-notice-id');
+    },petId);
+    const startDelete = page.getByRole('button',{name:'계정 지우기',exact:true});
+    const dialog = page.getByRole('dialog',{name:'계정 지우기'});
+    const entry = dialog.getByLabel('확인 문구');
+    const submit = dialog.getByRole('button',{name:'지우기',exact:true});
+    const close = dialog.getByRole('button',{name:'닫기'});
+    await startDelete.click();
+    await entry.fill('계정을 지우기');
+    assert.equal(await submit.isDisabled(),true);
+    assert.deepEqual(deletes,[]);
+    await close.click();
+    await startDelete.click();
+    assert.equal(await entry.inputValue(),'');
+    await entry.fill('계정 지우기');
+    await submit.click();
+    await visible(dialog.getByText('글이 맞지 않아요',{exact:true}));
+    assert.equal(await page.getByText('24시간 안에 지워요').count(),0);
+    await submit.click();
+    await started.promise;
+    assert.equal(await entry.isDisabled(),true);
+    assert.equal(await submit.isDisabled(),true);
+    assert.equal(await close.isDisabled(),true);
+    await page.keyboard.press('Escape');
+    assert.equal(await dialog.isVisible(),true);
+    hold.resolve();
+    await page.waitForURL(origin + '/');
+    await visible(page.getByText('24시간 안에 지워요',{exact:true}));
+    assert.deepEqual(deletes,[{confirm:'계정 지우기'},{confirm:'계정 지우기'}]);
+    assert.deepEqual(await page.evaluate(own => [
+      sessionStorage.getItem('pet:chat:' + own),sessionStorage.getItem('pet:chat:not-owned'),
+      localStorage.getItem('pet:push:AB12CD34'),
+    ],petId),[null,'다른 회원 시험 초안',null]);
+    await page.reload();
+    await visible(page.getByRole('link',{name:'구글로 시작'}));
+    assert.equal(await page.getByText('24시간 안에 지워요').count(),0);
+  });
+
+  test('SCR-159 renders the age notice without enabling payment action', async t => {
+    const {origin}=await fixture(t,{signedIn:false,closetMode:'living'});
+    const page=await browser.newPage();
+    t.after(() => page.close());
+    const warning='이 서비스는 만 19세 이상만 쓸 수 있어요.';
+    await page.goto(origin+'/?loginError=underage');
+    await visible(page.getByText(warning,{exact:true}));
+    assert.equal(new URL(page.url()).search,'');
+    await page.route('**/api/me',route=>route.fulfill({json:{status:'minor_locked',memberNo:'AB12CD34'}}));
+    await page.goto(origin+'/me');
+    await visible(page.getByText(warning,{exact:true}));
+    assert.equal(await page.getByRole('button',{name:'한도와 구독'}).isDisabled(),true);
+    assert.equal(await page.getByRole('link',{name:'상점',exact:true}).count(),0);
+    await page.getByRole('button',{name:'계정 지우기',exact:true}).click();
+    await visible(page.getByRole('dialog',{name:'계정 지우기'}));
+  });
+
   test('SCR-160 shows quota, disabled payments, price consent and two-step cancellation', async t => {
     const page = await browser.newPage({viewport: {width: 360, height: 790}});
     t.after(() => page.close());
