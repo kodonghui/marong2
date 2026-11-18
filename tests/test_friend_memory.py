@@ -688,7 +688,7 @@ async def check_forget_dialogue(db):
         [(caller,)] = db.admin("INSERT INTO call.callers(friend_id) VALUES (%s) RETURNING id", (owner,))
         [(call,)] = db.admin("""
             INSERT INTO call.calls(caller_id,client_id,prompt_version,voice,status,ended_at,end_reason)
-            VALUES (%s,gen_random_uuid(),'fixture','fixture','ended',now(),'client') RETURNING id
+            VALUES (%s,gen_random_uuid(),'fixture','fixture','ended',now(),'hangup') RETURNING id
         """, (caller,))
         [(segment,)] = db.admin("""
             INSERT INTO call.segments(call_id,mode,client_id) VALUES (%s,'start',gen_random_uuid()) RETURNING id
