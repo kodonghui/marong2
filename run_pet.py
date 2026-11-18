@@ -6,22 +6,26 @@ import os
 import sys
 
 import psycopg
-from aiohttp import web
+from aiohttp import ClientSession, web
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from marong.pet.account import register as register_account
 from marong.pet.auth import AuthConfig, register as register_auth
 from marong.pet.cost import Budget
+from marong.pet.creations import register as register_creations
 from marong.pet.delete import register as register_delete
 from marong.pet.http import CONFIG, POOL, guard, read_media
 from marong.pet.photos import load_detector, register as register_photos
 from marong.pet.quota import register as register_quota
 from marong.pet.push import VapidSender, register as register_push
 from marong.pet.settings import Settings, SettingsError
+from marong.pet.traits import register as register_traits
+from marong.pet.vision import VisionExtractor
 
 log = logging.getLogger("pet")
 BUDGET = web.AppKey("pet_budget", Budget)
+VISION = web.AppKey("pet_vision", VisionExtractor)
 
 
 async def health(_request):
@@ -29,7 +33,7 @@ async def health(_request):
 
 
 def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, push_sender=None,
-             face_detector=None) -> web.Application:
+             face_detector=None, traits_api_key=None) -> web.Application:
     app = web.Application(middlewares=[guard])
     app[CONFIG] = settings
 
@@ -47,7 +51,12 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
                     raise SettingsError("the separate pet database is not initialized")
             app[POOL] = pool
             app[BUDGET] = Budget(pool, settings)
-            yield
+            if traits_api_key:
+                async with ClientSession() as session:
+                    app[VISION] = VisionExtractor(session, traits_api_key, settings, app[BUDGET])
+                    yield
+            else:
+                yield
         finally:
             await pool.close()
 
@@ -60,6 +69,9 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
     register_push(app, sender=push_sender)
     register_delete(app, revoke=revoke_billing_key)
     register_photos(app, face_detector)
+    register_creations(app)
+    extract = (lambda photos, job: app[VISION](photos, job)) if traits_api_key else None
+    register_traits(app, extract)
     return app
 
 
@@ -73,7 +85,9 @@ def main() -> int:
             raise SettingsError("pet push key and contact must be configured together")
         sender = VapidSender(key, subject) if key else None
         detector = load_detector(os.environ.get("PET_YUNET_MODEL_PATH"))
-        web.run_app(make_app(settings, push_sender=sender, face_detector=detector), host="127.0.0.1", port=settings.port,
+        traits_key = os.environ.get("PET_ANTHROPIC_API_KEY")
+        web.run_app(make_app(settings, push_sender=sender, face_detector=detector, traits_api_key=traits_key),
+                   host="127.0.0.1", port=settings.port,
                    access_log=None, print=None)
     except SettingsError as error:
         log.error("pet_start_failed %s", error)

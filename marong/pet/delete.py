@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from aiohttp import web
 
 from .http import CONFIG, COOKIE, POOL, Problem, body_json, require_member
+from .creations import cleanup as cleanup_creations
 from .jobs import JobQueue
 from .log import logger, member_ref
 from .quota import release_expired
@@ -88,20 +89,26 @@ def register(app, *, revoke=None):
     app.router.add_delete("/api/me", request_delete)
 
     async def maintenance(app):
+        stop = asyncio.Event()
+
         async def run():
-            while True:
+            while not stop.is_set():
                 try:
                     await erase_next(app[POOL], app[CONFIG].media_dir, revoke=revoke)
                     await release_expired(app[POOL], datetime.now(timezone.utc))
+                    await cleanup_creations(app[POOL], app[CONFIG].media_dir)
                 except Exception:
                     logger.error("pet_maintenance_failed")
-                await asyncio.sleep(30)
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=30)
+                except TimeoutError:
+                    pass
 
         worker = asyncio.create_task(run())
         try:
             yield
         finally:
-            worker.cancel()
-            await asyncio.gather(worker, return_exceptions=True)
+            stop.set()
+            await worker
 
     app.cleanup_ctx.append(maintenance)

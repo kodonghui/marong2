@@ -14,6 +14,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from psycopg.types.json import Jsonb
 
 from .account import require_overseas
+from .creations import OPEN, view
 from .http import CONFIG, POOL, Problem, require_member
 from .log import logger
 
@@ -143,9 +144,9 @@ async def read_form(req):
 
 async def require_capacity(conn, member_id):
     result = await conn.execute(
-        """SELECT (SELECT count(*) FROM pet.pets WHERE member_id=%s) AS pets,
+        f"""SELECT (SELECT count(*) FROM pet.pets WHERE member_id=%s) AS pets,
                   (SELECT count(*) FROM pet.creations WHERE member_id=%s
-                   AND state NOT IN ('done','rejected','failed_traits','failed_candidates','expired')) AS open""",
+                   AND state NOT IN {OPEN}) AS open""",
         (member_id, member_id),
     )
     counts = await result.fetchone()
@@ -168,7 +169,7 @@ async def save_photos(pool, root, member_id, kind, photos):
             await require_capacity(conn, member_id)
             result = await conn.execute(
                 """INSERT INTO pet.creations(member_id,kind,faces_masked) VALUES (%s,%s,%s)
-                RETURNING id,kind,state,created_at,expires_at""",
+                RETURNING *""",
                 (member_id, kind, sum(photo.faces for photo in photos)),
             )
             row = await result.fetchone()
@@ -218,11 +219,6 @@ def register(app, detect):
                 lambda: [sanitize(raw, index, detect) for index, raw in enumerate(originals, 1)]
             )
             row = await save_photos(pool, req.app[CONFIG].media_dir, member_id, kind, photos)
-        return web.json_response({
-            "id": str(row["id"]), "kind": row["kind"], "state": row["state"], "traits": None,
-            "multiplePets": False, "template": None, "preview": None, "candidates": [],
-            "chosenId": None, "regenerationsLeft": 2, "failure": None, "priceKrw": 5900,
-            "petId": None, "createdAt": row["created_at"].isoformat(), "expiresAt": row["expires_at"].isoformat(),
-        }, status=202)
+        return web.json_response(view(row), status=202)
 
     app.router.add_post("/api/creations", create)
