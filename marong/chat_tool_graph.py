@@ -9,7 +9,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 from langsmith import tracing_context
 
-from tools.vertex_live.tool_trace import step as trace_step
+from tools.vertex_live.tool_trace import app_parent, step as trace_step
 
 from .llm import text_of
 
@@ -157,7 +157,7 @@ def graph():
 async def answer_with_tools(agent, msg, system, messages, tools, end, *, texts,
                             server_counts=None, server_blocks=()):
     surface = {"app": "app_chat", "discord": "discord_chat"}.get(getattr(msg, "via", None), "kakao_chat")
-    with trace_step("text_turn", surface=surface) as trace:
+    with trace_step("text_turn", app_parent(), surface=surface) as trace:
         turn = Turn(agent, msg, system, messages, tools, end, trace, texts, server_counts, server_blocks)
         # Graph state carries only routing decisions. The provider request and tool values stay in memory.
         with tracing_context(enabled=False):

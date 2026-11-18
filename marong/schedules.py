@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from tools.vertex_live.tool_trace import app_note, app_read
+
 from .fmt import WEEKDAYS
 
 REPEATS = ("none", "daily", "weekdays", "weekly", "monthly")
@@ -304,11 +306,15 @@ async def run_tool(store, name: str, inp: dict, *, friend_id: int, room_key: str
     if name == "schedule_add":
         item = check_add(inp, tz, now, ring)
         if isinstance(item, str):
+            app_note(reason="invalid_input")
             return item, {"tool": name, "result": "error"}
-        if item.action == "call" and await store.call_friend(friend_id) is None:
+        if item.action == "call" and await app_read("schedule_storage", store.call_friend, friend_id) is None:
+            app_note(reason="call_unavailable")
             return CALL_UNAVAILABLE, {"tool": name, "result": "error", "why": "call_unavailable"}
-        outcome, row = await store.add_schedule(friend_id, room_key, source, source_message_id, item)
+        outcome, row = await app_read("schedule_storage", store.add_schedule, friend_id, room_key, source,
+                                     source_message_id, item)
         if outcome == "full":
+            app_note(reason="capacity")
             return (f"일정이 이미 {ACTIVE_MAX}개라 더 저장하지 못했어. 맞춰 뒀다고 하지 말고, 지난 일정이나 안 쓰는 알림을 "
                     "취소하자고 말해."), {"tool": name, "result": "error"}
         if outcome == "already":
@@ -323,9 +329,11 @@ async def run_tool(store, name: str, inp: dict, *, friend_id: int, room_key: str
     if name == "schedule_cancel":
         schedule_id = inp.get("id")
         if isinstance(schedule_id, bool) or not isinstance(schedule_id, int):
+            app_note(reason="invalid_input")
             return "id 는 '이 친구 일정'에 붙은 번호(정수)야.", {"tool": name, "result": "error"}
-        row = await store.cancel_schedule(friend_id, schedule_id)
+        row = await app_read("schedule_storage", store.cancel_schedule, friend_id, schedule_id)
         if row is None:
+            app_note(reason="not_found")
             return (f"#{schedule_id} 는 이 친구의 진행 중인 일정이 아니야. 취소하지 않았어. 번호를 다시 확인해."), \
                 {"tool": name, "result": "error"}
         return f"취소했어: {describe(row, tz, now)}.", {"tool": name, "result": "ok", "id": schedule_id}
@@ -334,12 +342,15 @@ async def run_tool(store, name: str, inp: dict, *, friend_id: int, room_key: str
             start, _ = parse_when(inp.get("start"), tz)
             end, _ = parse_when(inp.get("end"), tz)
         except ValueError:
+            app_note(reason="invalid_input")
             return "start·end 는 'YYYY-MM-DD'로 써.", {"tool": name, "result": "error"}
         start = start.replace(hour=0, minute=0, second=0, microsecond=0)
         end = end.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
         if end <= start:
+            app_note(reason="invalid_input")
             return "end 가 start 보다 앞이야.", {"tool": name, "result": "error"}
-        rows = await store.schedules_between(friend_id, start, end, LIST_MAX)
+        rows = await app_read("schedule_storage", store.schedules_between, friend_id, start, end, LIST_MAX)
+        app_note(count=len(rows))
         if not rows:
             return "그 기간에는 저장된 일정이 없어.", {"tool": name, "result": "ok", "count": 0}
         return ("그 기간 일정(반복 알림 포함):\n" + "\n".join("- " + describe(r, tz, now) for r in rows),

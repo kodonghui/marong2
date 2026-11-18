@@ -18,6 +18,8 @@ from zoneinfo import ZoneInfo
 
 import discord
 
+from tools.vertex_live.tool_trace import app_note, app_step
+
 from . import reactions
 from .agent import CAPTION_PROMPT, Agent, Incoming
 from .app_delivery import RingCalls
@@ -386,8 +388,11 @@ class DiscordAgent(Agent):
         if isinstance(msg, DiscordIncoming) and msg.friend_id:
             tz = ZoneInfo(self.s.timezone)
             try:
-                msg.schedule_rows, msg.schedule_total = await asyncio.wait_for(
-                    self.store.upcoming_schedules(msg.friend_id, datetime.now(tz), tz), 2)
+                with app_step("schedules_context", storage=True) as schedules:
+                    msg.schedule_rows, msg.schedule_total = await asyncio.wait_for(
+                        self.store.upcoming_schedules(msg.friend_id, datetime.now(tz), tz), 2)
+                    if schedules:
+                        schedules.record(result="ok", count=len(msg.schedule_rows), available=msg.schedule_total)
             except Exception as e:  # Answer without the list; the model is told it could not be read.
                 log.warning("schedule_context_error %s", type(e).__name__)
             if self.google:
@@ -400,7 +405,16 @@ class DiscordAgent(Agent):
     async def _google_context(self, msg, tz):
         """The friend's Google link and upcoming events. A slow or failing Google never blocks the answer."""
         try:
-            msg.google_link = await asyncio.wait_for(self.store.google_link(msg.friend_id), 2)
+            with app_step("calendar_link", storage=True) as lookup:
+                msg.google_link = await asyncio.wait_for(self.store.google_link(msg.friend_id), 2)
+                if lookup:
+                    link = msg.google_link
+                    connected = link and link["status"] == "connected"
+                    can_read = connected and link["can_read"]
+                    if can_read:
+                        lookup.record(result="ok")
+                    else:
+                        lookup.record(result="skipped", reason="permission_denied" if connected else "no_link")
         except Exception as e:
             log.warning("google_context_error %s", type(e).__name__)
             msg.google_link = UNKNOWN_LINK
@@ -409,7 +423,13 @@ class DiscordAgent(Agent):
         if not link or link["status"] != "connected" or not link["can_read"]:
             return
         try:
-            got = await asyncio.wait_for(self.google.upcoming(msg.friend_id, datetime.now(tz)), GOOGLE_CONTEXT_S)
+            with app_step("calendar_context") as calendar:
+                got = await asyncio.wait_for(self.google.upcoming(msg.friend_id, datetime.now(tz)), GOOGLE_CONTEXT_S)
+                if calendar:
+                    if got is None:
+                        calendar.record(result="rejected", reason="provider_auth")
+                    else:
+                        calendar.record(result="ok", count=len(got[0]))
             if got is None:  # Google refused the token just now: show the link as it is now (broken).
                 msg.google_link = await asyncio.wait_for(self.store.google_link(msg.friend_id), 2) or UNKNOWN_LINK
             else:
@@ -421,10 +441,11 @@ class DiscordAgent(Agent):
         """Google events for schedule_list's period, appended to its result."""
         tz = ZoneInfo(self.s.timezone)
         try:
-            start = parse_when(inp.get("start"), tz)[0].replace(hour=0, minute=0, second=0, microsecond=0)
-            end = parse_when(inp.get("end"), tz)[0].replace(hour=0, minute=0, second=0, microsecond=0)
-            return await asyncio.wait_for(
-                self.google.list_text(friend_id, start, end + timedelta(days=1), datetime.now(tz)), GOOGLE_LIST_S)
+            with app_step("calendar_tool"):
+                start = parse_when(inp.get("start"), tz)[0].replace(hour=0, minute=0, second=0, microsecond=0)
+                end = parse_when(inp.get("end"), tz)[0].replace(hour=0, minute=0, second=0, microsecond=0)
+                return await asyncio.wait_for(
+                    self.google.list_text(friend_id, start, end + timedelta(days=1), datetime.now(tz)), GOOGLE_LIST_S)
         except Exception as e:
             log.warning("google_list_error %s", type(e).__name__)
             return "\n구글 캘린더는 지금 못 읽었어."
@@ -492,6 +513,7 @@ class DiscordAgent(Agent):
         result = {"type": "tool_result", "tool_use_id": block.id}
         friend_id = getattr(msg, "friend_id", None)
         if block.name not in SCHEDULE_TOOL_NAMES or not friend_id:
+            app_note(reason="permission_denied" if block.name in SCHEDULE_TOOL_NAMES else "unknown_tool")
             return {**result, "content": f"{block.name} 도구는 없어.", "is_error": True}
         try:
             content, action = await run_schedule_tool(
@@ -499,6 +521,7 @@ class DiscordAgent(Agent):
                 source="discord", source_message_id=msg.saved_id, tz=ZoneInfo(self.s.timezone), ring=self.ring)
         except Exception as e:
             log.error("db_error %s", brief(e))
+            app_note(reason="storage_error")
             msg.actions.append({"tool": block.name, "result": "db_error"})
             return {**result, "is_error": True,
                     "content": "저장소 오류로 못 했어. 맞춰 뒀다고 하지 말고, 지금은 저장이 안 된다고 솔직하게 말해."}

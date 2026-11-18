@@ -19,6 +19,9 @@ sys.path[:0] = [str(ROOT), str(ROOT / "tools" / "vertex_live")]
 from fakes import ScriptedLLM, message, text, thinking, tool_use
 from live_session import LiveSession
 from marong.agent import Agent, Incoming
+from marong.deepseek import DeepSeekError, DeepSeekLLM
+from marong.discord_dm import DiscordAgent
+from marong.schedules import SCHEDULE_LIST_TOOL
 from tools.vertex_live import tool_trace as text_trace
 import tool_trace as voice_trace
 
@@ -184,6 +187,61 @@ class ToolTraceTest(unittest.IsolatedAsyncioTestCase):
             await self.ask(agent)
         _, request = self.capture.traces[0]
         self.assertEqual(request["error"], "timeout")
+
+    async def test_app_schedule_failures_keep_distinct_reasons(self):
+        agent = DiscordAgent.__new__(DiscordAgent)
+        agent.s = SimpleNamespace(anthropic_model="fixture", llm_max_tokens=100, anthropic_effort=None,
+                                  timezone="Asia/Seoul")
+        agent.store = SimpleNamespace(schedules_between=AsyncMock(side_effect=RuntimeError(PRIVATE_FIXTURE)))
+        agent.friend_cards = agent.google = agent.route = agent.warmer = None
+        agent.ring = False
+        scenarios = [
+            (None, {}, "permission_denied"),
+            (1, {}, "invalid_input"),
+            (1, {"start": "2026-11-19", "end": "2026-11-20"}, "storage_error"),
+        ]
+        for friend, args, reason in scenarios:
+            with self.subTest(reason=reason), text_trace.step("app_turn", surface="app_chat"):
+                def respond(body):
+                    if len(body["messages"]) == 1:
+                        return message([tool_use("schedule_list", args)], "tool_use")
+                    self.assertTrue(body["messages"][-1]["content"][0]["is_error"])
+                    return message([text("실패했어")])
+
+                agent.llm = ScriptedLLM(respond)
+                incoming = SimpleNamespace(friend_id=friend, via="app", room_key=PRIVATE_FIXTURE,
+                                           user_key=PRIVATE_FIXTURE, saved_id=None, actions=[])
+                end = asyncio.get_running_loop().time() + 2
+                await agent.ask([], [{"role": "user", "content": PRIVATE_FIXTURE}], incoming, end,
+                                tools=[SCHEDULE_LIST_TOOL])
+            trace = self.capture.traces[-1]
+            dispatch = next(run for run in trace if run["name"] == "tool_dispatch")
+            self.assertEqual(dispatch["outputs"]["reason"], reason)
+            if reason == "storage_error":
+                storage = next(run for run in trace if run["name"] == "schedule_storage")
+                self.assertEqual(storage["error"], "storage_error")
+
+    async def test_alternate_provider_tokens_do_not_count_cache_twice(self):
+        replies = iter([
+            httpx.Response(403, json={"error": PRIVATE_FIXTURE}),
+            httpx.Response(200, json={"choices": [{"message": {"content": PRIVATE_FIXTURE}}],
+                                      "usage": {"prompt_tokens": 90, "completion_tokens": 7,
+                                                "prompt_tokens_details": {"cached_tokens": 60}}}),
+        ])
+        llm = DeepSeekLLM(PRIVATE_FIXTURE, model="fixture-alternate", hedge_s=0,
+                          transport=httpx.MockTransport(lambda request: next(replies)))
+        self.addAsyncCleanup(llm.close)
+        payload = {"messages": [{"role": "user", "content": PRIVATE_FIXTURE}]}
+        with text_trace.step("app_turn", surface="app_chat"):
+            with self.assertRaises(DeepSeekError):
+                await llm._post(payload, asyncio.get_running_loop().time() + 2)
+            await llm._post(payload, asyncio.get_running_loop().time() + 2)
+        _, failure, success = self.capture.traces[0]
+        self.assertEqual(failure["outputs"]["reason"], "provider_auth")
+        self.assertEqual(success["extra"]["metadata"]["ls_model_name"], "fixture-alternate")
+        self.assertEqual(success["prompt_tokens"], 90)
+        self.assertEqual(success["total_tokens"], 97)
+        self.assertEqual(success["outputs"]["usage_metadata"]["input_token_details"]["cache_read"], 60)
 
     async def run_voice(self, execute, disconnect=False):
         upstream = Upstream([{"name": "recall", "id": PRIVATE_FIXTURE,

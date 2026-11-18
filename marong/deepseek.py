@@ -36,6 +36,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from tools.vertex_live.tool_trace import app_step
+
 from .llm import brief, server_tool_counts
 
 log = logging.getLogger("marong.deepseek")
@@ -276,27 +278,46 @@ class DeepSeekLLM:
             left = deadline - loop.time()
             if left < 1:
                 raise DeepSeekError(None, "out of time")
-            try:
-                # httpx 의 timeout 은 바이트 사이 간격이라, 전체 시간은 wait_for 로 자른다
-                resp = await asyncio.wait_for(self.http.post("/chat/completions", json=payload, timeout=left), left)
-            except (httpx.TimeoutException, asyncio.TimeoutError):
-                raise DeepSeekError(None, "timeout") from None  # 남은 시간을 다 씀: 다시 보내지 않음
-            except httpx.TransportError as e:
-                error = DeepSeekError(None, type(e).__name__)
-            else:
-                if replied is not None:
-                    replied.set()
-                if resp.status_code == 200:
-                    try:
-                        data = resp.json()
-                        data["choices"][0]["message"]
-                    except (ValueError, KeyError, IndexError, TypeError):
-                        raise DeepSeekError(200, "bad response") from None
-                    return data
-                risk = resp.status_code == 400 and "risk" in resp.text.lower()
-                error = DeepSeekError(resp.status_code, "risk" if risk else "HTTP error")
-                if resp.status_code not in (429, 500, 502, 503, 504):
-                    raise error
+            with app_step("model_attempt", attempt=attempt) as trace:
+                if trace:
+                    trace.model("deepseek", self.model)
+                try:
+                    # httpx 의 timeout 은 바이트 사이 간격이라, 전체 시간은 wait_for 로 자른다
+                    resp = await asyncio.wait_for(self.http.post("/chat/completions", json=payload, timeout=left), left)
+                except (httpx.TimeoutException, asyncio.TimeoutError):
+                    if trace:
+                        trace.fail("timeout")
+                        trace.record(reason="timeout")
+                    raise DeepSeekError(None, "timeout") from None  # 남은 시간을 다 씀: 다시 보내지 않음
+                except httpx.TransportError as e:
+                    error = DeepSeekError(None, type(e).__name__)
+                    if trace:
+                        trace.fail("connection_error")
+                        trace.record(reason="connection_error")
+                else:
+                    if replied is not None:
+                        replied.set()
+                    if resp.status_code == 200:
+                        try:
+                            data = resp.json()
+                            data["choices"][0]["message"]
+                        except (ValueError, KeyError, IndexError, TypeError):
+                            raise DeepSeekError(200, "bad response") from None
+                        if trace:
+                            usage = data.get("usage") or {}
+                            if isinstance(usage, dict):
+                                details = usage.get("prompt_tokens_details")
+                                cached = details.get("cached_tokens") if isinstance(details, dict) else None
+                                trace.usage(usage.get("prompt_tokens"), usage.get("completion_tokens"),
+                                            usage.get("prompt_cache_hit_tokens") or cached)
+                            trace.record(result="ok")
+                        return data
+                    risk = resp.status_code == 400 and "risk" in resp.text.lower()
+                    error = DeepSeekError(resp.status_code, "risk" if risk else "HTTP error")
+                    if trace:
+                        trace.capture(error)
+                    if resp.status_code not in (429, 500, 502, 503, 504):
+                        raise error
             if attempt == 1 and deadline - loop.time() > RETRY_WAIT_S + 5 and (retry or error.status_code in BUSY):
                 log.warning("deepseek retry after %s", brief(error))
                 await asyncio.sleep(RETRY_WAIT_S)

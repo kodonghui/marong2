@@ -2,12 +2,14 @@
 
 import asyncio
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from functools import lru_cache
 import json
 import logging
 import os
 from queue import Full, Queue
+import re
 from threading import Thread
 import time
 from urllib.error import HTTPError
@@ -26,15 +28,30 @@ LABELS = {
                     "refusal", "model_context_window_exceeded"},
     "result": {"ok", "rejected", "invalid_result", "no_tool_blocks",
                "time", "found", "not_found", "ask_which", "refused", "unavailable",
-               "not_saved", "ending", "memory_unavailable", "temporary_error"},
+               "not_saved", "ending", "memory_unavailable", "temporary_error",
+               "queued", "skipped", "fallback", "no_reply", "no_device"},
+    "reason": {"timeout", "cancelled", "invalid_input", "permission_denied", "unknown_tool",
+               "storage_error", "rate_limited", "provider_auth", "provider_rejected",
+               "provider_unavailable", "connection_error", "invalid_result", "not_found",
+               "call_unavailable", "capacity", "no_link", "disabled", "waiter_active",
+               "no_ack", "exception", "not_attempted"},
+    "recall": {"ok", "short", "off", "slow", "error"},
+    "delivery": {"poll", "history", "push"},
 }
 NUMBERS = {"round", "offered", "requested", "results_attempted", "results_sent",
-           "web_searches", "web_fetches", "status_code"}
+           "web_searches", "web_fetches", "status_code", "count", "attempt", "available",
+           "candidates", "recalled", "summaries", "notes", "recent", "cache_write_5m", "cache_write_1h"}
 STAGES = {"text_turn", "model_request", "tool_node", "tool_dispatch", "voice_setup", "voice_tool",
-          "provider_send", "voice_search"}
-ROOT_STAGES = {"text_turn", "voice_setup", "voice_tool", "voice_search"}
+          "provider_send", "voice_search", "app_turn", "account_lookup", "room_queue",
+          "context", "recent_memory", "memory_summaries", "memory_notes", "memory_search",
+          "friend_context", "discord_context", "call_context", "schedules_context", "calendar_link",
+          "calendar_context", "schedule_storage", "calendar_tool", "model_attempt",
+          "reply_prepare", "reply_save", "reply_publish", "reply_push", "app_http_delivery"}
+ROOT_STAGES = {"text_turn", "voice_setup", "voice_tool", "voice_search", "app_turn"}
 ERRORS = {"timeout", "cancelled", "invalid_input", "provider_http_error",
-          "connection_error", "exception"}
+          "connection_error", "exception", "storage_error"}
+MODEL_NAME = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,95}\Z")
+active = ContextVar("active_marong_trace", default=None)
 log = logging.getLogger(__name__)
 
 
@@ -43,10 +60,13 @@ class Span:
         start = datetime.now(timezone.utc)
         identifier = str(uuid4())
         order = start.strftime("%Y%m%dT%H%M%S%fZ") + identifier
-        self.runs = parent.runs if parent else []
+        self.root = parent.root if parent else self
+        self.finished = False
+        self.runs = parent.runs if parent and not self.root.finished else []
         self.data = {
             "id": identifier, "name": stage,
-            "run_type": "tool" if stage in {"tool_dispatch", "voice_tool"} else "chain",
+            "run_type": {"tool_dispatch": "tool", "voice_tool": "tool", "model_attempt": "llm",
+                         "memory_search": "retriever"}.get(stage, "chain"),
             "start_time": start.isoformat(), "inputs": {}, "outputs": {},
             "trace_id": parent.data["trace_id"] if parent else identifier,
             "dotted_order": f'{parent.data["dotted_order"]}.{order}' if parent else order,
@@ -58,6 +78,8 @@ class Span:
 
     def record(self, **facts):
         for field, value in facts.items():
+            if value is None:
+                continue
             if field in LABELS:
                 self.data["outputs"][field] = value if type(value) is str and value in LABELS[field] else "other"
             elif field in NUMBERS and type(value) is int and value >= 0:
@@ -66,25 +88,56 @@ class Span:
     def fail(self, error):
         self.data["error"] = error if error in ERRORS else "exception"
 
+    def model(self, provider, model):
+        if provider in {"anthropic", "deepseek"} and isinstance(model, str) and MODEL_NAME.fullmatch(model):
+            self.data["extra"] = {"metadata": {"ls_provider": provider, "ls_model_name": model}}
 
-def _record_error(span, error):
+    def usage(self, inputs, outputs, cached=0, written=0, write_5m=0, write_1h=0):
+        def number(value):
+            return value if type(value) is int and value >= 0 else 0
+
+        if type(inputs) is not int or type(outputs) is not int:
+            return
+        inputs, outputs = number(inputs), number(outputs)
+        cached, written = min(inputs, number(cached)), min(inputs, number(written))
+        usage = {"input_tokens": inputs, "output_tokens": outputs, "total_tokens": inputs + outputs,
+                 "input_token_details": {"cache_read": cached, "cache_creation": written}}
+        self.data["outputs"]["usage_metadata"] = usage
+        self.data.update(prompt_tokens=inputs, completion_tokens=outputs, total_tokens=inputs + outputs)
+        self.record(cache_write_5m=number(write_5m), cache_write_1h=number(write_1h))
+
+    def capture(self, error, fallback="exception"):
+        _record_error(self, error, fallback)
+
+
+def _record_error(span, error, fallback="exception"):
     status = getattr(error, "status_code", None)
     # Hosted SDK exceptions do not all inherit from their built-in counterparts.
     # Match the known classes without importing the chat SDK in the voice relay.
     names = {cls.__name__ for cls in type(error).__mro__}
     if isinstance(error, asyncio.CancelledError):
         span.fail("cancelled")
+        span.record(reason="cancelled")
     elif isinstance(error, TimeoutError) or names & {"APITimeoutError", "TimeoutException"}:
         span.fail("timeout")
+        span.record(reason="timeout")
     elif type(status) is int and 100 <= status <= 599:
         span.fail("provider_http_error")
-        span.record(status_code=status)
+        category = {401: "provider_auth", 403: "provider_auth", 429: "rate_limited"}
+        span.record(status_code=status, reason=category.get(status, "provider_unavailable" if status >= 500
+                    else "invalid_result" if status < 400 else "provider_rejected"))
     elif isinstance(error, (TypeError, ValueError)):
         span.fail("invalid_input")
+        span.record(reason="invalid_input")
+    elif fallback == "storage_error":
+        span.fail("storage_error")
+        span.record(reason="storage_error")
     elif isinstance(error, OSError) or names & {"APIConnectionError", "ClientConnectionError", "NetworkError"}:
         span.fail("connection_error")
+        span.record(reason="connection_error")
     else:
         span.fail("exception")
+        span.record(reason="exception")
 
 
 @contextmanager
@@ -94,15 +147,58 @@ def step(stage, parent=None, **facts):
         yield None
         return
     span = Span(stage, parent, **facts)
+    token = active.set(span)
     try:
         yield span
     except (Exception, asyncio.CancelledError) as error:
-        _record_error(span, error)
+        if "error" not in span.data:
+            _record_error(span, error)
         raise
     finally:
+        active.reset(token)
         span.data["end_time"] = datetime.now(timezone.utc).isoformat()
         if sink is not None:
+            span.finished = True
             sink.submit(span.runs)
+
+
+def app_parent():
+    parent = active.get()
+    return parent if parent and parent.root.data["name"] == "app_turn" else None
+
+
+@contextmanager
+def app_step(stage, *, storage=False, **facts):
+    with step(stage, app_parent(), **facts) as span:
+        if span is None:
+            yield None
+            return
+        try:
+            yield span
+        except Exception as error:
+            if storage:
+                span.capture(error, "storage_error")
+            raise
+
+
+def app_note(**facts):
+    if parent := app_parent():
+        parent.record(**facts)
+
+
+async def app_read(stage, read, *args, **kwargs):
+    with app_step(stage, storage=True) as span:
+        result = await read(*args, **kwargs)
+        if span:
+            span.record(result="ok", count=len(result) if isinstance(result, list) else None)
+        return result
+
+
+def app_delivery(parent, transport):
+    span = Span("app_http_delivery", parent, delivery=transport, result="ok", status_code=200)
+    span.data["end_time"] = datetime.now(timezone.utc).isoformat()
+    if parent.root.finished and (sink := _sink()):
+        sink.submit(span.runs)
 
 
 class _NoRedirect(HTTPRedirectHandler):

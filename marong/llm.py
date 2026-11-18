@@ -4,6 +4,8 @@ import logging
 
 import anthropic
 
+from tools.vertex_live.tool_trace import app_step
+
 from .config import Settings
 
 log = logging.getLogger("llm")
@@ -82,7 +84,20 @@ class LLM:
 
     @staticmethod
     async def _once(client, body: dict, timeout: float):
-        return await client.messages.create(**body, timeout=timeout)
+        with app_step("model_attempt") as attempt:
+            if attempt:
+                attempt.model("anthropic", body.get("model"))
+            response = await client.messages.create(**body, timeout=timeout)
+            if attempt:
+                usage = response.usage
+                cached = getattr(usage, "cache_read_input_tokens", None) or 0
+                written = getattr(usage, "cache_creation_input_tokens", None) or 0
+                ttl = getattr(usage, "cache_creation", None)
+                attempt.usage((usage.input_tokens or 0) + cached + written, usage.output_tokens or 0,
+                              cached, written, getattr(ttl, "ephemeral_5m_input_tokens", None),
+                              getattr(ttl, "ephemeral_1h_input_tokens", None))
+                attempt.record(result="ok", stop_reason=response.stop_reason)
+            return response
 
     async def check_keys(self) -> list[tuple[str, str]]:
         """--check 용: 키를 하나씩 따로 시험한다(effort low, 짧은 답)."""
