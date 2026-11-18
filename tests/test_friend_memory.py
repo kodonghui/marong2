@@ -4,8 +4,10 @@ import asyncio
 import json
 from datetime import datetime, time, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+from anthropic import APIConnectionError
+from httpx import Request
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.conninfo import make_conninfo
 
@@ -258,6 +260,9 @@ async def check_worker(db):
             async def create_once(self, body, timeout):
                 requests.append(body)
                 assert timeout == 60
+                assert body["model"] == "fixture-ledger"
+                if len(requests) == 1:
+                    raise APIConnectionError(request=Request("POST", "https://fixture.test/"))
                 assert body["output_config"]["format"]["type"] == "json_schema"
                 [statement] = json.loads(body["messages"][0]["content"])["messages"]
                 assert statement["id"] == message
@@ -267,12 +272,14 @@ async def check_worker(db):
                 return SimpleNamespace(stop_reason="end_turn", content=[
                     SimpleNamespace(type="text", text=json.dumps(result, ensure_ascii=False))])
 
-        worker = asyncio.create_task(run_text_memory(store, db.app_url, FakeLLM(), "fixture"))
+        with patch.dict("os.environ", {"MARONG_MEMORY_MODEL": "fixture-ledger"}):
+            worker = asyncio.create_task(run_text_memory(store, db.app_url, FakeLLM(), "fixture"))
+            await asyncio.sleep(0)
         try:
             async with asyncio.timeout(10):
                 while db.admin("SELECT last_outcome FROM marong.memory_jobs WHERE friend_id=%s", (friend,)) != [("ok",)]:
                     await asyncio.sleep(0.05)
-            assert len(requests) == 1
+            assert len(requests) == 2
             assert db.admin("SELECT status,message_id FROM marong.memory_items WHERE friend_id=%s", (friend,)) == [
                 ("current", message)]
         finally:
@@ -309,26 +316,38 @@ async def check_call_worker(db):
         assert db.admin("SELECT calls FROM marong.memory_jobs WHERE friend_id=%s", (friend,)) == [([call],)]
         await organizer.fail(call)
 
-        async def infer(payload):
-            [statement] = payload["messages"]
-            assert statement["id"] == turn and statement["channel"] == "call"
-            return {"ops": [{"op": "loop_open", "message_id": turn, "quote": "다음 주에 이사해",
-                             "text": "이사", "due": None, "sensitivity": "low"}]}
+        output = {"ops": [{"op": "loop_open", "message_id": turn, "quote": "다음 주에 이사해",
+                           "text": "이사", "due": None, "sensitivity": "low"}]}
 
         async with call_checkpoint_pool(dsn) as pool:
             saver = AsyncPostgresSaver(pool)
             await saver.setup()
-            worker = asyncio.create_task(organizer.run_friend_memory(saver, infer))
-            try:
-                async with asyncio.timeout(10):
-                    while db.admin("SELECT last_outcome FROM marong.memory_jobs WHERE friend_id=%s", (friend,)) != [("ok",)]:
-                        await asyncio.sleep(0.05)
-                assert db.admin("SELECT text,channel,call_turn_id FROM marong.open_loops WHERE friend_id=%s", (friend,)) == [
-                    ("이사", "call", turn)]
-                assert_sqlstate(db, "marong", "SELECT 1 FROM call.turns WHERE false", "42501")
-            finally:
-                worker.cancel()
-                await asyncio.gather(worker, return_exceptions=True)
+            with patch("organizer.aiohttp.ClientSession") as session, \
+                    patch("organizer.google_headers", new=AsyncMock(return_value={})), \
+                    patch.dict("os.environ", {"MARONG_MEMORY_MODEL": "fixture-call"}):
+                http = session.return_value.__aenter__.return_value
+                result = http.post.return_value.__aenter__.return_value
+                result.status = 200
+                result.json = AsyncMock(return_value={"candidates": [{
+                    "finishReason": "STOP", "content": {"parts": [{"text": json.dumps(output, ensure_ascii=False)}]},
+                }]})
+                worker = asyncio.create_task(organizer.run_friend_memory(saver))
+                try:
+                    async with asyncio.timeout(10):
+                        while db.admin("SELECT last_outcome FROM marong.memory_jobs WHERE friend_id=%s",
+                                       (friend,)) != [("ok",)]:
+                            await asyncio.sleep(0.05)
+                    assert db.admin("SELECT text,channel,call_turn_id FROM marong.open_loops WHERE friend_id=%s",
+                                    (friend,)) == [("이사", "call", turn)]
+                    assert_sqlstate(db, "marong", "SELECT 1 FROM call.turns WHERE false", "42501")
+                    assert "fixture-call:generateContent" in http.post.call_args.args[0]
+                    body = http.post.call_args.kwargs["json"]
+                    assert body["generationConfig"]["responseJsonSchema"]["type"] == "object"
+                    [statement] = json.loads(body["contents"][0]["parts"][0]["text"])["messages"]
+                    assert statement["id"] == turn and statement["channel"] == "call"
+                finally:
+                    worker.cancel()
+                    await asyncio.gather(worker, return_exceptions=True)
     finally:
         await store.close()
 
@@ -345,5 +364,5 @@ if __name__ == "__main__":
     print("TC-330: debounced text, call eligibility, concurrent claims, lease recovery, fencing and ID-only checkpoints passed")
     print("TC-331–334: synthetic extraction, room scope, replacement, call provenance and loop expiry passed")
     print("TC-335: tool evidence, private list and room-scoped visibility passed")
-    print("Text runtime: scheduled message reached the structured client and was stored in one attempt")
+    print("Text runtime: a retryable connection error retried once and stored the scheduled message")
     print("TC-341: the call organizer saved a sourced open loop after legacy organization failed")

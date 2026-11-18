@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Literal, TypedDict
 from uuid import uuid4
@@ -190,7 +191,7 @@ async def run_text_memory(store, dsn, llm, model):
     from ..friend_memory import MemoryExtraction, StructuredInference
 
     queue = MemoryQueue(store.pool)
-    extraction = MemoryExtraction(store.pool, StructuredInference(llm, model))
+    extraction = MemoryExtraction(store.pool, StructuredInference(llm, os.getenv("MARONG_MEMORY_MODEL") or model))
     while True:
         try:
             async with checkpoint_pool(dsn) as pool:

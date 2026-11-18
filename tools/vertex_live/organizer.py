@@ -61,13 +61,20 @@ async def extract_friend_memory(payload):
             "maxOutputTokens": 6000, "thinkingConfig": {"thinkingLevel": "LOW"},
         },
     }
+    model = os.getenv("MARONG_MEMORY_MODEL") or TEXT_MODEL
     url = (f"https://aiplatform.googleapis.com/v1/projects/{PROJECT}/locations/global/"
-           f"publishers/google/models/{TEXT_MODEL}:generateContent")
+           f"publishers/google/models/{model}:generateContent")
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as http:
-        async with http.post(url, headers=await google_headers(), json=body) as response:
-            if response.status != 200:
-                raise RuntimeError("friend_memory_provider_failed")
-            data = await response.json()
+        for attempt in range(2):
+            try:
+                async with http.post(url, headers=await google_headers(), json=body) as response:
+                    if response.status != 200:
+                        raise RuntimeError("friend_memory_provider_failed")
+                    data = await response.json()
+                break
+            except aiohttp.ClientConnectionError as error:
+                if attempt or isinstance(error, TimeoutError):
+                    raise
     candidate = data["candidates"][0]
     if candidate.get("finishReason") != "STOP":
         raise ValueError("incomplete memory operations")

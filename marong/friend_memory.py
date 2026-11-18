@@ -249,13 +249,21 @@ class StructuredInference:
         self.model = model
 
     async def __call__(self, payload):
+        from anthropic import APIConnectionError, APITimeoutError
+
         from .llm import text_of
 
-        response = await self.llm.create_once({
+        request = {
             "model": self.model, "max_tokens": 6000, "system": GUIDE,
             "messages": [{"role": "user", "content": json.dumps(payload, ensure_ascii=False, default=str)}],
             "output_config": {"format": {"type": "json_schema", "schema": operation_schema()}},
-        }, 60)
+        }
+        try:
+            response = await self.llm.create_once(request, 60)
+        except APITimeoutError:
+            raise
+        except APIConnectionError:
+            response = await self.llm.create_once(request, 60)
         if response.stop_reason != "end_turn":
             raise ValueError("incomplete memory operations")
         return json.loads(text_of(response))
