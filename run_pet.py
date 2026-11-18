@@ -58,7 +58,7 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
     register_quota(app)
     register_push(app, sender=push_sender)
     register_delete(app, revoke=revoke_billing_key)
-    register_web(app, legal_dir=os.environ.get("PET_LEGAL_DIR"))
+    register_web(app, legal_dir=os.environ.get("PET_LEGAL_DIR"), item_dir=settings.media_dir / "items")
     return app
 
 

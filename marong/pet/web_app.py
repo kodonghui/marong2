@@ -23,7 +23,8 @@ HEADERS = {
 }
 
 
-def register(app, *, legal_dir=None):
+def register(app, *, legal_dir=None, item_dir=None):
+    item_root = (Path(item_dir) if item_dir else STATIC / "items").resolve()
     async def page(request):
         headers = HEADERS
         if request.path.endswith("/call") and SAFE_HOST.fullmatch(request.host):
@@ -42,8 +43,8 @@ def register(app, *, legal_dir=None):
         return web.FileResponse(STATIC / "pet-worker.js", headers=HEADERS)
 
     async def thumbnail(request):
-        path = STATIC / "items" / request.match_info["id"] / "thumb.webp"
-        if not path.is_file():
+        path = (item_root / request.match_info["id"] / "thumb.webp").resolve()
+        if not path.is_relative_to(item_root) or not path.is_file():
             raise web.HTTPNotFound()
         return web.FileResponse(path, headers=HEADERS)
 
