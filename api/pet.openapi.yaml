@@ -1244,6 +1244,7 @@ paths:
         - SPEC-321
         - SPEC-355
         - SPEC-361
+        - SPEC-312
       responses:
         '200':
           description: 성공
@@ -1279,7 +1280,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: '`wrong_state` · `payments_off` · `identity_required`'
+          description: '`wrong_state` · `payments_off` · `identity_required` · `consent_required`'
           content:
             application/problem+json:
               schema:
@@ -1291,6 +1292,17 @@ paths:
                   $ref: '#/components/examples/payments_off'
                 identity_required:
                   $ref: '#/components/examples/identity_required'
+                consent_required:
+                  $ref: '#/components/examples/consent_required'
+        '429':
+          description: '`rate_limited`'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                rate_limited:
+                  $ref: '#/components/examples/rate_limited'
         default:
           $ref: '#/components/responses/ServerError'
   /api/creations/{id}/regenerate:
