@@ -1,0 +1,108 @@
+{
+  "width": 1536,
+  "height": 1024,
+  "stages": {
+    "home_livingroom": {
+      "centerX": 768,
+      "floorY": 876,
+      "height": 708,
+      "tags": [
+        "home"
+      ]
+    },
+    "home_sofa": {
+      "centerX": 903,
+      "floorY": 879,
+      "height": 694,
+      "tags": [
+        "home"
+      ]
+    },
+    "home_window": {
+      "centerX": 791,
+      "floorY": 888,
+      "height": 690,
+      "tags": [
+        "home"
+      ]
+    },
+    "walking_path": {
+      "centerX": 787,
+      "floorY": 887,
+      "height": 674,
+      "tags": [
+        "walk"
+      ]
+    },
+    "park": {
+      "centerX": 768,
+      "floorY": 888,
+      "height": 681,
+      "tags": [
+        "park",
+        "walk"
+      ]
+    },
+    "beach": {
+      "centerX": 818,
+      "floorY": 888,
+      "height": 661,
+      "tags": [
+        "beach",
+        "walk"
+      ]
+    },
+    "snow": {
+      "centerX": 771,
+      "floorY": 877,
+      "height": 683,
+      "tags": [
+        "snow"
+      ]
+    },
+    "rain_window": {
+      "centerX": 764,
+      "floorY": 886,
+      "height": 686,
+      "tags": [
+        "rain",
+        "home"
+      ]
+    },
+    "night_blanket": {
+      "centerX": 765,
+      "floorY": 865,
+      "height": 714,
+      "tags": [
+        "night",
+        "home"
+      ]
+    },
+    "birthday": {
+      "centerX": 768,
+      "floorY": 869,
+      "height": 663,
+      "tags": [
+        "birthday",
+        "home"
+      ]
+    },
+    "autumn_leaves": {
+      "centerX": 788,
+      "floorY": 887,
+      "height": 657,
+      "tags": [
+        "autumn",
+        "walk"
+      ]
+    },
+    "rainbow_meadow": {
+      "centerX": 766,
+      "floorY": 886,
+      "height": 680,
+      "tags": [
+        "memorial_ok"
+      ]
+    }
+  }
+}

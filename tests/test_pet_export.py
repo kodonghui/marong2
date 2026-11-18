@@ -11,7 +11,7 @@ from zipfile import ZipFile
 
 import psycopg
 from aiohttp.test_utils import TestClient, TestServer
-from PIL import Image
+from PIL import Image, ImageDraw
 from psycopg.types.json import Jsonb
 
 from marong.pet.artwork import Templates
@@ -50,6 +50,15 @@ async def scenario(admin, dsn, base):
         image, image_path = media_file(conn, root, member, pet, preview.getvalue(), "scene")
         image_path.write_bytes(preview.getvalue())
         front_path.write_bytes(original)
+        (item,) = conn.execute("""
+            INSERT INTO pet.items(kind,name,slot,license_key,assets)
+            VALUES ('wear','fixture','head','fixture',%s) RETURNING id
+        """, (Jsonb({"layers": {"dog_small": "layers/dog_small.png"}}),)).fetchone()
+        layer = root / "items" / str(item) / "layers" / "dog_small.png"
+        layer.parent.mkdir(parents=True)
+        sprite = Image.new("RGBA", (1024, 1024))
+        ImageDraw.Draw(sprite).rectangle((360, 340, 680, 680), fill=(255, 8, 90, 255))
+        sprite.save(layer)
         conn.execute("UPDATE pet.pets SET mode='memorial',status='archived',memorial_since=%s,sheet=%s WHERE id=%s",
                      (at, Jsonb({name: str(front) for name in ("front", "smile", "excited", "sleepy",
                                                               "surprised", "sad", "pout")}), pet))
@@ -59,7 +68,8 @@ async def scenario(admin, dsn, base):
                 INSERT INTO pet.diary_entries(member_id,pet_id,day,status,title,body,picture_id,composite)
                 VALUES (%s,%s,%s,'ready','fixture','<script>fixture</script>',%s,%s)
             """, (member, pet, day, image if index else None,
-                  None if index else Jsonb({"backgroundId": "missing", "expression": "front", "outfit": {}})))
+                  None if index else Jsonb({"backgroundId": "missing", "expression": "front",
+                                             "outfit": {"head": str(item)}})))
         conn.execute("INSERT INTO pet.messages(member_id,pet_id,role,kind,content,created_at)"
                      " VALUES (%s,%s,'member','chat','우리 집은 시험용이야',%s)", (member, pet, at))
         conn.execute("INSERT INTO pet.messages(member_id,pet_id,role,kind,content,created_at)"
@@ -118,6 +128,9 @@ async def scenario(admin, dsn, base):
             with Image.open(BytesIO(bundle.read("pictures/front.png"))) as front_exported:
                 assert front_exported.getpixel((973, 995))[3] <= 179
                 assert front_exported.crop((800, 935, 1024, 1024)).getbbox() is not None
+            with Image.open(BytesIO(bundle.read(f"pictures/day-{at.date()}.png"))) as adorned:
+                assert adorned.size == (1536, 1024)
+                assert (255, 8, 90, 255) in adorned.getdata()
         assert (await client.post(start, headers=headers)).status == 429
         at += timedelta(hours=25)
         assert (await client.get(status + "/download", headers=headers)).status == 404

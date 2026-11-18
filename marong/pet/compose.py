@@ -2,12 +2,15 @@
 
 from dataclasses import dataclass
 from io import BytesIO
+import json
 from pathlib import Path
 
 from PIL import Image
 
 
-CANVAS = (1536, 1024)
+REGISTRY = Path(__file__).resolve().parents[2] / "design" / "pet" / "backgrounds" / "stages.json"
+STAGES = json.loads(REGISTRY.read_text(encoding="utf-8"))
+CANVAS = (STAGES["width"], STAGES["height"])
 SPRITE = (1024, 1024)
 SLOTS = ("body", "neck", "head")
 
@@ -24,20 +27,10 @@ class Background:
         return Path(directory) / f"{self.name}.webp"
 
 
-BACKGROUNDS = {item.name: item for item in (
-    Background("home_livingroom", 768, 876, 708, ("home",)),
-    Background("home_sofa", 903, 879, 694, ("home",)),
-    Background("home_window", 791, 888, 690, ("home",)),
-    Background("walking_path", 787, 887, 674, ("walk",)),
-    Background("park", 768, 888, 681, ("park", "walk")),
-    Background("beach", 818, 888, 661, ("beach", "walk")),
-    Background("snow", 771, 877, 683, ("snow",)),
-    Background("rain_window", 764, 886, 686, ("rain", "home")),
-    Background("night_blanket", 765, 865, 714, ("night", "home")),
-    Background("birthday", 768, 869, 663, ("birthday", "home")),
-    Background("autumn_leaves", 788, 887, 657, ("autumn", "walk")),
-    Background("rainbow_meadow", 766, 886, 680, ("memorial_ok",)),
-)}
+BACKGROUNDS = {
+    name: Background(name, stage["centerX"], stage["floorY"], stage["height"], tuple(stage["tags"]))
+    for name, stage in STAGES["stages"].items()
+}
 
 
 def background_for(name=None, *, memorial=False, tag=None):

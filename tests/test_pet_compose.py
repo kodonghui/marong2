@@ -4,7 +4,7 @@ from io import BytesIO
 
 from PIL import Image, ImageDraw
 
-from marong.pet.compose import BACKGROUNDS, Background, background_for, compose
+from marong.pet.compose import BACKGROUNDS, REGISTRY, Background, background_for, compose
 
 
 def png(layer):
@@ -42,8 +42,16 @@ def verify():
         assert result.getpixel((750, 640)) == (255, 0, 0, 255)
         assert result.getpixel((750, 740)) == (0, 128, 0, 255)
         assert result.getpixel((750, 840)) == (0, 0, 255, 255)
+    assert {path.stem for path in REGISTRY.parent.glob("*.webp")} == BACKGROUNDS.keys()
+    for stage in BACKGROUNDS.values():
+        asset = stage.asset(REGISTRY.parent)
+        with Image.open(asset) as raster:
+            assert raster.size == (1536, 1024) and raster.mode == "RGB"
+        with Image.open(BytesIO(compose(asset, stage, pet))) as result:
+            assert result.size == (1536, 1024)
+            assert result.getpixel((stage.center_x, stage.floor_y - 6))[:3] == (0, 0, 0)
 
 
 if __name__ == "__main__":
     verify()
-    print("TC-411: canvas, stage center and floor, exact per-slot overlap and fallback")
+    print("TC-411: all twelve backgrounds, canvas, stage center and floor, exact per-slot overlap and fallback")

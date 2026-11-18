@@ -36,7 +36,7 @@ def under(root, key):
     return path
 
 
-def render_diary(entry, pet, media, items, assets):
+def render_diary(entry, pet, media, items, assets, item_dir):
     choice = entry["composite"]
     stage = BACKGROUNDS.get(choice.get("backgroundId"), BACKGROUNDS["home_livingroom"])
     scene = stage.asset(assets / "backgrounds")
@@ -47,13 +47,16 @@ def render_diary(entry, pet, media, items, assets):
     source = media.get(pet["sheet"].get(expression)) or media[pet["sheet"]["front"]]
     outfit = {}
     for slot, item_id in choice.get("outfit", {}).items():
-        if item_id is not None:
-            layers = items[item_id]["layers"]
-            outfit[slot] = under(assets / "items", layers[pet["template"]])
+        item = items.get(item_id)
+        layer = item.get("layers", {}).get(pet["template"]) if item else None
+        if layer:
+            path = under(under(item_dir, item_id), layer)
+            if path.is_file():
+                outfit[slot] = path
     return compose(scene, stage, source, outfit=outfit)
 
 
-def build_zip(destination, pet, media, entries, messages, items, assets, font):
+def build_zip(destination, pet, media, entries, messages, items, assets, font, *, item_dir=None):
     safe_name = escape(pet["name"])
     with ZipFile(destination, "w", compression=ZIP_DEFLATED) as bundle:
         bundle.mkdir("pictures/")
@@ -69,7 +72,7 @@ def build_zip(destination, pet, media, entries, messages, items, assets, font):
             if entry["picture_id"] is not None:
                 image = media[str(entry["picture_id"])]
             elif entry["composite"]:
-                image = render_diary(entry, pet, media, items, assets)
+                image = render_diary(entry, pet, media, items, assets, item_dir or assets / "items")
             else:
                 image = None
             if image is not None:
@@ -160,7 +163,8 @@ async def run_export(pool, root, assets, font, clock, sender):
         with tempfile.TemporaryDirectory(prefix=".export-", dir=final.parent) as folder:
             temp_zip = Path(folder) / "archive.zip"
             # Finish the offloaded write before tearing down its temporary directory on shutdown.
-            write = asyncio.create_task(asyncio.to_thread(build_zip, temp_zip, *data, assets, font))
+            write = asyncio.create_task(asyncio.to_thread(build_zip, temp_zip, *data, assets, font,
+                                                          item_dir=root / "items"))
             try:
                 await asyncio.shield(write)
             except asyncio.CancelledError:
