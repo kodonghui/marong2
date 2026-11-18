@@ -6,28 +6,32 @@ import os
 import sys
 
 import psycopg
-from aiohttp import web
+from aiohttp import ClientSession, web
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from marong.pet.account import register as register_account
 from marong.pet.auth import AuthConfig, register as register_auth
+from marong.pet.chat import register as register_chat
 from marong.pet.cost import Budget
 from marong.pet.delete import register as register_delete
 from marong.pet.http import CONFIG, POOL, guard, read_media
 from marong.pet.quota import register as register_quota
 from marong.pet.push import VapidSender, register as register_push
+from marong.pet.replies import ChatModel, register as register_replies
 from marong.pet.settings import Settings, SettingsError
 
 log = logging.getLogger("pet")
 BUDGET = web.AppKey("pet_budget", Budget)
+CHAT = web.AppKey("pet_chat", ChatModel)
 
 
 async def health(_request):
     return web.json_response({"ok": True}, headers={"Cache-Control": "no-store"})
 
 
-def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, push_sender=None) -> web.Application:
+def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, push_sender=None,
+             chat_api_key=None, reply_model=None, chat_clock=None) -> web.Application:
     app = web.Application(middlewares=[guard])
     app[CONFIG] = settings
 
@@ -45,7 +49,12 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
                     raise SettingsError("the separate pet database is not initialized")
             app[POOL] = pool
             app[BUDGET] = Budget(pool, settings)
-            yield
+            if chat_api_key:
+                async with ClientSession() as session:
+                    app[CHAT] = ChatModel(session, chat_api_key, settings, app[BUDGET])
+                    yield
+            else:
+                yield
         finally:
             await pool.close()
 
@@ -57,6 +66,9 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
     register_quota(app)
     register_push(app, sender=push_sender)
     register_delete(app, revoke=revoke_billing_key)
+    register_chat(app, **({"clock": chat_clock} if chat_clock else {}))
+    if reply_model or chat_api_key:
+        register_replies(app, reply_model or (lambda *args, **kwargs: app[CHAT](*args, **kwargs)))
     return app
 
 
@@ -69,7 +81,8 @@ def main() -> int:
         if bool(key) != bool(subject):
             raise SettingsError("pet push key and contact must be configured together")
         sender = VapidSender(key, subject) if key else None
-        web.run_app(make_app(settings, push_sender=sender), host="127.0.0.1", port=settings.port,
+        web.run_app(make_app(settings, push_sender=sender, chat_api_key=os.environ.get("PET_ANTHROPIC_API_KEY")),
+                   host="127.0.0.1", port=settings.port,
                    access_log=None, print=None)
     except SettingsError as error:
         log.error("pet_start_failed %s", error)
