@@ -88,7 +88,7 @@ class ToolTraceTest(unittest.IsolatedAsyncioTestCase):
                                                         "arguments": '{"start":"2026-11-26"}'}}],
             PRIVATE_FIXTURE: "unrecognized key",
             "account": {"id": 7654321, "authorization": PRIVATE_FIXTURE},
-            "records": [PRIVATE_FIXTURE] * 20,
+            "records": [PRIVATE_FIXTURE] * 119 + [{"role": "tool", "content": PRIVATE_FIXTURE}],
         }
         with text_trace.step("app_turn", surface="app_chat") as span:
             span.io(inputs={"request": fixture})
@@ -98,7 +98,8 @@ class ToolTraceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request["tools"][0]["function"], {"name": "schedule_list", "arguments": {"start": mask}})
         self.assertEqual(request["account"], {"id": mask, "_masked_fields": 1})
         self.assertEqual(request["_masked_fields"], 1)
-        self.assertEqual(request["records"][-1], {"_omitted_items": 12})
+        self.assertEqual(request["records"][50], {"_omitted_items": 20})
+        self.assertEqual(request["records"][-1], {"role": "tool", "content": mask})
         self.assertNotIn("7654321", json.dumps(request))
         self.assertNotIn("2026-11-26", json.dumps(request))
 

@@ -69,8 +69,8 @@ PAYLOAD_FIELDS = {
     "notes", "source_id", "source_type",
 }
 INPUT_FACTS = {"surface", "round", "tool", "offered", "requested", "results_attempted", "attempt", "delivery"}
-MAX_PAYLOAD_ITEMS = 8
-MAX_PAYLOAD_DEPTH = 8
+MAX_PAYLOAD_ITEMS = 100
+MAX_PAYLOAD_DEPTH = 10
 active = ContextVar("active_marong_trace", default=None)
 log = logging.getLogger(__name__)
 
@@ -98,10 +98,12 @@ def _masked(value, depth=0, field=None):
             result["_masked_fields"] = len(value) - len(result)
         return result
     if isinstance(value, (list, tuple)):
-        shown = [_masked(item, depth + 1, field) for item in value[:MAX_PAYLOAD_ITEMS]]
-        if len(value) > MAX_PAYLOAD_ITEMS:
-            shown.append({"_omitted_items": len(value) - MAX_PAYLOAD_ITEMS})
-        return shown
+        if len(value) <= MAX_PAYLOAD_ITEMS:
+            return [_masked(item, depth + 1, field) for item in value]
+        half = MAX_PAYLOAD_ITEMS // 2
+        return ([_masked(item, depth + 1, field) for item in value[:half]]
+                + [{"_omitted_items": len(value) - MAX_PAYLOAD_ITEMS}]
+                + [_masked(item, depth + 1, field) for item in value[-half:]])
     if type(value) is str:
         if (field == "role" and value in ROLES) or (field == "type" and value in BLOCK_TYPES):
             return value
