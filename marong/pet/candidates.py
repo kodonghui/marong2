@@ -18,7 +18,8 @@ from .images import preview_png
 from .jobs import JobQueue
 from .log import logger
 
-LEASE = timedelta(minutes=31)
+CANDIDATE_WINDOW = timedelta(minutes=30)
+LEASE = CANDIDATE_WINDOW + timedelta(minutes=1)
 CANDIDATES = 4
 MATCH = 0.75
 
@@ -80,48 +81,81 @@ async def cancel_order(conn, gateway, row):
     """, ("refunded" if ok else "refund_pending", ok, order["id"]))
 
 
-async def save_round(pool, directory, job, pictures, gateway):
-    written = []
+async def save_candidate(pool, directory, job, index, picture):
+    written = None
     try:
         async with pool.connection() as conn, conn.transaction():
-            locked = await conn.execute("""
-                SELECT id FROM pet.jobs WHERE id=%s AND status='running' AND lease_until=%s
-                    AND lease_until>now() FOR UPDATE
-            """, (job["id"], job["lease_until"]))
-            if not await locked.fetchone():
-                return
-            member = await conn.execute("SELECT status FROM pet.members WHERE id=%s FOR UPDATE", (job["member_id"],))
-            member = await member.fetchone()
-            if not member or member["status"] != "active":
-                return
-            row = await owned(conn, job["member_id"], job["creation_id"], lock=True)
-            if row["state"] != "paid":
+            row = await locked_creation(conn, job)
+            if row is None:
                 return
             try:
                 await require_overseas(conn, row["member_id"])
             except Problem:
-                pictures = []
-            for index, picture in enumerate(pictures):
-                if picture is None:
-                    continue
-                data, score = picture
-                ident = uuid4()
-                key = f"candidates/{ident}.png"
-                target = directory / key
-                target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-                with os.fdopen(os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as file:
-                    written.append(target)
-                    file.write(data)
-                await conn.execute("""
-                    INSERT INTO pet.media(id,member_id,creation_id,kind,storage_key,content_type,bytes,width,height,sha256,meta)
-                    VALUES (%s,%s,%s,'candidate',%s,'image/png',%s,1024,1024,%s,%s)
-                """, (ident, row["member_id"], row["id"], key, len(data), sha256(data).digest(),
-                      Jsonb({"round": row["regenerations"], "slot": index, "iou": score})))
+                return
+            existing = await candidate_slots(conn, row)
+            if index in existing:
+                return
+            data, score = picture
+            ident = uuid4()
+            key = f"candidates/{ident}.png"
+            target = directory / key
+            target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            with os.fdopen(os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as file:
+                written = target
+                file.write(data)
+            await conn.execute("""
+                INSERT INTO pet.media(id,member_id,creation_id,kind,storage_key,content_type,bytes,width,height,sha256,meta)
+                VALUES (%s,%s,%s,'candidate',%s,'image/png',%s,1024,1024,%s,%s)
+            """, (ident, row["member_id"], row["id"], key, len(data), sha256(data).digest(),
+                  Jsonb({"round": row["regenerations"], "slot": index, "iou": score})))
+    except BaseException:
+        if written is not None:
+            try:
+                written.unlink(missing_ok=True)
+            except OSError:
+                logger.error("pet_candidate_rollback_unlink_failed")
+        raise
+
+
+async def candidate_slots(conn, row):
+    result = await conn.execute("""
+        SELECT meta->'slot' AS slot FROM pet.media WHERE member_id=%s AND creation_id=%s AND kind='candidate'
+          AND meta->>'round'=%s AND (delete_after IS NULL OR delete_after>now())
+    """, (row["member_id"], row["id"], str(row["regenerations"])))
+    return {item["slot"] for item in await result.fetchall()}
+
+
+async def locked_creation(conn, job):
+    locked = await conn.execute("""
+        SELECT 1 FROM pet.jobs WHERE id=%s AND status='running' AND lease_until=%s
+            AND lease_until>now() FOR UPDATE
+    """, (job["id"], job["lease_until"]))
+    if not await locked.fetchone():
+        return None
+    member = await conn.execute("SELECT status FROM pet.members WHERE id=%s FOR UPDATE", (job["member_id"],))
+    member = await member.fetchone()
+    if not member or member["status"] != "active":
+        return None
+    row = await owned(conn, job["member_id"], job["creation_id"], lock=True)
+    return row if row["state"] == "paid" else None
+
+
+async def finish_round(pool, job, gateway):
+    async with pool.connection() as conn, conn.transaction():
+        row = await locked_creation(conn, job)
+        if row is not None:
             count = await conn.execute("""
                 SELECT count(*) AS n FROM pet.media WHERE member_id=%s AND creation_id=%s AND kind='candidate'
+                  AND (delete_after IS NULL OR delete_after>now())
             """, (row["member_id"], row["id"]))
             any_candidates = bool((await count.fetchone())["n"])
             if not any_candidates:
+                deadline = job["queued_at"] + CANDIDATE_WINDOW
+                if datetime.now(timezone.utc) < deadline:
+                    await conn.execute("""
+                        UPDATE pet.jobs SET status='queued',run_after=%s,lease_until=NULL WHERE id=%s
+                    """, (deadline, job["id"]))
+                    return
                 await cancel_order(conn, gateway, row)
                 await conn.execute("""
                     UPDATE pet.media SET delete_after=now() WHERE member_id=%s AND creation_id=%s AND kind IN ('photo','preview')
@@ -133,38 +167,39 @@ async def save_round(pool, directory, job, pictures, gateway):
             await conn.execute("""
                 UPDATE pet.jobs SET status=%s,error_code=%s,finished_at=now(),lease_until=NULL WHERE id=%s
             """, ("done" if any_candidates else "failed", None if any_candidates else "candidates_failed", job["id"]))
-    except BaseException:
-        for path in written:
-            try:
-                path.unlink(missing_ok=True)
-            except OSError:
-                logger.error("pet_candidate_rollback_unlink_failed")
-        raise
 
 
 async def next_candidates(pool, settings, budget, draw, mask_for, gateway):
     job = await JobQueue(pool).claim(("candidates",), lease=LEASE, attempts=2_147_483_647)
     if not job:
         return False
-    images = []
     try:
         async with pool.connection() as conn, conn.transaction():
-            row = await owned(conn, job["member_id"], job["creation_id"], lock=True)
-            if row["state"] != "paid":
-                raise Problem("wrong_state")
-            active = await conn.execute("SELECT 1 FROM pet.members WHERE id=%s AND status='active'", (job["member_id"],))
-            if not await active.fetchone():
-                raise Problem("unauthenticated")
+            row = await locked_creation(conn, job)
+            if row is None:
+                return True
             await require_overseas(conn, job["member_id"])
+            slots = await candidate_slots(conn, row)
             await conn.execute("UPDATE pet.orders SET used_at=coalesce(used_at,now()) WHERE id=%s", (row["order_id"],))
-        await budget.allow("candidate", paid=True)
-        mask = await asyncio.to_thread(mask_for, row["template"])
-        remaining = (job["queued_at"] + timedelta(minutes=30) - datetime.now(timezone.utc)).total_seconds()
-        async with asyncio.timeout(max(0, remaining)):
-            images = await asyncio.gather(*(draw_candidate(draw, settings, row, mask, i) for i in range(CANDIDATES)))
+        remaining = (job["queued_at"] + CANDIDATE_WINDOW - datetime.now(timezone.utc)).total_seconds()
+        if remaining <= 0:
+            raise TimeoutError
+        async with asyncio.timeout(remaining):
+            await budget.allow("candidate", paid=True)
+            mask = await asyncio.to_thread(mask_for, row["template"])
+
+            async def draw_and_save(slot):
+                picture = await draw_candidate(draw, settings, row, mask, slot)
+                if picture is not None:
+                    await save_candidate(pool, settings.media_dir, job, slot, picture)
+
+            async with asyncio.TaskGroup() as workers:
+                for slot in range(CANDIDATES):
+                    if slot not in slots:
+                        workers.create_task(draw_and_save(slot))
     except (Problem, TimeoutError, ValueError, OSError):
         pass
-    await save_round(pool, settings.media_dir, job, images, gateway)
+    await finish_round(pool, job, gateway)
     return True
 
 

@@ -733,6 +733,7 @@ async def check_candidates(admin, dsn, directory):
     ImageDraw.Draw(mask).rectangle((200, 200, 399, 399), fill=255)
     expression_attempts = {}
     bad_head = False
+    release_candidates = asyncio.Event()
 
     def template_mask(ident):
         assert ident == "dog_small"
@@ -740,6 +741,8 @@ async def check_candidates(admin, dsn, directory):
 
     async def render(*, model, template, traits, slot, note):
         assert template == "dog_small" and traits["species"] == "dog"
+        if note == "hold fixture" and slot > 0:
+            await release_candidates.wait()
         result = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
         end_x = 359 if slot < 3 and note != "fixture fail" else 319
         ImageDraw.Draw(result).rectangle((200, 200, end_x, 399), fill=(80, 100, 150, 255))
@@ -767,11 +770,11 @@ async def check_candidates(admin, dsn, directory):
         failed_member, failed_token = add_member(conn)
         other_member, other_token = add_member(conn)
         creations = []
-        for owner, failure in ((member, None), (failed_member, "fixture fail"), (other_member, None)):
+        for owner, note in ((member, "hold fixture"), (failed_member, "fixture fail"), (other_member, None)):
             creation, = conn.execute("""
                 INSERT INTO pet.creations(member_id,kind,state,template,traits,regenerate_note)
                 VALUES (%s,'living','paid','dog_small',%s,%s) RETURNING id
-            """, (owner, Jsonb(TRAITS), failure)).fetchone()
+            """, (owner, Jsonb(TRAITS), note)).fetchone()
             number = "fixture-" + uuid4().hex
             payment = "fixture-" + uuid4().hex
             gateway.add(payment, number, 5900)
@@ -798,9 +801,21 @@ async def check_candidates(admin, dsn, directory):
 
         ready, _ = creations[0]
         failed, refunded = creations[1]
+        try:
+            async with asyncio.timeout(6):
+                while True:
+                    reply = await client.get(f"/api/creations/{ready}", headers=headers(token))
+                    progress = await reply.json()
+                    if progress["candidates"]:
+                        break
+                    await asyncio.sleep(0.05)
+            assert progress["state"] == "paid" and len(progress["candidates"]) == 1
+        finally:
+            release_candidates.set()
         first = await fetch(ready, token, "candidates")
         assert len(first["candidates"]) == 3
         assert {row["round"] for row in first["candidates"]} == {0}
+        assert progress["candidates"][0]["id"] in {row["id"] for row in first["candidates"]}
         for number in (1, 2):
             redraw = await client.post(f"/api/creations/{ready}/regenerate", headers=headers(token),
                                        json={"note": "synthetic fixture note"})
@@ -810,6 +825,21 @@ async def check_candidates(admin, dsn, directory):
             assert next_round["regenerationsLeft"] == 2 - number
         over = await client.post(f"/api/creations/{ready}/regenerate", headers=headers(token), json={})
         assert over.status == 409 and (await over.json())["code"] == "regenerate_limit"
+        async with asyncio.timeout(6):
+            while True:
+                with psycopg.connect(admin) as conn:
+                    pending = conn.execute("""
+                        SELECT status,attempts,run_after=queued_at+INTERVAL '30 minutes'
+                        FROM pet.jobs WHERE creation_id=%s AND kind='candidates'
+                    """, (failed,)).fetchone()
+                    if pending == ("queued", 1, True):
+                        assert not gateway.refunds
+                        conn.execute("""
+                            UPDATE pet.jobs SET queued_at=now()-INTERVAL '30 minutes',run_after=now()
+                            WHERE creation_id=%s AND kind='candidates'
+                        """, (failed,))
+                        break
+                await asyncio.sleep(0.05)
         assert (await fetch(failed, failed_token, "failed_candidates"))["candidates"] == []
         assert len(gateway.refunds) == 1
         with psycopg.connect(admin) as conn:
