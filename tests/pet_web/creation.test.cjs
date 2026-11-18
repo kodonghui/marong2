@@ -482,6 +482,7 @@ if (require.main === module) {
         subscribe: async options => {
           window.pushActions.push([options.userVisibleOnly, ...options.applicationServerKey]);
           if (document.URL.endsWith('#denied')) throw new DOMException('Fixture denial', 'NotAllowedError');
+          if (document.URL.endsWith('#broken')) throw new DOMException('Fixture service failure', 'AbortError');
           sessionStorage.setItem('test-push', 'yes');
           return subscription;
         },
@@ -498,11 +499,15 @@ if (require.main === module) {
     await subscribe.click();
     await visible(page.getByText('알림을 끄셨어요. 이 화면을 다시 열면 볼 수 있어요'));
     assert.deepEqual(writes, []);
+    await page.evaluate(() => history.replaceState(null, '', location.pathname + '#broken'));
+    await subscribe.click();
+    await visible(page.getByText('잠시 뒤 다시 해 주세요.'));
+    assert.deepEqual(writes, []);
     await page.evaluate(() => history.replaceState(null, '', location.pathname));
     await subscribe.click();
     await visible(page.getByText('알려 드릴게요'));
     assert.deepEqual(writes, [parameters]);
-    assert.deepEqual(await page.evaluate(() => window.pushActions[1]), [true, ...applicationKey]);
+    assert.deepEqual(await page.evaluate(() => window.pushActions[2]), [true, ...applicationKey]);
     await page.goto(origin + '/me');
     await page.getByRole('button', {name: '알림 끄기'}).click();
     await visible(page.getByRole('button', {name: '알림 켜기'}));

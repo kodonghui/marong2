@@ -1,4 +1,4 @@
-import {action, api, button, el, text} from './pet.js';
+import {action, api, button, el, Failure, text} from './pet.js';
 
 export function pushControl(member, {waiting = false} = {}) {
   if (member.status !== 'active') return null;
@@ -26,7 +26,7 @@ export function pushControl(member, {waiting = false} = {}) {
       try {
         subscription ||= await registration.pushManager.subscribe({userVisibleOnly: true, applicationServerKey});
       } catch (error) {
-        if (error.name !== 'NotAllowedError' && Notification.permission !== 'denied') throw error;
+        if (error.name !== 'NotAllowedError' && Notification.permission !== 'denied') throw new Failure(0);
         denied();
         return;
       }
