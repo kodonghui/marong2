@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko" data-theme="night">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>마롱이 · 친구 약속</title>
+  <link rel="stylesheet" href="/chat/chat.css">
+  <link rel="stylesheet" href="/chat/persona/persona.css">
+  <script src="/chat/persona/persona.js" defer></script>
+</head>
+<body>
+  <main class="persona-page" data-page="card">
+    <header class="bar"><a href="/chat/">‹ 글 대화</a><h1>친구 약속</h1></header>
+    <p class="feedback" id="feedback" role="status"></p>
+    <button id="reload" class="text-button" type="button" hidden>다시 해 볼게</button>
+    <div id="content" hidden>
+      <section id="promise" class="persona-box">
+        <p id="promise-label" class="hint">마롱이 약속</p>
+        <p id="sentence"></p>
+        <p class="hint" id="source"></p>
+        <p class="hint" id="want" hidden></p>
+      </section>
+      <div id="choices"></div>
+      <button id="make" class="primary" type="button" hidden>약속 만들기</button>
+      <section>
+        <h2>선톡</h2><div id="proactive"></div>
+        <p class="hint">늘리는 건 대화에서 말해 줘. 동희한테 남겨 둘게</p>
+      </section>
+      <section>
+        <h2>먼저 전화</h2><p id="call-first"></p>
+        <p class="hint">끄려면 '먼저 전화하지 마', 켜려면 '먼저 전화해도 돼'라고 글 대화에서 말해 줘</p>
+      </section>
+      <section>
+        <h2>꼭 지킬 것</h2><div id="rules"></div>
+        <p class="hint">꼭 지킬 것은 단체방에서도 지켜. 약속은 둘이 얘기할 때만 써</p>
+      </section>
+      <a class="persona-box persona-link" href="/chat/persona/instructions">
+        맞춤형 지침 <span id="instruction-preview" class="hint">아직 없어</span>
+      </a>
+    </div>
+  </main>
+</body>
+</html>

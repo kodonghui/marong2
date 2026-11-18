@@ -5,6 +5,7 @@
   이름으로 바꾸고('현경아 뭐해'), 그 밖에는 뺀다. '야식', '야호', '3시야', '야라고'처럼 낱말에 붙은 '야'와 문장 가운데
   '야'는 그대로 둔다(문장 가운데서 빼면 '야 소리 안 할게' 같은 말이 깨짐)."""
 import re
+from dataclasses import dataclass
 
 SIGH = re.compile("\U0001F62E️?‍\U0001F4A8️?")
 # 줄 첫머리에 홀로 선 '야'(뒤에 한글 음절이 붙지 않음)와 뒤따르는 문장 부호·빈칸
@@ -89,3 +90,90 @@ def tidy(text: str, name: str | None = None, *, stage_fallback: str = STAGE_FALL
         out = re.sub(r"\n[ \t]*\n(?:[ \t]*\n)+", "\n\n", "\n".join(lines))  # 지운 줄 때문에 빈 줄이 겹치지 않게
     out = out.strip()
     return (out or EMPTY_FALLBACK), fixes
+
+
+SINGLE_K = re.compile(r"(?<!ㅋ)ㅋ(?!ㅋ)")
+SENTENCES = re.compile(r"[^.!?。\n]+[.!?。]*")
+GENTLE_COUNSEL = re.compile(r"(?<!\d)(?:109|119)(?!\d)|상담전화|상담사|병원")
+SAFETY_QUESTION = re.compile(r"죽고\s*싶은\s*마음")
+PROMISED_OWNER = re.compile(r"동희한테\s*(?:남겼|말해\s*뒀|전했)")
+NO_ALTERNATIVE = re.compile(r"못\s*해|안\s*돼|할\s*수\s*없어")
+ALTERNATIVE = re.compile(r"대신|해\s*줄까|켜\s*달라고")
+FORMAL = re.compile(r"(?:요|니다|세요)\s*(?=[.!?。\n]|$)")
+
+
+@dataclass(frozen=True)
+class Review:
+    text: str
+    issues: tuple[str, ...]
+    fixed: tuple[str, ...]
+
+
+def check(text, *, name=None, banned=(), topics=(), recent=(), private_labels=(), difficult=False,
+          safety_again=False, counsel_allowed=True, tired=False, polite=False, owner_asked=False,
+          capability_on=False, code_only=False):
+    fixed = []
+    alternative = vocative(name)
+    for token in banned:
+        if not token:
+            continue
+        leading = re.compile(r"(?m)^([ \t]*)" + re.escape(token) + r"(?=$|[^가-힣])")
+        replaced = leading.sub(lambda match: match[1] + (alternative or ""), text)
+        if replaced != text and "vocative" not in fixed:
+            fixed.append("vocative")
+        text = replaced
+    text, tidy_fixed = tidy(text, name, stage_fallback=STAGE_FALLBACK)
+    fixed.extend(tidy_fixed)
+    if difficult:
+        plain = "\n".join(line.replace("ㅋ", "").strip() for line in text.splitlines()).strip()
+        if plain != text:
+            fixed.append("hard_k")
+        text = plain or STAGE_FALLBACK
+    else:
+        text, count = SINGLE_K.subn("ㅋㅋ", text)
+        if count:
+            fixed.append("single_k")
+    if code_only:
+        return Review(text, (), tuple(fixed))
+    issues = []
+    if len(text) >= 15 and any(repeat_similarity(text, old, name) >= REPEAT_SIMILARITY for old in recent):
+        issues.append("repeat")
+    if text.count("?") + text.count("？") >= 2:
+        issues.append("two_questions")
+    if not owner_asked and PROMISED_OWNER.search(text) or (
+        capability_on and NO_ALTERNATIVE.search(text) and not ALTERNATIVE.search(text)
+    ):
+        issues.append("capability")
+    if any(label and label in text for label in private_labels):
+        issues.append("scope")
+    if any(topic and topic in text for topic in topics):
+        issues.append("topic")
+    if not polite and len(FORMAL.findall(text)) >= 2:
+        issues.append("formal")
+    if safety_again and any(SAFETY_QUESTION.search(piece) and "?" in piece for piece in SENTENCES.findall(text)):
+        issues.append("ask_again")
+    if not counsel_allowed and GENTLE_COUNSEL.search(text):
+        issues.append("counsel")
+    if tired and (len(text) > 120 or "two_questions" in issues):
+        issues.append("long_tired")
+    return Review(text, tuple(issues), tuple(fixed))
+
+
+def fallback(review, *, proactive=False):
+    issues = review.issues
+    if proactive and issues:
+        return ""
+    if "scope" in issues:
+        return "그건 나중에 둘이 얘기하자"
+    if "topic" in issues:
+        return STAGE_FALLBACK
+    text = review.text
+    cuts = {"ask_again": SAFETY_QUESTION, "counsel": GENTLE_COUNSEL, "capability": PROMISED_OWNER}
+    for issue, expression in cuts.items():
+        if issue in issues:
+            text = " ".join(piece.strip() for piece in SENTENCES.findall(text) if not expression.search(piece))
+    if "two_questions" in issues and "?" in text:
+        text = text.split("?", 1)[0].strip() + "?"
+    if "long_tired" in issues:
+        text = " ".join(SENTENCES.findall(text)[:2]).strip()
+    return text or STAGE_FALLBACK

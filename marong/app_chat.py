@@ -55,6 +55,13 @@ PROBLEMS = {
     "too_many_messages": (429, "1분에 20번 넘게 보냄"),
     "no_picture": (404, "그 이름의 그림이 없음"),
     "no_release": (404, "지금 받을 수 있는 앱 파일이 아님"),
+    "feature_off": (403, "이 기능이 꺼져 있음"),
+    "needs_owner": (403, "선톡을 늘리는 요청은 동희님이 정함"),
+    "not_found": (404, "이 계정으로 찾을 수 없음"),
+    "rule_limit": (409, "그 종류의 친구 규칙이 이미 20개"),
+    "card_closed": (409, "카드가 닫혔거나 다른 값으로 답함"),
+    "too_many_requests": (429, "맞춤형 지침 요청이 너무 자주 도착함"),
+    "ai_unavailable": (503, "맞춤형 지침을 읽지 못함"),
     "db_unavailable": (503, "DB에 닿지 않음"),
     "internal": (500, "예상하지 못한 서버 오류"),
 }
@@ -96,7 +103,12 @@ class AppChat:
         self.read = {}                       # DM room -> the friend's newest message an answer here took up (SPEC-148)
         self.tasks = set()
         self.files = {k: ((STATIC / name).read_bytes(), kind) for k, (name, kind) in FILES.items()}
+        if getattr(agent, "friend_cards", None):
+            self.files[""] = (self.files[""][0].replace(b"<!-- persona-link -->",
+                '<a class="icon-button" href="/chat/persona/" aria-label="친구 약속">나</a>'.encode("utf-8")), "text/html")
         self.runner = None
+        from .app_persona import AppPersona
+        self.persona = AppPersona(self)
 
     # ── plumbing ───────────────────────────────────────────────
 
@@ -316,7 +328,7 @@ class AppChat:
         limit = self._number(req.query.get("limit"), "limit", minimum=1, maximum=PAGE_MAX) or PAGE_DEFAULT
         rows = await self.store.app_messages(who["room_key"], before, limit)
         marks = await self._marks(who["room_key"])
-        return self._json(200, {"messages": [self.message(r) for r in rows[:limit][::-1]],
+        return self._json(200, {"messages": await self.persona.messages(who, rows[:limit][::-1]),
                                 "hasMore": len(rows) > limit, "readUpTo": marks["readUpTo"],
                                 "answeredUpTo": marks["answeredUpTo"]})
 
@@ -431,7 +443,7 @@ class AppChat:
                 self.waiters.pop(friend, None)
         if mine.is_set() and not fresh:
             rows = []
-        return self._json(200, {"messages": [self.message(r) for r in rows], **marks})
+        return self._json(200, {"messages": await self.persona.messages(who, rows), **marks})
 
     async def device(self, req):
         """API-105: this phone's notification state (SPEC-115, SPEC-139)."""
@@ -487,6 +499,7 @@ class AppChat:
         app.router.add_get("/chat/topics/{set}/{file}", self.picture)
         app.router.add_get(RELEASE_CHECK_PATH, self.app_release, allow_head=False)
         app.router.add_get("/chat/app/{file:.*}", self.app_apk, allow_head=False)
+        self.persona.register(app)
         return app
 
     async def serve(self, host: str = "127.0.0.1") -> web.AppRunner:

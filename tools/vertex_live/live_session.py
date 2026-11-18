@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 import re
 import struct
 import time
@@ -63,6 +64,8 @@ class LiveSession:
         # ring: the ring id the page was opened with (/?ring=), or None. ring_info: the promise this call answers.
         # ring_topic: the picture card of a hello call, sent once with the first 'ready' (SPEC-268, SPEC-269).
         self.ring_id=ring;self.ring_info=None;self.ring_greet=False;self.ring_topic=None
+        self.call_safety=None
+        self.safety_queue=asyncio.Queue(maxsize=32)
 
     def log_transport(self,mode,reason):
         self.d['audioPath']=mode
@@ -102,7 +105,22 @@ class LiveSession:
     async def save(self,key,role,content,finalized,interrupted):
         if self.store and self.p and self.segment:
             segment=self.turn_segments.setdefault(key,self.segment)
-            return await self.store.save_turn(self.p,self.call_id,segment,key,role,content,finalized,interrupted)
+            result=await self.store.save_turn(self.p,self.call_id,segment,key,role,content,finalized,interrupted)
+            if self.call_safety and not interrupted and finalized:
+                if self.safety_queue.full():print('crisis_queue_full',flush=True)
+                else:self.safety_queue.put_nowait((key,role,content,finalized))
+            return result
+
+    async def safety_loop(self):
+        while True:
+            item=await self.safety_queue.get()
+            try:
+                prompt=await asyncio.wait_for(self.call_safety.caption(*item),5)
+                if prompt and not self.stop.is_set() and not self.controls.full():
+                    await self.controls.put({'clientContent':{'turns':[{'role':'user','parts':[{'text':'[알림] '+prompt}]}],'turnComplete':True}})
+                    self.available.set()
+            except Exception as error:print('crisis_judge_error',type(error).__name__,flush=True)
+            finally:self.safety_queue.task_done()
 
     def caption(self,role,text,key):
         self.turn_segments.setdefault(key,self.segment)
@@ -202,6 +220,10 @@ class LiveSession:
                 self.p,self.client_id,self.voice,BUILD,
                 entrypoint='discord' if self.entry_transport=='discord' else 'web')
             await self.claim_ring()
+            if os.getenv('MARONG_SAFETY')=='on':
+                from call_safety import CallSafety
+                from server import PROJECT
+                self.call_safety=CallSafety(self.store,self.p,self.call_id,self.headers,PROJECT)
         elif self.resume.get('owner')==self.owner and time.time()-self.resume.get('updated',0)<600:
             self.call_id=self.resume.get('call_id',self.call_id)
         self.d.update(build=BUILD,callId=self.call_id,startedAt=time.time(),providerInterruptions=0,providerReconnects=0)
@@ -210,6 +232,7 @@ class LiveSession:
             self.handle=self.resume.get('handle')
         self.recorder=TranscriptRecorder(self.save,self.caption)
         running=[asyncio.create_task(self.browser_writer()),asyncio.create_task(self.browser_input()),asyncio.create_task(self.google_loop()),asyncio.create_task(self.watch_revision())]
+        if self.call_safety:running.append(asyncio.create_task(self.safety_loop()))
         try:
             done,_=await asyncio.wait(running,return_when=asyncio.FIRST_COMPLETED)
             for task in done:task.result()
@@ -285,13 +308,16 @@ class LiveSession:
             if self.reset.is_set():
                 self.handle=None;self.pending.clear();self.resume.clear();self.recorder.parts.clear();self.reset.clear()
                 if self.store and self.p:self.revision=await self.store.revision(self.p)
-            seed='';self.segment=None
+            seed='';self.segment=None;friend_instruction=''
             if self.store and self.p:
                 try:
                     self.segment=await asyncio.wait_for(self.store.start_segment(self.p,self.call_id,self.client_id,self.model),3)
                     seed=await asyncio.wait_for(self.store.seed(self.p,self.call_id),1)
                     self.d['memoryConnected']=True
                 except Exception:self.d['memoryConnected']=False
+                if hasattr(self.store,'friend_instruction'):
+                    try:friend_instruction=await asyncio.wait_for(self.store.friend_instruction(self.p),.5)
+                    except Exception:print('card_read_error',flush=True)
             try:
                 url=f'wss://{self.location}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent'
                 async with ClientSession(timeout=ClientTimeout(total=None,connect=15)) as http:
@@ -300,6 +326,7 @@ class LiveSession:
                         options={'hangup':self.hangup}
                         if mode:options['search']=mode
                         if self.ring_info:options['ring']=self.ring_info
+                        if friend_instruction:options['friend_instruction']=friend_instruction
                         await upstream.send_json(self.setup(self.handle,seed,bool(self.p and self.segment),**options))
                         first=await upstream.receive(timeout=20)
                         if first.type not in (WSMsgType.TEXT,WSMsgType.BINARY) or 'setupComplete' not in json.loads(first.data):

@@ -24,6 +24,7 @@ from .app_delivery import RingCalls
 from .app_push import TALK, can_notify
 from .config import proactive_schedule
 from .fmt import short_time
+from .friend_card import KST, QUESTIONS, CardError, choices
 from .google_calendar import (CONNECT_TEXT, DISCONNECTED_TEXT, LINK_MARK, NOT_CONNECTED_TEXT, REVOKE_FAILED_TEXT,
                               UNAVAILABLE_TEXT, calendar_lines, command as google_command)
 from .llm import brief
@@ -184,31 +185,45 @@ async def react(message, emoji: str) -> bool:
     return True
 
 
-async def send_text(channel, text: str, reference=None, file=None) -> bool:
+async def send_text(channel, text: str, reference=None, file=None, view=None) -> bool:
     """reference (channels): the first part goes as a reply to the friend's message, without pinging anyone.
     file (a discord.File, a picture topic's picture): attached to the first part."""
     try:
-        for chunk in chunks(text):
+        parts = list(chunks(text))
+        for index, chunk in enumerate(parts):
+            extra = {"view": view} if view and index == len(parts) - 1 else {}
             if file is not None:
-                await channel.send(chunk, allowed_mentions=NO_MENTIONS, suppress_embeds=True, file=file)
+                await channel.send(chunk, allowed_mentions=NO_MENTIONS, suppress_embeds=True, file=file, **extra)
                 file = None
                 continue
             if reference is not None:
                 try:
                     await channel.send(chunk, allowed_mentions=NO_MENTIONS, suppress_embeds=True, reference=reference,
-                                       mention_author=False)
+                                       mention_author=False, **extra)
                 except discord.HTTPException as exc:  # e.g. no Read Message History there: send it as a plain message
                     if exc.status >= 500:
                         raise
                     log.warning("discord_reply_link_failed status=%s code=%s", exc.status, exc.code)
-                    await channel.send(chunk, allowed_mentions=NO_MENTIONS, suppress_embeds=True)
+                    await channel.send(chunk, allowed_mentions=NO_MENTIONS, suppress_embeds=True, **extra)
                 reference = None
                 continue
-            await channel.send(chunk, allowed_mentions=NO_MENTIONS, suppress_embeds=True)
+            await channel.send(chunk, allowed_mentions=NO_MENTIONS, suppress_embeds=True, **extra)
         return True
     except discord.HTTPException as exc:
         log.warning("discord_send_failed status=%s code=%s", exc.status, exc.code)
         return False
+
+
+def question_view(row):
+    if not row:
+        return None
+    view = discord.ui.View(timeout=None)
+    for value, label in choices(row):
+        kinds = {"ask_support": "support", "card_draft": "draft", "card_proposal": "proposal"}
+        step = row["step"] if row["kind"] == "card_question" else kinds[row["kind"]]
+        custom_id = f"card:{step}:{value}:{row['id']}"
+        view.add_item(discord.ui.Button(label=label, custom_id=custom_id))
+    return view
 
 
 class DiscordAgent(Agent):
@@ -235,7 +250,7 @@ class DiscordAgent(Agent):
         tools += [fetch] if fetch else []
         # The one web_search definition (a second tool with the same name is a 400). None once today's searches are spent.
         search = self.web.tool() if self.web is not None else None
-        return tools + ([search] if search else [])
+        return tools + ([search] if search else []) + self._card_tools(msg)
 
     def _shown_photos(self, room_key, first):
         # A photo already answered stays visible for a while, so "then what about question 5?" still sees the page.
@@ -472,6 +487,8 @@ class DiscordAgent(Agent):
         return text, meta
 
     async def _run_tool(self, block, msg):
+        if block.name == "card_update":
+            return await self._card_update(block, msg)
         result = {"type": "tool_result", "tool_use_id": block.id}
         friend_id = getattr(msg, "friend_id", None)
         if block.name not in SCHEDULE_TOOL_NAMES or not friend_id:
@@ -518,6 +535,16 @@ class DiscordAgent(Agent):
 
     async def _dm_command(self, msg, person, user_id, text, use_memory):
         """A DM reply that needs no model (opt-out/in, Google link, the opening, the guide), or None."""
+        if self.friend_cards and msg.proactive_preference is not None and msg.friend_id and use_memory:
+            try:
+                changed = await self.friend_cards.apply_tool(msg.friend_id, msg.room_key, user_id,
+                    f"preference:{user_id}", {"op": "proactive_lower", "value": "normal" if msg.proactive_preference else "off",
+                                            "quote": text})
+                if changed.outcome != "ok":
+                    return PREF_FAILED, {"persona_preference": "failed"}
+            except Exception as error:
+                log.warning("card_preference_error %s", type(error).__name__)
+                return PREF_FAILED, {"persona_preference": "failed"}
         if msg.proactive_preference is False:
             return "응, 먼저 연락하는 건 멈출게.", {}
         if msg.topic_command and self.topics and msg.friend_id is not None:
@@ -634,6 +661,56 @@ class DiscordDM(discord.Client):
 
     def room_lock(self, room_key):
         return self.locks.setdefault(room_key, asyncio.Lock())
+
+    async def on_interaction(self, event):
+        key = (event.data or {}).get("custom_id")
+        if not isinstance(key, str) or not key.startswith("card:"):
+            return
+        parts = re.fullmatch(r"card:([1-3]|draft|support|proposal):([a-z_]{1,20}):([1-9][0-9]{0,17})", key)
+        cards = getattr(self.agent, "friend_cards", None)
+        if not parts or not cards or event.guild is not None:
+            return
+        await event.response.defer()
+        try:
+            link = await self.store.link(str(event.user.id))
+            if not link or str(link["channel_id"]) != str(event.channel_id):
+                return
+            room, friend = link["room_key"], link["friend_id"]
+            async with self.room_lock(room):
+                row = await self.store._one("SELECT id,kind FROM marong.chat_cards WHERE id=%s AND friend_id=%s",
+                                             (int(parts[3]), friend))
+                if not row:
+                    return
+                result = await cards.answer_card(friend, row, parts[2], room=room, via="button", at=datetime.now(KST))
+                answered_view = discord.ui.View(timeout=None)
+                label = next(label for value, label in choices(result["card"]) if value == parts[2])
+                answered_view.add_item(discord.ui.Button(label="✓ " + label, disabled=True))
+                await event.message.edit(view=answered_view)
+                if not result["applied"]:
+                    return
+                if result["effect"] == "open_card_screen":
+                    await event.followup.send("고칠 칸을 골라 줘", view=self._open_card_view(), ephemeral=True)
+                    return
+                question = result.get("next")
+                answer = QUESTIONS[question["step"] - 1][1] if question else result.get("sentence")
+                if not answer:
+                    return
+                delivered = await send_text(event.channel, answer, view=question_view(question))
+                saved = await self.store.add_message(room, "assistant", answer,
+                    meta={"transport": "discord", "delivered": delivered,
+                          **({"persona_question": question["id"]} if question else {})})
+                if question and delivered and saved:
+                    await cards.attach_question(friend, question["id"], saved)
+        except CardError:
+            await event.followup.send("이 카드는 이제 못 골라", ephemeral=True)
+        except Exception as error:
+            log.warning("card_button_error %s", type(error).__name__)
+
+    @staticmethod
+    def _open_card_view():
+        view = discord.ui.View(timeout=None)
+        view.add_item(discord.ui.Button(label="친구 약속", url=DEFAULT_ORIGIN + "/chat/persona/?from=draft"))
+        return view
 
     async def setup_hook(self):
         # After login, before the Gateway: ask for the Message Content intent only when the Developer Portal has it on
@@ -760,9 +837,10 @@ class DiscordDM(discord.Client):
             # Web search sources go under the answer in the DM only; the history keeps the answer alone.
             # A page the answer already links (a picked product) is not repeated there.
             line = sources_line([s for s in incoming.sources if s["url"] not in body])
+            view = question_view(getattr(incoming, "question", None))
             if not line or len(body) + len(line) <= SOURCES_FIT:
-                return await send_text(msg.channel, body + line)
-            return await send_text(msg.channel, body) and await send_text(msg.channel, line.strip())
+                return await send_text(msg.channel, body + line, view=view)
+            return await send_text(msg.channel, body, view=view) and await send_text(msg.channel, line.strip())
 
         async with self.room_lock(room):
             for item in items[:-1]:
@@ -1025,6 +1103,8 @@ class DiscordProactive(Proactive):
         return count
 
     async def deliver(self, room, dry=False, *, send_until=None):
+        if getattr(self.agent, "safety", None):
+            room = {**room, "persona_dry": dry}
         empty = {"text": None, "ok": False, "code": None}
         now = self.clock()
         planned = self.plan(room, now)
@@ -1034,10 +1114,12 @@ class DiscordProactive(Proactive):
             return empty  # Discord is away and no phone takes it: keep the slot for when Discord is back
         if send_until is not None and time.monotonic() >= send_until:
             return empty
+        if not await self.agent.proactive_allowed(room):
+            return empty
         begin = planned[0]
         if not dry and not await self.store.claim_slot(room, begin):
             return empty
-        if self.topics is not None and not dry:
+        if self.topics is not None and not dry and not room.get("persona_care"):
             choice = None
             try:
                 choice = await self.topics.choose(room, now, self._slot(room, now)[1])
@@ -1051,7 +1133,13 @@ class DiscordProactive(Proactive):
         text, meta = made
         if dry:
             return {**empty, "text": text}
-        return await self._send(room, begin, text, meta)
+        result = {**empty}
+        try:
+            result = await self._send(room, begin, text, meta)
+            return result
+        finally:
+            if getattr(self.agent, "safety", None):
+                await self.agent.proactive_result(room, result.get("ok", False))
 
     async def _send(self, room, begin, text, meta, *, app_text=None, picture=None):
         """Send a proactive turn's text by the D18 path and keep it: the app only when the friend has a phone for it;
@@ -1107,7 +1195,11 @@ class DiscordProactive(Proactive):
                         return {"text": None, "ok": False, "code": None}
                     return await self._send(room, begin, *made)
             picture = choice.picture
-            text, meta = await self.agent.proactive_message(room, topic=picture)
+            made = await self.agent.proactive_message(room, topic=picture)
+            if made is None:
+                await self.store.topic_failed(choice.topic_id)
+                return {"text": None, "ok": False, "code": None}
+            text, meta = made
             result = await self._send(room, begin, text, {**meta, "topic": picture.key}, app_text=picture.preview,
                                       picture=picture)
         except Exception:

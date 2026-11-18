@@ -1,0 +1,739 @@
+"""TC-380/381 for the separate pet database and executable service."""
+
+import asyncio
+import json
+import logging
+import os
+from pathlib import Path
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import date, datetime, timedelta
+from decimal import Decimal
+from base64 import urlsafe_b64encode
+from hashlib import sha256
+from io import StringIO
+from secrets import token_urlsafe
+from unittest.mock import patch
+from urllib.request import urlopen
+from urllib.parse import parse_qs, urlsplit
+from uuid import uuid4
+
+import psycopg
+import jwt
+from aiohttp import web
+from aiohttp.test_utils import TestClient, TestServer
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from psycopg.conninfo import make_conninfo
+from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
+
+from pg import ROOT, TestDB
+from marong.pet.jobs import JobQueue
+from marong.pet.cost import Budget, KST, Run, microusd, timings
+from marong.pet.account import require_overseas
+from marong.pet.delete import erase_next
+from marong.pet.auth import AuthConfig, Provider, STATE_COOKIE, subject_hash
+from marong.pet.http import COOKIE, POOL, Problem, cookie_hash, require_member
+from marong.pet.log import member_ref
+from marong.pet.push import notify
+from marong.pet.quota import release_expired, reserve, settle
+from marong.pet.settings import PRICE_FILE, Settings, SettingsError
+from run_pet import make_app
+
+
+def fixtures(db):
+    with psycopg.connect(db.srv.get_uri(), autocommit=True) as conn:
+        conn.execute("CREATE DATABASE marong_pet")
+        # Limit CONNECT in the disposable cluster. Deployment must configure the corresponding server access rule.
+        conn.execute("REVOKE CONNECT ON DATABASE marong FROM PUBLIC")
+    dsn = db.srv.get_uri("marong_pet")
+    source = (ROOT / "marong/pet/schema.sql").read_text(encoding="utf-8")
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        conn.execute(source)
+        conn.execute(source)
+        keys = conn.execute("SELECT tablename FROM pg_tables WHERE schemaname='pet'").fetchall()
+        assert len(keys) == 24
+        conn.execute("REVOKE CONNECT ON DATABASE marong_pet FROM PUBLIC")
+        conn.execute("GRANT CONNECT ON DATABASE marong_pet TO marong_pet")
+
+    with psycopg.connect(make_conninfo(dsn, user="marong_pet")) as conn:
+        for table, in keys:
+            assert conn.execute(
+                """SELECT has_table_privilege(%s,'SELECT'),has_table_privilege(%s,'INSERT'),
+                has_table_privilege(%s,'UPDATE'),has_table_privilege(%s,'DELETE')""",
+                (f"pet.{table}",) * 4,
+            ).fetchone() == (True, True, table != "consents", True)
+    try:
+        with psycopg.connect(make_conninfo(db.admin_url, user="marong_pet")):
+            raise AssertionError("pet role connected to the private companion database")
+    except psycopg.OperationalError as error:
+        assert "permission denied" in str(error)
+    return dsn, make_conninfo(dsn, user="marong_pet")
+
+
+def launch(env, *, assert_health):
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    env = {**env, "PET_PORT": str(port)}
+    command = [sys.executable, str(ROOT / "run_pet.py")]
+    if not assert_health:
+        return subprocess.run(command, env=env, capture_output=True, text=True, encoding="utf-8", timeout=8)
+    with subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) as process:
+        try:
+            until = time.monotonic() + 6
+            while time.monotonic() < until:
+                if process.poll() is not None:
+                    raise AssertionError(f"pet test listener exited with {process.returncode}")
+                try:
+                    with urlopen(f"http://127.0.0.1:{port}/healthz", timeout=0.2) as response:
+                        assert response.status == 200 and json.load(response) == {"ok": True}
+                        assert response.headers["Cache-Control"] == "no-store"
+                    return
+                except OSError:
+                    time.sleep(0.05)
+            raise AssertionError("pet test listener did not start")
+        finally:
+            process.terminate()
+            process.wait(timeout=5)
+
+
+def check_startup(dsn):
+    env = {k: value for k, value in os.environ.items() if not k.startswith("PET_")}
+    env.update({"PET_DATABASE_URL": dsn, "PET_MONTHLY_BUDGET_KRW": "50000"})
+    assert Settings.read(env).signup == "invite"
+    failed = launch({k: value for k, value in env.items() if k != "PET_MONTHLY_BUDGET_KRW"}, assert_health=False)
+    assert failed.returncode == 2 and len(failed.stderr.splitlines()) == 1
+    failed = launch({**env, "PET_IMAGE_MODEL": "synthetic-secret-marker"}, assert_health=False)
+    assert failed.returncode == 2 and "outside the allowed list" in failed.stderr
+    assert "synthetic-secret-marker" not in failed.stderr
+    denied = launch({**env, "PET_DATABASE_URL": make_conninfo(dsn, dbname="marong")}, assert_health=False)
+    assert denied.returncode == 2 and "separate pet database" in denied.stderr
+
+    prices = json.loads(PRICE_FILE.read_text(encoding="utf-8"))
+    prices["models"].pop("claude-haiku-5-5")
+    with tempfile.TemporaryDirectory() as tmp:
+        file = Path(tmp) / "prices.json"
+        file.write_text(json.dumps(prices), encoding="utf-8")
+        try:
+            Settings.read(env, price_file=file)
+        except SettingsError as error:
+            assert str(error) == "PET_CHAT_MODEL has no price"
+        else:
+            raise AssertionError("a missing price did not block startup")
+    launch(env, assert_health=True)
+    launch({**env, "PET_CHAT_MODEL": "claude-sonnet-5-5"}, assert_health=True)
+
+
+async def check_jobs(admin_dsn, dsn):
+    def put(job):
+        with psycopg.connect(admin_dsn, autocommit=True) as conn:
+            conn.execute("INSERT INTO pet.jobs(id,kind) VALUES (%s,'cleanup')", (job,))
+
+    def expire(job):
+        with psycopg.connect(admin_dsn, autocommit=True) as conn:
+            conn.execute("UPDATE pet.jobs SET lease_until=now()-interval '1 second' WHERE id=%s", (job,))
+
+    def status(job):
+        with psycopg.connect(admin_dsn, autocommit=True) as conn:
+            return conn.execute("SELECT status, attempts, error_code FROM pet.jobs WHERE id=%s", (job,)).fetchone()
+
+    job = uuid4()
+    put(job)
+    lease = timedelta(seconds=5)
+    async with AsyncConnectionPool(dsn, open=False, kwargs={"row_factory": dict_row}) as pool:
+        queue = JobQueue(pool)
+        async def claim():
+            return await queue.claim(["cleanup"], lease=lease, attempts=2)
+        first, second = await asyncio.gather(claim(), claim())
+        assert sum(item is not None for item in (first, second)) == 1
+        taken = first or second
+        assert taken["attempts"] == 1
+        assert await queue.fail(taken, "temporary", retry_after=timedelta(), attempts=2)
+        assert status(job) == ("queued", 1, "temporary")
+        again = await claim()
+        assert again["attempts"] == 2
+        assert not await queue.complete(taken)
+        assert await queue.complete(again)
+        assert status(job) == ("done", 2, None)
+
+        finished = uuid4()
+        put(finished)
+        abandoned = await claim()
+        expire(finished)
+        recovered = await claim()
+        assert recovered["id"] == finished and recovered["attempts"] == 2
+        assert not await queue.complete(abandoned)
+        expire(finished)
+        assert await claim() is None and status(finished) == ("failed", 2, "deadline")
+
+
+async def check_http(admin_dsn, dsn, directory):
+    media_dir = directory / "media"
+    media_dir.mkdir()
+    picture = media_dir / "sample.png"
+    art = b"synthetic byte fixture"
+    picture.write_bytes(art)
+    secret = directory / "not-a-media-file"
+    secret.write_bytes(b"must not be read as media")
+    a, b, c = uuid4(), uuid4(), uuid4()
+    token_a, token_b, expired = token_urlsafe(32), token_urlsafe(32), token_urlsafe(32)
+    member_a, member_b = "FIXTURE1", "FIXTURE2"
+    with psycopg.connect(admin_dsn, autocommit=True) as conn:
+        for ident, member, token in ((a, member_a, token_a), (b, member_b, token_b)):
+            conn.execute("INSERT INTO pet.members(id,member_no,provider,sub_hash,adult_self_declared_at) "
+                         "VALUES (%s,%s,'google',%s,now())", (ident, member, sha256(token.encode()).digest()))
+            conn.execute(
+                """INSERT INTO pet.sessions(token_hash,kind,member_id,expires_at,absolute_expires_at)
+                VALUES (%s,'member',%s,now()+interval '1 day',now()+interval '3 days')""",
+                (cookie_hash(token), ident),
+            )
+        conn.execute(
+            """INSERT INTO pet.sessions(token_hash,kind,member_id,expires_at,absolute_expires_at)
+            VALUES (%s,'member',%s,now()-interval '1 day',now()+interval '3 days')""",
+            (cookie_hash(expired), a),
+        )
+        digest = sha256(art).digest()
+        for ident, path, days in ((c, "sample.png", 2), (uuid4(), "../not-a-media-file", 2), (uuid4(), "old.png", -1)):
+            conn.execute(
+                """INSERT INTO pet.media(id,member_id,kind,storage_key,content_type,bytes,sha256,delete_after)
+                VALUES (%s,%s,'preview',%s,'image/png',%s,%s,now()+%s)""",
+                (ident, a, path, len(art), digest, timedelta(days=days)),
+            )
+        blocked_files = conn.execute("SELECT id FROM pet.media WHERE id<>%s", (c,)).fetchall()
+
+    origin = "https://pet.example.test"
+    settings = Settings.read({"PET_DATABASE_URL": dsn, "PET_MONTHLY_BUDGET_KRW": "50000",
+                              "PET_ORIGIN": origin, "PET_MEDIA_DIR": str(media_dir)})
+    app = make_app(settings)
+    counter = 0
+
+    async def write(req):
+        nonlocal counter
+        await require_member(req)
+        counter += 1
+        return web.json_response({"ok": True})
+
+    async def fail(req):
+        await require_member(req)
+        raise RuntimeError("member input fixture alice@example.test picture-example.png")
+
+    app.router.add_put("/test/write", write)
+    app.router.add_get("/test/fail", fail)
+    logged = StringIO()
+    lines = logging.StreamHandler(logged)
+    target = logging.getLogger("pet")
+    target.addHandler(lines)
+
+    async def error(res, expected, status):
+        assert res.status == status and res.content_type == "application/problem+json"
+        assert res.headers["Cache-Control"] == "no-store"
+        response = await res.json()
+        assert response["status"] == status and response["code"] == expected
+        assert len(response.pop("traceId")) == 32
+        return response
+
+    def headers(token, **extra):
+        return {"Cookie": f"{COOKIE}={token}", **extra}
+
+    try:
+        async with TestClient(TestServer(app)) as client:
+            url = f"/api/media/{c}"
+            await error(await client.get(url), "unauthenticated", 401)
+            await error(await client.get(url, headers=headers(expired)), "unauthenticated", 401)
+            await error(await client.get("/api/media/wrong-id", headers=headers(token_a)), "invalid_input", 400)
+            missing = await error(await client.get(f"/api/media/{uuid4()}", headers=headers(token_b)), "not_found", 404)
+            other = await error(await client.get(url, headers=headers(token_b)), "not_found", 404)
+            assert missing == other
+            for item, in blocked_files:
+                await error(await client.get(f"/api/media/{item}", headers=headers(token_a)), "not_found", 404)
+            response = await client.get(url, headers=headers(token_a))
+            assert response.status == 200 and response.content_type == "image/png"
+            assert response.headers["Cache-Control"] == "no-store"
+            assert await response.read() == art
+            cookie = response.cookies[COOKIE]
+            assert cookie["secure"] and cookie["httponly"] and cookie["samesite"] == "Lax"
+            assert 0 < int(cookie["max-age"]) <= 3 * 24 * 3600
+            # A reused file validator must still go through authorization after account switching.
+            etag = response.headers["ETag"]
+            assert (await client.get(url, headers=headers(token_a, **{"If-None-Match": etag}))).status == 304
+            await error(await client.get(url, headers=headers(token_b, **{"If-None-Match": etag})), "not_found", 404)
+            await error(await client.get(url, headers={"If-None-Match": etag}), "unauthenticated", 401)
+
+            write_route = "/test/write"
+            await error(await client.put(write_route, headers=headers(token_a)), "cross_site", 403)
+            separate = headers(token_a, Origin="https://other.test", **{"Sec-Fetch-Site": "same-origin"})
+            await error(await client.put(write_route, headers=separate), "cross_site", 403)
+            assert counter == 0
+            assert (await client.put(write_route, headers=headers(token_a, Origin=origin))).status == 200
+            assert (await client.put(write_route, headers=headers(token_a, **{"Sec-Fetch-Site": "same-origin"}))).status == 200
+            assert counter == 2
+            failure = await error(await client.get("/test/fail", headers=headers(token_a)), "server_error", 500)
+            assert failure["detail"] == "잠시 뒤 다시 해 주세요."
+    finally:
+        target.removeHandler(lines)
+    logs = logged.getvalue()
+    assert member_ref(member_a) in logs
+    for value in (member_a, member_b, token_a, token_b, "alice@example.test", "picture-example.png", "RuntimeError"):
+        assert value not in logs
+
+
+async def check_cost(admin_dsn, dsn):
+    settings = Settings.read({"PET_DATABASE_URL": dsn, "PET_MONTHLY_BUDGET_KRW": "1337"})
+    now = datetime(2026, 11, 30, 23, 59, 59, tzinfo=KST)
+    image = Run(uuid4(), "AI-31", "image", settings.image_model, "fixture", "ok",
+                images=1, input_tokens=700, image_input=400, output_tokens=600)
+    voice = Run(uuid4(), "AI-35", "call_minute", "gemini-3.8-live", "fixture", "ok", seconds=Decimal(60))
+    assert microusd(settings.prices, image) == 22700
+    assert microusd(settings.prices, voice) == 26926
+    assert max(pics * Decimal(53) + minutes * Decimal(36)
+               for pics in range(3) for minutes in range(4) if pics*40 + minutes*30 <= 100) <= 150
+
+    def text(cost):
+        return Run(uuid4(), "AI-32", "chat", settings.chat_model, "fixture", "ok", output_tokens=cost * 2)
+
+    async with AsyncConnectionPool(dsn, open=False, kwargs={"row_factory": dict_row}) as pool:
+        budget = Budget(pool, settings, clock=lambda: now)
+        await budget.allow("preview")
+        assert await budget.record(text(790000)) == 790000
+        await asyncio.gather(budget.record(text(5000)), budget.record(text(5000)))
+        assert await budget.record(text(200000)) == 200000
+        for action in ("preview", "redraw", "farewell", "call"):
+            try:
+                await budget.allow(action)
+            except Problem as error:
+                assert error.code == "budget_paused"
+            else:
+                raise AssertionError(f"cost gate allowed {action}")
+        await budget.allow("chat")
+        await budget.allow("candidate", paid=True)
+        await budget.allow("candidate", paid=True)
+        with psycopg.connect(admin_dsn) as conn:
+            events = conn.execute("SELECT key FROM pet.settings WHERE key LIKE 'budget:%' ORDER BY key").fetchall()
+            assert events == [("budget:2026-11:paid_creation_continues",), ("budget:2026-11:warn",)]
+            assert conn.execute("SELECT count(*),sum(est_cost_microusd) FROM pet.ai_runs").fetchone() == (4, 1000000)
+        now += timedelta(seconds=1)
+        await budget.allow("preview")
+        await budget.allow("redraw")
+        await budget.allow("call")
+
+    current = datetime.now(KST)
+    with psycopg.connect(admin_dsn, autocommit=True) as conn:
+        for kind in ("preview", "candidates", "sheet", "reply"):
+            conn.execute(
+                """INSERT INTO pet.jobs(kind,status,queued_at,started_at,finished_at,running_at_start)
+                VALUES (%s,'done',%s,%s,%s,2)""",
+                (kind, current - timedelta(seconds=5), current - timedelta(seconds=5), current),
+            )
+        rows = timings(conn, 7, current)
+        assert len(rows) == 4
+        assert all(value[1:] == (1, 5000, 5000, 2) for value in rows)
+
+
+async def check_oidc(admin_dsn, dsn):
+    signing = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    unrelated = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = jwt.algorithms.RSAAlgorithm.to_jwk(signing.public_key(), as_dict=True)
+    key["kid"] = "fixture-key"
+    jobs = {}
+    requests = 0
+    app = web.Application()
+
+    async def token(req):
+        nonlocal requests
+        requests += 1
+        service = req.match_info["provider"]
+        posted = await req.post()
+        attributes, claims, outcome = jobs.pop(posted["code"])
+        challenge = urlsafe_b64encode(sha256(posted["code_verifier"].encode()).digest()).decode().rstrip("=")
+        assert challenge == attributes["code_challenge"][0]
+        assert posted["redirect_uri"] == attributes["redirect_uri"][0] and posted["client_id"] == f"fixture-{service}"
+        assert posted["grant_type"] == "authorization_code"
+        if outcome == "provider_error":
+            return web.json_response({"error": "fixture-secret-error"}, status=400)
+        return web.json_response({"id_token": jwt.encode(
+            claims, unrelated if outcome == "wrong_key" else signing, algorithm="RS256", headers={"kid": key["kid"]},
+        )})
+
+    async def jwks(req):
+        return web.json_response({"keys": [key]})
+
+    app.router.add_post("/token/{provider}", token)
+    app.router.add_get("/keys", jwks)
+    origin = "https://pet.example.test"
+    secret = b"fixture-signing-secret-for-this-test-only"
+    sub = "fixture-provider-subject"
+    user_id = uuid4()
+    settings = Settings.read({"PET_DATABASE_URL": dsn, "PET_MONTHLY_BUDGET_KRW": "50000", "PET_ORIGIN": origin})
+    async with TestServer(app) as provider_server:
+        providers = {}
+        for name in ("google", "kakao"):
+            host = str(provider_server.make_url("/")).rstrip("/")
+            issuers = (f"{host}/issuer/{name}",)
+            providers[name] = Provider(f"fixture-{name}", "fixture-secret", f"{host}/authorize/{name}",
+                                       f"{host}/token/{name}", f"{host}/keys", issuers)
+        config = AuthConfig(providers, secret)
+        async with TestClient(TestServer(make_app(settings, auth_config=config))) as client:
+            async def begin(service="google"):
+                resp = await client.get(f"/api/auth/{service}/start", allow_redirects=False)
+                assert resp.status == 302 and resp.headers["Cache-Control"] == "no-store"
+                attrs = parse_qs(urlsplit(resp.headers["Location"]).query)
+                assert attrs["scope"] == ["openid"] and attrs["code_challenge_method"] == ["S256"]
+                assert "code_verifier" not in attrs and "client_secret" not in attrs
+                cookie = resp.cookies[STATE_COOKIE]
+                assert cookie["secure"] and cookie["httponly"] and cookie["max-age"] == "600"
+                return attrs, cookie.value
+
+            async def finish(flow, *, service="google", claims=None, state=None, outcome=None):
+                attrs, cookie = flow
+                code = uuid4().hex
+                payload = {"iss": providers[service].issuers[0], "aud": [f"fixture-{service}"],
+                           "exp": int(time.time()) + 60, "sub": sub, "nonce": attrs["nonce"][0]}
+                jobs[code] = (attrs, {**payload, **(claims or {})}, outcome)
+                return await client.get(f"/api/auth/{service}/callback",
+                                        params={"code": code, "state": state or attrs["state"][0]},
+                                        headers={"Cookie": f"{STATE_COOKIE}={cookie}"}, allow_redirects=False)
+
+            def destination(resp, where):
+                assert resp.status == 302 and resp.headers["Location"] == where
+                assert resp.cookies[STATE_COOKIE]["max-age"] == "0"
+
+            before = requests
+            for service in ("kakao", "google"):
+                pending = await finish(await begin(service), service=service)
+                destination(pending, "/signup")
+                cookie = pending.cookies[COOKIE]
+                assert cookie["secure"] and cookie["httponly"] and cookie["samesite"] == "Lax"
+                assert cookie["max-age"] == "1800"
+                with psycopg.connect(admin_dsn) as conn:
+                    stored = conn.execute("SELECT kind,sub_hash,expires_at=absolute_expires_at FROM pet.sessions "
+                                          "WHERE token_hash=%s", (cookie_hash(cookie.value),)).fetchone()
+                    assert stored == ("pending", subject_hash(secret, service, sub), True)
+                unsigned = await client.get("/api/media/" + str(uuid4()), headers={"Cookie": f"{COOKIE}={cookie.value}"})
+                assert unsigned.status == 401
+            assert requests - before == 2
+
+            before = requests
+            state_bad = await finish(await begin(), state="wrong")
+            destination(state_bad, "/?loginError=auth_state")
+            flow = await begin()
+            with patch("marong.pet.auth.time", return_value=time.time() + 601):
+                old_state = await finish(flow)
+            destination(old_state, "/?loginError=auth_state")
+            assert requests == before
+            for claims, outcome in (({}, "wrong_key"), ({}, "provider_error"), ({"iss": "https://wrong.test"}, None),
+                                    ({"aud": "wrong"}, None), ({"nonce": "wrong"}, None), ({"exp": 1}, None)):
+                rejected = await finish(await begin(), claims=claims, outcome=outcome)
+                destination(rejected, "/?loginError=auth_provider")
+                assert COOKIE not in rejected.cookies
+
+            with psycopg.connect(admin_dsn, autocommit=True) as conn:
+                conn.execute("INSERT INTO pet.members(id,member_no,provider,sub_hash,adult_self_declared_at) "
+                             "VALUES (%s,'FIXTURE3','google',%s,now())", (user_id, subject_hash(secret, "google", sub)))
+            logged_in = await finish(await begin())
+            destination(logged_in, "/")
+            raw = logged_in.cookies[COOKIE].value
+            headers = {"Cookie": f"{COOKIE}={raw}", "Origin": origin}
+            with psycopg.connect(admin_dsn, autocommit=True) as conn:
+                conn.execute("UPDATE pet.sessions SET created_at=now()-interval '29 days', "
+                             "expires_at=now()+interval '1 day',absolute_expires_at=now()+interval '61 days' "
+                             "WHERE token_hash=%s AND member_id=%s", (cookie_hash(raw), user_id))
+            active = await client.get("/api/media/" + str(uuid4()), headers=headers)
+            assert active.status == 404 and int(active.cookies[COOKIE]["max-age"]) > 29 * 86400
+            with psycopg.connect(admin_dsn, autocommit=True) as conn:
+                conn.execute("UPDATE pet.sessions SET created_at=now()-interval '91 days', "
+                             "absolute_expires_at=now()-interval '1 day' WHERE token_hash=%s", (cookie_hash(raw),))
+            too_old = await client.get("/api/media/" + str(uuid4()), headers=headers)
+            assert too_old.status == 401
+            second = await finish(await begin())
+            raw = second.cookies[COOKIE].value
+            headers["Cookie"] = f"{COOKIE}={raw}"
+            cross = await client.post("/api/auth/logout", headers={**headers, "Origin": "https://other.test"})
+            assert cross.status == 403
+            exit = await client.post("/api/auth/logout", headers=headers)
+            assert exit.status == 204 and exit.cookies[COOKIE]["max-age"] == "0"
+            assert (await client.post("/api/auth/logout", headers=headers)).status == 401
+            with psycopg.connect(admin_dsn, autocommit=True) as conn:
+                conn.execute("UPDATE pet.members SET status='deleting',deleting_since=now(),sub_hash=NULL WHERE id=%s",
+                             (user_id,))
+            got = await finish(await begin())
+            destination(got, "/signup")
+
+
+async def check_signup(admin_dsn, dsn):
+    origin = "https://pet.example.test"
+    invite = "FIXTURE9"
+    settings = Settings.read({"PET_DATABASE_URL": dsn, "PET_MONTHLY_BUDGET_KRW": "50000", "PET_ORIGIN": origin})
+    store = make_app(settings, auth_config=AuthConfig({}, b""))
+    calls = 0
+
+    async def model_gate(req):
+        nonlocal calls
+        member = await require_member(req)
+        async with req.app[POOL].connection() as conn:
+            await require_overseas(conn, member["id"])
+        calls += 1
+        return web.json_response({"ok": True})
+
+    store.router.add_post("/test/model-gate", model_gate)
+
+    def pending():
+        raw = token_urlsafe(32)
+        with psycopg.connect(admin_dsn, autocommit=True) as conn:
+            conn.execute(
+                """INSERT INTO pet.sessions(token_hash,kind,provider,sub_hash,expires_at,absolute_expires_at)
+                VALUES (%s,'pending','google',%s,now()+interval '30 minutes',now()+interval '30 minutes')""",
+                (cookie_hash(raw), sha256(uuid4().bytes).digest()),
+            )
+        return {"Origin": origin, "Cookie": f"{COOKIE}={raw}"}, raw
+
+    with psycopg.connect(admin_dsn, autocommit=True) as conn:
+        conn.execute("INSERT INTO pet.invites(code_hash,uses_left) VALUES (%s,1)", (sha256(invite.encode()).digest(),))
+        for kind, count in (("font", 5), ("theme", 3), ("sticker_pack", 2), ("wear", 5)):
+            for sequence in range(count):
+                conn.execute(
+                    """INSERT INTO pet.items(kind,name,slot,is_default,license_key,assets)
+                    VALUES (%s,%s,%s,true,'fixture','{}')""",
+                    (kind, f"fixture-{kind}-{sequence}", "head" if kind == "wear" else None),
+                )
+
+    example = {"birthDate": "2007-11-17", "agreeTerms": True, "agreePrivacy": True, "aiNoticeConfirmed": True,
+               "overseasTransfer": False, "inviteCode": invite}
+    async with TestClient(TestServer(store)) as client:
+        async def failure(response, status, code):
+            assert response.status == status and (await response.json())["code"] == code
+
+        async def signup(body, credentials):
+            return await client.post("/api/signup", headers=credentials, json=body)
+
+        with patch("marong.pet.account.korea_today", return_value=date(2026, 11, 17)):
+            await failure(await signup(example, {"Origin": origin}), 401, "unauthenticated")
+            minor, expired_raw = pending()
+            await failure(await signup({**example, "birthDate": "2007-11-18"}, minor), 403, "underage")
+            pending_headers, pending_raw = pending()
+            await failure(await client.get("/api/me", headers=pending_headers), 401, "unauthenticated")
+            await failure(await signup({**example, "birthDate": "2026-11-18"}, pending_headers), 400, "invalid_input")
+            await failure(await signup({**example, "agreeTerms": False}, pending_headers), 400, "consents_missing")
+            await failure(await signup({**example, "inviteCode": "UNKNOWN1"}, pending_headers), 403, "invite_required")
+            await failure(await signup({k: v for k, v in example.items() if k != "inviteCode"}, pending_headers),
+                          403, "invite_required")
+            other, _ = pending()
+            success, failed = await asyncio.gather(signup(example, pending_headers), signup(example, other))
+            if failed.status == 201:
+                success, failed = failed, success
+            assert success.status == 201
+            await failure(failed, 403, "invite_required")
+            profile = await success.json()
+            assert profile["status"] == "active" and not profile["overseasTransfer"] and not profile["paymentsEnabled"]
+            assert "birthDate" not in profile
+            raw = success.cookies[COOKIE].value
+            assert raw != pending_raw and success.cookies[COOKIE]["max-age"] == str(30 * 86400)
+            member = {"Origin": origin, "Cookie": f"{COOKIE}={raw}"}
+            await failure(await signup(example, member), 409, "already_member")
+            assert await (await client.get("/api/me", headers=member)).json() == profile
+        with psycopg.connect(admin_dsn) as conn:
+            assert conn.execute("SELECT 1 FROM pet.sessions WHERE token_hash=%s", (cookie_hash(expired_raw),)).fetchone() is None
+            assert conn.execute(
+                """SELECT i.kind,count(*) FROM pet.inventory b JOIN pet.items i ON i.id=b.item_id
+                JOIN pet.members m ON m.id=b.member_id WHERE m.member_no=%s GROUP BY i.kind ORDER BY i.kind""",
+                (profile["memberNo"],),
+            ).fetchall() == [("font", 5), ("sticker_pack", 2), ("theme", 3), ("wear", 5)]
+            assert not conn.execute("""SELECT column_name FROM information_schema.columns
+                WHERE table_schema='pet' AND column_name ILIKE '%%birth%%'""").fetchall()
+
+        path = "/api/me/consents"
+        consent = await (await client.get(path, headers=member)).json()
+        assert len(consent["items"]) == 4 and all(item["docVersion"] == "2026-11" for item in consent["items"])
+        await failure(await client.post("/test/model-gate", headers=member), 409, "consent_required")
+        assert calls == 0
+        await failure(await client.put(path + "/terms", headers=member, json={"value": False}), 400, "use_delete_account")
+        foreign = {**member, "Origin": "https://other.test"}
+        await failure(await client.put(path + "/overseas_transfer", headers=foreign, json={"value": True}), 403, "cross_site")
+        for _ in range(2):
+            allowed = await client.put(path + "/overseas_transfer", headers=member, json={"value": True})
+            assert allowed.status == 200
+        assert (await client.post("/test/model-gate", headers=member)).status == 200 and calls == 1
+        changed = await client.put(path + "/overseas_transfer", headers=member, json={"value": False})
+        assert changed.status == 200
+        await failure(await client.post("/test/model-gate", headers=member), 409, "consent_required")
+        with psycopg.connect(admin_dsn) as conn:
+            values = conn.execute(
+                """SELECT c.value FROM pet.consents c JOIN pet.members m ON m.id=c.member_id
+                WHERE m.member_no=%s AND c.kind='overseas_transfer' ORDER BY c.id""", (profile["memberNo"],),
+            ).fetchall()
+        assert values == [(False,), (True,), (False,)] and calls == 1
+
+
+async def check_delete_push_quota(admin_dsn, dsn, root):
+    origin = "https://pet.test"
+    raw = token_urlsafe(32)
+    with psycopg.connect(admin_dsn, autocommit=True) as conn:
+        member = conn.execute(
+            """INSERT INTO pet.members(member_no,provider,sub_hash,adult_self_declared_at)
+            VALUES('P0000420','google',%s,now()) RETURNING id""", (sha256(uuid4().bytes).digest(),),
+        ).fetchone()[0]
+        conn.execute(
+            """INSERT INTO pet.sessions(token_hash,kind,member_id,expires_at,absolute_expires_at)
+            VALUES(%s,'member',%s,now()+interval '30 days',now()+interval '90 days')""",
+            (cookie_hash(raw), member),
+        )
+        pets = []
+        for mode in ("living", "memorial"):
+            creation = conn.execute("INSERT INTO pet.creations(member_id,kind) VALUES(%s,%s) RETURNING id",
+                                    (member, mode)).fetchone()[0]
+            sheet = json.dumps(dict.fromkeys(("front", "smile", "excited", "sleepy", "surprised", "sad", "pout"), None))
+            pets.append(conn.execute(
+                """INSERT INTO pet.pets(member_id,creation_id,name,intro,species,template,sheet,mode,memorial_since)
+                VALUES(%s,%s,'시험아이','{}','dog','dog_small',%s::jsonb,%s,
+                       CASE WHEN %s='memorial' THEN now() ELSE NULL END) RETURNING id""",
+                (member, creation, sheet, mode, mode),
+            ).fetchone()[0])
+        for index in range(3):
+            order = conn.execute(
+                """INSERT INTO pet.orders(order_no,member_id,product,amount_krw,vat_krw,withdrawal_rule,idempotency_key)
+                VALUES(%s,%s,'subscription_month',1000,90,'fixture',%s) RETURNING id""",
+                (f"fixture-erasure-{index}", member, uuid4()),
+            ).fetchone()[0]
+        conn.execute(
+            """INSERT INTO pet.subscriptions(member_id,status,billing_key_enc,price_krw,first_order_id,period_start,period_end)
+            VALUES(%s,'active',%s,1000,%s,'2026-12-01 05:00+09','2026-12-01 06:00+09')""",
+            (member, b"fixture", order),
+        )
+        (root / "fixture-erase.png").write_bytes(b"fixture")
+        conn.execute(
+            """INSERT INTO pet.media(member_id,kind,storage_key,content_type,bytes,sha256)
+            VALUES (%s,'photo','fixture-erase.png','image/png',7,%s)""", (member, sha256(b"fixture").digest()),
+        )
+    options = {"PET_DATABASE_URL": dsn, "PET_MONTHLY_BUDGET_KRW": "50000", "PET_ORIGIN": origin,
+               "PET_MEDIA_DIR": str(root)}
+    settings = Settings.read(options)
+    app = make_app(settings, auth_config=AuthConfig({}, b""))
+    headers = {"Origin": origin, "Cookie": f"{COOKIE}={raw}"}
+    fixed = datetime(2026, 12, 1, 3, 59, tzinfo=KST)
+    async with TestClient(TestServer(app)) as client:
+        pool = app[POOL]
+
+        async def hold(kind, at=fixed, memorial=False):
+            async with pool.connection() as conn, conn.transaction():
+                return await reserve(conn, member, kind, at=at, memorial=memorial)
+
+        async def settle_hold(id, at=fixed, commit=True):
+            async with pool.connection() as conn, conn.transaction():
+                return await settle(conn, member, id, at=at, commit=commit)
+
+        async def quota():
+            result = await client.get("/api/me/quota", headers=headers)
+            assert result.status == 200
+            return await result.json()
+
+        assert (await client.get("/api/me/quota")).status == 401
+        with patch("marong.pet.quota.datetime", wraps=datetime) as clock:
+            clock.now.return_value = fixed
+            assert await quota() == {"percent": 100, "resetsAt": "2026-12-01T04:00:00+09:00"}
+            first, error = await hold("call_minute")
+            assert first and not error and (await quota())["percent"] == 70
+            second, error = await hold("new_picture")
+            assert second and not error and (await quota())["percent"] == 30
+            third, error = await hold("call_minute")
+            assert third and not error and (await quota())["percent"] == 0
+            assert (await hold("call_minute", memorial=True))[1].extra == {"prompt": "none"}
+            assert (await hold("call_minute"))[1].extra == {"prompt": "recharge"}
+            assert (await hold("call_minute"))[1].extra == {"prompt": "brief"}
+            assert await settle_hold(second, commit=False) and not await settle_hold(second, commit=False)
+            pair = await asyncio.gather(hold("new_picture"), hold("new_picture"))
+            assert sum(id is not None for id, _ in pair) == 1 and (await quota())["percent"] == 0
+            assert await settle_hold(first) and not await settle_hold(first, commit=False)
+            assert await release_expired(pool, fixed + timedelta(minutes=11)) == 2
+            assert (await quota())["percent"] == 70
+            clock.now.return_value = fixed + timedelta(minutes=1)
+            assert (await quota())["percent"] == 100
+            subscribed = fixed + timedelta(hours=2)
+            assert (await hold("new_picture", at=subscribed))[0]
+            clock.now.return_value = subscribed
+            assert (await quota())["percent"] == 80
+            clock.now.return_value = fixed + timedelta(hours=3)
+            assert (await quota())["percent"] == 80
+            clock.now.return_value = fixed + timedelta(days=1, minutes=1)
+            assert (await quota())["percent"] == 100
+
+        point = ec.generate_private_key(ec.SECP256R1()).public_key().public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+        value = {"endpoint": "https://fcm.googleapis.com/fcm/send/fixture",
+                 "keys": {"p256dh": urlsafe_b64encode(point).decode(), "auth": token_urlsafe(16)}}
+        for bad in ("http://fcm.googleapis.com/a", "https://127.0.0.1/a", "https://fcm.googleapis.com@other.test/a"):
+            response = await client.post("/api/me/push", json={**value, "endpoint": bad}, headers=headers)
+            assert response.status == 400
+        assert (await client.post("/api/me/push", json=value)).status == 403
+        assert (await client.post("/api/me/push", json=value, headers={"Origin": origin})).status == 401
+        first = await client.post("/api/me/push", json=value, headers=headers)
+        assert first.status == 201
+        subscription = (await first.json())["jobId"]
+        replay = await client.post("/api/me/push", json=value, headers=headers)
+        assert replay.status == 201 and (await replay.json())["jobId"] == subscription
+        records = []
+        replies = []
+
+        async def send(_target, payload):
+            records.append(payload)
+            return replies.pop(0) if replies else 201
+
+        for kind in ("sheet", "proactive", "diary", "refund", "export"):
+            assert await notify(pool, member, pets[0], kind, send=send) == 1
+        assert len(records) == 5 and all(p["title"] == "시험아이(AI)" and set(p) == {"title", "body"} for p in records)
+        assert await notify(pool, member, pets[1], "diary", send=send) == 0
+        assert len(records) == 5
+        replies[:] = [500, 500, 410]
+        assert await notify(pool, member, pets[0], "diary", send=send) == 0 and len(records) == 7
+        assert await notify(pool, member, pets[0], "diary", send=send) == 0 and len(records) == 8
+        path = "/api/me/push/" + subscription
+        assert (await client.delete(path, headers=headers)).status == 404
+        new = await client.post("/api/me/push", json=value, headers=headers)
+        path = "/api/me/push/" + (await new.json())["jobId"]
+        assert (await client.delete(path, headers=headers)).status == 204
+        assert (await client.delete(path, headers=headers)).status == 404
+        assert (await client.post("/api/me/push", json=value, headers=headers)).status == 201
+
+        wrong = await client.delete("/api/me", json={"confirm": "시험"}, headers=headers)
+        assert wrong.status == 400 and (await wrong.json())["code"] == "confirm_required"
+        assert (await client.delete("/api/me", json={"confirm": "계정 지우기"}, headers=headers)).status == 202
+        assert (await client.get("/api/me", headers=headers)).status == 401
+        assert await erase_next(pool, root)
+        with psycopg.connect(admin_dsn, autocommit=True) as conn:
+            assert conn.execute("SELECT status FROM pet.subscriptions WHERE member_id=%s", (member,)).fetchone() == ("canceling",)
+            assert conn.execute("SELECT count(*) FROM pet.sessions WHERE member_id=%s", (member,)).fetchone() == (0,)
+            assert conn.execute("""UPDATE pet.jobs SET run_after=now() WHERE member_id=%s AND status='queued'
+                AND error_code='account_delete_retry' AND run_after>=now()+interval '59 minutes' RETURNING attempts""",
+                (member,)).fetchone() == (1,)
+
+        async def revoke(key):
+            assert key == b"fixture"
+
+        assert await erase_next(pool, root, revoke=revoke)
+        assert not (root / "fixture-erase.png").exists()
+        with psycopg.connect(admin_dsn) as conn:
+            for table in ("subscriptions", "media", "pets", "push_subscriptions", "sessions", "jobs", "member_days"):
+                assert conn.execute(f"SELECT count(*) FROM pet.{table} WHERE member_id=%s", (member,)).fetchone() == (0,)
+            assert conn.execute("SELECT count(*) FROM pet.members WHERE id=%s", (member,)).fetchone() == (0,)
+            assert conn.execute("SELECT count(*) FROM pet.orders WHERE order_no LIKE 'fixture-erasure-%' AND member_id IS NULL").fetchone() == (3,)
+
+
+if __name__ == "__main__":
+    db = TestDB()
+    try:
+        admin, pet = fixtures(db)
+        check_startup(pet)
+        asyncio.run(check_jobs(admin, pet))
+        with tempfile.TemporaryDirectory() as tmp:
+            asyncio.run(check_http(admin, pet, Path(tmp)))
+        asyncio.run(check_cost(admin, pet))
+        asyncio.run(check_oidc(admin, pet))
+        asyncio.run(check_signup(admin, pet))
+        with tempfile.TemporaryDirectory() as tmp:
+            asyncio.run(check_delete_push_quota(admin, pet, Path(tmp)))
+    finally:
+        db.close()
+    print("TC-380–393: isolated core, OIDC, signup, consent, account erasure, Web Push and quota verified")

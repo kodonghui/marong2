@@ -1,5 +1,5 @@
 """Private transcript export on the isolated restored DB; never calls the bot or Sheets."""
-import asyncio,os,subprocess,sys,uuid
+import asyncio,sys,uuid
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -9,17 +9,12 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 from tools.report import build,workbook,FRIEND_COLOR,MARONG_COLOR
 from call_memory import MemoryStore,Principal
 
-DB=os.environ.get('TEST_DATABASE','marong_voice_verify_20261112')
-assert DB.startswith('marong_voice_verify_')
+from fixture_database import CALL_DSN, BOT_DSN, admin
 CHECKS=0
 def ok(value,label):
     global CHECKS
     assert value,label
     CHECKS+=1;print('PASS',label,flush=True)
-def admin(sql):
-    r=subprocess.run(['sudo','-n','-u','postgres','psql','-X','-q','-At','-v','ON_ERROR_STOP=1','-d',DB],input=sql,text=True,capture_output=True)
-    if r.returncode:raise RuntimeError(r.stderr)
-    return r.stdout.strip()
 
 async def main():
     prefix='report_asr_'+uuid.uuid4().hex
@@ -27,7 +22,7 @@ async def main():
     caller=int(admin(f"INSERT INTO call.callers(friend_id) VALUES({friend}) RETURNING id"))
     admin(f"INSERT INTO marong.rooms(room_key,is_channel,proactive) VALUES('{prefix}',true,false);")
     kakao=int(admin(f"INSERT INTO marong.messages(room_key,role,content,created_at) VALUES('{prefix}','user','KAKAO_FIXTURE','2001-01-02 10:00:10+09') RETURNING id;"))
-    p=Principal(caller,friend,prefix);store=MemoryStore(f'dbname={DB} user=marong_call');await store.open()
+    p=Principal(caller,friend,prefix);store=MemoryStore(CALL_DSN);await store.open()
     try:
         call,_=await store.start_call(p,str(uuid.uuid4()),'Sulafat','report-only-test')
         seg=await store.start_segment(p,call,str(uuid.uuid4()),'gemini-3.8-live')
@@ -45,7 +40,7 @@ async def main():
         admin(f"UPDATE call.turns SET forgotten_at=now() WHERE id={ids['hidden']}; UPDATE call.turns SET content=' ' WHERE id={ids['blank']};")
         tz=ZoneInfo('Asia/Seoul');start=datetime(2001,1,2,10,tzinfo=tz);until=datetime(2001,1,2,11,tzinfo=tz)
         def snapshot():
-            with psycopg.connect(f'dbname={DB} user=marong',row_factory=dict_row) as c:
+            with psycopg.connect(BOT_DSN,row_factory=dict_row) as c:
                 c.read_only=True
                 return build(c,start,until,tz,now=until,vectors=False)
         before=admin(f"SELECT count(*) FROM marong.messages WHERE room_key='{prefix}'")
@@ -69,7 +64,7 @@ async def main():
         ok(updated==ids['asr'] and len(updated_rows)==5 and final[4]=='통화(전사)' and final[5]=='전사가 완성된 말','partial updates replace the same row without duplication')
         ok(snapshot()==(changed,_),'repeated refresh is idempotent')
         ok(admin(f"SELECT count(*) FROM marong.messages WHERE room_key='{prefix}'")==before,'report never writes transcripts into Kakao storage')
-        with psycopg.connect(f'dbname={DB} user=marong',autocommit=True) as c:
+        with psycopg.connect(BOT_DSN,autocommit=True) as c:
             try:c.execute('SELECT content FROM call.turns LIMIT 1');raise AssertionError('raw transcript-table access granted')
             except psycopg.errors.InsufficientPrivilege:pass
             ok(not c.execute("SELECT has_table_privilege(current_user,'call.transcript_report','INSERT,UPDATE,DELETE')").fetchone()[0],

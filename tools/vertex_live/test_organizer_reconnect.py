@@ -5,15 +5,14 @@ is the same event for the client: AdminShutdown on the next use, then a closed
 connection. Unattended upgrades restarted the server on 2026-11-14 and the
 organizer's single checkpoint connection failed every later job.
 """
-import asyncio,os,uuid
+import asyncio,uuid
 from typing import TypedDict
 import psycopg
 from langgraph.graph import StateGraph,START,END
 from organizer import AsyncPostgresSaver,checkpoint_pool
 
-DB=os.environ.get('TEST_DATABASE','marong_voice_verify_20261112')
-assert DB.startswith('marong_voice_verify_'),'Only the isolated restored database is allowed'
-BASE=f'dbname={DB} user=marong_call'
+from fixture_database import CALL_DSN
+BASE=CALL_DSN
 APP='organizer_reconnect_'+uuid.uuid4().hex[:10]
 DSN=f'{BASE} application_name={APP}'
 CHECKS=0

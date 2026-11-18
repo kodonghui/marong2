@@ -56,13 +56,24 @@ const app = {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const inApp = () => Boolean(window.__marongApp);
+async function discoverPersona() {
+  try {
+    const result = await fetch('/chat/persona/api/card', {credentials: 'same-origin', cache: 'no-store', redirect: 'manual'});
+    if (result.status === 200 && !document.querySelector('a[href="/chat/persona/"]')) {
+      const link = document.createElement('a');
+      link.className = 'icon-button'; link.href = '/chat/persona/'; link.textContent = '나';
+      link.setAttribute('aria-label', '친구 약속');
+      document.querySelector('.actions').prepend(link);
+    }
+  } catch {}
+}
 
-async function api(path, options = {}) {
+async function api(path, options = {}, root = API) {
   const headers = {Accept: 'application/json'};
   if (options.body) headers['Content-Type'] = 'application/json';
   let res;
   try {
-    res = await fetch(API + path, {...options, headers, credentials: 'same-origin', redirect: 'manual', cache: 'no-store'});
+    res = await fetch(root + path, {...options, headers, credentials: 'same-origin', redirect: 'manual', cache: 'no-store'});
   } catch (error) {
     if (error && error.name === 'AbortError') return {status: -1};
     return {status: 0};
@@ -202,9 +213,112 @@ function item(message) {
   meta.append(time);
   if (picture) body.append(picture);
   body.append(bubble, meta);
+  if (!me && message.card) showCard(li, body, message);
   row.append(face, body);
   li.append(dayLine, row);
   return li;
+}
+
+function showCard(li, body, message) {
+  const card = message.card;
+  const version = card && [card.id, card.status, card.answer].join(':');
+  if (li.dataset.cardVersion === version) return;
+  body.querySelector('.persona-options')?.remove();
+  li.dataset.cardVersion = version || '';
+  if (!card) return;
+  const container = document.createElement('div');
+  container.className = 'persona-options';
+  const notice = document.createElement('p');
+  notice.className = 'persona-card-note';
+  notice.setAttribute('role', 'status');
+  if (card.status === 'answered') {
+    notice.textContent = '✓ ' + (card.options.find(option => option.value === card.answer)?.label || '');
+    notice.setAttribute('aria-label', '골랐어: ' + notice.textContent.slice(2));
+  } else if (card.status !== 'open') {
+    notice.textContent = card.status === 'expired' ? '시간이 지나서 닫혔어' : '이 질문은 닫혔어';
+  } else {
+    if (card.step) {
+      const progress = document.createElement('p');
+      progress.className = 'persona-card-note';
+      progress.textContent = `${card.step}/3`;
+      container.append(progress);
+    }
+    const group = document.createElement('div');
+    group.className = 'persona-card-group';
+    group.setAttribute('role', 'radiogroup');
+    group.setAttribute('aria-label', message.text.split('\n').at(-1));
+    const buttons = [];
+    async function choose(value, button) {
+      buttons.forEach(item => { item.disabled = true; });
+      group.setAttribute('aria-busy', 'true');
+      button.setAttribute('aria-checked', 'true');
+      notice.replaceChildren();
+      const r = await api(`/cards/${card.id}/answer`, {method: 'POST', body: JSON.stringify({value})}, '/chat/persona/api');
+      if (r.status === 200) {
+        showCard(li, body, {...message, card: r.body.card});
+        if (r.body.effect === 'open_card_screen') {
+          location.href = '/chat/persona/?from=draft';
+          return;
+        }
+        if (r.body.effect === 'card_set') {
+          ui.notice.textContent = '약속 정했어';
+          ui.notice.hidden = false;
+        }
+        return;
+      }
+      group.removeAttribute('aria-busy');
+      if (r.status === 401) { relogin(); return; }
+      if (r.status === 404) {
+        showCard(li, body, {...message, card: null});
+        await refreshCards();
+        return;
+      }
+      if (r.status === 409) {
+        notice.textContent = '이 카드는 이제 못 골라';
+        await refreshCards();
+        return;
+      }
+      if (r.status === 403) {
+        const code = r.body?.code;
+        notice.textContent = code === 'feature_off' ? '이건 아직 준비 중이야'
+          : code === 'cross_site' ? '이 화면에서 다시 해 줘' : '이 계정으로는 열 수 없어';
+        return;
+      }
+      buttons.forEach(item => { item.disabled = false; item.setAttribute('aria-checked', 'false'); });
+      if (r.status === 400) { notice.textContent = '뭔가 잘못 보냈나 봐. 다시 해 볼게'; return; }
+      const retry = document.createElement('button');
+      retry.type = 'button'; retry.className = 'text-button'; retry.textContent = '다시 해 볼게';
+      retry.addEventListener('click', () => { void choose(value, button); }, {once: true});
+      notice.append(retry);
+    }
+    for (const option of card.options) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.setAttribute('role', 'radio');
+      button.setAttribute('aria-checked', 'false');
+      button.textContent = option.label;
+      button.addEventListener('click', () => { void choose(option.value, button); });
+      group.append(button);
+      buttons.push(button);
+    }
+    group.addEventListener('keydown', (event) => {
+      const n = buttons.indexOf(event.target);
+      const step = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1
+        : event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : 0;
+      if (step && n >= 0) {
+        event.preventDefault();
+        buttons[(n + step + buttons.length) % buttons.length].focus();
+      }
+    });
+    container.append(group);
+  }
+  container.append(notice);
+  body.insertBefore(container, body.querySelector('.meta'));
+}
+
+async function refreshCards() {
+  const r = await api(`/messages?limit=${PAGE}`);
+  if (r.status === 200) add(r.body.messages);
 }
 
 // A picture topic's picture above Marong's words (SCR-107#picture): an empty box while it loads, gone if it cannot.
@@ -266,7 +380,11 @@ function add(messages) {
   const stick = nearBottom();
   let added = false;
   for (const message of messages) {
-    if (app.shown.has(message.id)) continue;
+    if (app.shown.has(message.id)) {
+      const li = app.shown.get(message.id);
+      if (message.card || li.dataset.cardVersion) showCard(li, li.querySelector('.body'), message);
+      continue;
+    }
     if (message.from === 'me') {
       for (const [clientId, entry] of app.pending) {
         if (entry.text === message.text && entry.li.classList.contains('sending')) {
@@ -367,7 +485,8 @@ async function waitLoop() {
       app.waitControl = control;
       const guard = setTimeout(() => control.abort(), 40_000);
       const began = Date.now();
-      const r = await api(`/messages/wait?after=${app.last}&typing=${app.typing ? 1 : 0}&read=${app.read}`,
+      const after = app.last;
+      const r = await api(`/messages/wait?after=${after}&typing=${app.typing ? 1 : 0}&read=${app.read}`,
         {signal: control.signal});
       clearTimeout(guard);
       app.waitControl = null;
@@ -380,7 +499,8 @@ async function waitLoop() {
         setTyping(r.body.typing);
         setRead(r.body);
         // Nothing new at once: another open screen took this wait over. Do not take it straight back.
-        if (!added && app.typing === typing && app.read === read && Date.now() - began < 1_000) await sleep(3_000);
+        const echoedNewMessage = r.body.messages.some(message => message.id > after);
+        if (!added && !echoedNewMessage && app.typing === typing && app.read === read && Date.now() - began < 1_000) await sleep(3_000);
         continue;
       }
       if (!handle(r)) break;
@@ -651,3 +771,4 @@ async function start() {
 }
 
 start();
+void discoverPersona();
