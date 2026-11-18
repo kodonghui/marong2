@@ -41,10 +41,10 @@ def preview_png(raw):
     return png
 
 
-async def generate_preview(render, settings, template, traits):
+async def generate_preview(render, settings, template, traits, job):
     for model in dict.fromkeys(filter(None, (settings.image_model, settings.image_fallback_model))):
         try:
-            raw = await asyncio.wait_for(render(model=model, template=template, traits=traits), 90)
+            raw = await asyncio.wait_for(render(model=model, template=template, traits=traits, job=job), 90)
             return await asyncio.to_thread(preview_png, raw)
         except Exception:
             logger.warning("pet_preview_draw_failed")
@@ -161,7 +161,7 @@ async def next_preview(pool, settings, budget, render):
         if row["state"] == "traits_confirmed" and row["expires_at"] > datetime.now(timezone.utc):
             traits = {key: value for key, value in row["traits"].items()
                       if key not in {"confidence", "petVisible", "multiplePets"}}
-            png = await generate_preview(render, settings, row["template"], traits)
+            png = await generate_preview(render, settings, row["template"], traits, job)
     except Problem:
         pass
     await finish_preview(pool, settings.media_dir, job, png, datetime.now(timezone.utc))

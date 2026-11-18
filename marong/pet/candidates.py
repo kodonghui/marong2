@@ -40,14 +40,14 @@ def fit_score(png, reference):
     return ImageChops.logical_and(generated, expected).histogram()[255] / counts[255]
 
 
-async def draw_candidate(render, settings, row, reference, index):
+async def draw_candidate(render, settings, row, reference, index, job):
     options = (settings.image_model, settings.image_model, settings.image_fallback_model)
     safe_traits = {key: value for key, value in row["traits"].items()
                    if key not in {"confidence", "petVisible", "multiplePets"}}
     for model in filter(None, options):
         try:
             raw = await asyncio.wait_for(render(model=model, template=row["template"], traits=safe_traits,
-                                                slot=index, note=row["regenerate_note"]), 90)
+                                                slot=index, note=row["regenerate_note"], job=job), 90)
             png = await asyncio.to_thread(preview_png, raw)
             score = await asyncio.to_thread(fit_score, png, reference)
             if score >= MATCH:
@@ -189,7 +189,7 @@ async def next_candidates(pool, settings, budget, draw, mask_for, gateway):
             mask = await asyncio.to_thread(mask_for, row["template"])
 
             async def draw_and_save(slot):
-                picture = await draw_candidate(draw, settings, row, mask, slot)
+                picture = await draw_candidate(draw, settings, row, mask, slot, job)
                 if picture is not None:
                     await save_candidate(pool, settings.media_dir, job, slot, picture)
 

@@ -392,7 +392,7 @@ async def check_preview(admin, dsn, directory):
     received = []
     release_failure = asyncio.Event()
 
-    async def renderer(*, model, template, traits):
+    async def renderer(*, model, template, traits, job):
         assert template == "dog_small" and traits["coatColors"] == ["갈색"]
         assert "petVisible" not in traits and "multiplePets" not in traits and "confidence" not in traits
         received.append(model)
@@ -739,7 +739,7 @@ async def check_candidates(admin, dsn, directory):
         assert ident == "dog_small"
         return mask
 
-    async def render(*, model, template, traits, slot, note):
+    async def render(*, model, template, traits, slot, note, job):
         assert template == "dog_small" and traits["species"] == "dog"
         if note == "hold fixture" and slot > 0:
             await release_candidates.wait()
@@ -754,7 +754,7 @@ async def check_candidates(admin, dsn, directory):
         assert ident == "dog_small"
         return (0.5, 0.5, 0.6, 0.6) if bad_head else (0.2, 0.19, 0.35, 0.29)
 
-    async def expression(*, model, template, front, expression):
+    async def expression(*, model, template, front, expression, job):
         assert template == "dog_small"
         expression_attempts[expression] = expression_attempts.get(expression, 0) + 1
         if expression == "sad" and expression_attempts[expression] == 1:

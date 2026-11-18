@@ -42,11 +42,11 @@ def head_in_box(mask, box):
     return box[0] <= center_x <= box[2] and box[1] <= center_y <= box[3]
 
 
-async def draw_expression(render, settings, template, front, reference, box, expression):
+async def draw_expression(render, settings, template, front, reference, box, expression, job):
     second = settings.image_fallback_model or settings.image_model
     for model in (settings.image_model, second):
         try:
-            raw = await asyncio.wait_for(render(model=model, template=template, front=front, expression=expression),
+            raw = await asyncio.wait_for(render(model=model, template=template, front=front, expression=expression, job=job),
                                          timeout=90)
             picture = await asyncio.to_thread(preview_png, raw)
             score = await asyncio.to_thread(fit_score, picture, reference)
@@ -145,7 +145,7 @@ async def next_sheet(pool, settings, budget, render, head_for):
         box = await asyncio.to_thread(head_for, row["template"])
         await budget.allow("expression", paid=True)
         pictures = await asyncio.gather(*(draw_expression(render, settings, row["template"], front, reference,
-                                                           box, label) for label in EXPRESSIONS))
+                                                           box, label, job) for label in EXPRESSIONS))
     except (Problem, ValueError, OSError):
         pass
     await save_sheet(pool, settings.media_dir, job, pictures)
