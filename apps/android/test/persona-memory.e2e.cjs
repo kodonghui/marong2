@@ -50,9 +50,16 @@ test('TC-346: mobile memory list, paging, confirmation, lost reply and idempoten
   await page.getByRole('button', {name: '들은 말 보기'}).click();
   assert.equal(await page.getByText(item.quote, {exact: true}).isVisible(), true);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  const existing = await page.getByRole('button', {name: '들은 말 보기'}).elementHandle();
+  const refreshed = page.waitForResponse(response => response.url().endsWith('/api/memories'));
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await refreshed;
+  await page.waitForFunction(() => !document.getElementById('memory-more').disabled);
+  assert.equal(await existing.evaluate(node => node.isConnected), true);
+  assert.equal(await page.getByText(item.quote, {exact: true}).isVisible(), true);
   await page.getByRole('button', {name: '더 보기'}).click();
   await page.getByText('가상 일정').waitFor();
-  assert.deepEqual(requests, [null, '3']);
+  assert.deepEqual(requests, [null, null, '3']);
 
   const rows = page.locator('.memory-row');
   await rows.filter({hasText: '시험 열린 고리'}).getByRole('button', {name: '잊기', exact: true}).click();
