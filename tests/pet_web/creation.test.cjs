@@ -1238,7 +1238,9 @@ if (require.main === module) {
       await route.continue();
     });
     await page.goto(origin + '/create/' + creationId + '/preview');
-    await page.locator('#page .skeleton').waitFor();
+    const loading = page.locator('#page .creation-loading');
+    await visible(loading);
+    assert.equal(await loading.locator('.skeleton').count(), 2);
     assert.equal(await page.locator('#page').getAttribute('aria-busy'), 'true');
     start.resolve();
     await page.getByRole('button', {name:'미리 보기 그리기',exact:true}).click();
