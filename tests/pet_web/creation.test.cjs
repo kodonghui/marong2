@@ -1991,12 +1991,21 @@ if (require.main === module) {
       const {origin, writes} = await fixture(t, {reportLimited});
       const page = await browser.newPage({viewport: {width: 360, height: 760}});
       try {
+        await page.clock.setFixedTime(new Date(reportLimited ? '2026-11-17T21:00:00+09:00' : '2026-11-17T09:00:00+09:00'));
         await page.goto(origin + '/pets/' + petId);
         await page.getByRole('button', {name: '신고', exact: true}).click();
         const modal = page.getByRole('dialog');
         const send = modal.getByRole('button', {name: '신고하기'});
         assert.equal(await modal.getByRole('radio').count(), 6);
         assert.ok(await modal.locator('.report-choices > label').first().evaluate(label => label.offsetHeight) >= 44);
+        const colors = await modal.evaluate(dialog => {
+          const root = getComputedStyle(document.documentElement);
+          return [getComputedStyle(dialog, '::backdrop').backgroundColor,
+            root.getPropertyValue('--line').trim(), root.getPropertyValue('--input').trim(), root.getPropertyValue('--star').trim()];
+        });
+        assert.deepEqual(colors, reportLimited
+          ? ['rgba(5, 7, 16, 0.62)', '#b4b2c618', '#b4b2c622', '#f6d57a']
+          : ['rgba(43, 33, 26, 0.5)', '#e2d3bf', '#a88f76', '#8a4b24']);
         assert.equal(await send.isDisabled(), true);
         await modal.getByLabel('상처 주는 말').check();
         await modal.getByLabel('메모').fill('합성 시험');
