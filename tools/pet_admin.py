@@ -3,11 +3,12 @@
 import argparse
 from datetime import datetime
 from hashlib import sha256
+import json
 import os
 from pathlib import Path
 from secrets import choice
 import sys
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -63,6 +64,35 @@ def create_invite(conn, uses):
     raise RuntimeError("pet_invite_collision")
 
 
+def report_command(conn, args):
+    if args.action == "resolve":
+        row = conn.execute(
+            "UPDATE pet.reports SET status='resolved',resolved_at=COALESCE(resolved_at,now()) "
+            "WHERE id=%s RETURNING id,resolved_at", (args.id,),
+        ).fetchone()
+        if row is None:
+            return 1
+        print(f"{row[0]}\t{row[1].isoformat()}")
+        return 0
+    if args.action == "show":
+        row = conn.execute(
+            "SELECT id,target_type,reason,note,copy_text,copy_media,status,created_at,resolved_at "
+            "FROM pet.reports WHERE id=%s", (args.id,),
+        ).fetchone()
+        if row is None:
+            return 1
+        keys = ("id", "targetType", "reason", "note", "text", "mediaId", "status", "createdAt", "resolvedAt")
+        print(json.dumps(dict(zip(keys, row)), default=str, ensure_ascii=False))
+        return 0
+    print("신고 ID\t대상\t이유\t접수 시각")
+    for row in conn.execute(
+        "SELECT id,target_type,reason,created_at FROM pet.reports WHERE status='open' "
+        "ORDER BY created_at,id LIMIT %s", (args.limit,),
+    ):
+        print("\t".join(map(str, row)))
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
@@ -80,6 +110,12 @@ def main(argv=None):
     create = invite.add_parser("create")
     create.add_argument("--uses", type=int, default=1)
 
+    reports = commands.add_parser("report")
+    actions = reports.add_subparsers(dest="action", required=True)
+    actions.add_parser("list").add_argument("--limit", type=int, choices=range(1, 201), default=100, metavar="1–200")
+    for action in ("show", "resolve"):
+        actions.add_parser(action).add_argument("id", type=UUID)
+
     args = parser.parse_args(argv)
     if args.command == "timing" and args.days < 1:
         parser.error("--days must be positive")
@@ -89,6 +125,8 @@ def main(argv=None):
         if args.command == "payments" and args.action == "on":
             info = {name: input(f"{name} > ").strip() for name in BUSINESS_FIELDS}
         with psycopg.connect(settings.db) as conn:
+            if args.command == "report":
+                return report_command(conn, args)
             if args.command == "timing":
                 rows = timings(conn, args.days, datetime.now(KST))
                 result = None

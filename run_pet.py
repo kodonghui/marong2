@@ -15,6 +15,7 @@ from marong.pet.artwork import ImageEditor, Templates
 from marong.pet.auth import AuthConfig, register as register_auth
 from marong.pet.billing import register as register_billing
 from marong.pet.candidates import register as register_candidates
+from marong.pet.chat import register as register_chat
 from marong.pet.cost import Budget
 from marong.pet.creations import register as register_creations
 from marong.pet.delete import register as register_delete
@@ -25,6 +26,8 @@ from marong.pet.photos import load_detector, register as register_photos
 from marong.pet.pets import register as register_pets
 from marong.pet.quota import register as register_quota
 from marong.pet.push import VapidSender, register as register_push
+from marong.pet.replies import ChatModel, register as register_replies
+from marong.pet.reports import register as register_reports
 from marong.pet.settings import Settings, SettingsError
 from marong.pet.sheet import register as register_sheet
 from marong.pet.traits import register as register_traits
@@ -34,6 +37,7 @@ log = logging.getLogger("pet")
 BUDGET = web.AppKey("pet_budget", Budget)
 VISION = web.AppKey("pet_vision", VisionExtractor)
 ARTWORK = web.AppKey("pet_artwork", ImageEditor)
+CHAT = web.AppKey("pet_chat", ChatModel)
 
 
 async def health(_request):
@@ -43,7 +47,8 @@ async def health(_request):
 def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, push_sender=None,
              face_detector=None, traits_api_key=None, image_api_key=None, preview_renderer=None, gateway=None, deliver_order=None,
              identity_verify=None, identity_digest_key=None, candidate_renderer=None, template_mask=None,
-             expression_renderer=None, template_head=None, greeting_renderer=None) -> web.Application:
+             expression_renderer=None, template_head=None, greeting_renderer=None, chat_api_key=None, reply_model=None, chat_clock=None,
+             report_clock=None) -> web.Application:
     app = web.Application(middlewares=[guard])
     app[CONFIG] = settings
     if image_api_key:
@@ -71,12 +76,14 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
                     raise SettingsError("the separate pet database is not initialized")
             app[POOL] = pool
             app[BUDGET] = Budget(pool, settings)
-            if traits_api_key or image_api_key:
+            if traits_api_key or image_api_key or chat_api_key:
                 async with ClientSession() as session:
                     if traits_api_key:
                         app[VISION] = VisionExtractor(session, traits_api_key, settings, app[BUDGET])
                     if image_api_key:
                         app[ARTWORK] = ImageEditor(session, image_api_key, templates, app[BUDGET])
+                    if chat_api_key:
+                        app[CHAT] = ChatModel(session, chat_api_key, settings, app[BUDGET])
                     yield
             else:
                 yield
@@ -101,6 +108,10 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
     register_identity(app, identity_verify, identity_digest_key)
     extract = (lambda photos, job: app[VISION](photos, job)) if traits_api_key else None
     register_traits(app, extract)
+    register_reports(app, clock=report_clock)
+    register_chat(app, **({"clock": chat_clock} if chat_clock else {}))
+    if reply_model or chat_api_key:
+        register_replies(app, reply_model or (lambda *args, **kwargs: app[CHAT](*args, **kwargs)))
     return app
 
 
@@ -116,7 +127,7 @@ def main() -> int:
         detector = load_detector(os.environ.get("PET_YUNET_MODEL_PATH"))
         traits_key = os.environ.get("PET_ANTHROPIC_API_KEY")
         web.run_app(make_app(settings, push_sender=sender, face_detector=detector, traits_api_key=traits_key,
-                             image_api_key=os.environ.get("PET_OPENAI_API_KEY")),
+                             image_api_key=os.environ.get("PET_OPENAI_API_KEY"), chat_api_key=traits_key),
                    host="127.0.0.1", port=settings.port,
                    access_log=None, print=None)
     except SettingsError as error:
