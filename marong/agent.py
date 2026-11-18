@@ -26,6 +26,7 @@ from uuid import uuid4
 from .cache_warm import hour_writes
 from .capabilities import TEXT_FEATURE_NAMES, availability, description as feature_description, text_matrix
 from .config import PER_DAY_MAX, Settings, proactive_schedule
+from . import memory_consent
 from .friend_card import CARD_UPDATE, KST, QUESTIONS, CardError, FriendCards, ModelRun, proposal_text, question_choices, text_choice
 from .friend_memory import MEMORY_LIST_TOOL, list_for_turn
 from .persona_prompt import FriendPrompt, append_prefix
@@ -305,8 +306,22 @@ class Agent:
                 )
             except Exception as error:
                 log.warning("card_support_error %s", type(error).__name__)
-        instruction = await self._instruction_reply(msg, text) if self.friend_cards and msg.card_actor else None
-        if instruction is not None:
+        memory_answer = None
+        if (self.friend_cards and msg.card_actor and msg.is_channel and not msg.safety_decision
+                and getattr(self, "friend_memory_mode", "off") == "on"):
+            try:
+                memory_answer = await asyncio.wait_for(
+                    memory_consent.reply_choice(self.store.pool, msg.card_actor, msg.room_key, text, datetime.now(KST)),
+                    .7,
+                )
+            except Exception as error:
+                log.warning("memory_card_choice_error %s", type(error).__name__)
+        instruction = None if memory_answer else (
+            await self._instruction_reply(msg, text) if self.friend_cards and msg.card_actor else None)
+        if memory_answer:
+            reply = "응, 잊었어" if memory_answer["effect"] == "memory_forgotten" else "기억해 뒀어"
+            meta = {}
+        elif instruction is not None:
             reply, meta = instruction
         elif budget < MIN_BUDGET_S:
             reply, meta = LATE_TEXT, {"late": True}
@@ -324,7 +339,8 @@ class Agent:
                 meta = {**meta, **review_meta}
             except Exception as error:
                 log.warning("reply_check_error %s", type(error).__name__)
-        if db_ok and self.friend_cards and msg.card_actor and msg.is_channel and msg.photo is None and not msg.safety_decision:
+        if (db_ok and self.friend_cards and msg.card_actor and msg.is_channel and msg.photo is None
+                and not msg.safety_decision and not memory_answer):
             try:
                 reply = await asyncio.wait_for(self._with_question(msg, reply, text), .7)
             except Exception as error:
@@ -349,6 +365,8 @@ class Agent:
                                                            meta={**meta, "delivered": ok})
                 if ok and question and saved_reply:
                     await self.friend_cards.attach_question(msg.card_actor, question["id"], saved_reply)
+                elif question and question["kind"] == "memory_ok":
+                    await memory_consent.undelivered(self.store.pool, msg.card_actor, question["id"])
             except Exception as e:
                 log.error("db_error %s", brief(e))
             self.on_saved()
@@ -464,6 +482,12 @@ class Agent:
         if getattr(msg, "support_question", None):
             msg.question = msg.support_question
             return reply + "\n\n일단 들을까, 같이 방법 찾아볼까?"
+        if getattr(self, "friend_memory_mode", "off") == "on":
+            card = await memory_consent.reserve(self.store.pool, friend, room, now)
+            if card:
+                msg.question = card
+                choices_text = "" if getattr(msg, "via", None) else "\n기억해 · 잊어"
+                return reply + "\n\n" + memory_consent.QUESTION + choices_text
         await self.friend_cards.expire_question(friend, now)
         if pending := await self.friend_cards.pending_notice(friend):
             msg.card_notice = True

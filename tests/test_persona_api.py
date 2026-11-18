@@ -1,7 +1,7 @@
 """Friend-card API on isolated PostgreSQL through an aiohttp test server."""
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -10,6 +10,8 @@ import psycopg
 
 from aiohttp.test_utils import TestClient, TestServer
 
+from marong import memory_consent
+from marong.agent import Agent
 from marong.app_chat import AppChat
 from marong.discord_store import DiscordStore
 from marong.friend_card import FriendCards
@@ -220,6 +222,77 @@ async def scenario(db):
             assert (await check(await http.get(memory_path, headers=one), 200))["items"] == []
             assert (await check(await http.get(memory_path, headers=two), 200))["items"] == [memory_two]
 
+            async def add_sensitive(category, room=ROOM):
+                origin = await store.add_message(room, "user", "합성 민감 자료", "fixture-one")
+                [(ident,)] = db.admin("""
+                    INSERT INTO marong.memory_items(friend_id,kind,text,status,heard_at,channel,
+                        message_id,quote,share,sensitive,room_key,source)
+                    SELECT 1,'fact','합성 민감 항목','pending_ok',now(),
+                        CASE WHEN r.is_channel THEN 'app' ELSE 'kakao_group' END,m.id,
+                        '합성 민감 자료','self',%s,CASE WHEN r.is_channel THEN NULL ELSE r.room_key END,'text'
+                    FROM marong.messages m JOIN marong.rooms r USING(room_key) WHERE m.id=%s RETURNING id
+                """, (category, origin))
+                return ident
+
+            current = datetime.now(timezone.utc)
+            first_pending = await add_sensitive("health")
+            db.admin("INSERT INTO marong.rooms(room_key,is_channel) VALUES ('fixture-group-consent',false)")
+            assert await memory_consent.reserve(store.pool, 1, "fixture-group-consent", current) is None
+            db.admin("INSERT INTO marong.safety_states(friend_id,kind,opened_via) VALUES (1,'crisis','text')")
+            assert await memory_consent.reserve(store.pool, 1, ROOM, current) is None
+            db.admin("UPDATE marong.safety_states SET closed_at=now(),close_reason='calm' WHERE friend_id=1")
+            assert (await check(await http.get(memory_path, headers=one), 200))["items"] == []
+
+            incoming = SimpleNamespace(card_actor=1, room_key=ROOM, via="app")
+            card_reply = await Agent._with_question(agent, incoming, "시험 답장", "평소 대화")
+            card = incoming.question
+            assert card_reply.endswith(memory_consent.QUESTION) and card["memory_item_id"] == first_pending
+            attached = await store.add_message(ROOM, "assistant", card_reply, meta={"delivered": True})
+            assert await cards.attach_question(1, card["id"], attached)
+            assert await memory_consent.reserve(store.pool, 1, ROOM, current) is None
+            path = f"{BASE}/cards/{card['id']}/answer"
+            output = (await check(await http.get("/chat/api/messages", headers=one), 200))["messages"][-1]["card"]
+            assert output["kind"] == "memory_ok"
+            assert output["options"] == [{"value": "keep", "label": "기억해"}, {"value": "forget", "label": "잊어"}]
+            await check(await http.post(path, json={"value": "keep"}, headers=two), 404, "not_found")
+            await check(await http.post(path, json={"value": "other"}, headers=one), 400, "invalid_request")
+            agent.friend_memory_mode = "shadow"
+            await check(await http.post(path, json={"value": "keep"}, headers=one), 403, "feature_off")
+            agent.friend_memory_mode = "on"
+            kept = await check(await http.post(path, json={"value": "keep"}, headers=one), 200)
+            assert kept["effect"] == "memory_kept"
+            assert await check(await http.post(path, json={"value": "keep"}, headers=one), 200) == kept
+            assert (await check(await http.get(memory_path, headers=one), 200))["items"][0]["id"] == first_pending
+            next_health = await add_sensitive("health", "fixture-group-consent")
+            await memory_consent.maintain(store.pool, current)
+            items = (await check(await http.get(memory_path, headers=one), 200))["items"]
+            assert {row["id"] for row in items} == {first_pending, next_health}
+            assert all(row["scope"] == "me" for row in items)
+
+            decline = await add_sensitive("money")
+            declined_card = await memory_consent.reserve(store.pool, 1, ROOM, current)
+            await memory_consent.undelivered(store.pool, 1, declined_card["id"])
+            declined_card = await memory_consent.reserve(store.pool, 1, ROOM, current)
+            await cards.attach_question(1, declined_card["id"], attached)
+            path = f"{BASE}/cards/{declined_card['id']}/answer"
+            declined = await check(await http.post(path, json={"value": "forget"}, headers=one), 200)
+            assert declined["effect"] == "memory_forgotten"
+            later = await add_sensitive("money")
+            await memory_consent.maintain(store.pool, current)
+            assert db.admin("SELECT status,text FROM marong.memory_items WHERE id IN (%s,%s) ORDER BY id", (decline,later)) == [
+                ("forgotten", None), ("forgotten", None)]
+            assert await memory_consent.reserve(store.pool, 1, ROOM, current) is None
+
+            unanswered = await add_sensitive("religion")
+            expired_card = await memory_consent.reserve(store.pool, 1, ROOM, current - timedelta(hours=24))
+            await cards.attach_question(1, expired_card["id"], attached)
+            path = f"{BASE}/cards/{expired_card['id']}/answer"
+            await check(await http.post(path, json={"value": "forget"}, headers=one), 409, "card_closed")
+            await memory_consent.maintain(store.pool, current)
+            assert db.admin("SELECT status FROM marong.memory_items WHERE id=%s", (unanswered,)) == [("current",)]
+            assert db.admin("SELECT status FROM marong.chat_cards WHERE id=%s", (expired_card["id"],)) == [("expired",)]
+            assert await memory_consent.reserve(store.pool, 1, ROOM, current) is None
+
             endpoints = (
                 ("GET", "/card", None), ("PATCH", "/card", {"lead": "lead"}),
                 ("POST", "/rules", {"kind": "avoid_topic", "text": "시험주제"}),
@@ -268,3 +341,5 @@ if __name__ == "__main__":
     print("TC-343: memory list status, owner isolation, inaccessible cursor and hidden consent state")
 
     print("TC-344: owner-only forget API, lost response recovery, same key replay and error envelopes")
+
+    print("TC-338/345: one private sensitive-memory card, keep/forget, expiry and future choices")

@@ -219,7 +219,7 @@ def question_view(row):
         return None
     view = discord.ui.View(timeout=None)
     for value, label in choices(row):
-        kinds = {"ask_support": "support", "card_draft": "draft", "card_proposal": "proposal"}
+        kinds = {"ask_support": "support", "card_draft": "draft", "card_proposal": "proposal", "memory_ok": "memory"}
         step = row["step"] if row["kind"] == "card_question" else kinds[row["kind"]]
         custom_id = f"card:{step}:{value}:{row['id']}"
         view.add_item(discord.ui.Button(label=label, custom_id=custom_id))
@@ -668,7 +668,7 @@ class DiscordDM(discord.Client):
         key = (event.data or {}).get("custom_id")
         if not isinstance(key, str) or not key.startswith("card:"):
             return
-        parts = re.fullmatch(r"card:([1-3]|draft|support|proposal):([a-z_]{1,20}):([1-9][0-9]{0,17})", key)
+        parts = re.fullmatch(r"card:([1-3]|draft|support|proposal|memory):([a-z_]{1,20}):([1-9][0-9]{0,17})", key)
         cards = getattr(self.agent, "friend_cards", None)
         if not parts or not cards or event.guild is not None:
             return
@@ -682,6 +682,8 @@ class DiscordDM(discord.Client):
                 row = await self.store._one("SELECT id,kind FROM marong.chat_cards WHERE id=%s AND friend_id=%s",
                                              (int(parts[3]), friend))
                 if not row:
+                    return
+                if row["kind"] == "memory_ok" and getattr(self.agent, "friend_memory_mode", "off") != "on":
                     return
                 result = await cards.answer_card(friend, row, parts[2], room=room, via="button", at=datetime.now(KST))
                 answered_view = discord.ui.View(timeout=None)

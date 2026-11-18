@@ -192,7 +192,10 @@ class AppPersona:
         now = datetime.now(timezone.utc)
         try:
             row = await self.cards.store._one("""SELECT id,kind FROM marong.chat_cards
-                WHERE friend_id=%s AND id=%s AND kind IN ('card_question','card_draft','ask_support','card_proposal')""", (who["friend_id"], id))
+                WHERE friend_id=%s AND id=%s AND kind IN
+                ('card_question','card_draft','ask_support','card_proposal','memory_ok')""", (who["friend_id"], id))
+            if row and row["kind"] == "memory_ok" and getattr(self.chat.agent, "friend_memory_mode", "off") != "on":
+                raise Problem("feature_off")
             if not row:
                 raise CardError("card_not_found")
             result = await self.cards.answer_card(who["friend_id"], row, body["value"], room=who["room_key"],
@@ -213,8 +216,10 @@ class AppPersona:
             return messages
         cards = await self.cards.store._all(
             """SELECT * FROM marong.chat_cards WHERE friend_id=%s AND room_key=%s
-            AND kind IN ('card_question','card_draft','ask_support','card_proposal') AND message_id=ANY(%s::bigint[])""",
-            (who["friend_id"], who["room_key"], [row["id"] for row in rows]),
+            AND (kind IN ('card_question','card_draft','ask_support','card_proposal')
+                OR (kind='memory_ok' AND %s)) AND message_id=ANY(%s::bigint[])""",
+            (who["friend_id"], who["room_key"], getattr(self.chat.agent, "friend_memory_mode", "off") == "on",
+             [row["id"] for row in rows]),
         )
         by_id = {row["message_id"]: row for row in cards}
         now = datetime.now(timezone.utc)

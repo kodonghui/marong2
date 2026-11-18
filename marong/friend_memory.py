@@ -75,7 +75,7 @@ async def measure_extraction(cards, friend, model, *, thinking=None):
 def item_view(row, private):
     value = {"id": row["id"], "kind": row["kind"], "text": row["text"],
              "heardAt": row["heard_at"].astimezone(KST).isoformat(), "channel": row["channel"],
-             "scope": "group" if row["room_key"] else "me", "sensitive": row["sensitive"] is not None,
+             "scope": "group" if row["room_key"] and row["sensitive"] is None else "me", "sensitive": row["sensitive"] is not None,
              "validUntil": row["valid_until"].isoformat() if row["valid_until"] else None}
     if private:
         value["quote"] = row["quote"]
@@ -99,7 +99,7 @@ async def read_items(conn, friend, *, before=None, group=None, direct_room=None,
         sql += " AND room_key=%s AND sensitive IS NULL AND share='known'"
         parameters.append(group)
     if direct_room is not None:
-        sql += " AND (room_key IS NULL OR room_key=%s)"
+        sql += " AND (room_key IS NULL OR room_key=%s OR (sensitive IS NOT NULL AND share='self'))"
         parameters.append(direct_room)
     query = await conn.execute(sql + " ORDER BY heard_at DESC,id DESC LIMIT %s", (*parameters, limit + 1))
     rows = await query.fetchall()

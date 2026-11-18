@@ -158,11 +158,13 @@ def compile_graph(queue, prepare, persist, *, checkpointer):
 async def run_queue(queue, graph, source):
     """Run only when the approved extractor and result validator are wired in."""
     from ..friend_memory import expire_loops
+    from ..memory_consent import maintain
 
     while True:
         try:
             if source == "text":
                 await expire_loops(queue.pool, queue.clock())
+                await maintain(queue.pool, queue.clock())
             state = await queue.claim(source)
             if state is not None:
                 thread = f"memory:{source}:{state['friend_id']}:{state['token']}"
