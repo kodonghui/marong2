@@ -115,7 +115,7 @@ async def layer(req):
     image = (root / str(item) / "layers" / (template + ".png")).resolve()
     if not image.is_relative_to(root) or not image.is_file():
         raise Problem("not_found")
-    return web.FileResponse(image, headers={"Content-Type": "image/png", "Cache-Control": "private, no-store"})
+    return web.FileResponse(image, headers={"Content-Type": "image/png"})
 
 
 def register(app):

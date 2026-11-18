@@ -1,23 +1,28 @@
 """TC-421 for the separate pet database and real HTTP routes."""
 
 import asyncio
+import json
 from base64 import b64decode
 from hashlib import sha256
 from pathlib import Path
 from secrets import token_urlsafe
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 from uuid import uuid4
 
 import psycopg
 from aiohttp.test_utils import TestClient, TestServer
+from PIL import Image, ImageDraw
 from psycopg.types.json import Jsonb
 
 from marong.pet.auth import AuthConfig
 from marong.pet.http import COOKIE, cookie_hash
 from marong.pet.settings import Settings
+from marong.pet.inventory import TEMPLATES
 from pg import TestDB
 from run_pet import make_app
 from test_pet_core import fixtures
+from tools import pet_admin
 
 PNG = b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+Xvp4AAAAASUVORK5CYII=")
 SHEET = ("front", "smile", "excited", "sleepy", "surprised", "sad", "pout")
@@ -89,7 +94,7 @@ async def check_inventory(admin, app_dsn, directory):
             assert offered["id"] == str(sale) and offered["priceKrw"] == 1200 and not offered["purchasable"]
             image = await client.get(layer(sale), headers=own)
             assert image.status == 200 and image.content_type == "image/png" and await image.read() == PNG
-            assert image.headers["Cache-Control"] == "private, no-store"
+            assert image.headers["Cache-Control"] == "no-store"
             assert (await client.get(layer(sale), headers=memorial_cookie)).status == 404
             assert (await client.get(layer(ended), headers=own)).status == 404
             assert (await client.get(layer(sale, "cat"), headers=own)).status == 404
@@ -112,11 +117,70 @@ async def check_inventory(admin, app_dsn, directory):
             assert used["withdrawableUntil"] is None
 
 
+def check_item_cli(admin, app_dsn, directory):
+    media = directory / "store"
+    templates = directory / "templates"
+    templates.mkdir()
+    license_file = directory / "licenses.csv"
+    license_file.write_text("key,app_sale\napproved,yes\n", encoding="utf-8")
+    for template in TEMPLATES:
+        (templates / f"{template}.json").write_text(json.dumps({"slots": {"head": [.3, .3, .7, .7]}}), encoding="utf-8")
+    source = directory / "hat"
+    folder = source / "layers"
+    folder.mkdir(parents=True)
+    data = {"kind": "wear", "name": "시험 모자", "slot": "head", "priceKrw": 1200, "sellable": True,
+            "limited": True, "saleStartsAt": "2026-01-01T00:00:00Z", "saleEndsAt": "2099-01-01T00:00:00Z",
+            "licenseKey": "approved"}
+    config = source / "item.json"
+    config.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    Image.new("RGB", (60, 60), "#b7a48d").save(source / "thumb.webp")
+    layer = Image.new("RGBA", (1024, 1024))
+    ImageDraw.Draw(layer).rectangle((400, 400, 409, 409), fill="#b7a48d")
+    for template in sorted(TEMPLATES)[1:]:
+        layer.save(folder / f"{template}.png")
+    env = {"PET_DATABASE_URL": app_dsn, "PET_ORIGIN": "http://127.0.0.1",
+           "PET_MONTHLY_BUDGET_KRW": "50000", "PET_MEDIA_DIR": str(media)}
+    media.mkdir()
+    with psycopg.connect(admin, autocommit=True) as conn, patch.object(pet_admin, "ASSETS", directory), patch.dict("os.environ", env):
+        count = conn.execute("SELECT count(*) FROM pet.items").fetchone()[0]
+        add = ["item", "add", str(source)]
+        assert pet_admin.main(add) == 2
+        first = folder / f"{sorted(TEMPLATES)[0]}.png"
+        layer.save(first)
+        config.write_text(json.dumps({**data, "licenseKey": "missing"}), encoding="utf-8")
+        assert pet_admin.main(add) == 2
+        config.write_text(json.dumps(data), encoding="utf-8")
+        outside = layer.copy()
+        ImageDraw.Draw(outside).rectangle((0, 0, 3, 0), fill="#b7a48d")
+        outside.save(first)
+        assert pet_admin.main(add) == 2
+        layer.save(first)
+        theme = directory / "theme"
+        theme.mkdir()
+        Image.new("RGB", (60, 60), "#b7a48d").save(theme / "thumb.webp")
+        Image.new("RGB", (1000, 1800), "#b7a48d").save(theme / "background.webp")
+        (theme / "item.json").write_text(json.dumps({"kind": "theme", "name": "시험 종이", "licenseKey": "approved"}),
+                                         encoding="utf-8")
+        assert pet_admin.main(["item", "add", str(theme)]) == 2
+        assert conn.execute("SELECT count(*) FROM pet.items").fetchone()[0] == count
+        assert not (media / "items").exists()
+        assert pet_admin.main(add) == 0
+        (ident,) = conn.execute("SELECT id FROM pet.items WHERE name='시험 모자'").fetchone()
+        assert len(list((media / "items" / str(ident) / "layers").glob("*.png"))) == 5
+        assert pet_admin.main(["item", "list"]) == 0
+        assert pet_admin.main(["item", "end", str(ident)]) == 0
+        assert pet_admin.main(["item", "reopen", str(ident)]) == 2
+        assert conn.execute("SELECT sellable FROM pet.items WHERE id=%s", (ident,)).fetchone() == (False,)
+
+
 if __name__ == "__main__":
     db = TestDB()
     try:
         with TemporaryDirectory() as directory:
-            asyncio.run(check_inventory(*fixtures(db), Path(directory)))
+            dsn = fixtures(db)
+            asyncio.run(check_inventory(*dsn, Path(directory)))
+            check_item_cli(*dsn, Path(directory))
     finally:
         db.close()
     print("TC-421: inventory scope, current sales, read-only previews, and owned ended layers passed")
+    print("TC-422: missing layer, license, dimensions and pixel limits, atomic upload, and limited sale ending passed")
