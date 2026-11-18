@@ -23,15 +23,14 @@ export async function petScreen(id) {
   const [me, pet, quota] = await Promise.all([api('/api/me'), api(path), api('/api/me/quota')]);
   const archived = pet.status === 'archived';
   const memorial = pet.mode === 'memorial';
-  header(pet.name, HOME);
   showTabs(null);
-  const title = el('div', {class: 'row'},
-    memorial ? el('small', {class: 'grow'}, '❀ 추억') : el('span', {class: 'grow'}),
+  header(pet.name, HOME, [
     !archived ? link('통화', screen + '/call') : null,
-    el('details', {}, el('summary', {'aria-label': '더 보기'}, '⋯'),
-      el('div', {class: 'stack'}, link('일기장', screen + '/diary', 'plain'),
+    el('details', {class: 'pet-menu'}, el('summary', {'aria-label': '더 보기'}, '⋯'),
+      el('div', {class: 'card stack'}, link('일기장', screen + '/diary', 'plain'),
         !archived ? link('옷 입히기', screen + '/closet', 'plain') : null, link('아이 설정', screen + '/settings', 'plain'),
-        pet.shopEntry ? link('상점', '/shop', 'plain') : null)));
+        pet.shopEntry ? link('상점', '/shop', 'plain') : null)),
+  ]);
   const quotaLine = el('div', {class: 'banner row'}, el('strong', {class: 'grow'}, `오늘 한도 ${quota.percent}%`),
     !archived && !memorial ? button('충전하기', () => rechargeSheet(pet), 'plain') : null);
   const chat = el('section', {class: 'stack', 'aria-label': '대화'});
@@ -39,7 +38,7 @@ export async function petScreen(id) {
   portrait.classList.add('portrait');
   const pictureId = mediaId(pet.sheet.front);
   const reported = el('div', {role: 'status'});
-  show(banner(AI_NOTICE), memberBanner(me), title, portrait,
+  show(banner(AI_NOTICE), memberBanner(me), memorial ? el('small', {}, '❀ 추억') : null, portrait,
     el('div', {class: 'row'}, el('small', {class: 'grow'}, 'AI가 그린 그림'), pictureId ? reportControl({
       targetType: 'picture', targetId: pictureId, preview: pet.sheet.front,
     }, '그림 신고', reported, portrait) : null), quotaLine,

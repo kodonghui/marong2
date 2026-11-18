@@ -664,15 +664,27 @@ if (require.main === module) {
     const call = {id: 'synthetic-call-turn', role: 'member', kind: 'call',
       createdAt: '2026-11-17T15:10:00Z', text: '시험 통화 기록'};
     const {origin} = await fixture(t, {chatNotices: [call]});
-    const page = await browser.newPage({timezoneId: 'America/Los_Angeles'});
+    const page = await browser.newPage({timezoneId: 'America/Los_Angeles', viewport: {width: 360, height: 820}});
     t.after(() => page.close());
     await page.goto(`${origin}/pets/${petId}`);
     const summary = page.getByText('통화했어요 · 11월 18일 오전 12시', {exact: true});
     const transcript = page.getByText(call.text, {exact: true});
     await visible(summary);
+    assert.ok(await summary.evaluate(node => node.offsetHeight) >= 44);
     assert.equal(await transcript.isVisible(), false);
     await summary.click();
     await visible(transcript);
+    const header = page.locator('#bar');
+    const openCall = header.getByRole('link', {name: '통화', exact: true});
+    assert.equal(await openCall.getAttribute('href'), '/pets/' + petId + '/call');
+    const more = header.locator('summary[aria-label="더 보기"]');
+    assert.ok(await more.evaluate(node => node.offsetHeight) >= 44);
+    await more.focus();
+    await page.keyboard.press('Enter');
+    const diaryLink = header.getByRole('link', {name: '일기장'});
+    await visible(diaryLink);
+    assert.ok(await diaryLink.evaluate(node => node.offsetHeight) >= 44);
+    assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true);
   });
 
   test('SCR-148 at 390px: mic denial, disclosure, PCM, quota ending and return', async t => {
@@ -958,7 +970,9 @@ if (require.main === module) {
     assert.equal(await page.getByRole('link', {name: '상점', exact: true}).count(), 0);
     const restored = page.getByRole('link', {name: /보관 시험 아이/});
     assert.equal(await restored.isVisible(), false);
-    await page.getByText('보관한 아이 1', {exact: true}).click();
+    const archive = page.getByText('보관한 아이 1', {exact: true});
+    assert.ok(await archive.evaluate(node => node.offsetHeight) >= 44);
+    await archive.click();
     await visible(restored);
     assert.equal(await restored.getAttribute('href'), '/pets/' + pets[4].id);
     assert.equal(await restored.evaluate(link => getComputedStyle(link).opacity), '0.65');

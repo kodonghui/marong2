@@ -35,10 +35,11 @@ export const DELETE_RECEIPT = 'pet:account-delete-receipt';
 export const CONSENT = '사진과 대화를 해외 AI 회사로 보내는 데 동의해야 쓸 수 있어요. 설정에서 바꿀 수 있어요.';
 export const RETRY = '잠시 뒤 다시 해 주세요.';
 
-export function header(title, back) {
+export function header(title, back, actions = []) {
   document.title = title === '마롱이' ? title : `${title} · 마롱이`;
   bar.replaceChildren(el('h1', {}, title));
   if (back) bar.append(link(`‹ ${back.label}`, back.url, 'back'));
+  if (actions.length) bar.append(el('div', {class: 'bar-actions'}, actions));
 }
 
 export function showTabs(active, shop) {
