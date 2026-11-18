@@ -1,0 +1,79 @@
+[
+  {
+    "id": "fact-01", "kind": "fact",
+    "turns": [{"say": "내 다음 프로젝트 별명은 모래유리야.", "text": "프로젝트 별명은 모래유리"}],
+    "ask": "프로젝트 별명을 뭐라고 했지?", "require": ["모래유리"], "reject": []
+  },
+  {
+    "id": "fact-02", "kind": "fact",
+    "turns": [{"say": "내가 모으는 엽서는 우표도감에 보관해.", "text": "엽서 보관 장소는 우표도감"}],
+    "ask": "내가 엽서를 어디에 둔다고 했지?", "require": ["우표도감"], "reject": []
+  },
+  {
+    "id": "correction-01", "kind": "correction",
+    "turns": [
+      {"say": "느티 강좌는 세덤실에서 열려.", "text": "느티 강좌 장소는 세덤실"},
+      {"say": "느티 강좌 장소가 이끼실로 바뀌었어.", "text": "느티 강좌 장소는 이끼실", "op": "supersede"}
+    ],
+    "ask": "느티 강좌 장소가 지금 어디야?", "require": ["이끼실"], "reject": ["세덤실"]
+  },
+  {
+    "id": "correction-02", "kind": "correction",
+    "turns": [
+      {"say": "칠보 전시의 새 표지는 은빛매듭이야.", "text": "칠보 전시 표지는 은빛매듭"},
+      {"say": "칠보 전시 표지는 금빛고리로 정정할게.", "text": "칠보 전시 표지는 금빛고리", "op": "supersede"}
+    ],
+    "ask": "그 전시 표지 이름이 뭐였더라?", "require": ["금빛고리"], "reject": ["은빛매듭"]
+  },
+  {
+    "id": "withdrawal-01", "kind": "withdrawal",
+    "turns": [
+      {"say": "종이배 동아리에 가입하기로 했어.", "text": "종이배 동아리 가입"},
+      {"say": "아까 가입한다는 말은 취소할게.", "op": "retract"},
+      {"say": "대신 소나기 모임에 갈래.", "text": "소나기 모임 참석"}
+    ],
+    "ask": "내가 가입하거나 가기로 한 모임이 있었지?", "require": ["소나기"], "reject": ["종이배"]
+  },
+  {
+    "id": "withdrawal-02", "kind": "withdrawal",
+    "turns": [
+      {"say": "가짜 솔방울 정류장으로 간다고 했어.", "text": "솔방울 정류장 방문"},
+      {"say": "아까 말한 정류장 방문은 잊어 줘.", "op": "forget"},
+      {"say": "만나는 곳으로 물잎 광장은 확정이야.", "text": "물잎 광장 약속"}
+    ],
+    "ask": "내가 약속 장소를 어디라고 했지?", "require": ["물잎 광장"], "reject": ["솔방울 정류장"]
+  },
+  {
+    "id": "time-01", "kind": "time",
+    "turns": [
+      {"say": "{soon}에 동틀녘 수선 수업이 있어.", "text": "{soon} 동틀녘 수선 수업", "date_offset": 2},
+      {"say": "{past}에 개암 연주회가 있어.", "text": "{past} 개암 연주회", "date_offset": -10}
+    ],
+    "ask": "예전 말 말고 앞으로 잡힌 수업 날짜가 언제야?", "require": ["{soon}", "동틀녘"], "reject": ["개암 연주회"]
+  },
+  {
+    "id": "time-02", "kind": "time",
+    "turns": [
+      {"say": "{soon} 낮 열두 시에 들꽃 소모임이 있어.", "text": "{soon} 12:00 들꽃 소모임", "date_offset": 5},
+      {"say": "{past} 밤 열두 시에는 달개비 구경이 있어.", "text": "{past} 00:00 달개비 구경", "date_offset": -12}
+    ],
+    "ask": "다음 모임 날짜랑 시간을 같이 말해 줘.", "require": ["{soon}", "12:00", "들꽃 소모임"],
+    "reject": ["달개비 구경", "00:00"]
+  },
+  {
+    "id": "scope-01", "kind": "scope", "audience": "group",
+    "turns": [
+      {"say": "내 엽서 교환 암호는 새벽종이야.", "text": "비공개 엽서 교환 암호는 새벽종"},
+      {"say": "이 방의 엽서 전시는 풍차실이야.", "text": "엽서 전시 장소는 풍차실", "room": "group"}
+    ],
+    "ask": "우리 방 엽서 전시 장소 기억나요?", "require": ["풍차실"], "reject": ["새벽종"]
+  },
+  {
+    "id": "scope-02", "kind": "scope", "audience": "group",
+    "turns": [
+      {"say": "우리만 아는 합주는 갈대홀에서 해.", "text": "다른 방 합주 장소는 갈대홀", "room": "other"},
+      {"say": "여기 공개 합주는 능소화실에서 해.", "text": "이 방 합주 장소는 능소화실", "room": "group"}
+    ],
+    "ask": "여기서 말한 합주 장소가 어디더라?", "require": ["능소화실"], "reject": ["갈대홀"]
+  }
+]
