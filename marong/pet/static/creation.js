@@ -21,6 +21,7 @@ const home = {label: '홈', url: '/'};
 const consentNotice = () => banner(CONSENT, link('설정에서 바꾸기', '/me#consents', 'plain'));
 const again = (message, label = '사진 다시 고르기') => notice(message, link(label, '/create', 'button primary'));
 const output = () => el('div', {'aria-live': 'polite'});
+const photoTips = '정면 얼굴, 귀와 무늬가 보이는 사진, 전신 한 장이면 가장 닮아요';
 
 async function changeCreation(job, operation, options, {refreshBusy = false} = {}) {
   const path = `/api/creations/${job.id}`;
@@ -152,7 +153,7 @@ async function photos(me) {
   const outcome = output();
   const submit = el('button', {type: 'submit', class: 'primary', disabled: true}, '올리기');
   const form = el('form', {}, kind, chosen,
-    text('정면 얼굴, 귀와 무늬가 보이는 사진, 전신 한 장이면 가장 닮아요', 'muted'),
+    text(photoTips, 'muted'),
     text('사람이 함께 찍히면 얼굴은 회색으로 가려요', 'muted'), outcome, submit);
   let uploading = false;
   const update = () => { submit.disabled = uploading || !kind.querySelector('input:checked')
@@ -290,7 +291,8 @@ function checks(label, name, options, initial = [], limit = 3) {
 
 function traits(job) {
   if (job.state === 'photos') {
-    show(notice('사진을 살펴보고 있어요', text('30초쯤 걸려요.', 'muted')));
+    show(notice('사진을 살펴보고 있어요', el('div', {class: 'stack'},
+      el('span', {class: 'busy', 'aria-busy': 'true', 'aria-hidden': 'true'}), text('30초쯤 걸려요.', 'muted'))));
     waitForUpdate(job.id, next => {
       if (next.state === 'photos') return false;
       if (stages[next.state]?.[0] === 'traits') traits(next);
@@ -302,7 +304,10 @@ function traits(job) {
   if (job.state === 'rejected' || job.state === 'failed_traits') {
     const message = job.state === 'failed_traits' ? '특징표를 만들지 못했어요. 잠시 뒤 다시 해 주세요. 사진은 지웠어요.'
       : job.failure === 'not_dog_or_cat' ? '개나 고양이를 찾지 못했어요' : '아이가 잘 보이지 않아요';
-    show(again(message));
+    show(job.state === 'rejected'
+      ? notice(message, el('div', {class: 'stack'}, text(photoTips, 'muted'),
+        link('사진 다시 고르기', '/create', 'button primary')))
+      : again(message));
     return;
   }
   const t = job.traits;
@@ -326,6 +331,7 @@ function traits(job) {
   }
 
   const modified = new Set();
+  const uncertain = new Set();
   const acknowledged = {...t};
   let pending = Promise.resolve();
   let confirming = false, refreshing = false;
@@ -337,7 +343,7 @@ function traits(job) {
   async function save(name, value) {
     const status = feedback.get(name);
     status.replaceChildren();
-    if (!changed(name, value)) {
+    if (!uncertain.has(name) && !changed(name, value)) {
       status.hidden = true;
       return;
     }
@@ -347,9 +353,16 @@ function traits(job) {
       if (name === 'coatColors' && !value.length) throw new Failure(400, {code: 'invalid_input'});
       const result = await changeCreation(job, 'traits', {method: 'PATCH', body: {[name]: value}});
       if (result === null) refreshing = true;
-      else acknowledged[name] = value;
+      else {
+        acknowledged[name] = value;
+        uncertain.delete(name);
+      }
     } catch (error) {
       errorText(error, status);
+      if (error.status === 0 || error.status === 429 || error.status >= 500) {
+        uncertain.add(name);
+        status.append(button('다시 해 보기', () => queueSave(name)));
+      }
       throw error;
     } finally {
       status.removeAttribute('aria-busy');
@@ -357,15 +370,18 @@ function traits(job) {
     }
   }
 
+  function queueSave(name) {
+    if (confirming || refreshing || !navigator.onLine) return;
+    modified.add(name);
+    const value = readField(new FormData(form), name);
+    pending = pending.then(() => refreshing ? null : save(name, value)).catch(() => {});
+  }
+
   form.addEventListener('input', event => {
     if (feedback.has(event.target.name)) modified.add(event.target.name);
   });
   form.addEventListener('change', event => {
-    const {name} = event.target;
-    if (confirming || refreshing || !navigator.onLine || !feedback.has(name)) return;
-    modified.add(name);
-    const value = readField(new FormData(form), name);
-    pending = pending.then(() => refreshing ? null : save(name, value)).catch(() => {});
+    if (feedback.has(event.target.name)) queueSave(event.target.name);
   });
   form.addEventListener('submit', event => {
     event.preventDefault();

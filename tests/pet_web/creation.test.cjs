@@ -1204,6 +1204,53 @@ if (require.main === module) {
     assert.equal((await (await stale.request.get(apiUrl)).json()).traits.breedGuess, '믹스');
   });
 
+  test('SCR-143 saves the requested value when a successful edit response is lost', async t => {
+    const {origin, writes} = await fixture(t, {creationState: 'traits'});
+    const page = await browser.newPage({viewport: {width: 360, height: 844}});
+    t.after(() => page.close());
+    const api = '/api/creations/' + creationId;
+    let attempts = 0;
+    await page.route('**' + api + '/traits', async route => {
+      attempts += 1;
+      if (attempts === 1) assert.equal((await route.fetch()).status(), 200);
+      if (attempts === 1 || attempts === 3) {
+        return route.fulfill({status: 503, json: {code: 'server_error', traceId: 'traits-write-test'}});
+      }
+      return route.continue();
+    });
+    await page.goto(origin + '/create/' + creationId + '/traits');
+    const input = page.getByLabel('품종 추정');
+    const status = page.locator('label:has([name=breedGuess]) + div');
+    const retry = status.getByRole('button', {name: '다시 해 보기'});
+    const read = async () => (await (await page.request.get(origin + api)).json()).traits.breedGuess;
+
+    await input.fill('믹스');
+    await input.blur();
+    await visible(retry);
+    await visible(status.getByText('traits-write-test', {exact: true}));
+    assert.equal(await input.inputValue(), '믹스');
+    assert.equal(await read(), '믹스');
+    assert.equal(attempts, 1);
+
+    await input.fill('푸들');
+    await input.blur();
+    await status.waitFor({state: 'hidden'});
+    assert.equal(attempts, 2);
+    assert.equal(await read(), '푸들');
+
+    await input.fill('소형 믹스');
+    await input.blur();
+    await visible(retry);
+    assert.equal(await input.inputValue(), '소형 믹스');
+    assert.equal(await read(), '푸들');
+    assert.equal(attempts, 3);
+    await retry.click();
+    await status.waitFor({state: 'hidden'});
+    assert.equal(await read(), '소형 믹스');
+    assert.equal(attempts, 4);
+    assert.deepEqual(writes, [{breedGuess: '믹스'}, {breedGuess: '푸들'}, {breedGuess: '소형 믹스'}]);
+  });
+
   test('SCR-144 uses the approved limit and consent states and disables drawing', async t => {
     const {origin} = await fixture(t, {creationState: 'traits_confirmed'});
     const cases = [
