@@ -382,7 +382,18 @@ async def trace_checks(http, chat):
     ok(attempt["run_type"] == "llm" and attempt["total_tokens"] == 181 and usage["input_tokens"] == 175
        and usage["input_token_details"] == {"cache_read": 111, "cache_creation": 20}
        and attempt["outputs"]["cache_write_1h"] == 15, "native usage, including split cache writes")
-    ok(marker not in json.dumps(runs) and all(not run["inputs"] for run in runs), "no contents in trace")
+    masked = tool_trace.MASKED
+    ok(all(run["inputs"]["operation"] == run["name"] for run in runs), "all app spans show their inputs")
+    ok(root["inputs"]["message"] == {"role": "user", "content": masked}, "app input message is masked")
+    dispatch = stages["tool_dispatch"]
+    ok(dispatch["inputs"]["tool"] == "schedule_list"
+       and dispatch["inputs"]["arguments"] == {"start": masked, "end": masked}
+       and dispatch["outputs"]["response"]["tool_use_id"] == masked, "tool shape without values or IDs")
+    ok(stages["app_http_delivery"]["outputs"]["response"]["messages"] == [{"role": "assistant", "content": masked}],
+       "app response shape without message text")
+    serialized = json.dumps(runs)
+    ok(marker not in serialized and "2026-11-26" not in serialized and "2026-11-29" not in serialized,
+       "no dialogue, scheduling data, or call IDs in trace")
     print("PASS app trace captures memory, schedules, model usage, tool round trip, reply save, and HTTP delivery")
     return runs
 

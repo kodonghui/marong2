@@ -48,11 +48,14 @@ class Turn:
         body = self.agent._body(self.system, self.messages, self.tools)
         with trace_step("model_request", self.trace, round=round_number, offered=len(self.tools),
                         results_attempted=self.results_waiting) as request:
+            if request:
+                request.io(inputs={"request": body})
             response = await self.llm.create(body, remaining)
             usage = response.usage
             searches, fetches = self.server_counts(usage) if self.server_counts else (0, 0)
             self.pending = [block for block in response.content if block.type == "tool_use"]
             if request:
+                request.io(outputs={"response": {"role": "assistant", "content": response.content}})
                 request.record(stop_reason=response.stop_reason, requested=len(self.pending),
                                results_sent=self.results_waiting, web_searches=searches, web_fetches=fetches)
                 if response.stop_reason == "tool_use" and not self.pending:
@@ -119,8 +122,11 @@ class Turn:
                 if self.loop.time() >= self.deadline:
                     raise TimeoutError("chat deadline reached")
                 with trace_step("tool_dispatch", node, round=round_number, tool=block.name) as dispatch:
+                    if dispatch:
+                        dispatch.io(inputs={"arguments": block.input})
                     outcome = await self.agent._run_tool(block, self.msg)
                     if dispatch:
+                        dispatch.io(outputs={"response": outcome})
                         dispatch.record(
                             result=("rejected" if outcome.get("is_error") else "ok") if isinstance(outcome, dict)
                             else "invalid_result",

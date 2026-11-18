@@ -87,6 +87,7 @@ class LLM:
         with app_step("model_attempt") as attempt:
             if attempt:
                 attempt.model("anthropic", body.get("model"))
+                attempt.io(inputs={"request": body})
             response = await client.messages.create(**body, timeout=timeout)
             if attempt:
                 usage = response.usage
@@ -96,6 +97,7 @@ class LLM:
                 attempt.usage((usage.input_tokens or 0) + cached + written, usage.output_tokens or 0,
                               cached, written, getattr(ttl, "ephemeral_5m_input_tokens", None),
                               getattr(ttl, "ephemeral_1h_input_tokens", None))
+                attempt.io(outputs={"response": {"role": "assistant", "content": response.content}})
                 attempt.record(result="ok", stop_reason=response.stop_reason)
             return response
 

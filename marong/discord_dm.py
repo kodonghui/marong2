@@ -389,10 +389,13 @@ class DiscordAgent(Agent):
             tz = ZoneInfo(self.s.timezone)
             try:
                 with app_step("schedules_context", storage=True) as schedules:
+                    if schedules:
+                        schedules.io(inputs={"friend_id": msg.friend_id})
                     msg.schedule_rows, msg.schedule_total = await asyncio.wait_for(
                         self.store.upcoming_schedules(msg.friend_id, datetime.now(tz), tz), 2)
                     if schedules:
                         schedules.record(result="ok", count=len(msg.schedule_rows), available=msg.schedule_total)
+                        schedules.io(outputs={"records": msg.schedule_rows})
             except Exception as e:  # Answer without the list; the model is told it could not be read.
                 log.warning("schedule_context_error %s", type(e).__name__)
             if self.google:
@@ -406,6 +409,8 @@ class DiscordAgent(Agent):
         """The friend's Google link and upcoming events. A slow or failing Google never blocks the answer."""
         try:
             with app_step("calendar_link", storage=True) as lookup:
+                if lookup:
+                    lookup.io(inputs={"friend_id": msg.friend_id})
                 msg.google_link = await asyncio.wait_for(self.store.google_link(msg.friend_id), 2)
                 if lookup:
                     link = msg.google_link
@@ -430,6 +435,7 @@ class DiscordAgent(Agent):
                         calendar.record(result="rejected", reason="provider_auth")
                     else:
                         calendar.record(result="ok", count=len(got[0]))
+                        calendar.io(outputs={"records": got[0]})
             if got is None:  # Google refused the token just now: show the link as it is now (broken).
                 msg.google_link = await asyncio.wait_for(self.store.google_link(msg.friend_id), 2) or UNKNOWN_LINK
             else:
@@ -441,7 +447,9 @@ class DiscordAgent(Agent):
         """Google events for schedule_list's period, appended to its result."""
         tz = ZoneInfo(self.s.timezone)
         try:
-            with app_step("calendar_tool"):
+            with app_step("calendar_tool") as lookup:
+                if lookup:
+                    lookup.io(inputs={"arguments": inp})
                 start = parse_when(inp.get("start"), tz)[0].replace(hour=0, minute=0, second=0, microsecond=0)
                 end = parse_when(inp.get("end"), tz)[0].replace(hour=0, minute=0, second=0, microsecond=0)
                 return await asyncio.wait_for(

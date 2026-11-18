@@ -346,6 +346,8 @@ class Agent:
         if db_ok:
             try:
                 with app_step("reply_save", storage=True) as write:
+                    if write:
+                        write.io(inputs={"reply": reply, "reply_to": user_id})
                     saved_reply = await self.store.add_message(msg.room_key, "assistant", reply, reply_to=user_id,
                                                                meta={**meta, "delivered": ok})
                     if write:
@@ -553,8 +555,11 @@ class Agent:
             try:
                 if getattr(self.store,'call_bridge',False):revision=await self.store.private_revision(msg.room_key)
                 with app_step("context") as context:
+                    if context:
+                        context.io(inputs={"message": {"role": "user", "content": text}})
                     system, messages, memory = await self._context(msg, person, user_id, text, held)
                     if context:
+                        context.io(outputs={"system": system, "messages": messages, "recalled": memory})
                         context.record(result="ok", recall=memory.get("recall"),
                                        candidates=len(memory.get("candidates", [])),
                                        recalled=len(memory.get("recalled", [])))
@@ -634,6 +639,8 @@ class Agent:
             try:
                 with app_step("memory_search", storage=True) as search:
                     query = self._query(rows, user_id, text)
+                    if search:
+                        search.io(inputs={"query": query, "before_id": rows[0]["id"]})
                     hits, recall = await self._search(msg.room_key, query, rows[0]["id"], [s["id"] for s in summaries],
                                                       (person or {}).get("name"))
                     recalled = self._pick(hits)
@@ -645,6 +652,7 @@ class Agent:
                             h["pair"] = pair
                     if search:
                         search.record(result="ok", candidates=len(hits), recalled=len(recalled), recall=recall)
+                        search.io(outputs={"records": hits, "recalled": recalled})
             except Exception as e:
                 recall = "error"
                 log.warning("recall_error %s", brief(e))

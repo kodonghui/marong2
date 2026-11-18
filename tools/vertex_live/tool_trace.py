@@ -12,6 +12,7 @@ from queue import Full, Queue
 import re
 from threading import Thread
 import time
+from types import SimpleNamespace
 from urllib.error import HTTPError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from uuid import uuid4
@@ -51,8 +52,68 @@ ROOT_STAGES = {"text_turn", "voice_setup", "voice_tool", "voice_search", "app_tu
 ERRORS = {"timeout", "cancelled", "invalid_input", "provider_http_error",
           "connection_error", "exception", "storage_error"}
 MODEL_NAME = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,95}\Z")
+MASKED = "[가림]"
+ROLES = {"system", "developer", "user", "assistant", "tool"}
+BLOCK_TYPES = {"text", "image", "thinking", "redacted_thinking", "tool_use", "tool_result",
+               "server_tool_use", "web_search_tool_result", "web_fetch_tool_result", "function",
+               "object", "string", "array", "boolean", "number", "integer", "null"}
+TOOL_NAMES = LABELS["tool"] | {"web_search", "web_fetch"}
+PAYLOAD_FIELDS = {
+    "account", "args", "arguments", "body", "call", "choices", "content", "date", "description", "end",
+    "findings", "finish_reason", "friend_id", "function", "id", "input", "input_schema", "is_error", "items",
+    "kwargs", "limit", "max_tokens", "message", "messages", "model", "name", "parameters", "properties",
+    "query", "records", "recalled", "recent", "remind_at", "repeat", "reply", "reply_to", "request",
+    "required", "response", "role", "room_key", "say", "since_id", "skip_summary_ids", "start", "status",
+    "status_code", "summaries", "system", "text", "title", "tool_call_id", "tool_calls", "tool_use_id",
+    "tools", "transport", "type", "value", "before_id", "created_at", "due_at", "end_time", "meta",
+    "notes", "source_id", "source_type",
+}
+INPUT_FACTS = {"surface", "round", "tool", "offered", "requested", "results_attempted", "attempt", "delivery"}
+MAX_PAYLOAD_ITEMS = 8
+MAX_PAYLOAD_DEPTH = 8
 active = ContextVar("active_marong_trace", default=None)
 log = logging.getLogger(__name__)
+
+
+def _masked(value, depth=0, field=None):
+    """Keep protocol structure, allowlisted labels and counts, and drop arbitrary keys and values."""
+    if value is None:
+        return None
+    if depth >= MAX_PAYLOAD_DEPTH:
+        return MASKED
+    if isinstance(value, SimpleNamespace) or type(value).__module__.startswith("anthropic.types."):
+        value = vars(value)
+    if isinstance(value, dict):
+        result = {}
+        for key, entry in value.items():
+            if type(key) is not str or key not in PAYLOAD_FIELDS:
+                continue
+            if (key == "name" and type(entry) is str and entry in TOOL_NAMES
+                    and (value.get("type") in ("tool_use", "server_tool_use", "function")
+                         or "input_schema" in value or field == "function")):
+                result[key] = entry
+            else:
+                result[key] = _masked(entry, depth + 1, key)
+        if len(result) < len(value):
+            result["_masked_fields"] = len(value) - len(result)
+        return result
+    if isinstance(value, (list, tuple)):
+        shown = [_masked(item, depth + 1, field) for item in value[:MAX_PAYLOAD_ITEMS]]
+        if len(value) > MAX_PAYLOAD_ITEMS:
+            shown.append({"_omitted_items": len(value) - MAX_PAYLOAD_ITEMS})
+        return shown
+    if type(value) is str:
+        if (field == "role" and value in ROLES) or (field == "type" and value in BLOCK_TYPES):
+            return value
+        if field == "arguments" and len(value) <= 4096:
+            try:
+                decoded = json.loads(value)
+            except (ValueError, RecursionError):
+                pass
+            else:
+                if isinstance(decoded, dict):
+                    return _masked(decoded, depth + 1)
+    return MASKED
 
 
 class Span:
@@ -75,6 +136,10 @@ class Span:
             self.data["parent_run_id"] = parent.data["id"]
         self.runs.append(self.data)
         self.record(**facts)
+        if self.root.data["name"] == "app_turn":
+            self.data["inputs"] = {"operation": stage,
+                                   **{field: self.data["outputs"][field] for field in sorted(facts.keys() & INPUT_FACTS)
+                                      if field in self.data["outputs"]}}
 
     def record(self, **facts):
         for field, value in facts.items():
@@ -87,6 +152,14 @@ class Span:
 
     def fail(self, error):
         self.data["error"] = error if error in ERRORS else "exception"
+
+    def io(self, *, inputs=None, outputs=None):
+        if self.root.data["name"] != "app_turn":
+            return
+        if inputs is not None:
+            self.data["inputs"].update(_masked(inputs))
+        if outputs is not None:
+            self.data["outputs"].update(_masked(outputs))
 
     def model(self, provider, model):
         if provider in {"anthropic", "deepseek"} and isinstance(model, str) and MODEL_NAME.fullmatch(model):
@@ -188,14 +261,18 @@ def app_note(**facts):
 
 async def app_read(stage, read, *args, **kwargs):
     with app_step(stage, storage=True) as span:
+        if span:
+            span.io(inputs={"args": args, "kwargs": kwargs})
         result = await read(*args, **kwargs)
         if span:
             span.record(result="ok", count=len(result) if isinstance(result, list) else None)
+            span.io(outputs={"records": result})
         return result
 
 
-def app_delivery(parent, transport):
+def app_delivery(parent, transport, reply):
     span = Span("app_http_delivery", parent, delivery=transport, result="ok", status_code=200)
+    span.io(outputs={"response": {"messages": [{"role": "assistant", "content": reply}]}})
     span.data["end_time"] = datetime.now(timezone.utc).isoformat()
     if parent.root.finished and (sink := _sink()):
         sink.submit(span.runs)

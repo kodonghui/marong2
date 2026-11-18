@@ -378,12 +378,15 @@ class AppChat:
         return self._json(202, {"message": self.message(row)})
 
     async def _delivered(self, text: str) -> bool:
-        with app_step("reply_prepare", result="queued"):
+        with app_step("reply_prepare", result="queued") as prepared:
+            if prepared:
+                prepared.io(inputs={"reply": text})
             return True  # the wait endpoint or a push handles delivery
 
     async def _answer(self, who: dict, saved_id: int, text: str, key: str, preference) -> None:
         with trace_step("app_turn", surface="app_chat") as trace:
             if trace:
+                trace.io(inputs={"message": {"role": "user", "content": text}})
                 self.reply_traces[saved_id] = (time.monotonic(), trace)
                 if len(self.reply_traces) > 256:
                     self.reply_traces.popitem(last=False)
@@ -415,11 +418,14 @@ class AppChat:
                 return
             if trace:
                 trace.record(result="ok")
+                trace.io(outputs={"reply": {"role": "assistant", "content": reply}})
             log.info("app_chat_replied")
             # The friend closed the chat before the answer came: tell their phone (SPEC-120). Never Discord.
             if not self.waiters.get(who["friend_id"]) and self.push.enabled:
                 try:
                     with app_step("reply_push", delivery="push") as push:
+                        if push:
+                            push.io(inputs={"message": {"role": "assistant", "content": reply}})
                         outcome = await self.push.notify(who["friend_id"], "reply", reply, ttl_s=REPLY_TTL_S)
                         if push and isinstance(outcome, tuple) and len(outcome) == 2:
                             accepted, available = outcome
@@ -438,7 +444,7 @@ class AppChat:
             if row.get("role") == "assistant":
                 pending = self.reply_traces.pop(row.get("reply_to"), None)
                 if pending and time.monotonic() - pending[0] <= 600:
-                    app_delivery(pending[1], transport)
+                    app_delivery(pending[1], transport, row.get("content"))
 
     async def wait(self, req):
         """API-104: new messages at once, else after up to 25 s an empty list (SPEC-114). `typing` and `read` are what

@@ -281,6 +281,7 @@ class DeepSeekLLM:
             with app_step("model_attempt", attempt=attempt) as trace:
                 if trace:
                     trace.model("deepseek", self.model)
+                    trace.io(inputs={"request": payload})
                 try:
                     # httpx 의 timeout 은 바이트 사이 간격이라, 전체 시간은 wait_for 로 자른다
                     resp = await asyncio.wait_for(self.http.post("/chat/completions", json=payload, timeout=left), left)
@@ -310,6 +311,7 @@ class DeepSeekLLM:
                                 cached = details.get("cached_tokens") if isinstance(details, dict) else None
                                 trace.usage(usage.get("prompt_tokens"), usage.get("completion_tokens"),
                                             usage.get("prompt_cache_hit_tokens") or cached)
+                            trace.io(outputs={"response": {"choices": data["choices"]}})
                             trace.record(result="ok")
                         return data
                     risk = resp.status_code == 400 and "risk" in resp.text.lower()

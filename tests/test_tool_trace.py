@@ -81,6 +81,27 @@ class ToolTraceTest(unittest.IsolatedAsyncioTestCase):
         incoming = Incoming(PRIVATE_FIXTURE, PRIVATE_FIXTURE, PRIVATE_FIXTURE)
         return await agent.ask([], [{"role": "user", "content": PRIVATE_FIXTURE}], incoming, deadline)
 
+    def test_masked_app_payload_keeps_only_known_shape(self):
+        fixture = {
+            "messages": [{"role": "user", "content": PRIVATE_FIXTURE}],
+            "tools": [{"type": "function", "function": {"name": "schedule_list",
+                                                        "arguments": '{"start":"2026-11-26"}'}}],
+            PRIVATE_FIXTURE: "unrecognized key",
+            "account": {"id": 7654321, "authorization": PRIVATE_FIXTURE},
+            "records": [PRIVATE_FIXTURE] * 20,
+        }
+        with text_trace.step("app_turn", surface="app_chat") as span:
+            span.io(inputs={"request": fixture})
+        request = self.capture.traces[0][0]["inputs"]["request"]
+        mask = text_trace.MASKED
+        self.assertEqual(request["messages"], [{"role": "user", "content": mask}])
+        self.assertEqual(request["tools"][0]["function"], {"name": "schedule_list", "arguments": {"start": mask}})
+        self.assertEqual(request["account"], {"id": mask, "_masked_fields": 1})
+        self.assertEqual(request["_masked_fields"], 1)
+        self.assertEqual(request["records"][-1], {"_omitted_items": 12})
+        self.assertNotIn("7654321", json.dumps(request))
+        self.assertNotIn("2026-11-26", json.dumps(request))
+
     async def test_text_dispatch_then_confirm_result_return(self):
         def respond(body):
             if len(body["messages"]) == 1:
