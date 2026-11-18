@@ -1171,6 +1171,79 @@ if (require.main === module) {
     }
   });
 
+  test('SCR-144 resumes an interrupted preview lookup when the browser restores the page', async t => {
+    const {origin,writes} = await fixture(t, {creationState: 'traits_confirmed'});
+    const page = await browser.newPage({viewport: {width: 360, height: 780}});
+    t.after(() => page.close());
+    await page.clock.install();
+    const start = Promise.withResolvers();
+    const delivered = Promise.withResolvers();
+    const outstanding = Promise.withResolvers();
+    t.after(start.resolve);
+    t.after(delivered.resolve);
+    let reads = 0;
+    const api = '/api/creations/' + creationId;
+    await page.route('**' + api, async route => {
+      reads += 1;
+      if (reads === 1) await start.promise;
+      if (reads === 2) {
+        outstanding.resolve();
+        await delivered.promise;
+      }
+      await route.continue();
+    });
+    await page.goto(origin + '/create/' + creationId + '/preview');
+    await page.locator('#page .skeleton').waitFor();
+    assert.equal(await page.locator('#page').getAttribute('aria-busy'), 'true');
+    start.resolve();
+    await page.getByRole('button', {name:'미리 보기 그리기',exact:true}).click();
+    const drawing = page.getByRole('status').filter({hasText:'그리고 있어요'});
+    await visible(drawing);
+    assert.equal(await drawing.locator('.busy').getAttribute('aria-busy'), 'true');
+    const inFlight = page.waitForResponse(response => new URL(response.url()).pathname === api);
+    await page.clock.fastForward(2000);
+    await outstanding.promise;
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted:true})));
+    delivered.resolve();
+    assert.equal((await inFlight).status(),200);
+    await page.clock.fastForward(6000);
+    assert.equal(reads,2);
+    assert.equal(await drawing.isVisible(),true);
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted:true})));
+    await page.clock.fastForward(1);
+    await visible(page.getByRole('img',{name:'AI가 그린 미리 보기',exact:true}));
+    assert.equal(reads,3);
+    assert.deepEqual(writes,[{}]);
+  });
+
+  test('SCR-144 resumes an accepted preview after reload and clears its marker after failure', async t => {
+    const {origin} = await fixture(t, {creationState: 'traits_confirmed'});
+    const page = await browser.newPage({viewport: {width: 430, height: 780}});
+    t.after(() => page.close());
+    await page.clock.install();
+    const api = '/api/creations/' + creationId;
+    const initial = await (await page.request.get(origin + api)).json();
+    let requests = 0, failed = false;
+    await page.route('**' + api, route => route.fulfill({json: {...initial, failure: failed ? 'preview_failed' : null}}));
+    await page.route('**' + api + '/preview', route => {
+      requests += 1;
+      return route.fulfill({status: 202, json: initial});
+    });
+    await page.goto(origin + '/create/' + creationId + '/preview');
+    await page.getByRole('button', {name:'미리 보기 그리기',exact:true}).click();
+    const drawing = page.getByRole('status').filter({hasText:'그리고 있어요'});
+    await visible(drawing);
+    await page.reload();
+    await visible(drawing);
+    assert.equal(await page.getByRole('button', {name:'미리 보기 그리기',exact:true}).count(),0);
+    assert.equal(requests,1);
+    failed = true;
+    await page.clock.fastForward(2000);
+    await visible(page.getByRole('button', {name:'다시 그리기',exact:true}));
+    assert.equal(await page.evaluate(id => sessionStorage.getItem('pet:preview-request:' + id), creationId),null);
+    assert.equal(requests,1);
+  });
+
   test('SCR-144 confirms the price and reuses a paid order key across retries', async t => {
     const {origin} = await fixture(t, {creationState: 'previewed', paymentsEnabled: true});
     const page = await browser.newPage({viewport: {width: 360, height: 780}});

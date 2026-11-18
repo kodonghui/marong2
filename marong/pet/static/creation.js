@@ -1,5 +1,5 @@
 import {action, AI_NOTICE, api, banner, button, CONSENT, currency, dateLabel, el, errorText, Failure, header,
-  link, notice, picture, show, showTabs, signIn, text} from './pet.js';
+  link, notice, page, picture, show, showTabs, signIn, text} from './pet.js';
 import {pendingCard} from './home.js';
 import {pushControl} from './push-control.js';
 import {business} from './shop.js';
@@ -37,32 +37,49 @@ async function changeCreation(job, operation, options, {refreshBusy = false} = {
 function waitForUpdate(id, onData, interval = 2_000) {
   const began = Date.now();
   let timer;
-  let fetching = false;
+  let fetching = false, stopped = false, suspended = false;
   function schedule(delay) {
     clearTimeout(timer);
-    if (!document.hidden && !fetching) timer = setTimeout(tick, delay);
+    if (!stopped && !suspended && !document.hidden && !fetching) timer = setTimeout(tick, delay);
   }
   function stop() {
+    stopped = true;
     clearTimeout(timer);
     document.removeEventListener('visibilitychange', visibility);
-    window.removeEventListener('pagehide', stop);
+    window.removeEventListener('pagehide', hide);
+    window.removeEventListener('pageshow', restore);
   }
   async function tick() {
-    if (document.hidden || fetching) return;
+    if (stopped || suspended || document.hidden || fetching) return;
     fetching = true;
+    let delay = interval;
     try {
       const data = await api(`/api/creations/${id}`);
-      fetching = false;
+      if (stopped || suspended) return;
       if (onData(data)) stop();
-      else schedule(Date.now() - began >= 30_000 ? 5_000 : interval);
-    } catch {
+      else if (Date.now() - began >= 30_000) delay = 5_000;
+    } catch (error) {
+      if (error.status === 401) stop();
+      delay = 5_000;
+    } finally {
       fetching = false;
-      schedule(5_000);
+      schedule(delay);
     }
   }
   function visibility() { schedule(0); }
+  function hide(event) {
+    if (!event.persisted) { stop(); return; }
+    suspended = true;
+    clearTimeout(timer);
+  }
+  function restore(event) {
+    if (!event.persisted) return;
+    suspended = false;
+    visibility();
+  }
   document.addEventListener('visibilitychange', visibility);
-  window.addEventListener('pagehide', stop, {once: true});
+  window.addEventListener('pagehide', hide);
+  window.addEventListener('pageshow', restore);
   schedule(interval);
   return stop;
 }
@@ -373,7 +390,22 @@ function traits(job) {
 }
 
 async function preview(job, me) {
+  const drawingKey = `pet:preview-request:${job.id}`;
+  if (job.state !== 'traits_confirmed' || job.preview || job.failure) sessionStorage.removeItem(drawingKey);
   if (job.state === 'expired') { show(again('30일이 지나 미리 보기와 사진을 지웠어요.', '새로 만들기')); return; }
+  function drawInProgress() {
+    show(el('div', {class: 'picture', role: 'status'},
+      el('div', {class: 'stack'}, el('span', {class: 'busy', 'aria-busy': 'true', 'aria-hidden': 'true'}),
+        text('그리고 있어요'), text('1분쯤 걸려요.', 'muted'))));
+    waitForUpdate(job.id, next => {
+      if (!next.preview && !next.failure && next.state === 'traits_confirmed') return false;
+      sessionStorage.removeItem(drawingKey);
+      if (stages[next.state]?.[0] === 'preview') preview(next, me);
+      else location.replace(creationPath(next));
+      return true;
+    });
+  }
+  if (sessionStorage.getItem(drawingKey)) { drawInProgress(); return; }
   const outlet = output();
   if (!job.preview) {
     let paused = false;
@@ -381,6 +413,7 @@ async function preview(job, me) {
       await action(draw, outlet, async () => {
         try {
           if (await changeCreation(job, 'preview', {method: 'POST', body: {}}) === null) return;
+          sessionStorage.setItem(drawingKey, '1');
         } catch (error) {
           if (['preview_limit', 'budget_paused', 'consent_required'].includes(error.code)) {
             paused = true;
@@ -389,13 +422,7 @@ async function preview(job, me) {
           }
           if (error.code !== 'busy') throw error;
         }
-        show(notice('그리고 있어요', text('1분쯤 걸려요.', 'muted')));
-        waitForUpdate(job.id, next => {
-          if (!next.preview && !next.failure && next.state === 'traits_confirmed') return false;
-          if (stages[next.state]?.[0] === 'preview') preview(next, me);
-          else location.replace(creationPath(next));
-          return true;
-        });
+        drawInProgress();
       });
       if (paused) draw.disabled = true;
     }, 'primary');
@@ -587,12 +614,18 @@ function namePet(job) {
 
 export async function creation(path) {
   showTabs(null);
-  const me = await api('/api/me');
-  if (path === '/create') { await photos(me); return; }
+  if (path === '/create') { await photos(await api('/api/me')); return; }
   const [, , id, stage] = path.split('/');
+  header({traits: '특징표 고치기', preview: '미리 보기와 결제', candidates: '그림 후보 고르기', name: '이름 짓기'}[stage]
+    || '아이 만들기', home);
+  if (stage === 'preview') {
+    show(el('div', {class: 'picture', 'aria-hidden': 'true'}),
+      el('div', {class: 'skeleton label-placeholder', 'aria-hidden': 'true'}));
+    page.setAttribute('aria-busy', 'true');
+  }
+  const me = await api('/api/me');
   const job = await api(`/api/creations/${id}`);
   if (path !== creationPath(job)) { location.replace(creationPath(job)); return; }
-  header({traits: '특징표 고치기', preview: '미리 보기와 결제', candidates: '그림 후보 고르기', name: '이름 짓기'}[stage], home);
   if (stage === 'traits') traits(job);
   else if (stage === 'preview') await preview(job, me);
   else if (stage === 'candidates') candidates(job, me);
