@@ -226,7 +226,7 @@ class AppPersona:
         who = await self._who(req)
         if getattr(self.chat.agent, "friend_memory_mode", "off") != "on":
             raise Problem("feature_off")
-        before = self.chat._number(req.query.get("before"), "before", minimum=1, maximum=2**63 - 1)
+        before = self.chat._number(req.query.get("before"), "before", minimum=1)
         return self.chat._json(200, await memory_page(self.cards.store.pool, who["friend_id"], before))
 
     def register(self, app):

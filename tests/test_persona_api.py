@@ -158,9 +158,22 @@ async def scenario(db):
             [memory_one] = (await check(response, 200))["items"]
             [memory_two] = (await check(await http.get(memory_path, headers=two), 200))["items"]
             assert memory_one["quote"] == "가을이 좋아" and memory_two["quote"] == "겨울이 좋아"
+            assert not {"room_key", "message_id", "call_turn_id"} & memory_one.keys()
             foreign = await check(await http.get(f"{memory_path}?before={memory_two['id']}", headers=one), 200)
             assert foreign == {"items": [], "loops": [], "hasMore": False}
             await check(await http.get(f"{memory_path}?before=-1", headers=one), 400, "invalid_request")
+            assert (await check(await http.get(f"{memory_path}?before={2**63 - 1}", headers=one), 200))["items"] == []
+            await check(await http.get(f"{memory_path}?before={2**63}", headers=one), 400, "invalid_request")
+            db.admin("""
+                INSERT INTO marong.memory_items(friend_id,kind,text,status,heard_at,channel,message_id,quote,share,source)
+                SELECT 1,'fact','시험 항목 '||i,'current',now()-i*INTERVAL '1 day','app',%s,'가을이 좋아','self','text'
+                FROM generate_series(1,100) i
+            """, (source_one,))
+            first_page = await check(await http.get(memory_path, headers=one), 200)
+            assert len(first_page["items"]) == 100 and first_page["hasMore"]
+            cursor = first_page["items"][-1]["id"]
+            next_page = await check(await http.get(f"{memory_path}?before={cursor}", headers=one), 200)
+            assert [row["text"] for row in next_page["items"]] == ["시험 항목 100"] and not next_page["hasMore"]
 
             endpoints = (
                 ("GET", "/card", None), ("PATCH", "/card", {"lead": "lead"}),

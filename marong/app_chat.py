@@ -43,7 +43,7 @@ FILES = {"": ("index.html", "text/html"), "chat.js": ("chat.js", "text/javascrip
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 FID = re.compile(r"[A-Za-z0-9_-]{16,200}\Z")
 VERSION = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\Z")
-NUMBER = re.compile(r"[0-9]{1,18}\Z")
+NUMBER = re.compile(r"[0-9]{1,19}\Z")
 PROBLEMS = {
     "invalid_request": (400, "요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)"),
     "unauthenticated": (401, "Access 로그인 증명이 없거나 맞지 않음"),
@@ -179,7 +179,7 @@ class AppChat:
         return body
 
     @staticmethod
-    def _number(raw, field: str, *, minimum: int, maximum: int | None = None, required: bool = False) -> int | None:
+    def _number(raw, field: str, *, minimum: int, maximum: int = 2**63 - 1, required: bool = False) -> int | None:
         if raw is None or raw == "":
             if required:
                 raise bad((field, "required"))
@@ -187,7 +187,7 @@ class AppChat:
         if not NUMBER.fullmatch(raw):
             raise bad((field, "bad_format"))
         value = int(raw)
-        if value < minimum or (maximum is not None and value > maximum):
+        if not minimum <= value <= maximum:
             raise bad((field, "bad_format"))
         return value
 
