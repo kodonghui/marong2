@@ -18,6 +18,7 @@ from functools import lru_cache
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 import random
 import re
@@ -385,7 +386,14 @@ class Topics:
             return None
         if slot_end <= today.at:  # a later slot holds the topic time
             return None
-        picture = pick(self.pictures.pickable, now, today.used, self.rng)
+        pictures = self.pictures.pickable
+        if os.getenv("MARONG_FRIEND_CARD") == "on":
+            rules = await self.store._all("""SELECT text FROM marong.friend_rules
+                WHERE friend_id=%s AND kind='avoid_topic' AND removed_at IS NULL""", (room["friend_id"],))
+            pictures = tuple(picture for picture in pictures if not any(
+                rule["text"] in " ".join((picture.title, picture.scene, picture.line, picture.ask, picture.alt))
+                for rule in rules))
+        picture = pick(pictures, now, today.used, self.rng)
         if picture is None:
             log.info("topic_skipped reason=no_picture")
             return None

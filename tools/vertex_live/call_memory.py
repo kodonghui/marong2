@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import uuid
 from dataclasses import dataclass
@@ -102,6 +103,31 @@ class MemoryStore:
     async def one(self, sql, params=()):
         rows = await self.all(sql, params)
         return rows[0] if rows else None
+
+    async def friend_instruction(self, p):
+        if os.getenv("MARONG_FRIEND_CARD") != "on":
+            return ""
+        from marong.friend_card import FriendCards
+        from marong.persona_prompt import FriendPrompt
+        adapter = type("FriendReader", (), {"pool": self.pool})()
+        data = await FriendCards(adapter).read(p.friend_id, include_call_first=False)
+        prompt = FriendPrompt().build(p.friend_id, "call", data, private=True)
+        if os.getenv("MARONG_SAFETY") == "on":
+            from marong.safety import ASK, ASKED, BODY_HELP, CALL_HELP, URGENT
+            state = await self.one("""SELECT * FROM marong.safety_states WHERE friend_id=%s AND closed_at IS NULL
+                AND last_signal_at>now()-CASE WHEN kind='crisis' THEN interval '3 days' ELSE interval '7 days' END
+                ORDER BY (kind='crisis') DESC LIMIT 1""", (p.friend_id,))
+            if state:
+                if state["kind"] == "body":
+                    safety = BODY_HELP if not state["told_help_at"] else ""
+                elif not state["told_109_at"] and (state["injured"] or state["answer"] == "now"):
+                    safety = URGENT if state["injured"] else CALL_HELP
+                elif state["told_109_at"] and state["asked_at"] is None:
+                    safety = ""
+                else:
+                    safety = ASK if state["asked_at"] is None else ASKED
+                prompt += "\n\n" + safety
+        return prompt
 
     async def principal(self, email_hash):
         row = await self.one("""SELECT c.id AS caller_id,c.friend_id,f.name,c.context_revision

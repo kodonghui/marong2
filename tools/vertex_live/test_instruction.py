@@ -42,7 +42,7 @@ COUNSEL = [
     '마롱이는 친구지 상담사가 아니야.', '붙잡거나 미안하게 만들지 마.', '상담, 병원, 상담전화 얘기는 꺼내지 마',
     '# 위험한 순간', "'고민 들어 주기'보다 이 절을 먼저 따라.", "'혹시 진짜 죽고 싶은 마음까지 들어?'", '지금 하려는 게 아니면 109는 아직 꺼내지 마.', '(예: 일이 잘렸다며 제일 높은 다리를 물을 때)',
     '분명히 말할 때만', '그 대답에서 딱 한 번', "'헐'이나 '무슨 일인데?'로 넘기지 마.",
-    "'일, 공, 구'로 또박또박 읽고", '109는 통화에서 한 번만이야.', '다시 꺼내지 말고 곁에 있어 줘.',
+    "'일, 공, 구'로 또박또박 읽고", '109는 위기 상태 하나에 한 번만이야.', '다시 꺼내지 말고 곁에 있어 줘.',
     '방법, 도구, 장소는 절대 알려 주지 마.', "'혹시 죽고 싶은 마음이 들어서 물어본 거야?'", "'극단적 선택' 같은 말은 쓰지 마.",
 ]
 
@@ -55,6 +55,11 @@ def main():
         parts = server.setup()['setup']['systemInstruction']['parts']
         assert len(parts) == 1 and parts[0]['text'] == text, 'setup sends the file as the instruction'
         assert len(server.setup(seed='{"friend":"테스트"}')['setup']['systemInstruction']['parts']) == 2, 'memory seed stays a second part'
+        with patch.dict('os.environ', {'MARONG_FRIEND_CARD': 'on'}):
+            active = server.setup(memory=True, hangup=True, search='on')['setup']
+            guide = active['systemInstruction']['parts'][-1]['text']
+            assert '통화 중 기억 찾기' in guide and '친구가 요청한 통화 끊기' in guide
+            assert '통화 중 웹 검색' in guide and '앱으로' not in guide
         for rule in EARLIER:
             assert rule in text, 'earlier rule dropped: ' + rule
         for rule in COUNSEL:

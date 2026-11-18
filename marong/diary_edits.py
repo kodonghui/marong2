@@ -53,7 +53,10 @@ class DiaryEdits:
         if kind == "fix" and row:
             code, changed = await self._run_fix(row, key, note.strip(), trace, deadline)
         if code != "ok":
-            raise Problem(code, headers={"Retry-After": str(retry)} if code == "too_many_requests" else None)
+            if code == "too_many_requests":
+                raise Problem(code, headers={"Retry-After": str(retry)},
+                              title="고치기와 다시 그리기를 합쳐 1분에 5번 넘게 보냄")
+            raise Problem(code)
         if kind == "fix":
             day_data = await self.api.day_data(friend, day, datetime.now(KST))
             return self.chat._json(200, {"sceneChanged": changed, "day": day_data})

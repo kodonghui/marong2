@@ -129,7 +129,7 @@
 
 - 화면: `/`(홈·아이 목록), `/pets/{id}`(아이 화면: 대화), `/pets/{id}/diary`(일기장), `/create`(캐릭터 만들기), `/shop`, `/me`(설정, 한도와 결제, 주문, 동의, 계정). 화면 목록은 07 단계 `docs/07-sitemap/sitemap.yaml`의 SCR-140\~162예요(2026-11-17).
 - API: `/api/…`(2절의 행), 내부 `/internal/…`(통화 서버만, 서버 사이 비밀 헤더와 `127.0.0.1`), 결제 대행 웹훅 `/api/pg/webhook`, `GET /healthz`.
-- 그림: `/api/media/{id}`는 회원 확인 뒤 `Cache-Control: private, max-age=31536000, immutable`(그림은 바뀌지 않고 바뀌면 새 id). 공용 그림(배경 세트, 아이템 레이어, 글꼴)은 `/static/…`에 해시 이름으로 같은 캐시.
+- 그림: `/api/media/{id}`는 현재 세션의 회원을 매번 확인하고 `Cache-Control: no-store`로 응답해요. 공용 그림(배경 세트, 아이템 레이어, 글꼴)은 `/static/…`에 해시 이름으로 두고 오래 캐시해요.
 
 ### 3.2 캐릭터 만들기 상태
 

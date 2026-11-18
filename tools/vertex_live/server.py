@@ -151,7 +151,7 @@ def ring_part(ring):
     data['울린 때']=ring['at'].astimezone(KST).strftime('%H:%M')
     return (HELLO_GUIDE if hello else RING_GUIDE)+json.dumps(data,ensure_ascii=False)
 
-def setup(handle=None,seed='',memory=False,hangup=False,search=None,ring=None,tuning=None,handoff=False):
+def setup(handle=None,seed='',memory=False,hangup=False,search=None,ring=None,tuning=None,handoff=False,friend_instruction=''):
     # search: 'on' adds Google Search and its guide, 'spent'/'off' only a guide that she cannot search now,
     # None (callers without a search budget) neither. ring: the promise of a call Marong placed, or None.
     resume={'transparent':True}
@@ -169,6 +169,7 @@ def setup(handle=None,seed='',memory=False,hangup=False,search=None,ring=None,tu
             'silenceDurationMs':tuning['vad_silence_ms'],'prefixPaddingMs':tuning['vad_prefix_ms']}
         config['contextWindowCompression']={'triggerTokens':tuning['compression_trigger'],
             'slidingWindow':{'targetTokens':tuning['compression_target']}}
+    if friend_instruction:result['setup']['systemInstruction']['parts'].append({'text':friend_instruction})
     guide=call_search.guide(search)
     if guide:result['setup']['systemInstruction']['parts'].append({'text':guide})
     if ring:result['setup']['systemInstruction']['parts'].append({'text':ring_part(ring)})
@@ -178,6 +179,11 @@ def setup(handle=None,seed='',memory=False,hangup=False,search=None,ring=None,tu
     tools=[{'functionDeclarations':declarations}] if declarations else []
     if search=='on':tools.append(dict(call_search.TOOL))
     if tools:result['setup']['tools']=tools
+    if os.getenv('MARONG_FRIEND_CARD')=='on':
+        from marong.capabilities import description
+        names={tool['name'] for tool in declarations}
+        if search=='on':names.add('googleSearch')
+        result['setup']['systemInstruction']['parts'].append({'text':description('call',names)})
     return result
 
 async def get_principal(authn):

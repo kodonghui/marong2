@@ -3819,7 +3819,7 @@ paths:
     get:
       operationId: getMedia
       summary: 회원 그림
-      description: '세션 회원의 것만. `Cache-Control: private, max-age=31536000, immutable`. WebP도 같은 경로(Content-Type이 다름).'
+      description: '현재 세션 회원의 것만. `Cache-Control: no-store`. WebP도 같은 경로(Content-Type이 다름).'
       parameters:
       - name: id
         in: path

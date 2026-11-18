@@ -12,7 +12,11 @@ const REPO = path.resolve(__dirname, '..', '..', '..', '..');
 const STATIC = path.join(REPO, 'marong', 'app_chat_static');
 const FACES = path.join(REPO, 'marong', 'call', 'static', 'face', 'v1');
 const FILES = { '/chat/': ['index.html', 'text/html'], '/chat/chat.js': ['chat.js', 'text/javascript'],
-  '/chat/chat.css': ['chat.css', 'text/css'] };
+  '/chat/chat.css': ['chat.css', 'text/css'],
+  '/chat/persona/': ['persona/index.html', 'text/html'],
+  '/chat/persona/instructions': ['persona/instructions.html', 'text/html'],
+  '/chat/persona/persona.css': ['persona/persona.css', 'text/css'],
+  '/chat/persona/persona.js': ['persona/persona.js', 'text/javascript'] };
 const ME = { name: '현경', textMax: 2000, delivery: { to: 'discord', reason: 'no_device' },
   ring: { to: 'discord', reason: 'ring_disabled', fullScreen: null } };
 

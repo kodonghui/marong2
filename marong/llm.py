@@ -55,6 +55,12 @@ class LLM:
         for _, client in self.clients:
             await client.close()
 
+    async def create_once(self, body: dict, timeout: float):
+        if not self.clients:
+            raise RuntimeError("llm_unconfigured")
+        _, client = self.clients[0]
+        return await self._once(client, body, timeout)
+
     async def create(self, body: dict, timeout: float):
         loop = asyncio.get_running_loop()
         end = loop.time() + timeout

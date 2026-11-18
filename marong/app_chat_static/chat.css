@@ -81,6 +81,15 @@ button:disabled {cursor: default; opacity: .45}
 .day {text-align: center; margin: 18px 0 10px; font-size: 12px; color: var(--muted)}
 .day span {padding: 3px 12px; border-radius: 12px; background: var(--surface)}
 .message {margin: 6px 0}
+.persona-options {margin: 6px 0 0}
+.persona-card-note {margin: 4px 0; color: var(--muted); font-size: 12px}
+.persona-card-note:empty {display: none}
+.persona-card-group {display: flex; flex-wrap: wrap; gap: 6px}
+.persona-card-group button {
+  min-height: 48px; padding: 6px 10px; border-radius: 12px; border: 1px solid var(--input-border);
+  background: var(--raised); color: var(--text); overflow-wrap: anywhere;
+}
+.persona-card-group button[aria-checked="true"] {border-color: var(--accent)}
 .row {display: flex; align-items: flex-end; gap: 8px}
 .message.me .row {flex-direction: row-reverse}
 .face {flex: none; width: 34px; height: 34px; border-radius: 50%; background: var(--face-base); display: grid; place-items: center; align-self: flex-start}

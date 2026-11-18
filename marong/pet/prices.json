@@ -1,0 +1,25 @@
+{
+  "version": "2026-11-17",
+  "models": {
+    "claude-haiku-5-5": {
+      "kind": "text",
+      "usd": {"input": 0.10, "output": 0.50, "cache_read": 0.01, "cache_write": 0.125},
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "claude-sonnet-5-5": {
+      "kind": "text",
+      "usd": {"input": 2.00, "output": 10.00, "cache_read": 0.10, "cache_write": 2.50},
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "gpt-image-2.5-flare": {
+      "kind": "image",
+      "usd": {"text_input": 5.00, "image_input": 8.00, "image_output": 30.00},
+      "source": "https://developers.openai.com/api/docs/models/gpt-image-2.5-flare"
+    },
+    "gemini-3.8-live": {
+      "kind": "minute",
+      "usd": {"minute": 0.026926},
+      "source": "docs/04-functional-spec/pet.md#37-시작-값"
+    }
+  }
+}

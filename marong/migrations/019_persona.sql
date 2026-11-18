@@ -1,12 +1,12 @@
 -- 019 Persona, proactive gate, favors and friend memory, stages 1 to 4
--- (docs/04-functional-spec/persona.md SPEC-192~242, CTX-008~013). Design draft: the schema is not frozen.
--- Eighteen new tables (TBL-115~124, TBL-127~134) and one schema for graph checkpoints. Nothing existing changes.
+-- (docs/04-functional-spec/persona.md SPEC-192~242, CTX-008~013).
+-- Eighteen new tables (TBL-115~124, TBL-127~134), a checkpoint schema and the SPEC-204 request kind.
 -- Rules kept here:
 --   * Logs and result rows hold ids, labels and counts only. Text a friend wrote lives only where the spec needs it
 --     (card values, rules, the custom instruction, memory items, a relay or call text until it is sent) and is
 --     emptied when that row ends (common rule 10).
 --   * Nobody gets DELETE on marong tables, as in schema.sql. Forgetting marks and empties rows instead (SPEC-230).
---     The one proposed exception is marong.forget_embeddings(), which drops search vectors of forgotten sources only.
+--     D63 approved marong.forget_embeddings() as the exception for vectors of forgotten sources.
 --   * Friend writes run under pg_advisory_xact_lock(friend_id) in the bot and the call server (common rule 11).
 --   * The call server (marong_call) never shares transcripts with the bot: call jobs run in the call organizer,
 --     and the bot learns of a forgotten call turn only through forget_marks.
@@ -22,6 +22,12 @@ SET LOCAL lock_timeout = '2s';
 CREATE SCHEMA IF NOT EXISTS talk_graph AUTHORIZATION marong;
 
 SET LOCAL ROLE marong_owner;
+
+ALTER TABLE marong.requests DROP CONSTRAINT IF EXISTS requests_kind_check;
+ALTER TABLE marong.requests ADD CONSTRAINT requests_kind_check CHECK (kind IN (
+    'share_off', 'share_on', 'friendship', 'link', 'proactive_off', 'proactive_on',
+    'proactive_less', 'proactive_more', 'feature'
+));
 
 -- TBL-115 friend_cards (CTX-008) ← SPEC-192, SPEC-193, SPEC-194, SPEC-195, SPEC-196, SPEC-197, SPEC-202, SPEC-220 | terms: TERM-040, TERM-041, TERM-042, TERM-047
 -- One row per friend, made the first time any of these is needed. state 'none' holds only per-friend values that
@@ -512,10 +518,9 @@ CREATE TABLE IF NOT EXISTS marong.persona_tool_calls (
 );
 CREATE INDEX IF NOT EXISTS persona_tool_calls_friend_idx ON marong.persona_tool_calls (friend_id, created_at DESC);
 
--- Proposed exception to "no DELETE" (to settle before implementation): search vectors are rebuildable copies
+-- D63 exception to "no DELETE": search vectors are rebuildable copies
 -- (schema.sql), and a forgotten message must stop turning up in search (3.20 step 3). The function deletes only the
--- vectors of sources one forget marked, so the bot still cannot delete anything else. Without it, every search
--- query has to leave out forget_marks instead, and the vectors stay on disk.
+-- vectors of sources one forget marked, so the bot still cannot delete anything else.
 CREATE OR REPLACE FUNCTION marong.forget_embeddings(p_forget bigint)
 RETURNS integer LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
   WITH gone AS (

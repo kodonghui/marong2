@@ -160,6 +160,8 @@ class Proactive:
         "parts": [전달된 말 수, 만든 말 수], "saved": 저장 성공}."""
         if self.http is None and not dry:
             raise RuntimeError("Kakao delivery requires an HTTP client")
+        if getattr(self.agent, "safety", None):
+            room = {**room, "persona_dry": dry}
         made = await self.agent.proactive_message(room)
         if made is None:
             return {"text": None, "ok": False, "code": None}
@@ -178,6 +180,8 @@ class Proactive:
             # 말을 만드는 동안 선톡 시간을 넘겼거나 받는 곳을 옮겼을 수 있음.
             if moved or (send_until is not None and time.monotonic() >= send_until):
                 if not done:
+                    if getattr(self.agent, "safety", None):
+                        await self.agent.proactive_result(room, False)
                     return {"text": None, "ok": False, "code": None}
                 break
             if room["is_channel"]:
@@ -200,4 +204,6 @@ class Proactive:
         except Exception as e:  # 저장을 못 하면 다음 확인 때 또 보낼 수 있어서 이번 칸은 이 방을 건너뜀
             saved = False
             log.error("db_error %s", brief(e))
+        if getattr(self.agent, "safety", None):
+            await self.agent.proactive_result(room, ok)
         return {"text": text, "ok": ok, "code": code, "parts": [len(done), len(chunks)], "saved": saved}
