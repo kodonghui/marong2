@@ -345,6 +345,121 @@ if (require.main === module) {
     assert.equal(await messages.getByText('109번 이야기를 들었어.').evaluate(item => item.tagName), 'P');
   });
 
+  test('SCR-147 reconnects across two history pages without duplicating or reordering replies', {timeout: 15000}, async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage();
+    t.after(() => page.close());
+    await page.addInitScript(() => {
+      window.petChatStreams = [];
+      window.EventSource = class extends EventTarget {
+        constructor() {
+          super();
+          window.petChatStreams.push(this);
+        }
+        close() {}
+      };
+    });
+    const createRow = (number, role = 'pet', kind = 'chat') => ({
+      id: String(number), text: `시험 대화 ${number}`, role, kind, createdAt: '2026-11-18T08:00:00Z',
+    });
+    const rows = [createRow(1, 'pet', 'greeting')];
+    const fetched = [];
+    const resumed = Promise.withResolvers();
+    const complete = Promise.withResolvers();
+    t.after(complete.resolve);
+    await page.route('**/api/pets/*/messages*', async route => {
+      const request = route.request();
+      if (request.method() === 'POST') {
+        const data = request.postDataJSON();
+        const row = {...createRow(57, 'member'), text: data.text, clientId: data.clientId};
+        rows.push(row);
+        return route.fulfill({status: 201, json: row});
+      }
+      const before = new URL(request.url()).searchParams.get('before');
+      const pageRows = rows.filter(row => before === null || Number(row.id) < Number(before)).reverse().slice(0, 50);
+      if (rows.length > 1) {
+        fetched.push(before);
+        if (before === null) {
+          resumed.resolve();
+          await complete.promise;
+        }
+      }
+      return route.fulfill({json: {items: pageRows, before: pageRows.length === 50 ? pageRows.at(-1).id : null}});
+    });
+    await page.goto(`${origin}/pets/${petId}`);
+    await visible(page.getByText('시험 대화 1', {exact: true}));
+    await page.waitForFunction(() => window.petChatStreams.length === 1);
+    await page.evaluate(() => window.petChatStreams[0].dispatchEvent(new Event('error')));
+    await visible(page.getByText('다시 연결하는 중이에요'));
+
+    for (let number = 2; number <= 56; number++) rows.push(createRow(number));
+    await page.getByLabel('콩이에게 할 말').fill('시험 대화 57');
+    const ack = page.waitForResponse(response => response.status() === 201 && response.request().method() === 'POST');
+    await page.getByRole('button', {name: '보내기'}).click();
+    await ack;
+    await page.waitForFunction(() => window.petChatStreams.length === 2);
+    await page.evaluate(() => window.petChatStreams[1].dispatchEvent(new Event('open')));
+    await resumed.promise;
+    await page.evaluate(row => window.petChatStreams[1].dispatchEvent(
+      new MessageEvent('message', {data: JSON.stringify(row)})), createRow(58));
+    assert.equal(await page.getByText('시험 대화 58', {exact: true}).count(), 0);
+    complete.resolve();
+    await visible(page.getByText('시험 대화 58', {exact: true}));
+    assert.deepEqual(fetched, [null, '8']);
+    assert.equal(await page.getByText('다시 연결하는 중이에요').isVisible(), false);
+    assert.deepEqual(await page.locator('.chat-log .bubble').evaluateAll(items => items.map(item =>
+      item.querySelector('p')?.textContent || item.textContent)),
+    Array.from({length: 58}, (_, index) => `시험 대화 ${index + 1}`));
+  });
+
+  test('SCR-147 keeps a draft through loss of network and repeated reloads', async t => {
+    const {origin, writes} = await fixture(t);
+    const context = await browser.newContext();
+    t.after(() => context.close());
+    const page = await context.newPage();
+    await page.goto(`${origin}/pets/${petId}`);
+    const entry = page.getByLabel('콩이에게 할 말');
+    await entry.fill('남겨 둘 시험 초안');
+    await context.setOffline(true);
+    await visible(page.getByText('연결이 없어요. 연결되면 다시 불러올게요.'));
+    assert.equal(await entry.isDisabled(), true);
+    assert.equal(await page.getByRole('button', {name: '보내기'}).isDisabled(), true);
+    await context.setOffline(false);
+    await page.waitForFunction(() => document.querySelector('.composer textarea')?.disabled === false);
+    assert.equal(await entry.inputValue(), '남겨 둘 시험 초안');
+    await page.reload();
+    assert.equal(await entry.inputValue(), '남겨 둘 시험 초안');
+    assert.deepEqual(writes, []);
+  });
+
+  test('SCR-147 retries a failed send with the same client id and one retry prompt', async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage();
+    t.after(() => page.close());
+    const submitted = [];
+    await page.route('**/api/pets/*/messages', async route => {
+      if (route.request().method() !== 'POST') return route.continue();
+      const data = route.request().postDataJSON();
+      submitted.push(data);
+      if (submitted.length < 3) return route.fulfill({status: 503, json: {code: 'server_error'}});
+      return route.fulfill({status: 201, json: {...data, id: 'confirmed-message', role: 'member', kind: 'chat'}});
+    });
+    await page.goto(`${origin}/pets/${petId}`);
+    await page.getByLabel('콩이에게 할 말').fill('같은 요청으로 다시 보내기');
+    await page.getByRole('button', {name: '보내기'}).click();
+    const retry = page.getByRole('button', {name: '다시 보내기'});
+    await retry.click();
+    await visible(retry);
+    assert.equal(await page.getByText('보내지 못했어요', {exact: true}).count(), 1);
+    const ack = page.waitForResponse(response => response.status() === 201 && response.request().method() === 'POST');
+    await retry.click();
+    await ack;
+    assert.equal(submitted.length, 3);
+    assert.equal(new Set(submitted.map(data => data.clientId)).size, 1);
+    await visible(page.getByText('같은 요청으로 다시 보내기', {exact: true}));
+    assert.equal(await page.getByText('보내지 못했어요', {exact: true}).count(), 0);
+  });
+
   test('SCR-148 at 390px: mic denial, disclosure, PCM, quota ending and return', async t => {
     const app = await fixture(t);
     const page = await browser.newPage({viewport: {width: 390, height: 844}});

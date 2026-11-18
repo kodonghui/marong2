@@ -43,11 +43,10 @@ export async function petScreen(id) {
   const reconnecting = banner('다시 연결하는 중이에요');
   reconnecting.hidden = true;
   const outlet = el('div', {'aria-live': 'polite'});
-  const seen = new Set();
+  const bubbles = new Map();
   let cursor = before;
+  let streamAnchor = items[0]?.id;
   function bubble(row) {
-    if (row.id && seen.has(row.id)) return null;
-    if (row.id) seen.add(row.id);
     if (row.kind === 'call') return el('details', {class: 'bubble system'},
       el('summary', {}, `통화했어요 · ${dateLabel(row.createdAt)}`), text(row.text));
     if (row.role === 'system' && row.kind === 'crisis_notice') {
@@ -59,9 +58,16 @@ export async function petScreen(id) {
     const report = reportControl({targetType: 'message', targetId: row.id, preview: row.text}, '신고', reported, message);
     return el('div', {class: 'bubble'}, message, el('small', {class: 'muted'}, 'AI'), report);
   }
-  function append(rows) {
+  function renderBubble(row, {move = false} = {}) {
+    const known = row.id && bubbles.get(row.id);
+    if (known) return move ? known : null;
+    const item = bubble(row);
+    if (row.id) bubbles.set(row.id, item);
+    return item;
+  }
+  function append(rows, {move = false} = {}) {
     for (const row of [...rows].reverse()) {
-      const item = bubble(row);
+      const item = renderBubble(row, {move});
       if (item) timeline.append(item);
     }
     timeline.scrollTop = timeline.scrollHeight;
@@ -70,7 +76,7 @@ export async function petScreen(id) {
   const more = button('이전 대화', () => action(more, outlet, async () => {
     const height = timeline.scrollHeight;
     const prior = await api(`${path}/messages?before=${encodeURIComponent(cursor)}`);
-    timeline.prepend(...[...prior.items].reverse().map(bubble).filter(Boolean));
+    timeline.prepend(...[...prior.items].reverse().map(row => renderBubble(row)).filter(Boolean));
     timeline.scrollTop += timeline.scrollHeight - height;
     cursor = prior.before;
     more.hidden = !cursor;
@@ -89,32 +95,35 @@ export async function petScreen(id) {
   }
   const entry = el('textarea', {rows: 2, maxlength: 1000, 'aria-label': `${pet.name}에게 할 말`});
   const submit = el('button', {type: 'submit', class: 'primary'}, '보내기');
-  entry.disabled = submit.disabled = !me.overseasTransfer;
+  let sendBlocked = !me.overseasTransfer;
+  const updateComposer = () => { entry.disabled = submit.disabled = sendBlocked || !navigator.onLine; };
+  updateComposer();
   const draftKey = `pet:chat:${id}`;
   entry.value = sessionStorage.getItem(draftKey) || '';
-  sessionStorage.removeItem(draftKey);
   entry.addEventListener('input', () => sessionStorage.setItem(draftKey, entry.value));
   const form = el('form', {class: 'composer'}, entry, submit);
 
-  async function send(payload, pending) {
+  async function send(payload, pending, feedback) {
     try {
       const message = await api(path + '/messages', {method: 'POST', body: payload});
       pending.remove();
       append([message]);
     } catch (error) {
-      if (error.code === 'asleep' || error.code === 'consent_required' || error.status === 401) {
+      if (['asleep', 'archived', 'consent_required'].includes(error.code) || error.status === 401) {
         if (!entry.value) entry.value = payload.text;
         sessionStorage.setItem(draftKey, entry.value);
-        if (error.code === 'asleep' || error.code === 'consent_required') entry.disabled = submit.disabled = true;
+        sendBlocked = true;
+        updateComposer();
         pending.remove();
-        errorText(error, outlet);
+        if (error.code === 'archived' || error.code === 'consent_required') location.reload();
+        else errorText(error, outlet);
       } else {
         const again = button('다시 보내기', () => {
           if (!navigator.onLine) return;
-          again.remove();
-          void send(payload, pending);
+          feedback.replaceChildren();
+          void send(payload, pending, feedback);
         }, 'plain');
-        pending.append(text('보내지 못했어요', 'error'), again);
+        feedback.replaceChildren(text('보내지 못했어요', 'error'), again);
       }
     }
   }
@@ -123,47 +132,101 @@ export async function petScreen(id) {
     const message = entry.value.trim();
     if (!message || entry.disabled || !navigator.onLine) return;
     const payload = {text: message, clientId: crypto.randomUUID()};
-    const pending = el('div', {class: 'bubble member'}, text(message));
+    const feedback = el('div');
+    const pending = el('div', {class: 'bubble member'}, text(message), feedback);
     timeline.append(pending);
     timeline.scrollTop = timeline.scrollHeight;
     entry.value = '';
     sessionStorage.removeItem(draftKey);
     empty?.remove();
-    void send(payload, pending);
+    void send(payload, pending, feedback);
   });
   chat.append(form);
   if (items.length === 1 && items[0].kind === 'greeting' && !entry.disabled) entry.focus();
 
   let reconnect;
   let events;
+  function retry(source) {
+    if (events !== source) return;
+    source.close();
+    events = null;
+    reconnecting.hidden = false;
+    typing.hidden = true;
+    clearTimeout(reconnect);
+    if (navigator.onLine) reconnect = setTimeout(connect, 3_000);
+  }
+
+  async function missedMessages(anchor) {
+    const missed = [];
+    let endpoint = path + '/messages';
+    const visited = new Set([endpoint]);
+    while (true) {
+      const {items, before} = await api(endpoint);
+      const index = items.findIndex(row => row.id === anchor);
+      if (index !== -1) {
+        missed.push(...items.slice(0, index));
+        return missed;
+      }
+      missed.push(...items);
+      if (!before) return missed;
+      endpoint = `${path}/messages?before=${encodeURIComponent(before)}`;
+      if (visited.has(endpoint)) throw new Error('Repeated message cursor');
+      visited.add(endpoint);
+    }
+  }
+
   function connect() {
-    events = new EventSource(path + '/events');
-    events.addEventListener('open', async () => {
-      if (reconnecting.hidden) return;
+    if (!navigator.onLine) return;
+    const source = new EventSource(path + '/events');
+    events = source;
+    let restoring = !reconnecting.hidden;
+    const buffered = [];
+    source.addEventListener('open', async () => {
+      if (!restoring || events !== source) return;
       try {
-        const fresh = await api(path + '/messages');
-        append(fresh.items);
+        const missed = await missedMessages(streamAnchor);
+        if (events !== source) return;
+        append(missed, {move: true});
+        if (missed[0]?.id) streamAnchor = missed[0].id;
+        for (const row of buffered) {
+          if (!bubbles.has(row.id)) streamAnchor = row.id || streamAnchor;
+          append([row]);
+        }
+        if (missed.length || buffered.length) empty?.remove();
+        restoring = false;
         reconnecting.hidden = true;
-      } catch (error) { errorText(error, outlet); }
+      } catch { retry(source); }
     });
-    events.addEventListener('typing', () => { typing.hidden = false; });
-    events.addEventListener('message', event => {
+    source.addEventListener('typing', () => { if (events === source) typing.hidden = false; });
+    source.addEventListener('message', event => {
+      if (events !== source) return;
       typing.hidden = true;
-      empty?.remove();
       try {
         const row = JSON.parse(event.data);
-        if (typeof row.text === 'string') append([row]);
+        if (typeof row.text !== 'string') return;
+        if (restoring) buffered.push(row);
+        else {
+          streamAnchor = row.id || streamAnchor;
+          empty?.remove();
+          append([row]);
+        }
       } catch {}
     });
-    events.addEventListener('error', () => {
-      events.close();
-      reconnecting.hidden = false;
-      typing.hidden = true;
-      reconnect = setTimeout(connect, 3_000);
-    });
+    source.addEventListener('error', () => retry(source));
   }
   connect();
-  window.addEventListener('pagehide', () => { events?.close(); clearTimeout(reconnect); }, {once: true});
+  function disconnected() {
+    updateComposer();
+    if (events) retry(events);
+    clearTimeout(reconnect);
+  }
+  window.addEventListener('offline', disconnected);
+  window.addEventListener('pagehide', () => {
+    window.removeEventListener('offline', disconnected);
+    events?.close();
+    events = null;
+    clearTimeout(reconnect);
+  }, {once: true});
 }
 
 export async function account() {
