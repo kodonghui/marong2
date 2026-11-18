@@ -682,6 +682,12 @@ if (require.main === module) {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     const route = '/pets/' + petId + '/call';
+    const quota = Promise.withResolvers();
+    t.after(quota.resolve);
+    await page.route('**/api/me/quota', async route => {
+      await quota.promise;
+      await route.continue();
+    }, {times: 1});
     let gateway;
     const micBlock = page.addInitScript(() => {
       const getMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
@@ -694,12 +700,20 @@ if (require.main === module) {
       };
       const Worklet = window.AudioWorkletNode;
       window.callAudio = false;
+      window.callAudioPackets = 0;
       window.AudioWorkletNode = class extends Worklet {
         constructor(...args) {
           super(...args);
-          if (args[1] === 'playback-pcm') this.port.addEventListener('message', event => {
-            if (event.data.playedMs > 0) window.callAudio = true;
-          });
+          if (args[1] === 'playback-pcm') {
+            const send = this.port.postMessage.bind(this.port);
+            this.port.postMessage = (message, ...options) => {
+              if (message.type === 'pcm') window.callAudioPackets += 1;
+              return send(message, ...options);
+            };
+            this.port.addEventListener('message', event => {
+              if (event.data.playedMs > 0) window.callAudio = true;
+            });
+          }
         }
       };
     });
@@ -715,6 +729,10 @@ if (require.main === module) {
       });
     });
     await page.goto(app.origin + route);
+    await page.locator('.call-face.skeleton').waitFor();
+    assert.equal(await page.locator('#page .skeleton').count(), 2);
+    assert.equal(await page.locator('#page').getAttribute('aria-busy'), 'true');
+    quota.resolve();
     await visible(page.getByText('통화는 1분마다 오늘 한도를 써요 · 지금 60%'));
     await page.getByRole('button', {name: '전화 걸기'}).click();
     await visible(page.getByText('마이크를 허용해야 통화할 수 있어요'));
@@ -727,11 +745,16 @@ if (require.main === module) {
     packet.write('MRG2');
     packet.writeUInt32BE(2400, 20);
     for (let i = 24; i < packet.length; i += 2) packet.writeInt16LE(1000, i);
+    const incomplete = Buffer.from(packet);
+    incomplete.writeUInt32BE(2500, 20);
+    gateway.send(incomplete);
     gateway.send(packet);
     gateway.send(JSON.stringify({type: 'audio_end', turn: 0, epoch: 0}));
     await page.waitForFunction(() => window.callAudio);
+    assert.equal(await page.evaluate(() => window.callAudioPackets), 1);
     gateway.send(JSON.stringify({type: 'ready'}));
     assert.equal(await pcm, 3200);
+    await visible(page.getByText('AI로 만든 목소리예요', {exact: true}));
     assert.equal(await page.getByText(/지금 60%/).count(), 0);
     gateway.send(JSON.stringify({type: 'ending', reason: 'quota'}));
     await visible(page.getByText(/졸려서 자러 가요/));
@@ -742,6 +765,29 @@ if (require.main === module) {
     await page.getByRole('link', {name: '대화로 돌아가기'}).click();
     await visible(page.getByText('누나, 나 왔어!', {exact: true}));
     assert.deepEqual(errors, []);
+  });
+
+  test('SCR-148 stops a microphone that arrives after the member cancels', async t => {
+    const app = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 430, height: 820}});
+    t.after(() => page.close());
+    await page.addInitScript(() => {
+      const getMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      navigator.mediaDevices.getUserMedia = async options => {
+        const stream = await getMedia(options);
+        window.lateMicTracks = stream.getTracks();
+        await new Promise(resolve => { window.releaseLateMic = resolve; });
+        return stream;
+      };
+    });
+    await page.goto(`${app.origin}/pets/${petId}/call`);
+    await page.getByRole('button', {name: '전화 걸기', exact: true}).click();
+    await page.waitForFunction(() => typeof window.releaseLateMic === 'function');
+    await page.getByRole('button', {name: '끊기', exact: true}).click();
+    await visible(page.getByText('통화했어요', {exact: true}));
+    await page.evaluate(() => window.releaseLateMic());
+    await page.waitForFunction(() => window.lateMicTracks.every(track => track.readyState === 'ended'));
+    assert.equal(app.callStarts, 0);
   });
 
   test('SCR-148 displays the contracted HTTP failures and frees the microphone', async t => {

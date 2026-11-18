@@ -137,6 +137,7 @@ button.diary-sticker[aria-pressed="true"] { border-color: var(--accent) }
 
 .call-card { justify-items: center; text-align: center; }
 .call-card > .stack { width: 100%; }
+.call-button-placeholder { min-height: 48px; }
 .call-face { width: min(200px, 100%); aspect-ratio: 1; margin-inline: auto; border-radius: 50%; overflow: hidden; }
 .call-face img { width: 100%; height: 100%; object-fit: contain; }
 

@@ -1,4 +1,4 @@
-import {AI_NOTICE, api, banner, button, CONSENT, el, errorText, header, link, notice, picture,
+import {AI_NOTICE, api, banner, button, CONSENT, el, errorText, header, link, page, picture,
   show, showTabs, text} from './pet.js';
 import {rechargeSheet} from './orders.js';
 
@@ -28,7 +28,7 @@ function stopAudio(attempt, notify) {
 function playPacket(player, buffer) {
   if (buffer.byteLength <= PACKET_HEADER || buffer.byteLength % 2 !== 0) return;
   const frame = new DataView(buffer);
-  if (frame.getUint32(0) !== PCM_MAGIC) return;
+  if (frame.getUint32(0) !== PCM_MAGIC || frame.getUint32(20) * 2 !== buffer.byteLength - PACKET_HEADER) return;
   const pcm = buffer.slice(PACKET_HEADER);
   player.port.postMessage({type: 'pcm', epoch: frame.getUint32(4), turn: frame.getUint32(8), pcm}, [pcm]);
 }
@@ -63,8 +63,9 @@ async function loadAudio(attempt) {
 export async function callScreen(id) {
   header('통화');
   showTabs(null);
-  show(el('div', {class: 'call-face banner', 'aria-hidden': 'true'}),
-    el('div', {class: 'banner', role: 'status'}, '불러오는 중'));
+  show(el('div', {class: 'call-face skeleton', 'aria-hidden': 'true'}),
+    el('div', {class: 'skeleton call-button-placeholder', 'aria-hidden': 'true'}));
+  page.setAttribute('aria-busy', 'true');
   const petPath = '/pets/' + id;
   const petApi = '/api' + petPath;
   const [me, pet, quota] = await Promise.all([api('/api/me'), api(petApi), api('/api/me/quota')]);
@@ -91,6 +92,9 @@ export async function callScreen(id) {
     state = next;
     face(emotion);
     status.replaceChildren(message ? text(message) : '');
+    if (next === 'connecting' || next === 'talking' || next === 'sleepy') {
+      status.append(el('small', {}, DISCLOSURE));
+    }
     controls.replaceChildren(action);
   }
 
@@ -140,7 +144,7 @@ export async function callScreen(id) {
     const socket = attempt.socket = new WebSocket(socketUrl(session.wsUrl));
     socket.binaryType = 'arraybuffer';
     const {player, capture} = attempt;
-    attempt.timer = setTimeout(() => finish('error'), 20_000);
+    attempt.timer = setTimeout(() => { if (active === attempt) finish('error'); }, 20_000);
     socket.addEventListener('open', () => socket.send(JSON.stringify({type: 'auth', token: session.token})));
     socket.addEventListener('close', () => { if (active === attempt) finish('error'); });
     socket.addEventListener('message', ({data}) => {
@@ -165,10 +169,10 @@ export async function callScreen(id) {
       }
     });
     player.port.onmessage = ({data}) => {
-      if (state === 'talking') face(data.speaking ? 'smile' : 'front');
+      if (active === attempt && state === 'talking') face(data.speaking ? 'smile' : 'front');
     };
     capture.port.onmessage = ({data}) => {
-      if (data.pcm && (state === 'talking' || state === 'sleepy')
+      if (active === attempt && data.pcm && (state === 'talking' || state === 'sleepy')
           && socket.readyState === WebSocket.OPEN && socket.bufferedAmount < 32_000) socket.send(data.pcm);
     };
   }
@@ -183,7 +187,6 @@ export async function callScreen(id) {
       if (active !== attempt) return;
       const session = await api(petApi + '/calls', {method: 'POST'});
       if (active !== attempt) return;
-      status.append(el('small', {}, DISCLOSURE));
       connect(attempt, session);
     } catch (error) {
       if (active !== attempt) return;
