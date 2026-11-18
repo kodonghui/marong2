@@ -30,3 +30,13 @@ TASK-377 · SPEC-368 · TC-428
 공개 주소에서 건강 확인 200, 초대 없는 가입 403 `invite_required`, 주문 409 `payments_off`를 확인한다. 인증이 필요한 시험은 전용 시험 회원을 사용한다. 새 서비스 로그를 5분 동안 보면서 Traceback과 ERROR가 각각 0건인지, 기존 서비스 실행 시각·파일 해시·기존 DB 상태가 반영 전과 같은지 확인한다.
 
 되돌리기는 반영 폴더의 `rollback.sh`로 실행한다. 두 새 유닛을 중지·비활성화하고 공개 호스트만 거둔다. 반려동물 DB·미디어 보존과 기존 DB 접속 차단을 위해 전용 역할의 PostgreSQL 규칙은 보존한다.
+
+로컬 관리 터널의 `remove-pet-hostname.sh`를 준비할 때 시스템 Python(PyYAML 사용)으로 철회 후보 파일을 만든다. 도메인이 확정되면 `HOST`에 반려동물 공개 호스트를 넣고 `ACTIVE_CONFIG`와 `CANDIDATE`에 각각 현재 설정과 새 파일 경로를 넣는다.
+
+```bash
+python3 deploy/pet/prepare-pet-withdrawal.py "$ACTIVE_CONFIG" "$HOST" "$CANDIDATE"
+cloudflared tunnel --config "$CANDIDATE" ingress validate
+cloudflared tunnel --config "$CANDIDATE" ingress rule "https://${HOST}/pet-call"
+```
+
+후보 파일은 두 반려동물 라우트를 전용 404 규칙으로 바꾼다. 규칙을 맨 앞에 두어 와일드카드가 이 호스트를 처리하지 않게 하고, 기존 호스트의 규칙 순서는 보존한다. 후보 파일로 반려동물의 웹·통화가 404에 일치하고 기존 호스트가 원래 서비스에 일치하는 것을 확인한다. Cloudflare의 전환 절차는 연결 중인 WebSocket을 끊을 수 있으므로, 반영할 때 대상 터널과 실행 중인 연결 상태를 확인한 뒤 전용 철회 명령을 확정한다. [Cloudflare 로컬 터널 설정 갱신 안내](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/configuration-file/#update-a-configuration-file)
