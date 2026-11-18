@@ -46,6 +46,10 @@ small, .muted { color: var(--muted) }
 .stack, form, fieldset { display: flex; flex-direction: column; gap: 12px; min-width: 0 }
 .card, .skeleton, .sheet { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px }
 .skeleton { min-height: 78px; background: var(--raised) }
+.home-action-placeholder { min-height: 48px }
+.card.pet.archived { opacity: .65 }
+#offline:not([hidden]) + #page .card.pet { opacity: .55 }
+.card.pet small { margin-left: 6px }
 progress { width: 100%; accent-color: var(--accent) }
 .portrait { max-width: 280px; width: 100%; margin-inline: auto }
 .banner { padding: 10px 14px; font-size: 13px; background: var(--raised); border-radius: 10px }
@@ -80,6 +84,7 @@ input:not([type="checkbox"],[type="radio"],[type="file"]), select, textarea {
 .check input { accent-color: var(--accent); margin-top: 5px }
 .date-fields { display: grid; grid-template-columns: 1.35fr 1fr 1fr; gap: 8px }
 .error { color: var(--danger) }
+fieldset[aria-invalid="true"] legend { color: var(--danger) }
 .notice { text-align: center; padding-block: 12px }
 .picture .retry-picture { position: absolute; inset: 0; background: var(--raised); padding: 8px; margin: auto }
 .sheet { width: min(calc(100% - 16px), 456px); max-height: 88dvh; margin: auto auto 8px; color: var(--text); border-color: var(--line) }

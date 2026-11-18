@@ -100,7 +100,9 @@ function local(value) {
 export function resumeAfterSignIn() {
   const pending = local(sessionStorage.getItem('pet_next'));
   sessionStorage.removeItem('pet_next');
-  if (pending && pending.pathname !== '/') location.replace(pending.href);
+  if (!pending || pending.pathname === '/') return false;
+  location.replace(pending.href);
+  return true;
 }
 
 export function signIn(activePath = location.pathname + location.search + location.hash) {

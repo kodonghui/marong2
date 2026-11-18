@@ -764,6 +764,113 @@ if (require.main === module) {
     assert.equal(writes[1].overseasTransfer, false);
   });
 
+  test('SCR-140 shows loading, empty, full and archived home states', {timeout: 15_000}, async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 360, height: 800}});
+    t.after(() => page.close());
+    const me = Promise.withResolvers();
+    t.after(me.resolve);
+    await page.route('**/api/me', async route => { await me.promise; await route.continue(); }, {times: 1});
+    await page.goto(origin);
+    await page.waitForFunction(() => document.querySelectorAll('#page .skeleton').length === 3);
+    assert.equal(await page.locator('#page').getAttribute('aria-busy'), 'true');
+    me.resolve();
+    await visible(page.getByText('아직 아이가 없어요. 사진 한 장으로 만들어 볼까요?'));
+    assert.equal(await page.getByRole('link', {name: '아이 만들기'}).getAttribute('href'), '/create');
+    assert.equal(await page.locator('#page').getAttribute('aria-busy'), 'false');
+
+    const pets = Array.from({length: 5}, (_, index) => ({
+      ...pet, id: petId.slice(0, -1) + index, name: index === 4 ? '보관 시험 아이' : `추억 아이 ${index + 1}`,
+      mode: 'memorial', status: index === 4 ? 'archived' : 'active', shopEntry: false,
+    }));
+    await page.route('**/api/pets', route => route.fulfill({json: {items: pets}}));
+    await page.reload();
+    await visible(page.getByText('아이는 5마리까지 만들 수 있어요.', {exact: true}));
+    assert.equal(await page.getByRole('button', {name: '아이 만들기'}).isDisabled(), true);
+    assert.equal(await page.getByRole('link', {name: '상점', exact: true}).count(), 0);
+    const restored = page.getByRole('link', {name: /보관 시험 아이/});
+    assert.equal(await restored.isVisible(), false);
+    await page.getByText('보관한 아이 1', {exact: true}).click();
+    await visible(restored);
+    assert.equal(await restored.getAttribute('href'), '/pets/' + pets[4].id);
+    assert.equal(await restored.evaluate(link => getComputedStyle(link).opacity), '0.65');
+    await visible(page.getByRole('link', {name: /추억 아이 1/}).getByText('❀ 추억'));
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.context().setOffline(true);
+    await visible(page.getByText('연결이 없어요. 연결되면 다시 불러올게요.'));
+    assert.equal(await restored.evaluate(link => getComputedStyle(link).opacity), '0.55');
+    await page.context().setOffline(false);
+    await page.waitForFunction(() => document.querySelector('#offline').hidden);
+  });
+
+  test('SCR-140 resumes a protected screen after sign-in', async t => {
+    const {origin} = await fixture(t, {signedIn: false});
+    const page = await browser.newPage();
+    t.after(() => page.close());
+    const protectedPath = `/pets/${petId}/settings?from=home#panel`;
+    let authenticated = false;
+    await page.route(`**/api/pets/${petId}`, route => authenticated ? route.continue()
+      : route.fulfill({status: 401, json: {code: 'unauthenticated'}}));
+    await page.goto(origin + protectedPath);
+    await page.waitForURL(origin + '/');
+    await visible(page.getByRole('link', {name: '구글로 시작'}));
+    assert.equal(await page.evaluate(() => sessionStorage.getItem('pet_next')), protectedPath);
+    authenticated = true;
+    await page.route('**/api/me', route => route.fulfill({json: {overseasTransfer: true}}));
+    await page.reload();
+    await page.waitForURL(origin + protectedPath);
+    await visible(page.getByRole('heading', {name: '아이 설정'}));
+    assert.equal(await page.evaluate(() => sessionStorage.getItem('pet_next')), null);
+  });
+
+  test('SCR-141 keeps validation in its group and prevents duplicate submissions while editing', {timeout: 15_000}, async t => {
+    const {origin} = await fixture(t, {signedIn: false});
+    const page = await browser.newPage({viewport: {width: 430, height: 850}});
+    t.after(() => page.close());
+    const hold = Promise.withResolvers();
+    t.after(hold.resolve);
+    const submitted = [];
+    await page.route('**/api/signup', async route => {
+      submitted.push(route.request().postDataJSON());
+      if (submitted.length === 1) await hold.promise;
+      return route.fulfill({status: 400,
+        json: {code: submitted.length === 1 ? 'invalid_input' : 'consents_missing'}});
+    });
+    await page.goto(origin + '/signup');
+    for (const label of ['이용약관', '개인정보 처리방침', 'AI 고지']) await page.getByRole('checkbox', {name: label}).check();
+    const year = page.getByLabel('년', {exact: true});
+    const day = page.getByLabel('일', {exact: true});
+    const submit = page.getByRole('button', {name: '가입하기'});
+    await year.fill('2023');
+    await page.getByLabel('월', {exact: true}).fill('2');
+    await day.fill('29');
+    assert.equal(await submit.isDisabled(), true);
+    await year.fill('2000');
+    await submit.click();
+    await page.waitForFunction(() => document.querySelector('button[type=submit]').hasAttribute('aria-busy'));
+    await day.fill('28');
+    assert.equal(await submit.isDisabled(), true);
+    await page.locator('form').evaluate(form => form.requestSubmit());
+    assert.equal(submitted.length, 1);
+    hold.resolve();
+    const birthDate = page.getByRole('group', {name: '생년월일'});
+    await visible(birthDate.getByText('입력을 확인해 주세요.', {exact: true}));
+    assert.equal(await birthDate.getAttribute('aria-invalid'), 'true');
+    assert.equal(await day.inputValue(), '28');
+    assert.equal(submitted[0].birthDate, '2000-02-29');
+    await day.fill('27');
+    assert.equal(await birthDate.getAttribute('aria-invalid'), null);
+    assert.equal(await birthDate.getByText('입력을 확인해 주세요.').count(), 0);
+    await submit.click();
+    const consents = page.getByRole('group', {name: '필수 동의'});
+    await visible(consents.getByText('필수 항목에 동의해야 가입할 수 있어요.', {exact: true}));
+    assert.equal(await consents.getAttribute('aria-invalid'), 'true');
+    assert.equal(submitted.length, 2);
+    assert.equal(submitted[1].birthDate, '2000-02-27');
+    assert.equal(submitted[1].overseasTransfer, false);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  });
+
   test('SCR-142 displays consent state and waits for an explicit change', async t => {
     const {origin} = await fixture(t, {consent: false});
     const page = await browser.newPage();

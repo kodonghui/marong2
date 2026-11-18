@@ -1,5 +1,5 @@
 import {action, api, banner, button, CONSENT, dateLabel, el, errorText, header,
-  link, notice, picture, resumeAfterSignIn, show, showTabs, text, today} from './pet.js';
+  link, notice, page, picture, resumeAfterSignIn, show, showTabs, text, today} from './pet.js';
 import {creationPath, stageLabel} from './creation.js';
 
 const LEGAL = '/static/legal/';
@@ -25,10 +25,11 @@ function signedOut() {
 }
 
 function petCard(pet) {
-  const name = [pet.name, pet.mode === 'memorial' ? ' · 추억' : ''].join('');
-  return el('a', {class: 'card pet', href: `/pets/${pet.id}`},
+  const archived = pet.status === 'archived';
+  return el('a', {class: archived ? 'card pet archived' : 'card pet', href: `/pets/${pet.id}`},
     pet.sheet?.front ? picture(pet.sheet.front, '', 'thumb') : el('span', {class: 'thumb', 'aria-hidden': 'true'}),
-    el('div', {class: 'grow'}, el('strong', {}, name),
+    el('div', {class: 'grow'}, el('strong', {}, pet.name),
+      pet.mode === 'memorial' ? el('small', {}, '❀ 추억') : null,
       pet.lastTalkAt ? text(dateLabel(pet.lastTalkAt), 'muted') : null),
     el('span', {'aria-hidden': 'true'}, '›'));
 }
@@ -43,6 +44,10 @@ export function pendingCard(job) {
 export async function home() {
   header('마롱이');
   showTabs(null);
+  show(el('div', {class: 'skeleton', 'aria-hidden': 'true'}),
+    el('div', {class: 'skeleton', 'aria-hidden': 'true'}),
+    el('div', {class: 'skeleton home-action-placeholder', 'aria-hidden': 'true'}));
+  page.setAttribute('aria-busy', 'true');
   let me;
   try { me = await api('/api/me', {auth: false}); }
   catch (error) {
@@ -50,7 +55,7 @@ export async function home() {
     signedOut();
     return;
   }
-  resumeAfterSignIn();
+  if (resumeAfterSignIn()) return;
   const [{items: pets}, {items: creations}, quota] = await Promise.all([
     api('/api/pets'), api('/api/creations'), api('/api/me/quota'),
   ]);
@@ -94,14 +99,17 @@ export async function signup() {
   showTabs(null);
   const invite = el('label', {hidden: true}, '초대 코드', el('input', {name: 'inviteCode', maxlength: 8, autocapitalize: 'characters'}));
   const outcome = el('div', {'aria-live': 'polite'});
+  const dateError = el('div', {id: 'birth-date-error', 'aria-live': 'polite'});
+  const consentError = el('div', {id: 'signup-consent-error', 'aria-live': 'polite'});
+  const dateFields = el('fieldset', {'aria-describedby': dateError.id}, el('legend', {}, '생년월일'),
+    el('div', {class: 'date-fields'}, field('년', 'year', 4), field('월', 'month', 2), field('일', 'day', 2)),
+    dateError);
+  const consentFields = el('fieldset', {'aria-describedby': consentError.id}, el('legend', {}, '필수 동의'),
+    consentField('agreeTerms', '이용약관', '', LEGAL + 'terms.html'),
+    consentField('agreePrivacy', '개인정보 처리방침', '', LEGAL + 'privacy.html'),
+    consentField('aiNoticeConfirmed', 'AI 고지', 'AI가 만든 캐릭터이고 진짜 그 아이가 아니에요'), consentError);
   const submit = el('button', {type: 'submit', class: 'primary', disabled: true}, '가입하기');
-  const form = el('form', {novalidate: true},
-    el('fieldset', {}, el('legend', {}, '생년월일'), el('div', {class: 'date-fields'},
-      field('년', 'year', 4), field('월', 'month', 2), field('일', 'day', 2))),
-    el('fieldset', {}, el('legend', {}, '필수 동의'),
-      consentField('agreeTerms', '이용약관', '', LEGAL + 'terms.html'),
-      consentField('agreePrivacy', '개인정보 처리방침', '', LEGAL + 'privacy.html'),
-      consentField('aiNoticeConfirmed', 'AI 고지', 'AI가 만든 캐릭터이고 진짜 그 아이가 아니에요')),
+  const form = el('form', {novalidate: true}, dateFields, consentFields,
     el('fieldset', {}, el('legend', {}, '선택 동의'),
       consentField('overseasTransfer', '국외 이전', '', LEGAL + 'overseas.html', false),
       text('동의하지 않으면 캐릭터 만들기와 대화를 할 수 없어요. 나중에 설정에서 바꿀 수 있어요', 'muted')),
@@ -111,11 +119,22 @@ export async function signup() {
     const values = new FormData(form);
     return birthDate(values) && required.every(name => values.has(name));
   };
-  form.addEventListener('input', () => { submit.disabled = !ready(); });
-  form.addEventListener('submit', event => {
+  form.addEventListener('input', event => {
+    for (const [section, error] of [[dateFields, dateError], [consentFields, consentError]]) {
+      if (!section.contains(event.target)) continue;
+      section.removeAttribute('aria-invalid');
+      error.replaceChildren();
+    }
+    if (!submit.hasAttribute('aria-busy')) submit.disabled = !ready();
+  });
+  form.addEventListener('submit', async event => {
     event.preventDefault();
-    if (!ready()) return;
-    action(submit, outcome, async () => {
+    if (submit.hasAttribute('aria-busy') || !ready()) return;
+    dateFields.removeAttribute('aria-invalid');
+    consentFields.removeAttribute('aria-invalid');
+    dateError.replaceChildren();
+    consentError.replaceChildren();
+    await action(submit, outcome, async () => {
       const values = new FormData(form);
       const data = {birthDate: birthDate(values)};
       for (const name of [...required, 'overseasTransfer']) data[name] = values.has(name);
@@ -129,9 +148,16 @@ export async function signup() {
         if (error.code === 'underage') show(notice('이 서비스는 만 19세 이상만 쓸 수 있어요.', link('처음으로', '/')));
         else if (error.code === 'already_member') show(notice('이미 가입했어요.', link('홈으로', '/')));
         else if (error.status === 401) show(notice('가입 시간이 지났어요. 다시 로그인해 주세요.', link('처음으로', '/')));
-        else errorText(error, outcome);
+        else if (error.code === 'invalid_input') {
+          dateFields.setAttribute('aria-invalid', 'true');
+          errorText(error, dateError);
+        } else if (error.code === 'consents_missing') {
+          consentFields.setAttribute('aria-invalid', 'true');
+          consentError.replaceChildren(text('필수 항목에 동의해야 가입할 수 있어요.', 'error'));
+        } else errorText(error, outcome);
       }
     });
+    if (form.isConnected) submit.disabled = !ready();
   });
   show(form);
 }
