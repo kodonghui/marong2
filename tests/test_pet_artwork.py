@@ -36,6 +36,7 @@ async def check():
     block = BytesIO()
     Image.new("RGB", (1024, 1024), "#fff").save(block, "PNG")
     calls = []
+    responses = []
 
     async def edit(request):
         assert request.headers["Authorization"] == "Bearer toy-credential"
@@ -45,9 +46,10 @@ async def check():
         calls.append((parts, files))
         assert parts["size"] == "1024x1024" and parts["background"] == "transparent"
         assert parts["output_format"] == "png" and parts["n"] == "1"
-        if len(calls) == 4:
+        response = responses.pop(0) if responses else "reference"
+        if response == "blocked":
             return web.json_response({"error": {"code": "moderation_blocked"}}, status=400)
-        raw = block.getvalue() if len(calls) == 3 else files[0][1]
+        raw = block.getvalue() if response == "opaque" else files[0][1]
         return web.json_response({"data": [{"b64_json": b64encode(raw).decode("ascii")}],
                                   "usage": {"input_tokens": 20, "output_tokens": 8,
                                             "input_tokens_details": {"image_tokens": 11}}})
@@ -55,14 +57,37 @@ async def check():
     app = web.Application()
     app.router.add_post("/v1/images/edits", edit)
     accounting = BudgetFixture()
-    traits = {"species": "dog", "breedGuess": "시험견", "petVisible": True, "rawPhoto": "private fixture"}
     model = next(iter(IMAGE_MODELS))
     job = {"member_id": uuid4()}
     async with TestServer(app) as server, ClientSession() as session:
         editor = ImageEditor(session, "toy-credential", assets, accounting, endpoint=server.make_url("/v1/images/edits"))
-        preview = await editor.preview(model=model, template="dog_small", traits=traits, job=job)
-        expression = await editor.expression(model=model, template="dog_small", front=preview, expression="smile", job=job)
-        assert fit_score(expression, assets.mask("dog_small")) == 1
+        for template in TEMPLATE_IDS:
+            species = "dog" if template.startswith("dog_") else "cat"
+            observed = {"species": species, "breedGuess": "시험 품종"}
+            traits = {**observed, "petVisible": True, "rawPhoto": "private fixture"}
+            reference = [("template.png", assets.front(template)), ("style.webp", assets.style)]
+            mask = assets.mask(template)
+
+            preview = await editor.preview(model=model, template=template, traits=traits, job=job)
+            assert calls[-1][1] == reference
+            assert json.loads(calls[-1][0]["prompt"].split("\n", 1)[1]) == {
+                "특징표": observed, "회원메모": None, "후보 번호": None,
+            }
+
+            candidate = await editor.candidate(model=model, template=template, traits=traits,
+                                               note="시험 메모", slot=2, job=job)
+            assert calls[-1][1] == reference
+            assert json.loads(calls[-1][0]["prompt"].split("\n", 1)[1]) == {
+                "특징표": observed, "회원메모": "시험 메모", "후보 번호": 2,
+            }
+
+            expression = await editor.expression(model=model, template=template, front=candidate,
+                                                 expression="smile", job=job)
+            assert calls[-1][1] == [("chosen.png", candidate)]
+            assert all(fit_score(image, mask) == 1 for image in (preview, candidate, expression))
+
+        traits = {"species": "dog", "breedGuess": "시험 품종"}
+        responses.extend(("opaque", "blocked"))
         for expected in ("unexpected_alpha", "pet_image_request_failed"):
             try:
                 await editor.candidate(model=model, template="dog_small", traits=traits, note="시험", slot=1, job=job)
@@ -71,12 +96,11 @@ async def check():
             else:
                 raise AssertionError(expected)
 
-    assert json.loads(calls[0][0]["prompt"].split("\n", 1)[1])["특징표"] == {"species": "dog", "breedGuess": "시험견"}
-    assert calls[0][1] == [("template.png", assets.front("dog_small")), ("style.webp", assets.style)]
-    assert calls[1][1] == [("chosen.png", preview)]
-    assert [item.result for item in accounting.runs] == ["ok", "ok", "rejected_by_check", "refused"]
-    assert accounting.runs[0].image_input == 11
-    print("AI-31: five exact masks and head boxes, reference uploads, transparency, refusal and usage passed")
+    accepted = len(TEMPLATE_IDS) * 3
+    assert [item.result for item in accounting.runs] == ["ok"] * accepted + ["rejected_by_check", "refused"]
+    assert all(item.image_input == 11 for item in accounting.runs[:accepted])
+    assert len(calls) == accepted + 2
+    print(f"AI-31: {accepted} successful fixture image requests across {len(TEMPLATE_IDS)} bodies, plus opacity and refusal cases")
 
 
 if __name__ == "__main__":
