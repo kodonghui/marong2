@@ -18,6 +18,7 @@ from marong.pet.http import CONFIG, POOL, guard, read_media
 from marong.pet.quota import register as register_quota
 from marong.pet.push import VapidSender, register as register_push
 from marong.pet.settings import Settings, SettingsError
+from marong.pet.web_app import register as register_web
 
 log = logging.getLogger("pet")
 BUDGET = web.AppKey("pet_budget", Budget)
@@ -57,6 +58,7 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
     register_quota(app)
     register_push(app, sender=push_sender)
     register_delete(app, revoke=revoke_billing_key)
+    register_web(app, legal_dir=os.environ.get("PET_LEGAL_DIR"))
     return app
 
 

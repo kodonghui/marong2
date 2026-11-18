@@ -1,0 +1,14 @@
+{
+  "id": "/",
+  "name": "마롱이",
+  "short_name": "마롱이",
+  "lang": "ko",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#121729",
+  "theme_color": "#121729",
+  "icons": [
+    {"src": "/static/pet-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}
+  ]
+}

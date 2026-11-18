@@ -1,0 +1,370 @@
+import {action, AI_NOTICE, api, banner, button, CONSENT, currency, dateLabel, el, Failure, header,
+  link, notice, picture, show, showTabs, text} from './pet.js';
+import {pendingCard} from './home.js';
+
+const stages = {
+  photos: ['traits', '사진을 살펴보고 있어요'], traits: ['traits', '특징표 고치기'],
+  rejected: ['traits', '사진 다시 고르기'], failed_traits: ['traits', '사진 다시 고르기'],
+  traits_confirmed: ['preview', '미리 보기와 결제'], previewed: ['preview', '미리 보기와 결제'],
+  expired: ['preview', '미리 보기와 결제'], paid: ['candidates', '그림 후보를 그리고 있어요'],
+  candidates: ['candidates', '그림 후보 고르기'], chosen: ['candidates', '표정을 그리고 있어요'],
+  failed_candidates: ['candidates', '그림 후보 고르기'], sheet_needs_operator: ['candidates', '표정을 그리고 있어요'],
+  sheet_ready: ['name', '이름 짓기'],
+};
+
+export const stageLabel = state => stages[state]?.[1] || '아이 만들기';
+export const creationPath = job => job.state === 'done' && job.petId ? `/pets/${job.petId}`
+  : `/create/${job.id}/${stages[job.state]?.[0] ?? 'traits'}`;
+const home = {label: '홈', url: '/'};
+const consentNotice = () => banner(CONSENT, link('설정에서 바꾸기', '/me#consents', 'plain'));
+const again = (message, label = '사진 다시 고르기') => notice(message, link(label, '/create', 'button primary'));
+const output = () => el('div', {'aria-live': 'polite'});
+
+function waitForUpdate(id, onData) {
+  const began = Date.now();
+  let timer;
+  let fetching = false;
+  function schedule(delay) {
+    clearTimeout(timer);
+    if (!document.hidden && !fetching) timer = setTimeout(tick, delay);
+  }
+  function stop() {
+    clearTimeout(timer);
+    document.removeEventListener('visibilitychange', visibility);
+    window.removeEventListener('pagehide', stop);
+  }
+  async function tick() {
+    if (document.hidden || fetching) return;
+    fetching = true;
+    try {
+      const data = await api(`/api/creations/${id}`);
+      fetching = false;
+      if (onData(data)) stop();
+      else schedule(Date.now() - began >= 30_000 ? 5_000 : 2_000);
+    } catch {
+      fetching = false;
+      schedule(5_000);
+    }
+  }
+  function visibility() { schedule(0); }
+  document.addEventListener('visibilitychange', visibility);
+  window.addEventListener('pagehide', stop, {once: true});
+  schedule(2_000);
+  return stop;
+}
+
+async function uploadable(file) {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+    const canvas = el('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext('2d', {alpha: false});
+    context.fillStyle = '#fff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const jpeg = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', .88));
+    if (!jpeg) throw new TypeError('photo');
+    return jpeg;
+  } finally { bitmap.close(); }
+}
+
+async function photos(me) {
+  const [{items: pets}, {items: jobs}] = await Promise.all([api('/api/pets'), api('/api/creations')]);
+  header('아이 만들기', home);
+  const top = jobs.map(pendingCard);
+  if (!me.overseasTransfer) { show(...top, consentNotice()); return; }
+  if (pets.length + jobs.length >= 5 || jobs.length >= 3) {
+    show(...top, notice(pets.length + jobs.length >= 5 ? '아이는 5마리까지 만들 수 있어요.'
+      : '만들고 있는 아이가 있어요. 먼저 마치거나 지워 주세요.'));
+    return;
+  }
+  const slots = Array.from({length: 3}, () => ({}));
+  const chosen = el('div', {class: 'slots'});
+  const kind = el('fieldset', {}, el('legend', {}, '누구를 만들까요?'),
+    el('label', {class: 'check'}, el('input', {name: 'kind', type: 'radio', value: 'living'}), '함께 사는 아이'),
+    el('label', {class: 'check'}, el('input', {name: 'kind', type: 'radio', value: 'memorial'}), '무지개다리를 건넌 아이'));
+  const outcome = output();
+  const submit = el('button', {type: 'submit', class: 'primary', disabled: true}, '올리기');
+  const form = el('form', {}, kind, chosen,
+    text('정면 얼굴, 귀와 무늬가 보이는 사진, 전신 한 장이면 가장 닮아요', 'muted'),
+    text('사람이 함께 찍히면 얼굴은 회색으로 가려요', 'muted'), outcome, submit);
+  const update = () => { submit.disabled = !new FormData(form).get('kind') || !slots.some(slot => slot.blob)
+    || slots.some(slot => slot.loading); };
+
+  for (let index = 0; index < slots.length; index++) {
+    const slot = slots[index];
+    const label = ['정면 얼굴', '귀와 무늬', '전신'][index];
+    const input = el('input', {type: 'file', accept: 'image/*,.heic,.heif', class: 'sr-only', 'aria-label': label});
+    const preview = el('div', {class: 'picture'}, text(label, 'muted'));
+    const warning = el('small', {'aria-live': 'polite', class: 'error'});
+    const clear = button('×', () => {
+      if (slot.url) URL.revokeObjectURL(slot.url);
+      Object.assign(slot, {url: null, blob: null, loading: false});
+      preview.replaceChildren(text(label, 'muted'));
+      warning.textContent = '';
+      clear.hidden = true;
+      input.value = '';
+      update();
+    }, 'plain');
+    clear.setAttribute('aria-label', `${label} 사진 빼기`);
+    clear.hidden = true;
+    input.addEventListener('change', async () => {
+      const file = input.files[0];
+      if (!file) return;
+      slot.loading = true;
+      input.disabled = true;
+      warning.textContent = '';
+      update();
+      try {
+        const blob = await uploadable(file);
+        if (slot.url) URL.revokeObjectURL(slot.url);
+        Object.assign(slot, {blob, url: URL.createObjectURL(blob)});
+        preview.replaceChildren(el('img', {src: slot.url, alt: label}));
+        clear.hidden = false;
+      } catch {
+        warning.textContent = /\.(heic|heif)$/i.test(file.name) ? '사진 앱에서 JPEG로 저장해 주세요'
+          : `${index + 1}번째 사진을 열 수 없어요. JPEG나 PNG, 8MB 이하로 올려 주세요.`;
+      } finally {
+        input.value = '';
+        input.disabled = false;
+        slot.loading = false;
+        update();
+      }
+    });
+    const pick = button(label + ' 고르기', () => input.click(), 'plain');
+    chosen.append(el('div', {class: 'stack'}, preview, input, pick, clear, warning));
+  }
+  form.addEventListener('input', update);
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    action(submit, outcome, async () => {
+      const body = new FormData();
+      body.set('kind', new FormData(form).get('kind'));
+      slots.filter(slot => slot.blob).forEach((slot, index) => body.append('photos', slot.blob, `photo-${index + 1}.jpg`));
+      outcome.replaceChildren(text('사진을 올리고 있어요', 'muted'));
+      const data = await api('/api/creations', {method: 'POST', body, timeout: 60_000});
+      location.assign(`/create/${data.creationId}/traits`);
+    });
+  });
+  show(...top, form);
+}
+
+const choices = {
+  species: {dog: '개', cat: '고양이'},
+  pattern: ['단색', '얼룩', '줄무늬', '턱시도', '포인트', '삼색', '브린들'],
+  earShape: ['선 귀', '접힌 귀', '늘어진 귀', '반쯤 선 귀'],
+  eyeColor: ['갈색', '검은색', '파란색', '초록색', '노란색', '짝눈'],
+  build: ['작음', '중간', '큼', '긴 몸', '통통함'],
+  furLength: ['짧음', '중간', '긺', '곱슬'],
+};
+const colors = ['흰색', '검은색', '갈색', '크림', '회색', '황토', '주황', '은색'];
+const profiles = ['활발함', '얌전함', '겁이 많음', '먹보', '애교 많음', '고집 셈', '호기심 많음', '느긋함'];
+
+function selectField(label, name, value) {
+  const entries = Array.isArray(choices[name]) ? choices[name].map(option => [option, option]) : Object.entries(choices[name]);
+  return el('label', {}, label, el('select', {name}, entries.map(([id, text]) =>
+    el('option', {value: id, selected: id === value}, text))));
+}
+
+function stringField(label, name, limit, value = '') {
+  return el('label', {}, label, el('input', {name, maxlength: limit, value}));
+}
+
+function checks(label, name, options, initial = [], limit = 3) {
+  const fields = options.map(value => el('input', {type: 'checkbox', name, value, checked: initial.includes(value)}));
+  const group = el('fieldset', {}, el('legend', {}, label),
+    el('div', {class: 'row'}, fields.map((element, index) => el('label', {class: 'check'}, element, options[index]))));
+  function update() {
+    const count = fields.filter(field => field.checked).length;
+    fields.forEach(field => { field.disabled = !field.checked && count >= limit; });
+  }
+  group.addEventListener('change', update);
+  update();
+  return group;
+}
+
+function traits(job) {
+  if (job.state === 'photos') {
+    show(notice('사진을 살펴보고 있어요', text('30초쯤 걸려요.', 'muted')));
+    waitForUpdate(job.id, next => {
+      if (next.state === 'photos') return false;
+      if (stages[next.state]?.[0] === 'traits') traits(next);
+      else location.replace(creationPath(next));
+      return true;
+    });
+    return;
+  }
+  if (job.state === 'rejected' || job.state === 'failed_traits') {
+    const message = job.state === 'failed_traits' ? '특징표를 만들지 못했어요. 잠시 뒤 다시 해 주세요. 사진은 지웠어요.'
+      : job.failure === 'not_dog_or_cat' ? '개나 고양이를 찾지 못했어요' : '아이가 잘 보이지 않아요';
+    show(again(message));
+    return;
+  }
+  const t = job.traits;
+  const outlet = output();
+  const submit = el('button', {type: 'submit', class: 'primary'}, '이대로 만들기');
+  const form = el('form', {}, selectField('종', 'species', t.species), stringField('품종 추정', 'breedGuess', 30, t.breedGuess),
+    checks('털 색 (1~3개)', 'coatColors', colors, t.coatColors),
+    selectField('무늬', 'pattern', t.pattern), stringField('무늬 설명', 'patternNotes', 60, t.patternNotes),
+    text('사진에서 보는 방향으로 적어요', 'muted'),
+    selectField('귀 모양', 'earShape', t.earShape), selectField('눈 색', 'eyeColor', t.eyeColor),
+    selectField('체격', 'build', t.build), selectField('털 길이', 'furLength', t.furLength),
+    stringField('특징', 'distinctive', 60, t.distinctive), outlet, submit);
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    action(submit, outlet, async () => {
+      const values = new FormData(form);
+      const body = Object.fromEntries(values);
+      body.coatColors = values.getAll('coatColors');
+      if (!body.coatColors.length) throw new Failure(400, {code: 'invalid_input'});
+      await api(`/api/creations/${job.id}/traits`, {method: 'PATCH', body});
+      const next = await api(`/api/creations/${job.id}/confirm-traits`, {method: 'POST', body: {}});
+      location.assign(creationPath(next));
+    });
+  });
+  show(job.multiplePets ? banner('사진에 여러 아이가 있어요. 한 아이만 나온 사진이면 더 닮아요', link('사진 다시 고르기', '/create', 'plain')) : null, form);
+}
+
+async function preview(job, me) {
+  if (job.state === 'expired') { show(again('30일이 지나 미리 보기와 사진을 지웠어요.', '새로 만들기')); return; }
+  const outlet = output();
+  const path = `/api/creations/${job.id}`;
+  if (!job.preview) {
+    const draw = button(job.failure === 'preview_failed' ? '다시 그리기' : '미리 보기 그리기', () => action(draw, outlet, async () => {
+      try { await api(path + '/preview', {method: 'POST', body: {}}); }
+      catch (error) { if (error.code !== 'busy') throw error; }
+      show(notice('그리고 있어요', text('1분쯤 걸려요.', 'muted')));
+      waitForUpdate(job.id, next => {
+        if (!next.preview && !next.failure && next.state === 'traits_confirmed') return false;
+        if (stages[next.state]?.[0] === 'preview') preview(next, me);
+        else location.replace(creationPath(next));
+        return true;
+      });
+    }), 'primary');
+    show(picture(null, ''), text(job.failure === 'preview_failed' ? '미리 보기를 그리지 못했어요. 횟수는 세지 않았어요.'
+      : '미리 보기는 무료예요. 하루 3장까지 그려요'), outlet, draw);
+    return;
+  }
+  const ticket = button(`만들기권으로 만들기(${me.freeTickets}장 있어요)`, () => action(ticket, outlet, async () => {
+    await api(path + '/checkout', {method: 'POST', body: {useFreeTicket: true}});
+    location.assign(`/create/${job.id}/candidates`);
+  }));
+  const price = `${currency.format(job.priceKrw)}원(부가세 포함)`;
+  const paid = button('결제하고 만들기', () => dialog.showModal(), 'primary');
+  paid.disabled = !me.paymentsEnabled;
+  const business = me.business ? el('details', {}, el('summary', {}, '사업자 정보'),
+    ...Object.entries(me.business).map(([name, value]) => text(`${name} ${value}`))) : null;
+  const dialog = el('dialog', {class: 'sheet stack'}, el('h2', {}, '캐릭터 만들기'), text(price),
+    text('후보를 그리기 시작하면 철회할 수 없어요'), business,
+    notice('잠시 뒤 다시 해 주세요.'), button('닫기', () => dialog.close()));
+  show(picture(job.preview, 'AI가 그린 미리 보기'), el('small', {}, 'AI가 그린 미리 보기'),
+    text('결제하면 이 모습을 바탕으로 그림 후보 4장을 그려요'), el('strong', {}, price),
+    text('후보를 그리기 시작하면 철회할 수 없어요', 'muted'),
+    me.paymentsEnabled ? null : text('결제는 곧 열려요.', 'muted'), paid,
+    me.freeTickets > 0 ? ticket : null, outlet, text(`${dateLabel(job.expiresAt)}까지 결제하지 않으면 지워요`, 'muted'), dialog);
+}
+
+function candidates(job) {
+  if (job.state === 'failed_candidates') {
+    show(notice('그림을 그리지 못했어요. 결제는 자동으로 취소했어요.', link('주문 내역 보기', '/me/orders')), link('새로 만들기', '/create'));
+    return;
+  }
+  if (job.state === 'sheet_needs_operator') { show(notice('조금 더 걸려요. 다 되면 알려 드릴게요.')); return; }
+  if (job.state === 'chosen') {
+    show(picture(`/api/media/${job.chosenId}`, '고른 그림'),
+      notice('표정을 그리고 있어요. 다 되면 이름을 지어 줘요'));
+  } else {
+    let selected;
+    const outlet = output();
+    const choose = button('이 그림으로 할게요', () => action(choose, outlet, async () => {
+      const next = await api(`/api/creations/${job.id}/choose`, {method: 'POST', body: {candidateId: selected}});
+      if (next?.state) location.replace(creationPath(next));
+      else location.reload();
+    }), 'primary');
+    choose.disabled = true;
+    const cards = job.candidates.map(item => el('label', {class: 'stack'},
+      el('input', {type: 'radio', name: 'candidate', value: item.id, disabled: job.state !== 'candidates',
+        onchange: () => { selected = item.id; choose.disabled = false; }}), picture(item.url, 'AI가 그린 후보'),
+      el('small', {}, 'AI가 그린 그림')));
+    const note = el('textarea', {maxlength: 100, rows: 3});
+    const remakeOutlet = output();
+    const retry = button('다시 그려 주세요', () => action(retry, remakeOutlet, async () => {
+      await api(`/api/creations/${job.id}/regenerate`, {method: 'POST', body: {note: note.value.trim()}});
+      location.reload();
+    }), 'primary');
+    const sheet = el('dialog', {class: 'sheet stack'}, el('label', {}, '어떻게 다시 그릴까요?', note), remakeOutlet,
+      retry, button('닫기', () => sheet.close()));
+    const redraw = button(`다시 그려 주세요 · ${job.regenerationsLeft}번 남음`, () => sheet.showModal());
+    redraw.disabled = !job.regenerationsLeft;
+    show(job.state === 'paid' ? notice('그림 후보 4장을 그리고 있어요. 몇 분 걸려요. 화면을 닫아도 돼요') : null,
+      el('div', {class: 'grid'}, cards), job.state === 'candidates' ? choose : null,
+      job.state === 'candidates' ? redraw : null,
+      job.state === 'candidates' && !job.regenerationsLeft ? text('다시 그리기를 다 썼어요.', 'muted') : null, outlet, sheet);
+  }
+  if (job.state === 'paid' || job.state === 'chosen') {
+    waitForUpdate(job.id, next => {
+      if (next.state === job.state && next.candidates.length === job.candidates.length) return false;
+      if (stages[next.state]?.[0] === 'candidates') candidates(next);
+      else location.replace(creationPath(next));
+      return true;
+    });
+  }
+}
+
+function namePet(job) {
+  const outlet = output();
+  const submit = el('button', {type: 'submit', class: 'primary', disabled: true}, '만나러 가기');
+  const form = el('form', {}, stringField('이름', 'name', 12), checks('성격 (최대 3개)', 'personality', profiles),
+    stringField('좋아하는 것', 'likes', 60), stringField('싫어하는 것', 'dislikes', 60),
+    stringField('나를 부르는 말', 'callMe', 10), outlet, submit);
+  const key = `pet:profile:${job.id}`;
+  const restored = sessionStorage.getItem(key);
+  if (restored) {
+    try {
+      const draft = JSON.parse(restored);
+      for (const input of form.querySelectorAll('input[name]')) {
+        if (input.type === 'checkbox') input.checked = draft.personality?.includes(input.value) === true;
+        else if (typeof draft[input.name] === 'string') input.value = draft[input.name];
+      }
+      form.querySelector('input[type="checkbox"]')?.dispatchEvent(new Event('change', {bubbles: true}));
+    } catch {}
+    sessionStorage.removeItem(key);
+  }
+  function draft() {
+    const values = new FormData(form);
+    return {...Object.fromEntries(values), personality: values.getAll('personality')};
+  }
+  function update() {
+    const data = draft();
+    submit.disabled = !/^[가-힣A-Za-z0-9 -]{1,12}$/.test(data.name.trim()) || !data.callMe.trim();
+  }
+  update();
+  form.addEventListener('input', () => { sessionStorage.setItem(key, JSON.stringify(draft())); update(); });
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    action(submit, outlet, async () => {
+      const {name, ...intro} = draft();
+      const pet = await api(`/api/creations/${job.id}/finish`, {method: 'POST', body: {name, intro}});
+      sessionStorage.removeItem(key);
+      location.assign(`/pets/${pet.id}`);
+    });
+  });
+  show(banner(AI_NOTICE), picture(`/api/media/${job.chosenId}`, '고른 정면 그림'),
+    job.kind === 'memorial' ? el('small', {}, '❀ 추억') : null, el('h2', {}, '이름을 지어 주세요'), form);
+}
+
+export async function creation(path) {
+  showTabs(null);
+  const me = await api('/api/me');
+  if (path === '/create') { await photos(me); return; }
+  const [, , id, stage] = path.split('/');
+  const job = await api(`/api/creations/${id}`);
+  if (path !== creationPath(job)) { location.replace(creationPath(job)); return; }
+  header({traits: '특징표 고치기', preview: '미리 보기와 결제', candidates: '그림 후보 고르기', name: '이름 짓기'}[stage], home);
+  if (stage === 'traits') traits(job);
+  else if (stage === 'preview') await preview(job, me);
+  else if (stage === 'candidates') candidates(job);
+  else if (stage === 'name') namePet(job);
+}
