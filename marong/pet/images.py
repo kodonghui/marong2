@@ -22,6 +22,21 @@ IMAGE_MAX = 5 * 1024 * 1024
 LEASE = timedelta(seconds=200)
 
 
+def landscape_png(raw):
+    if not isinstance(raw, bytes) or not 0 < len(raw) <= IMAGE_MAX:
+        raise ValueError("invalid_image_bytes")
+    with Image.open(BytesIO(raw)) as image:
+        if image.format != "PNG" or image.size != (1536, 1024) or getattr(image, "n_frames", 1) != 1:
+            raise ValueError("invalid_image_format")
+        if image.convert("RGBA").getchannel("A").getextrema() != (255, 255):
+            raise ValueError("unexpected_alpha")
+        result = BytesIO()
+        image.convert("RGB").save(result, format="PNG")
+        if result.tell() > IMAGE_MAX:
+            raise ValueError("invalid_image_bytes")
+        return result.getvalue()
+
+
 def preview_png(raw):
     if not isinstance(raw, bytes) or not 0 < len(raw) <= IMAGE_MAX:
         raise ValueError("invalid_image_bytes")

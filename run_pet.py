@@ -20,6 +20,7 @@ from marong.pet.cost import Budget
 from marong.pet.creations import register as register_creations
 from marong.pet.delete import register as register_delete
 from marong.pet.export import register as register_exports
+from marong.pet.farewell import generate_letter, register as register_farewell
 from marong.pet.http import CONFIG, POOL, guard, read_media
 from marong.pet.identity import register as register_identity
 from marong.pet.images import register as register_preview
@@ -51,7 +52,7 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
              identity_verify=None, identity_digest_key=None, candidate_renderer=None, template_mask=None,
              expression_renderer=None, template_head=None, greeting_renderer=None, chat_api_key=None, reply_model=None, chat_clock=None,
              report_clock=None, lifecycle_clock=None, export_clock=None, export_assets=None,
-             watermark_font=None) -> web.Application:
+             watermark_font=None, farewell_letter=None, farewell_picture=None) -> web.Application:
     app = web.Application(middlewares=[guard])
     app[CONFIG] = settings
     if image_api_key:
@@ -64,6 +65,7 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
         expression_renderer = lambda **params: app[ARTWORK].expression(**params)
         template_mask = templates.mask
         template_head = templates.head
+        farewell_picture = farewell_picture or (lambda **params: app[ARTWORK].farewell(**params))
 
     async def database(app):
         pool = AsyncConnectionPool(settings.db, open=False, min_size=1, max_size=4, timeout=3,
@@ -113,6 +115,9 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
     register_identity(app, identity_verify, identity_digest_key)
     extract = (lambda photos, job: app[VISION](photos, job)) if traits_api_key else None
     register_traits(app, extract)
+    if chat_api_key and farewell_letter is None:
+        farewell_letter = lambda job, pet, memories: generate_letter(app[CHAT], job, pet, memories)
+    register_farewell(app, BUDGET, letter_model=farewell_letter, picture_model=farewell_picture)
     register_reports(app, clock=report_clock)
     register_chat(app, **({"clock": chat_clock} if chat_clock else {}))
     if reply_model or chat_api_key:

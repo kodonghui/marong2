@@ -66,13 +66,15 @@ def serialize(row, *, now=None):
         "memorialSince": since.isoformat() if since else None,
         "passedOn": row["passed_on"].isoformat() if row["passed_on"] else None,
         "revertUntil": revert.isoformat() if revert and revert > now and row["status"] == "active" else None,
-        "shopEntry": living, "rechargePrompt": living, "farewellDone": False,
+        "shopEntry": living, "rechargePrompt": living, "farewellDone": row["farewell_done"],
     }
 
 
 async def pet_rows(conn, member, pet_id=None):
     sql = """
-        SELECT p.*,d.head_item,d.body_item,d.neck_item,d.theme_item,d.font_item
+        SELECT p.*,d.head_item,d.body_item,d.neck_item,d.theme_item,d.font_item,
+          EXISTS (SELECT 1 FROM pet.diary_entries e WHERE e.pet_id=p.id AND e.member_id=p.member_id
+                  AND e.kind='farewell' AND e.status='ready') AS farewell_done
         FROM pet.pets p LEFT JOIN pet.decor d ON p.id=d.pet_id WHERE p.member_id=%s
     """
     cur = await (conn.execute(sql + " AND p.id=%s", (member, pet_id)) if pet_id

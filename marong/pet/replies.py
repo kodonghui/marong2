@@ -69,12 +69,16 @@ class ChatModel:
             "system": system,
             "messages": [{"role": "user", "content": json.dumps(data, ensure_ascii=False)}],
         }
+        return await self.request(job, payload, validate=lambda value: not bad_reply(value))
+
+    async def request(self, job, payload, *, validate, entry="AI-32", kind="chat", purpose="reply",
+                      version=PROMPT_VERSION, timeout=35, effort=None):
         usage, result, stop = {}, "error", None
         began = monotonic()
         try:
             headers = {"x-api-key": self.key, "anthropic-version": "2023-06-01"}
             async with self.session.post(ENDPOINT, headers=headers, json=payload, allow_redirects=False,
-                                         timeout=ClientTimeout(total=35)) as response:
+                                         timeout=ClientTimeout(total=timeout)) as response:
                 if response.status != 200:
                     raise ValueError("pet_chat_request_failed")
                 message = await response.json()
@@ -87,7 +91,7 @@ class ChatModel:
             if stop != "end_turn":
                 raise ValueError("pet_chat_reply_incomplete")
             text = "".join(block["text"] for block in message["content"] if block.get("type") == "text")
-            result = "rejected_by_check" if bad_reply(text) else "ok"
+            result = "ok" if validate(text) else "rejected_by_check"
             return text
         except (TimeoutError, asyncio.CancelledError):
             result = "timeout"
@@ -98,8 +102,8 @@ class ChatModel:
             try:
                 await asyncio.wait_for(self.budget.record(Run(
                     trace=job["id"], member_id=job["member_id"], pet_id=job["pet_id"],
-                    entry="AI-32", kind="chat", purpose="reply", model=self.settings.chat_model,
-                    prompt_version=PROMPT_VERSION, result=result,
+                    entry=entry, kind=kind, purpose=purpose, model=self.settings.chat_model,
+                    prompt_version=version, effort=effort, result=result,
                     stop=stop if stop in {"end_turn", "refusal", "max_tokens"} else None,
                     total_ms=int((monotonic() - began) * 1000), **numbers,
                 )), timeout=1)
