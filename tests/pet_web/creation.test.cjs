@@ -491,6 +491,7 @@ if (require.main === module) {
         register: async () => {}, ready: Promise.resolve({pushManager: manager}),
       }});
       Object.defineProperty(window, 'PushManager', {value: function () {}});
+      Object.defineProperty(Notification, 'permission', {value: 'default'});
     }, parameters);
     await page.goto(`${origin}/create/${creationId}/candidates#denied`);
     const subscribe = page.getByRole('button', {name: '다 그리면 알려 드릴까요?'});
