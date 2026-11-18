@@ -46,7 +46,7 @@ export async function petScreen(id) {
     reported, chat);
   const {items, before} = await api(path + '/messages');
   const timeline = el('div', {class: 'chat-log', role: 'log', tabindex: '0', 'aria-label': '메시지'});
-  const typing = el('small', {class: 'muted', hidden: true}, '···');
+  const typing = el('small', {class: 'bubble muted', role: 'status', hidden: true}, '···');
   const reconnecting = banner('다시 연결하는 중이에요');
   reconnecting.hidden = true;
   const outlet = el('div', {'aria-live': 'polite'});
@@ -83,24 +83,45 @@ export async function petScreen(id) {
     return item;
   }
   function append(rows, {move = false} = {}) {
+    const following = timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight <= 20;
     for (const row of [...rows].reverse()) {
       const item = renderBubble(row, {move});
       if (item) timeline.append(item);
     }
-    timeline.scrollTop = timeline.scrollHeight;
+    if (following) timeline.scrollTop = timeline.scrollHeight;
   }
   append(items);
-  const more = button('이전 대화', () => action(more, outlet, async () => {
-    const height = timeline.scrollHeight;
-    const prior = await api(`${path}/messages?before=${encodeURIComponent(cursor)}`);
-    timeline.prepend(...[...prior.items].reverse().map(row => renderBubble(row)).filter(Boolean));
-    timeline.scrollTop += timeline.scrollHeight - height;
-    cursor = prior.before;
-    more.hidden = !cursor;
-  }), 'plain');
+  const olderStatus = el('div', {'aria-live': 'polite', hidden: true});
+  let olderFailed = false;
+  function loadOlder() {
+    if (!cursor) return;
+    void action(more, olderStatus, async () => {
+      olderStatus.hidden = true;
+      try {
+        const prior = await api(`${path}/messages?before=${encodeURIComponent(cursor)}`);
+        const {scrollHeight, scrollTop} = timeline;
+        timeline.prepend(...[...prior.items].reverse().map(row => renderBubble(row)).filter(Boolean));
+        timeline.scrollTop = scrollTop + timeline.scrollHeight - scrollHeight;
+        cursor = prior.before;
+        more.hidden = !cursor;
+        more.textContent = '이전 대화';
+        olderFailed = false;
+      } catch {
+        olderFailed = true;
+        olderStatus.hidden = false;
+        olderStatus.append(text('불러오지 못했어요', 'error'));
+        more.textContent = '다시';
+      }
+    });
+  }
+  const more = button('이전 대화', loadOlder, 'plain');
   more.hidden = !cursor;
+  timeline.addEventListener('scroll', () => {
+    if (!olderFailed && timeline.scrollTop <= 12 && timeline.scrollHeight > timeline.clientHeight) loadOlder();
+  });
   const empty = items.length ? null : text('곧 인사하러 와요', 'muted');
-  chat.append(reconnecting, more, timeline, empty || document.createComment(''), typing, outlet);
+  chat.append(reconnecting, olderStatus, more, timeline, empty || document.createComment(''), typing, outlet);
+  timeline.scrollTop = timeline.scrollHeight;
 
   if (archived) {
     const restore = button('꺼내기', () => action(restore, outlet, async () => {
@@ -113,7 +134,23 @@ export async function petScreen(id) {
   const entry = el('textarea', {rows: 2, maxlength: 1000, 'aria-label': `${pet.name}에게 할 말`});
   const submit = el('button', {type: 'submit', class: 'primary'}, '보내기');
   let sendBlocked = !me.overseasTransfer;
-  const updateComposer = () => { entry.disabled = submit.disabled = sendBlocked || !navigator.onLine; };
+  const sleepKey = `pet:sleep:${id}`;
+  let wakeAt = Number(sessionStorage.getItem(sleepKey)) || 0;
+  let wakeTimer;
+  const asleep = banner(`${pet.name}가 잠들었어요. 새벽 4시에 깨요.`);
+  function updateComposer() {
+    clearTimeout(wakeTimer);
+    if (wakeAt && wakeAt <= Date.now()) {
+      wakeAt = 0;
+      sessionStorage.removeItem(sleepKey);
+    }
+    asleep.hidden = !wakeAt;
+    entry.disabled = submit.disabled = sendBlocked || !navigator.onLine || Boolean(wakeAt);
+    for (const retry of timeline.querySelectorAll('[data-retry-send]')) retry.disabled = entry.disabled;
+    if (wakeAt && Number.isFinite(wakeAt)) {
+      wakeTimer = setTimeout(updateComposer, Math.min(wakeAt - Date.now(), 86_400_000));
+    }
+  }
   updateComposer();
   const draftKey = `pet:chat:${id}`;
   entry.value = sessionStorage.getItem(draftKey) || '';
@@ -127,7 +164,18 @@ export async function petScreen(id) {
       append([message]);
     } catch (error) {
       if (!pendingSends.has(payload.clientId)) return;
-      if (['asleep', 'archived', 'consent_required'].includes(error.code) || error.status === 401) {
+      if (error.code === 'asleep') {
+        const scheduled = Date.parse(error.wakesAt);
+        wakeAt = Number.isFinite(scheduled) ? scheduled : Infinity;
+        if (Number.isFinite(wakeAt)) sessionStorage.setItem(sleepKey, String(wakeAt));
+        asleep.firstElementChild.textContent = error.message;
+        if (!entry.value) {
+          entry.value = payload.text;
+          sessionStorage.setItem(draftKey, entry.value);
+          settle(payload.clientId);
+        } else offerRetry(payload, feedback);
+        updateComposer();
+      } else if (['archived', 'consent_required'].includes(error.code) || error.status === 401) {
         if (!entry.value) entry.value = payload.text;
         sessionStorage.setItem(draftKey, entry.value);
         sendBlocked = true;
@@ -135,15 +183,18 @@ export async function petScreen(id) {
         settle(payload.clientId);
         if (error.code === 'archived' || error.code === 'consent_required') location.reload();
         else errorText(error, outlet);
-      } else {
-        const again = button('다시 보내기', () => {
-          if (!navigator.onLine) return;
-          feedback.replaceChildren();
-          void send(payload, feedback);
-        }, 'plain');
-        feedback.replaceChildren(text('보내지 못했어요', 'error'), again);
-      }
+      } else offerRetry(payload, feedback);
     }
+  }
+  function offerRetry(payload, feedback) {
+    const again = button('다시 보내기', () => {
+      if (entry.disabled) return;
+      feedback.replaceChildren();
+      void send(payload, feedback);
+    }, 'plain');
+    again.dataset.retrySend = '';
+    again.disabled = entry.disabled;
+    feedback.replaceChildren(text('보내지 못했어요', 'error'), again);
   }
   form.addEventListener('submit', event => {
     event.preventDefault();
@@ -160,7 +211,7 @@ export async function petScreen(id) {
     empty?.remove();
     void send(payload, feedback);
   });
-  chat.append(form);
+  chat.append(asleep, form);
   if (items.length === 1 && items[0].kind === 'greeting' && !entry.disabled) entry.focus();
 
   let reconnect;
@@ -249,7 +300,10 @@ export async function petScreen(id) {
     updateComposer();
     suspend();
   });
-  window.addEventListener('pagehide', suspend);
+  window.addEventListener('pagehide', () => {
+    suspend();
+    clearTimeout(wakeTimer);
+  });
   window.addEventListener('pageshow', event => { if (event.persisted) resume(); });
   return resume;
 }

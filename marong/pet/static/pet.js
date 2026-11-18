@@ -85,6 +85,7 @@ export class Failure extends Error {
     this.trace = details.traceId;
     this.photo = details.photo;
     this.prompt = details.prompt;
+    this.wakesAt = details.wakesAt;
   }
 }
 

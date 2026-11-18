@@ -539,6 +539,127 @@ if (require.main === module) {
     assert.equal(sends, 1);
   });
 
+  test('SCR-147 loads older history at the top and keeps the reading position when replies arrive', {timeout: 15_000}, async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 360, height: 800}});
+    t.after(() => page.close());
+    await page.addInitScript(() => {
+      window.EventSource = class extends EventTarget {
+        constructor() { super(); window.readingStream = this; }
+        close() {}
+      };
+    });
+    const row = seq => ({id: String(seq), role: 'pet', kind: 'chat', text: `시험 기록 ${seq}`});
+    const last = Array.from({length: 30}, (_, index) => row(40 - index));
+    const past = Array.from({length: 10}, (_, index) => row(10 - index));
+    const cursors = [];
+    await page.route('**/api/pets/*/messages*', route => {
+      const before = new URL(route.request().url()).searchParams.get('before');
+      if (!before) return route.fulfill({json: {items: last, before: '11'}});
+      cursors.push(before);
+      if (cursors.length === 1) return route.fulfill({status: 503, json: {code: 'server_error'}});
+      return route.fulfill({json: {items: past, before: null}});
+    });
+    await page.goto(`${origin}/pets/${petId}`);
+    await visible(page.getByText('시험 기록 40', {exact:true}));
+    const log = page.getByRole('log', {name: '메시지'});
+    const atEnd = await log.evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop < 2);
+    assert.equal(atEnd, true);
+    assert.deepEqual(cursors, []);
+    await log.evaluate(node => { node.scrollTop = 0; });
+    await visible(page.getByText('불러오지 못했어요', {exact: true}));
+    const first = page.getByText('시험 기록 11', {exact: true});
+    const before = await first.evaluate(node => node.getBoundingClientRect().top - node.closest('.chat-log').getBoundingClientRect().top);
+    await page.getByRole('button', {name: '다시', exact: true}).click();
+    await visible(page.getByText('시험 기록 1', {exact: true}));
+    const after = await first.evaluate(node => node.getBoundingClientRect().top - node.closest('.chat-log').getBoundingClientRect().top);
+    assert.ok(Math.abs(after - before) < 2);
+    assert.deepEqual(cursors, ['11', '11']);
+    const position = await log.evaluate(node => node.scrollTop);
+    await page.evaluate(() => window.readingStream.dispatchEvent(new Event('typing')));
+    await visible(page.getByText('···', {exact:true}));
+    await page.evaluate(next => window.readingStream.dispatchEvent(
+      new MessageEvent('message', {data: JSON.stringify(next)})), row(41));
+    await visible(page.getByText('시험 기록 41', {exact:true}));
+    assert.equal(await log.evaluate(node => node.scrollTop), position);
+    assert.equal(await page.getByText('···', {exact:true}).isVisible(), false);
+  });
+
+  test('SCR-147 preserves a sleeping pet draft through reload and resumes at the server time', {timeout: 15_000}, async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage();
+    t.after(() => page.close());
+    const sent = [];
+    await page.route('**/api/pets/*/messages', route => {
+      if (route.request().method() === 'GET') return route.continue();
+      const data = route.request().postDataJSON();
+      sent.push(data);
+      if (sent.length === 1) return route.fulfill({status: 409,
+        json: {code: 'asleep', detail: '콩이가 잠들었어요. 새벽 4시에 깨요.',
+          wakesAt: new Date(Date.now() + 3_500).toISOString()}});
+      return route.fulfill({status: 201, json: {...data, id: 'awake-message', role: 'member', kind: 'chat'}});
+    });
+    await page.goto(`${origin}/pets/${petId}`);
+    const entry = page.getByLabel('콩이에게 할 말');
+    const submit = page.getByRole('button', {name: '보내기'});
+    const sleeping = page.getByText('콩이가 잠들었어요. 새벽 4시에 깨요.', {exact: true});
+    await entry.fill('깰 때까지 남겨 둘 글');
+    await submit.click();
+    await visible(sleeping);
+    assert.equal(await entry.isDisabled(), true);
+    assert.equal(await entry.inputValue(), '깰 때까지 남겨 둘 글');
+    await page.reload();
+    await visible(sleeping);
+    assert.equal(await submit.isDisabled(), true);
+    assert.equal(await entry.inputValue(), '깰 때까지 남겨 둘 글');
+    await sleeping.waitFor({state: 'hidden'});
+    assert.equal(await submit.isEnabled(), true);
+    assert.equal(sent.length, 1);
+    await submit.click();
+    await visible(page.getByText('깰 때까지 남겨 둘 글', {exact: true}));
+    assert.equal(sent.length, 2);
+    assert.equal(sent[1].text, sent[0].text);
+  });
+
+  test('SCR-147 preserves a new draft alongside a send rejected while asleep', {timeout: 15_000}, async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage();
+    t.after(() => page.close());
+    const sent = [];
+    const requestSeen = Promise.withResolvers();
+    const held = Promise.withResolvers();
+    t.after(held.resolve);
+    await page.route('**/api/pets/*/messages', async route => {
+      if (route.request().method() === 'GET') return route.continue();
+      const data = route.request().postDataJSON();
+      sent.push(data);
+      if (sent.length === 1) {
+        requestSeen.resolve();
+        await held.promise;
+        return route.fulfill({status: 409, json: {code: 'asleep', detail: '콩이가 잠들었어요. 새벽 4시에 깨요.',
+          wakesAt: new Date(Date.now() + 2_000).toISOString()}});
+      }
+      return route.fulfill({status: 201, json: {...data, id: 'later-message', role: 'member', kind: 'chat'}});
+    });
+    await page.goto(`${origin}/pets/${petId}`);
+    const entry = page.getByLabel('콩이에게 할 말');
+    await entry.fill('먼저 보낸 글');
+    await page.getByRole('button', {name:'보내기', exact:true}).click();
+    await requestSeen.promise;
+    await entry.fill('다음에 쓰던 글');
+    held.resolve();
+    const retry = page.getByRole('button', {name: '다시 보내기'});
+    await visible(retry);
+    assert.equal(await retry.isDisabled(), true);
+    assert.equal(await entry.inputValue(), '다음에 쓰던 글');
+    await page.waitForFunction(() => !document.querySelector('[data-retry-send]').disabled);
+    assert.equal(sent.length, 1);
+    await retry.click();
+    await retry.waitFor({state:'detached'});
+    assert.equal(await entry.inputValue(), '다음에 쓰던 글');
+    assert.deepEqual(sent[1], sent[0]);
+  });
+
   test('SCR-147 shows the Korean call date and hour and keeps the transcript folded', async t => {
     const call = {id: 'synthetic-call-turn', role: 'member', kind: 'call',
       createdAt: '2026-11-17T15:10:00Z', text: '시험 통화 기록'};
