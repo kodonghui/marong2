@@ -9,8 +9,9 @@ import re
 
 from aiohttp import web
 
-from .app_chat import Problem, bad
+from .app_chat import UUID, Problem, bad
 from .friend_card import CardError, ModelRun, card_sentence, choices
+from .friend_forget import SOURCE_TABLES, forget_selected
 from .friend_memory import memory_page
 from .persona_instructions import LIMIT, InterpretationError, interpret, refusal_lines
 from .style import check as check_style
@@ -42,8 +43,9 @@ class AppPersona:
         await self._who(req)
         name = req.match_info.get("asset")
         if name is None:
-            name = "instructions.html" if req.path.endswith("instructions") else "index.html"
-        if name not in ("index.html", "instructions.html", "persona.css", "persona.js"):
+            name = {"instructions": "instructions.html", "memory": "memory.html"}.get(
+                req.path.rsplit("/", 1)[-1], "index.html")
+        if name not in ("index.html", "instructions.html", "memory.html", "persona.css", "persona.js"):
             raise web.HTTPNotFound()
         return web.FileResponse(STATIC / name)
 
@@ -229,9 +231,31 @@ class AppPersona:
         before = self.chat._number(req.query.get("before"), "before", minimum=1)
         return self.chat._json(200, await memory_page(self.cards.store.pool, who["friend_id"], before))
 
+    async def forget(self, req):
+        who = await self._who(req, write=True)
+        if getattr(self.chat.agent, "friend_memory_mode", "off") != "on":
+            raise Problem("feature_off")
+        key = req.headers.get("Idempotency-Key", "")
+        if not UUID.fullmatch(key):
+            raise bad(("Idempotency-Key", "bad_format" if key else "required"))
+        body = await self.chat._body(req)
+        if set(body) != {"type", "id"}:
+            raise bad(("body", "bad_format"))
+        kind, ident = body["type"], body["id"]
+        if not isinstance(kind, str) or kind not in SOURCE_TABLES:
+            raise bad(("type", "not_an_option"))
+        if type(ident) is not int or not 1 <= ident < 2**63:
+            raise bad(("id", "bad_format"))
+        result = await forget_selected(self.cards.store.pool, who["friend_id"], kind, ident, key, via="screen")
+        if result is None:
+            raise Problem("not_found")
+        self.chat.pulse()
+        return self.chat._json(200, result)
+
     def register(self, app):
         app.router.add_get("/chat/persona/", self.page)
         app.router.add_get("/chat/persona/instructions", self.page)
+        app.router.add_get("/chat/persona/memory", self.page)
         app.router.add_get(r"/chat/persona/{asset:persona\.(?:css|js)}", self.page)
         app.router.add_get(BASE + "/card", self.get_card)
         app.router.add_patch(BASE + "/card", self.patch_card)
@@ -241,4 +265,5 @@ class AppPersona:
         app.router.add_put(BASE + "/instructions", self.put_instruction)
         app.router.add_delete(BASE + "/instructions", self.clear_instruction)
         app.router.add_get(BASE + "/memories", self.memories)
+        app.router.add_post(BASE + "/forgets", self.forget)
         app.router.add_post(BASE + "/cards/{cardId}/answer", self.answer)

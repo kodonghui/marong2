@@ -56,10 +56,10 @@ function rememberDraft() {
     else sessionStorage.removeItem(DRAFT);
   } catch {}
 }
-async function request(path, method = 'GET', body) {
+async function request(path, method = 'GET', body, headers = {}) {
   try {
     const response = await fetch(API + path, {method, credentials: 'same-origin', cache: 'no-store',
-      redirect: 'manual', signal: AbortSignal.timeout(15_000), headers: body ? {'Content-Type': 'application/json'} : {},
+      redirect: 'manual', signal: AbortSignal.timeout(15_000), headers: {...(body ? {'Content-Type': 'application/json'} : {}), ...headers},
       body: body && JSON.stringify(body)});
     if (response.status === 401 || response.type === 'opaqueredirect') {
       rememberDraft();
@@ -237,8 +237,169 @@ async function clear() {
   rememberDraft();
   note('지웠어');
 }
+const CHANNELS = {discord_dm: '디스코드 DM', app: '앱', kakao_dm: '카톡',
+  kakao_group: '카톡 단체방', discord_server: '디스코드 서버', call: '통화'};
+const MEMORY_GROUPS = [['fact', '사실'], ['preference', '좋아하는 것'], ['event', '일·계획'],
+  ['relation', '사람'], ['hard', '힘든 일']];
+const memory = {items: [], loops: [], more: false, loading: false, selected: null, quotes: new Set()};
+
+function byDay(value) {
+  const [year, month, day] = value.split('-');
+  return stamp(year + '-' + month + '-' + day + 'T12:00:00+09:00');
+}
+
+function memoryRow(row, type) {
+  const key = type + ':' + row.id;
+  const selected = memory.selected?.key === key ? memory.selected : null;
+  const article = element('article', '', 'persona-box memory-row');
+  const line = element('div', '', 'memory-line');
+  const details = element('div');
+  details.append(element('p', row.text));
+  const date = stamp(row.heardAt);
+  const source = CHANNELS[row.channel] || '';
+  const timing = type === 'loop'
+    ? [row.due && byDay(row.due) + '까지', date + ' ' + source]
+    : [date, source, row.validUntil && byDay(row.validUntil) + '까지'];
+  details.append(element('p', timing.filter(Boolean).join(' · '), 'hint'));
+  const tags = [row.sensitive && '둘만 아는 얘기', row.scope === 'group' && '단체방에서만'].filter(Boolean);
+  if (tags.length) details.append(element('p', tags.join(' · '), 'hint'));
+  const reveal = row.quote && button('들은 말 보기', () => {
+    const shown = !memory.quotes.has(key);
+    if (shown) memory.quotes.add(key); else memory.quotes.delete(key);
+    quote.hidden = !shown;
+    reveal.setAttribute('aria-expanded', String(shown));
+  }, 'text-button');
+  if (reveal) {
+    reveal.disabled = Boolean(selected?.sending);
+    reveal.setAttribute('aria-expanded', String(memory.quotes.has(key)));
+    reveal.setAttribute('aria-controls', 'memory-quote-' + type + '-' + row.id);
+    details.append(reveal);
+  }
+  const forget = button('잊기', () => {
+    memory.selected = {type, id: row.id, key};
+    renderMemory();
+    $('memory-confirm')?.focus();
+  }, 'text-button');
+  forget.disabled = Boolean(memory.selected?.sending);
+  line.append(details, forget);
+  article.append(line);
+  const quote = element('blockquote', row.quote || '');
+  if (row.quote) {
+    quote.id = 'memory-quote-' + type + '-' + row.id;
+    quote.hidden = !memory.quotes.has(key);
+    article.append(quote);
+  }
+  if (selected) {
+    const box = element('section', '', 'memory-confirm');
+    box.id = 'memory-confirm';
+    box.tabIndex = -1;
+    box.append(element('p', '이걸 잊을까? 같은 말에서 나온 기억도 같이 잊어'));
+    const confirm = button(selected.sending ? '잊는 중…' : selected.retry ? '다시 해 볼게' : '잊기',
+      () => void submitForget(selected), 'primary');
+    const cancel = button('그만', () => { memory.selected = null; renderMemory(); }, 'text-button');
+    confirm.disabled = cancel.disabled = Boolean(selected.sending);
+    box.append(confirm, cancel);
+    if (selected.message) {
+      const detail = element('p', selected.message, 'hint');
+      detail.setAttribute('role', 'status');
+      box.append(detail);
+    }
+    article.append(box);
+  }
+  return article;
+}
+
+function renderMemory() {
+  const target = $('memory-list');
+  target.replaceChildren();
+  const groups = [['기다리는 얘기', memory.loops, 'loop'],
+    ...MEMORY_GROUPS.map(([kind, label]) => [label, memory.items.filter(item => item.kind === kind), 'item'])];
+  for (const [label, rows, type] of groups) {
+    if (!rows.length) continue;
+    const section = element('section', '', 'memory-group');
+    section.append(element('h2', label), ...rows.map(row => memoryRow(row, type)));
+    target.append(section);
+  }
+  $('memory-empty').hidden = Boolean(memory.items.length || memory.loops.length);
+  $('memory-more').hidden = !memory.more;
+}
+
+function accessNotice(r) {
+  $('content').hidden = true;
+  $('memory-list').replaceChildren();
+  memory.items = []; memory.loops = []; memory.quotes.clear(); memory.selected = null;
+  const allowed = r.data?.code === 'feature_off';
+  if (r.status === 403) {
+    const path = $('memory-back');
+    path.textContent = allowed ? '친구 약속으로' : '글 대화로';
+    path.href = allowed ? '/chat/persona/' : '/chat/';
+    path.hidden = false;
+  }
+}
+
+async function loadMemory({more = false, keepNotice = false} = {}) {
+  if (memory.loading || memory.selected?.sending) return;
+  memory.loading = true;
+  const control = $('memory-more');
+  control.disabled = true;
+  const cursor = more && memory.items.at(-1)?.id;
+  const r = await request('/memories' + (cursor ? '?before=' + cursor : ''));
+  memory.loading = false;
+  control.disabled = false;
+  $('memory-skeleton').hidden = true;
+  if (r.status !== 200) {
+    if (r.status === 401 || r.status === 403) accessNotice(r);
+    retryLoad(r);
+    $('memory-trace').textContent = r.data?.traceId || '';
+    return;
+  }
+  if (!keepNotice) note();
+  $('memory-trace').textContent = '';
+  $('memory-back').hidden = true;
+  $('reload').hidden = true;
+  clearTimeout(retryTimer); retryTimer = null; retryDelay = 5000;
+  try { sessionStorage.removeItem('marong.persona.login'); } catch {}
+  if (cursor) memory.items.push(...r.data.items);
+  else {
+    memory.items = r.data.items;
+    memory.loops = r.data.loops;
+    memory.quotes.clear();
+  }
+  memory.more = r.data.hasMore;
+  $('content').hidden = false;
+  started = true;
+  renderMemory();
+}
+
+async function submitForget(selected) {
+  if (selected.sending || memory.selected !== selected || memory.loading) return;
+  selected.requestKey ||= crypto.randomUUID();
+  selected.sending = true;
+  renderMemory();
+  const r = await request('/forgets', 'POST', {type: selected.type, id: selected.id},
+    {'Idempotency-Key': selected.requestKey});
+  selected.sending = false;
+  if ([200, 400, 404].includes(r.status)) {
+    memory.selected = null;
+    if (r.status === 200) {
+      note('잊었어 · 기억 ' + r.data.forgot + '개, 들은 말 ' + r.data.messages + '개');
+      $('content').hidden = true;
+    } else error(r);
+    renderMemory();
+    await loadMemory({keepNotice: true});
+  } else if (r.status === 401 || (r.status === 403 && r.data?.code !== 'cross_site')) {
+    accessNotice(r);
+    error(r);
+  } else {
+    selected.retry = r.status === 0;
+    selected.message = r.status ? ERRORS[r.data?.code] || FAILED : '';
+    renderMemory();
+  }
+}
+
 async function load() {
   theme();
+  if (page === 'memory') return loadMemory();
   const r = await request(page === 'card' ? '/card' : '/instructions');
   if (r.status !== 200) { retryLoad(r); return; }
   clearTimeout(retryTimer); retryTimer = null; retryDelay = 5000;
@@ -271,6 +432,8 @@ async function load() {
 }
 if (page === 'card') {
   $('make').addEventListener('click', () => { void update(chose, '약속 정했어'); });
+} else if (page === 'memory') {
+  $('memory-more').addEventListener('click', () => void loadMemory({more: true}));
 } else {
   $('instruction').addEventListener('input', syncInstruction);
   $('save').addEventListener('click', save);
@@ -282,7 +445,7 @@ if (page === 'card') {
 }
 $('reload').addEventListener('click', load);
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && started && !busy) { void load(); }
+  if (!document.hidden && started && !busy && (page !== 'memory' || !memory.selected)) { void load(); }
 });
 setInterval(theme, 30_000);
 void load();

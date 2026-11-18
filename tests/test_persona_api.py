@@ -4,7 +4,8 @@ import asyncio
 from datetime import datetime, timezone
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 import psycopg
 
 from aiohttp.test_utils import TestClient, TestServer
@@ -12,6 +13,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from marong.app_chat import AppChat
 from marong.discord_store import DiscordStore
 from marong.friend_card import FriendCards
+from marong.friend_forget import forget_selected
 from pg import TestDB
 from test_persona_schema import prepare
 
@@ -58,7 +60,7 @@ async def scenario(db):
             await check(await http.get(path, headers=one), 403, "feature_off")
             agent.friend_cards = cards
             assert (await check(await http.get(path, headers=one), 200))["state"] == "none"
-            for screen in ("/chat/persona/", "/chat/persona/instructions", "/chat/persona/persona.js"):
+            for screen in ("/chat/persona/", "/chat/persona/instructions", "/chat/persona/memory", "/chat/persona/persona.js"):
                 page = await http.get(screen, headers=one)
                 assert page.status == 200 and page.headers["Cache-Control"] == "no-store"
             invalid = {"support": "listen"}
@@ -175,18 +177,61 @@ async def scenario(db):
             next_page = await check(await http.get(f"{memory_path}?before={cursor}", headers=one), 200)
             assert [row["text"] for row in next_page["items"]] == ["시험 항목 100"] and not next_page["hasMore"]
 
+            forget = BASE + "/forgets"
+            own_item = {"type": "item", "id": memory_one["id"]}
+            request_key = str(uuid4())
+            keyed = {**one, "Idempotency-Key": request_key}
+            for body in ({}, {"type": "item", "id": True}, {"type": "item", "id": 2**63},
+                         {"type": [], "id": memory_one["id"]}, {**own_item, "friend": 2}):
+                await check(await http.post(forget, json=body, headers=keyed), 400, "invalid_request")
+            await check(await http.post(forget, json=own_item, headers=one), 400, "invalid_request")
+            await check(await http.post(forget, json=own_item, headers={**keyed, "Idempotency-Key": "invalid"}),
+                        400, "invalid_request")
+            await check(await http.post(forget, json={"type": "item", "id": memory_two["id"]}, headers=keyed),
+                        404, "not_found")
+            agent.friend_memory_mode = "shadow"
+            await check(await http.post(forget, json=own_item, headers=keyed), 403, "feature_off")
+            assert db.admin("SELECT count(*) FROM marong.memory_forgets") == [(0,)]
+            agent.friend_memory_mode = "on"
+
+            # The browser can lose its reply after the transaction has already committed.
+            committed = asyncio.Event()
+            resume_response = asyncio.Event()
+
+            async def wait_after_commit(*args, **kwargs):
+                result = await forget_selected(*args, **kwargs)
+                committed.set()
+                await resume_response.wait()
+                return result
+
+            with patch("marong.app_persona.forget_selected", wait_after_commit):
+                lost = asyncio.create_task(http.post(forget, json=own_item, headers=keyed))
+                await asyncio.wait_for(committed.wait(), 5)
+                lost.cancel()
+                await asyncio.gather(lost, return_exceptions=True)
+                resume_response.set()
+
+            result = await check(await http.post(forget, json=own_item, headers=keyed), 200)
+            assert result == {"forgot": 102, "messages": 1}
+            assert await check(await http.post(forget, json=own_item, headers=keyed), 200) == result
+            assert db.admin("SELECT count(*) FROM marong.memory_forgets") == [(1,)]
+            assert await check(await http.post(forget, json=own_item,
+                headers={**one, "Idempotency-Key": str(uuid4())}), 200) == {"forgot": 0, "messages": 0}
+            assert (await check(await http.get(memory_path, headers=one), 200))["items"] == []
+            assert (await check(await http.get(memory_path, headers=two), 200))["items"] == [memory_two]
+
             endpoints = (
                 ("GET", "/card", None), ("PATCH", "/card", {"lead": "lead"}),
                 ("POST", "/rules", {"kind": "avoid_topic", "text": "시험주제"}),
                 ("DELETE", "/rules/999999", None), ("GET", "/instructions", None),
                 ("PUT", "/instructions", {"text": "짧게 말해 줘"}), ("DELETE", "/instructions", None),
                 ("POST", "/cards/999999/answer", {"value": "yes"}),
-                ("GET", "/memories", None),
+                ("GET", "/memories", None), ("POST", "/forgets", own_item),
             )
             original_login = store.app_login.side_effect
             for method, suffix, body in endpoints:
                 async def send(headers):
-                    return await http.request(method, BASE+suffix, json=body, headers=headers)
+                    return await http.request(method, BASE+suffix, json=body, headers={**headers, "Idempotency-Key": str(uuid4())})
                 await check(await send({"Origin": ORIGIN}), 401, "unauthenticated")
                 await check(await send({**one, "Cf-Access-Jwt-Assertion": "unlinked"}), 403, "not_allowed")
                 if method != "GET":
@@ -221,3 +266,5 @@ if __name__ == "__main__":
         db.close()
     print("TC-280–284 partial: friend card, writes, rule idempotency and question DTO with test Access")
     print("TC-343: memory list status, owner isolation, inaccessible cursor and hidden consent state")
+
+    print("TC-344: owner-only forget API, lost response recovery, same key replay and error envelopes")
