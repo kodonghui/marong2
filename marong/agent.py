@@ -23,6 +23,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
+from tools.vertex_live.tool_trace import step as trace_step
+
 from .cache_warm import hour_writes
 from .capabilities import TEXT_FEATURE_NAMES, availability, description as feature_description, text_matrix
 from .config import PER_DAY_MAX, Settings, proactive_schedule
@@ -1052,6 +1054,11 @@ class Agent:
         tools 를 안 주면 이 방에서 쓸 수 있는 도구 전부, [] 면 도구 없이.
         웹 검색(서버 도구)은 Anthropic 서버가 한 응답 안에서 돌린다. 오래 걸리면 pause_turn 으로 멈추는데, 받은 응답을
         그대로 assistant 로 돌려 보내면(새 user 말 없이) 이어서 답한다. 검색한 횟수는 meta.web_searches·web_fetches."""
+        surface = {"app": "app_chat", "discord": "discord_chat"}.get(getattr(msg, "via", None), "kakao_chat")
+        with trace_step("text_turn", surface=surface) as trace:
+            return await self._ask(system, messages, msg, end, tools, trace)
+
+    async def _ask(self, system, messages, msg, end, tools, trace):
         loop = asyncio.get_running_loop()
         tools = self._tools(msg) if tools is None else tools
         if self.friend_cards:
@@ -1071,9 +1078,21 @@ class Agent:
         # 웹 검색 결과를 보고 쓴 글(True)은 답의 일부라 마지막 답 앞에 그대로 남긴다.
         said: list[tuple[str, bool]] = []
         nudged = False
-        for _ in range(MAX_STEPS):
+        previous_results = 0
+        for round_number in range(1, MAX_STEPS + 1):
             body = self._body(system, convo, tools)
-            resp = await llm.create(body, end - loop.time())
+            with trace_step("model_request", trace, round=round_number, offered=len(tools),
+                            results_attempted=previous_results) as request:
+                resp = await llm.create(body, end - loop.time())
+                usage = resp.usage
+                searches, fetches = server_tool_counts(usage)
+                if request:
+                    requested = sum(block.type == "tool_use" for block in resp.content)
+                    request.record(stop_reason=resp.stop_reason, requested=requested,
+                                   results_sent=previous_results, web_searches=searches, web_fetches=fetches)
+                    if resp.stop_reason == "tool_use" and not requested:
+                        request.record(result="no_tool_blocks")
+            previous_results = 0
             served = getattr(resp, "served_model", None)
             if deepseek and served and served != deepseek:  # DeepSeek 가 안 돼서 Claude 가 대신 답함: 이번 답은 끝까지 Claude
                 llm, deepseek = self.llm, None
@@ -1082,12 +1101,10 @@ class Agent:
                 self._cache_used(body, resp.usage, meta)
             meta["calls"] += 1
             meta["stop_reason"] = resp.stop_reason
-            usage = resp.usage
             meta["input_tokens"] += usage.input_tokens or 0
             meta["output_tokens"] += usage.output_tokens or 0
             meta["cache_read_tokens"] += getattr(usage, "cache_read_input_tokens", None) or 0
             meta["cache_write_tokens"] += getattr(usage, "cache_creation_input_tokens", None) or 0
-            searches, fetches = server_tool_counts(usage)
             if searches:
                 meta["web_searches"] = meta.get("web_searches", 0) + searches
             if fetches:
@@ -1110,7 +1127,20 @@ class Agent:
             if resp.stop_reason == "tool_use":
                 if text:
                     said.append((text, server))
-                results = [await self._run_tool(b, msg) for b in resp.content if b.type == "tool_use"]
+                results = []
+                for block in resp.content:
+                    if block.type != "tool_use":
+                        continue
+                    with trace_step("tool_dispatch", trace, round=round_number, tool=block.name) as dispatch:
+                        outcome = await self._run_tool(block, msg)
+                        if dispatch:
+                            if isinstance(outcome, dict):
+                                dispatch.record(result="rejected" if outcome.get("is_error") else "ok",
+                                                offered=int(any(tool.get("name") == block.name for tool in tools)))
+                            else:
+                                dispatch.record(result="invalid_result")
+                        results.append(outcome)
+                previous_results = len(results)
                 # 생각 블록까지 응답 그대로 돌려줘야 함(손대면 400)
                 convo = [*convo, {"role": "assistant", "content": resp.content}, {"role": "user", "content": results}]
                 continue
@@ -1124,6 +1154,8 @@ class Agent:
                 break
             convo = [*convo, {"role": "system", "content": EMPTY_NUDGE}]
             nudged = True
+        if trace and meta["calls"] == MAX_STEPS:
+            trace.record(result="step_limit", requested=previous_results)
         return ("\n\n".join(t for t, _ in said) if said else FALLBACK_TEXT), meta
 
     async def _run_tool(self, block, msg: Incoming) -> dict:
