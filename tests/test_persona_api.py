@@ -16,6 +16,7 @@ from marong.app_chat import AppChat
 from marong.discord_store import DiscordStore
 from marong.friend_card import FriendCards
 from marong.friend_forget import forget_selected
+from marong.friend_memory import read_items
 from pg import TestDB
 from test_persona_schema import prepare
 
@@ -41,7 +42,7 @@ async def scenario(db):
 
         store.app_login = AsyncMock(side_effect=lambda key: identities.get(key))
         cards = FriendCards(store)
-        agent = SimpleNamespace(friend_cards=None)
+        agent = SimpleNamespace(friend_cards=None, store=store)
         agent.s = SimpleNamespace(anthropic_model="fixture")
         agent.llm = SimpleNamespace(create_once=AsyncMock())
         chat = AppChat(store, agent, SimpleNamespace(room_lock=lambda _: asyncio.Lock()),
@@ -268,12 +269,17 @@ async def scenario(db):
             items = (await check(await http.get(memory_path, headers=one), 200))["items"]
             assert {row["id"] for row in items} == {first_pending, next_health}
             assert all(row["scope"] == "me" for row in items)
+            async with store.pool.connection() as conn:
+                public, _ = await read_items(conn, 1, group="fixture-group-consent")
+                direct, _ = await read_items(conn, 1, direct_room=ROOM)
+            assert not public and {row["id"] for row in direct} == {first_pending, next_health}
 
             decline = await add_sensitive("money")
             declined_card = await memory_consent.reserve(store.pool, 1, ROOM, current)
             await memory_consent.undelivered(store.pool, 1, declined_card["id"])
             declined_card = await memory_consent.reserve(store.pool, 1, ROOM, current)
-            await cards.attach_question(1, declined_card["id"], attached)
+            decline_reply = await store.add_message(ROOM, "assistant", memory_consent.QUESTION, meta={"delivered": True})
+            await cards.attach_question(1, declined_card["id"], decline_reply)
             path = f"{BASE}/cards/{declined_card['id']}/answer"
             declined = await check(await http.post(path, json={"value": "forget"}, headers=one), 200)
             assert declined["effect"] == "memory_forgotten"
@@ -285,7 +291,8 @@ async def scenario(db):
 
             unanswered = await add_sensitive("religion")
             expired_card = await memory_consent.reserve(store.pool, 1, ROOM, current - timedelta(hours=24))
-            await cards.attach_question(1, expired_card["id"], attached)
+            expiry_reply = await store.add_message(ROOM, "assistant", memory_consent.QUESTION, meta={"delivered": True})
+            await cards.attach_question(1, expired_card["id"], expiry_reply)
             path = f"{BASE}/cards/{expired_card['id']}/answer"
             await check(await http.post(path, json={"value": "forget"}, headers=one), 409, "card_closed")
             await memory_consent.maintain(store.pool, current)
