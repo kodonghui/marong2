@@ -10,6 +10,7 @@ const {chromium} = require('playwright');
 const assets = path.resolve(__dirname, '../../marong/pet/static');
 const creationId = '00000000-0000-4000-8000-000000000900';
 const candidateId = '00000000-0000-4000-8000-000000000901';
+const orderId = '00000000-0000-4000-8000-000000000920';
 const petId = '00000000-0000-4000-8000-000000000902';
 const traits = {species: 'dog', breedGuess: '푸들', coatColors: ['갈색'], pattern: '단색',
   patternNotes: '', earShape: '늘어진 귀', eyeColor: '갈색', build: '작음', furLength: '곱슬', distinctive: ''};
@@ -30,11 +31,14 @@ async function body(request) {
   return Buffer.concat(chunks);
 }
 
-async function fixture(t, {signedIn = true, consent = true, invite = false, reportLimited = false} = {}) {
+async function fixture(t, {signedIn = true, consent = true, invite = false, reportLimited = false, payment = 'fulfilled'} = {}) {
   let member = signedIn;
   let state;
   let selected = null;
   const writes = [];
+  const order = {id: orderId, orderNo: 'P20261117-ABC123', product: 'item', itemName: '털모자',
+    amountKrw: 1200, vatKrw: 109, status: 'fulfilled', createdAt: '2026-11-17T06:40:00Z',
+    withdrawable: true, withdrawalNote: '한 번 입히면 철회할 수 없어요.'};
   function job() {
     const preview = ['previewed', 'paid', 'candidates', 'chosen', 'sheet_ready', 'done'].includes(state);
     return {id: creationId, state, kind: 'living', traits, multiplePets: false,
@@ -92,6 +96,13 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
       res.writeHead(200, {'Content-Type': 'image/png'});
       return res.end(await readFile(path.join(assets, 'pet-icon.png')));
     }
+    if (pathname === '/api/orders') return json(res, {items: payment === 'empty' ? [] : [order]});
+    if (pathname === `/api/orders/${orderId}/confirm`) {
+      writes.push(JSON.parse(await body(req)));
+      if (payment === 'already') return json(res, {code: 'wrong_state'}, 409);
+      return json(res, {...order, status: payment});
+    }
+    if (pathname === `/api/orders/${orderId}/withdraw`) return json(res, {...order, status: 'refunded', withdrawable: false});
     if (pathname === '/api/reports' && req.method === 'POST') {
       writes.push(JSON.parse(await body(req)));
       if (reportLimited) return json(res, {code: 'rate_limited', detail: '오늘은 더 신고할 수 없어요. 내일 다시 해 주세요.'}, 429);
@@ -240,6 +251,32 @@ if (require.main === module) {
           assert.equal(await modal.getByLabel('메모').inputValue(), '합성 시험');
           assert.equal(await modal.getByLabel('상처 주는 말').isChecked(), true);
         } else await visible(page.getByText('신고했어요. 확인해 볼게요.'));
+      } finally { await page.close(); }
+    }
+  });
+
+  test('SCR-161 reads the current order and updates only after the API confirms withdrawal', async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 360, height: 760}});
+    t.after(() => page.close());
+    await page.goto(origin + '/me/orders');
+    await visible(page.getByText('1,200원'));
+    await page.getByRole('button', {name: '청약철회'}).click();
+    await page.getByRole('dialog').getByRole('button', {name: '청약철회'}).click();
+    await visible(page.getByText('결제를 취소했어요', {exact: true}));
+    await visible(page.getByText(/환불됨/));
+  });
+
+  test('SCR-162 handles completed, preconfirmed, and canceled payment returns', async t => {
+    for (const payment of ['fulfilled', 'already', 'canceled']) {
+      const {origin, writes} = await fixture(t, {payment});
+      const page = await browser.newPage({viewport: {width: 430, height: 760}});
+      try {
+        const query = payment === 'canceled' ? 'canceled=1' : `orderId=${orderId}&amount=1200&paymentKey=fixture`;
+        await page.goto(origin + '/pay/return?' + query);
+        await visible(page.getByText(payment === 'canceled' ? '결제를 취소했어요.' : '결제했어요', {exact: true}));
+        assert.equal(new URL(page.url()).search, '');
+        assert.deepEqual(writes, payment === 'canceled' ? [] : [{paymentKey: 'fixture', amount: 1200}]);
       } finally { await page.close(); }
     }
   });
