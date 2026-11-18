@@ -660,6 +660,36 @@ if (require.main === module) {
     assert.deepEqual(sent[1], sent[0]);
   });
 
+  test('SCR-147 keeps the approved loading layout until the thread is available', async t => {
+    const {origin} = await fixture(t);
+    for (const width of [360, 430]) {
+      const page = await browser.newPage({viewport: {width, height: 820}});
+      const messages = Promise.withResolvers();
+      try {
+        await page.route(`**/api/pets/${petId}/messages`, async route => {
+          await messages.promise;
+          await route.continue();
+        });
+        await page.goto(`${origin}/pets/${petId}`);
+        const loading = page.locator('.chat-loading');
+        await visible(loading);
+        assert.equal(await loading.getAttribute('aria-hidden'), 'true');
+        assert.equal(await page.locator('#page').getAttribute('aria-busy'), 'true');
+        assert.equal(await loading.locator('.bubble').count(), 3);
+        assert.equal(await page.getByRole('button', {name: '보내기'}).count(), 0);
+        assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true);
+        messages.resolve();
+        await visible(page.getByRole('log', {name: '메시지'}));
+        await visible(page.getByRole('button', {name: '보내기'}));
+        assert.equal(await loading.count(), 0);
+        assert.equal(await page.locator('#page').getAttribute('aria-busy'), 'false');
+      } finally {
+        messages.resolve();
+        await page.close();
+      }
+    }
+  });
+
   test('SCR-147 shows the Korean call date and hour and keeps the transcript folded', async t => {
     const call = {id: 'synthetic-call-turn', role: 'member', kind: 'call',
       createdAt: '2026-11-17T15:10:00Z', text: '시험 통화 기록'};

@@ -20,10 +20,19 @@ function memberBanner(me) {
 export async function petScreen(id) {
   const path = `/api/pets/${id}`;
   const screen = `/pets/${id}`;
-  const [me, pet, quota] = await Promise.all([api('/api/me'), api(path), api('/api/me/quota')]);
+  showTabs(null);
+  header('마롱이', HOME);
+  show(el('section', {class: 'chat-loading stack', 'aria-hidden': 'true'},
+    el('div', {class: 'skeleton chat-loading-notice'}),
+    el('div', {class: 'skeleton portrait chat-loading-portrait'}),
+    el('div', {class: 'stack'}, ['pet', 'member', 'pet'].map(role => el('div', {class: `skeleton bubble ${role}`}))),
+    el('div', {class: 'skeleton chat-loading-composer'})));
+  page.setAttribute('aria-busy', 'true');
+  const [me, pet, quota, {items, before}] = await Promise.all([
+    api('/api/me'), api(path), api('/api/me/quota'), api(path + '/messages'),
+  ]);
   const archived = pet.status === 'archived';
   const memorial = pet.mode === 'memorial';
-  showTabs(null);
   header(pet.name, HOME, [
     !archived ? link('통화', screen + '/call') : null,
     el('details', {class: 'pet-menu'}, el('summary', {'aria-label': '더 보기'}, '⋯'),
@@ -44,7 +53,6 @@ export async function petScreen(id) {
     }, '그림 신고', reported, portrait) : null), quotaLine,
     memorial && quota.percent === 0 ? banner('오늘은 여기까지, 새벽 4시 뒤에 또 이야기해요.') : null,
     reported, chat);
-  const {items, before} = await api(path + '/messages');
   const timeline = el('div', {class: 'chat-log', role: 'log', tabindex: '0', 'aria-label': '메시지'});
   const typing = el('small', {class: 'bubble muted', role: 'status', hidden: true}, '···');
   const reconnecting = banner('다시 연결하는 중이에요');
