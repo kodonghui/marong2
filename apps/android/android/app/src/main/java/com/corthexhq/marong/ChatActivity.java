@@ -70,6 +70,12 @@ public class ChatActivity extends BridgeActivity {
     }
 
     @Override
+    public void onStop() {
+        super.onStop();
+        AppUpdateJob.retryWhenQuiet(this);
+    }
+
+    @Override
     public void onResume() {
         super.onResume();
         AppUpdateJob.check(this);

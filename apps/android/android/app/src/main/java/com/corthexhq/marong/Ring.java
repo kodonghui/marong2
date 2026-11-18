@@ -129,6 +129,7 @@ final class Ring {
 
         try {
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification);
+            AppUpdateJob.observeRingExpiry(context);
             Logger.info(TAG, "ring_shown reason=" + reason);
         } catch (SecurityException | IllegalArgumentException e) {
             // No notification permission, or Android refused the call style: the server's
@@ -162,6 +163,7 @@ final class Ring {
     /** Stops the ring: answered, declined, or a call started (SPEC-132, SPEC-133). */
     static void cancel(Context context) {
         NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID);
+        AppUpdateJob.retryWhenQuiet(context);
         RingActivity.closeShown();
     }
 }

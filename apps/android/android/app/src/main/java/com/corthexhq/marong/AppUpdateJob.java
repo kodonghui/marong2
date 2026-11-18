@@ -54,6 +54,8 @@ public final class AppUpdateJob extends JobService {
     static final int CHECK_JOB = 2210;
     static final int DAILY_JOB = 2211;
     static final int INSTALL_JOB = 2212;
+    private static final int QUIET_INSTALL_JOB = 2213;
+    private static final int RING_EXPIRY_JOB = 2214;
     private static final long DAY_MS = 24L * 60 * 60 * 1000;
     private static final long DEFER_MS = 15L * 60 * 1000;
     private static final int BUFFER_SIZE = 65536;
@@ -74,6 +76,39 @@ public final class AppUpdateJob extends JobService {
 
     static void rearm(Context context) {
         schedule(context, DAILY_JOB, true);
+    }
+
+    static void retryWhenQuiet(Context source) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return;
+        Context context = source.getApplicationContext();
+        // Android's process importance and service notification can lag a lifecycle callback.
+        new Handler(Looper.getMainLooper()).postDelayed(() -> scheduleQuietInstall(context), 900);
+    }
+
+    private static void scheduleQuietInstall(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return;
+        JobScheduler scheduler = context.getSystemService(JobScheduler.class);
+        if (scheduler == null || scheduler.getPendingJob(INSTALL_JOB) == null
+                || scheduler.getPendingJob(QUIET_INSTALL_JOB) != null || !quiet(context)) return;
+        Candidate cached = candidate(preferences(context));
+        if (cached == null || !apk(context, cached.release.code).isFile()) return;
+        JobInfo job = new JobInfo.Builder(QUIET_INSTALL_JOB, new ComponentName(context, AppUpdateJob.class))
+            .setExpedited(true).build();
+        if (scheduler.schedule(job) != JobScheduler.RESULT_SUCCESS) {
+            Log.i(TAG, "update_install expedited_unavailable");
+        }
+    }
+
+    static void observeRingExpiry(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return;
+        JobScheduler scheduler = context.getSystemService(JobScheduler.class);
+        if (scheduler == null) return;
+        // Android expires the alert itself and does not send its dismissal intent.
+        JobInfo job = new JobInfo.Builder(RING_EXPIRY_JOB, new ComponentName(context, AppUpdateJob.class))
+            .setMinimumLatency(Ring.RING_MS + 1200)
+            .setOverrideDeadline(Ring.RING_MS + 5000)
+            .build();
+        scheduler.schedule(job);
     }
 
     static boolean installPermissionMissing(Context context) {
@@ -98,6 +133,10 @@ public final class AppUpdateJob extends JobService {
     @Override
     public boolean onStartJob(JobParameters params) {
         int job = params.getJobId();
+        if (job == RING_EXPIRY_JOB) {
+            scheduleQuietInstall(this);
+            return false;
+        }
         CancellationSignal cancel = new CancellationSignal();
         CancellationSignal previous = active.put(job, cancel);
         if (previous != null) previous.cancel();
@@ -157,7 +196,8 @@ public final class AppUpdateJob extends JobService {
         AppUpdate.Release release = cached == null ? null : cached.release;
         long now = System.currentTimeMillis();
 
-        if (job != INSTALL_JOB && AppUpdate.shouldCheck(prefs.getLong("checkedAt", 0), now)) {
+        boolean installOnly = job == INSTALL_JOB || job == QUIET_INSTALL_JOB;
+        if (!installOnly && AppUpdate.shouldCheck(prefs.getLong("checkedAt", 0), now)) {
             CheckResponse response = ask(own.versionName, cancel);
             if (response.kind == AppUpdate.Check.SIGNED_OUT || response.kind == AppUpdate.Check.RETRY) return false;
             prefs.edit().putLong("checkedAt", System.currentTimeMillis()).apply();
@@ -173,7 +213,7 @@ public final class AppUpdateJob extends JobService {
         File apk = apk(this, release.code);
         if (cached == null || !cached.release.sameAs(release)) {
             discard(this, prefs, cached, release.code);
-            if (job == INSTALL_JOB) return false;
+            if (installOnly) return false;
             if (!apk.isFile()) {
                 try {
                     download(release, own.versionName, cancel);
@@ -212,7 +252,7 @@ public final class AppUpdateJob extends JobService {
         }
         if (cached.permissionBlocked && installPermissionMissing(this)
                 && prefs.getInt("notified", -1) == release.code) return false;
-        if (!quiet()) return true;
+        if (!quiet(this)) return true;
         return install(cached, apk, cancel);
     }
 
@@ -296,11 +336,11 @@ public final class AppUpdateJob extends JobService {
         return bytes;
     }
 
-    private boolean quiet() {
+    private static boolean quiet(Context context) {
         ActivityManager.RunningAppProcessInfo process = new ActivityManager.RunningAppProcessInfo();
         ActivityManager.getMyMemoryState(process);
         boolean visible = process.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE;
-        NotificationManager manager = getSystemService(NotificationManager.class);
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
         if (manager == null) return false;
         boolean calling = false;
         boolean ringing = false;
@@ -358,7 +398,7 @@ public final class AppUpdateJob extends JobService {
                 synchronized (STATE_LOCK) {
                     cancel.throwIfCanceled();
                     // The app may have become visible while the installer session was staged.
-                    if (!quiet()) {
+                    if (!quiet(this)) {
                         callback.cancel();
                         return true;
                     }
