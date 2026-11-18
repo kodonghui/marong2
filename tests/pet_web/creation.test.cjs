@@ -1934,6 +1934,70 @@ if (require.main === module) {
     assert.deepEqual(writes, []);
   });
 
+  test('SCR-158 reads a wearable once and does not show a stale preview after switching pets', {timeout:15_000}, async t => {
+    const {origin,writes} = await fixture(t, {closetMode:'living'});
+    const page = await browser.newPage({viewport:{width:360,height:800}});
+    t.after(() => page.close());
+    const old = Promise.withResolvers();
+    const requested = Promise.withResolvers();
+    const previousSettled = Promise.withResolvers();
+    t.after(old.resolve);
+    const otherId = petId.slice(0,-1)+'3';
+    const first = {...pet, template:'dog_small'};
+    const other = {...pet,id:otherId,name:'둘째 시험 아이',template:'cat'};
+    await page.route('**/api/pets', route => route.fulfill({json:{items:[first,other]}}));
+    await page.route('**/api/pets/'+petId, route => route.fulfill({json:first}));
+    await page.route('**/api/pets/'+otherId, route => route.fulfill({json:other}));
+    const requestedTemplates = [];
+    await page.route('**/api/items/*/layer?*',async route => {
+      const template=new URL(route.request().url()).searchParams.get('template');
+      requestedTemplates.push(template);
+      if (template==='dog_small') {
+        requested.resolve();
+        await old.promise;
+        await route.fulfill({status:404,json:{code:'not_found'}}).catch(() => {});
+        previousSettled.resolve();
+        return;
+      }
+      await route.fulfill({path:path.join(assets,'pet-icon.png'),contentType:'image/png'});
+    });
+    await page.goto(`${origin}/shop/${garmentId}?kind=wear`);
+    await requested.promise;
+    const pick=page.getByRole('button',{name:other.name});
+    await pick.click();
+    await visible(page.getByRole('img',{name:other.name,exact:true}));
+    const layer=page.locator('.outfit-stage [data-slot="head"]');
+    assert.match(await layer.getAttribute('src'),/^blob:/);
+    assert.ok(await layer.evaluate(async image => { await image.decode(); return image.naturalWidth; })>0);
+    old.resolve();
+    await previousSettled.promise;
+    await page.waitForFunction(() => document.querySelector('.outfit-stage [data-slot="head"]')?.complete);
+    assert.equal(await pick.getAttribute('aria-pressed'),'true');
+    assert.equal(await page.getByText('판매가 끝났어요.',{exact:true}).count(),0);
+    assert.equal(await page.getByText('입혀 보기를 불러오지 못했어요',{exact:true}).isVisible(),false);
+    assert.deepEqual(requestedTemplates,['dog_small','cat']);
+    assert.deepEqual(writes,[]);
+  });
+
+  test('SCR-158 moves to sold-out when the current layer returns 404', async t => {
+    const {origin,writes} = await fixture(t, {closetMode:'living',paymentsEnabled:true});
+    const page = await browser.newPage();
+    t.after(() => page.close());
+    const hold = Promise.withResolvers();
+    t.after(hold.resolve);
+    await page.route('**/api/pets',async route => { await hold.promise; await route.continue(); },{times:1});
+    await page.route('**/api/items/*/layer?*',route =>
+      route.fulfill({status:404,json:{code:'not_found'}}));
+    await page.goto(`${origin}/shop/${garmentId}?kind=wear`);
+    await page.waitForFunction(() => document.querySelectorAll('#page .skeleton').length===4);
+    assert.equal(await page.locator('#page').getAttribute('aria-busy'),'true');
+    hold.resolve();
+    await visible(page.getByText('판매가 끝났어요.',{exact:true}));
+    assert.equal(await page.getByRole('button',{name:'사기',exact:true}).count(),0);
+    assert.equal(await page.getByRole('link',{name:'상점으로',exact:true}).getAttribute('href'),'/shop?kind=wear');
+    assert.deepEqual(writes,[]);
+  });
+
   test('SCR-158 keeps its order key on retry and updates ownership only after fulfillment', async t => {
     const {origin, writes} = await fixture(t, {closetMode: 'living', paymentsEnabled: true, orderRetry: true});
     const page = await browser.newPage({viewport: {width: 360, height: 780}});

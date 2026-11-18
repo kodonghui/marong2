@@ -47,6 +47,8 @@ small, .muted { color: var(--muted) }
 .card, .skeleton, .sheet { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px }
 .skeleton { min-height: 78px; background: var(--raised) }
 .home-action-placeholder { min-height: 48px }
+.shop-label-placeholder { min-height: 32px }
+.shop-preview-placeholder { aspect-ratio: 3 / 2 }
 .card.pet.archived, .card.pet.diary-unwritten { opacity: .65 }
 .diary-art-frame.drawing { opacity: .65 }
 .diary-quota-placeholder, .diary-heading-placeholder { min-height: 32px }

@@ -63,7 +63,7 @@ async function positionSprite(stage, image, backdrop, fallback) {
   }
 }
 
-export function petLayers(pet, outfit, errorMessage, {onLayerError, background, expression = 'front'} = {}) {
+export function petLayers(pet, outfit, errorMessage, {onLayerError, background, expression = 'front', layerUrls = {}} = {}) {
   const label = el('p', {hidden: true, class: 'muted', role: 'status'}, errorMessage);
   const fallback = pet.mode === 'memorial' ? 'rainbow_meadow' : 'home_livingroom';
   let backdrop = /^[a-z0-9_]{1,40}$/.test(background || '') ? background : fallback;
@@ -100,7 +100,7 @@ export function petLayers(pet, outfit, errorMessage, {onLayerError, background, 
   for (const slot of ['body', 'neck', 'head']) {
     if (!outfit[slot] || !pet.template) continue;
     const layer = el('img', {class: 'outfit-layer', alt: '', 'data-slot': slot,
-      src: `/api/items/${part(outfit[slot])}/layer?template=${part(pet.template)}`});
+      src: layerUrls[outfit[slot]] || `/api/items/${part(outfit[slot])}/layer?template=${part(pet.template)}`});
     layer.addEventListener('error', () => {
       layer.hidden = true;
       label.hidden = false;

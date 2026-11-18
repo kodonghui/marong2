@@ -1,4 +1,4 @@
-import {action, api, banner, button, currency, dateLabel, el, Failure, header, link, notice, show, showTabs, text} from './pet.js';
+import {action, api, banner, button, currency, dateLabel, el, Failure, header, link, notice, page, show, showTabs, signIn, text} from './pet.js';
 import {itemThumb, outfitOf, petLayers} from './closet.js';
 
 const CATEGORIES = [['wear', '착용'], ['sticker_pack', '스티커'], ['theme', '일기장 테마'], ['theme_package', '테마 패키지']];
@@ -23,6 +23,10 @@ function shopAccess(pets) {
 
 export async function shop() {
   header('상점', {label: '홈', url: '/'});
+  showTabs(null);
+  show(el('div', {class: 'skeleton shop-label-placeholder', 'aria-hidden': 'true'}),
+    el('div', {class: 'grid'}, Array.from({length: 6}, () => el('div', {class: 'skeleton', 'aria-hidden': 'true'}))));
+  page.setAttribute('aria-busy', 'true');
   const [{items: pets}, me] = await Promise.all([api('/api/pets'), api('/api/me')]);
   if (!shopAccess(alive(pets))) return;
   const query = new URLSearchParams(location.search);
@@ -72,19 +76,33 @@ export async function shopItem(id) {
   const suffix = CATEGORIES.some(([category]) => category === kind) ? `?kind=${part(kind)}` : '';
   const url = '/shop' + suffix;
   header('아이템 보기', {label: '상점', url});
+  showTabs(null);
+  show(el('div', {class: 'skeleton shop-preview-placeholder', 'aria-hidden': 'true'}),
+    ...Array.from({length: 3}, () => el('div', {class: 'skeleton shop-label-placeholder', 'aria-hidden': 'true'})));
+  page.setAttribute('aria-busy', 'true');
   const [{items: pets}, me] = await Promise.all([api('/api/pets'), api('/api/me')]);
   const living = alive(pets);
   if (!shopAccess(living)) return;
   const {items} = await api('/api/shop' + suffix);
   const item = items.find(value => value.id === id);
-  const soldOut = () => show(notice('판매가 끝났어요.', link('상점으로', url)));
+  let previewRequest = 0, previewFetch, previewUrl;
+  function releasePreview() {
+    previewFetch?.abort();
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = null;
+  }
+  function soldOut() {
+    previewRequest += 1;
+    releasePreview();
+    show(notice('판매가 끝났어요.', link('상점으로', url)));
+  }
   if (!item) return soldOut();
+  window.addEventListener('pagehide', event => { if (!event.persisted) releasePreview(); });
   header(item.name, {label: '상점', url});
   let picked = living.find(pet => pet.id === query.get('pet')) || living[0];
   const stage = el('div', {class: 'stack'});
   const controls = el('div', {class: 'row', role: 'group', 'aria-label': '입혀 볼 아이'});
   const purchase = el('div', {class: 'stack'});
-  let previewRequest = 0;
   const choices = living.map(child => {
     const control = button(child.name, () => { picked = child; drawPurchase(); void preview(); });
     controls.append(control);
@@ -92,24 +110,40 @@ export async function shopItem(id) {
   });
   async function preview() {
     const token = ++previewRequest;
+    releasePreview();
     for (const [key, control] of choices) control.setAttribute('aria-pressed', key === picked.id);
     if (item.kind !== 'wear') {
       stage.replaceChildren(itemThumb(item.id, item.name));
       return;
     }
-    stage.replaceChildren(el('div', {class: 'skeleton'}));
+    const controller = new AbortController();
+    previewFetch = controller;
+    const unavailable = () => {
+      releasePreview();
+      stage.replaceChildren(itemThumb(item.id, item.name), text('입혀 보기를 불러오지 못했어요', 'muted'));
+    };
+    stage.replaceChildren(el('div', {class: 'skeleton shop-preview-placeholder', 'aria-hidden': 'true'}));
     try {
       const pet = await api(`/api/pets/${part(picked.id)}`);
       if (token !== previewRequest) return;
+      const response = await fetch(`/api/items/${part(item.id)}/layer?template=${part(pet.template)}`,
+        {signal: controller.signal, cache: 'no-store'});
+      if (token !== previewRequest) return;
+      if (response.status === 404) { soldOut(); return; }
+      if (response.status === 401) { signIn(); return; }
+      if (!response.ok) { unavailable(); return; }
+      const raster = await response.blob();
+      if (token !== previewRequest) return;
+      if (raster.type !== 'image/png') { unavailable(); return; }
+      previewUrl = URL.createObjectURL(raster);
       stage.replaceChildren(petLayers(pet, {...outfitOf(pet), [item.slot]: item.id}, '입혀 보기를 불러오지 못했어요', {
+        layerUrls: {[item.id]: previewUrl},
         onLayerError: failed => {
-          if (failed === item.id && token === previewRequest) stage.replaceChildren(
-            itemThumb(item.id, item.name), text('입혀 보기를 불러오지 못했어요', 'muted'));
+          if (failed === item.id && token === previewRequest) unavailable();
         },
       }));
     } catch (error) {
-      if (token === previewRequest && error.status !== 401) stage.replaceChildren(
-        itemThumb(item.id, item.name), text('입혀 보기를 불러오지 못했어요', 'muted'));
+      if (token === previewRequest && error.status !== 401 && error.name !== 'AbortError') unavailable();
     }
   }
   function drawPurchase() {
