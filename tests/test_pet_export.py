@@ -65,7 +65,7 @@ async def scenario(admin, dsn, base):
         conn.execute("INSERT INTO pet.messages(member_id,pet_id,role,kind,content,created_at)"
                      " VALUES (%s,%s,'pet','chat','시험이야',%s)", (member, pet, at))
         conn.execute("INSERT INTO pet.messages(member_id,pet_id,role,kind,content)"
-                     " VALUES (%s,%s,'member','chat','다른 계정의 시험',now())", (other, foreign))
+                     " VALUES (%s,%s,'member','chat','다른 계정의 시험')", (other, foreign))
         conn.execute("INSERT INTO pet.push_subscriptions(member_id,endpoint,p256dh,auth)"
                      " VALUES (%s,'https://updates.push.services.mozilla.com/test','fixture','fixture')", (member,))
     pushes = []
