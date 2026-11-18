@@ -36,9 +36,10 @@ async function body(request) {
 
 async function fixture(t, {signedIn = true, consent = true, invite = false, reportLimited = false, payment = 'fulfilled',
   closetMode, paymentsEnabled = false, layerFailure = false, outfitFailure = false, orderRetry = false,
-  diaryDecor = false, subscription, exhaustedRedraw = false, diaryDays = false, chatNotices = []} = {}) {
+  diaryDecor = false, subscription, exhaustedRedraw = false, diaryDays = false, chatNotices = [],
+  creationState, pushKey = null} = {}) {
   let member = signedIn;
-  let state;
+  let state = creationState;
   let selected = null;
   let memberPet = {...pet, intro: {personality: ['느긋함'], likes: '산책', dislikes: '', callMe: '누나'}};
   if (diaryDays) memberPet = {...memberPet, template: 'dog_small',
@@ -70,6 +71,16 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
       memberNo: 'AB12CD34', identityVerified: false, status: 'active',
       business: paymentsEnabled ? {'상호': '시험 상점'} : null,
     } : {code: 'unauthenticated'}, member ? 200 : 401);
+    if (pathname === '/static/push-key.json') return json(res, {publicKey: pushKey});
+    if (pathname === '/api/me/push' && req.method === 'POST') {
+      writes.push(JSON.parse(await body(req)));
+      return json(res, {jobId: orderId}, 201);
+    }
+    if (pathname === `/api/me/push/${orderId}` && req.method === 'DELETE') {
+      writes.push('remove-push');
+      res.writeHead(204);
+      return res.end();
+    }
     if (pathname === '/api/signup' && req.method === 'POST') {
       const data = JSON.parse(await body(req));
       writes.push(data);
@@ -78,6 +89,7 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
       return json(res, {}, 201);
     }
     if (pathname === '/api/me/quota') return json(res, {percent: 60});
+    if (pathname === '/api/me/consents') return json(res, {items: [{kind: 'overseas_transfer', value: consent}]});
     if (pathname === '/api/subscription') return json(res, plan);
     if (pathname === '/api/subscription/cancel' && req.method === 'POST') {
       writes.push('cancel');
@@ -419,6 +431,93 @@ if (require.main === module) {
     await page.goto(origin + '/create');
     await visible(page.getByRole('link', {name: '설정에서 바꾸기'}));
     assert.equal(await page.getByRole('button', {name: '올리기'}).count(), 0);
+  });
+
+  test('SCR-142 encodes photo fallback locally at 1600px JPEG 0.9 and explains unsupported HEIC', async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage();
+    t.after(() => page.close());
+    await page.addInitScript(() => {
+      window.createImageBitmap = async () => { throw new Error('fixture fallback'); };
+      const encode = HTMLCanvasElement.prototype.toBlob;
+      HTMLCanvasElement.prototype.toBlob = function (callback, mime, quality) {
+        if (mime === 'image/jpeg') window.photoEncoding = [this.width, this.height, mime, quality];
+        return encode.call(this, callback, mime, quality);
+      };
+    });
+    await page.goto(origin + '/create');
+    const source = await page.evaluate(() => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 2000;
+      canvas.height = 1000;
+      return canvas.toDataURL('image/png').split(',')[1];
+    });
+    await page.getByLabel('정면 얼굴', {exact: true}).setInputFiles({
+      name: 'synthetic.png', mimeType: 'image/png', buffer: Buffer.from(source, 'base64'),
+    });
+    await visible(page.getByRole('img', {name: '정면 얼굴'}));
+    assert.deepEqual(await page.evaluate(() => window.photoEncoding), [1600, 800, 'image/jpeg', .9]);
+    await page.getByLabel('귀와 무늬', {exact: true}).setInputFiles({
+      name: 'unreadable.heic', mimeType: 'image/heic', buffer: Buffer.from('synthetic unsupported HEIC'),
+    });
+    await visible(page.getByText('사진 앱에서 JPEG로 저장해 주세요'));
+  });
+
+  test('SCR-145/159 enables Web Push on click and removes the current device registration', async t => {
+    const applicationKey = Buffer.alloc(65, 1);
+    applicationKey[0] = 4;
+    const {origin, writes} = await fixture(t, {creationState: 'paid', pushKey: applicationKey.toString('base64url')});
+    const page = await browser.newPage();
+    t.after(() => page.close());
+    const parameters = {endpoint: 'https://fcm.googleapis.com/fcm/send/pet-test',
+      keys: {p256dh: 'synthetic-device-public-key', auth: 'synthetic-auth'}};
+    await page.addInitScript(device => {
+      window.pushActions = [];
+      const subscription = {
+        toJSON: () => ({...device, expirationTime: null}),
+        unsubscribe: async () => { sessionStorage.removeItem('test-push'); window.pushActions.push('removed'); },
+      };
+      const manager = {
+        getSubscription: async () => sessionStorage.getItem('test-push') ? subscription : null,
+        subscribe: async options => {
+          window.pushActions.push([options.userVisibleOnly, ...options.applicationServerKey]);
+          if (document.URL.endsWith('#denied')) throw new DOMException('Fixture denial', 'NotAllowedError');
+          sessionStorage.setItem('test-push', 'yes');
+          return subscription;
+        },
+      };
+      Object.defineProperty(navigator, 'serviceWorker', {value: {
+        register: async () => {}, ready: Promise.resolve({pushManager: manager}),
+      }});
+      Object.defineProperty(window, 'PushManager', {value: function () {}});
+    }, parameters);
+    await page.goto(`${origin}/create/${creationId}/candidates#denied`);
+    const subscribe = page.getByRole('button', {name: '다 그리면 알려 드릴까요?'});
+    await visible(subscribe);
+    assert.deepEqual(await page.evaluate(() => window.pushActions), []);
+    await subscribe.click();
+    await visible(page.getByText('알림을 끄셨어요. 이 화면을 다시 열면 볼 수 있어요'));
+    assert.deepEqual(writes, []);
+    await page.evaluate(() => history.replaceState(null, '', location.pathname));
+    await subscribe.click();
+    await visible(page.getByText('알려 드릴게요'));
+    assert.deepEqual(writes, [parameters]);
+    assert.deepEqual(await page.evaluate(() => window.pushActions[1]), [true, ...applicationKey]);
+    await page.goto(origin + '/me');
+    await page.getByRole('button', {name: '알림 끄기'}).click();
+    await visible(page.getByRole('button', {name: '알림 켜기'}));
+    assert.deepEqual(writes, [parameters, 'remove-push']);
+    assert.deepEqual(await page.evaluate(() => window.pushActions), ['removed']);
+  });
+
+  test('SCR-159 shows installation instructions in an iPhone browser tab', async t => {
+    const {origin, writes} = await fixture(t);
+    const page = await browser.newPage({userAgent: 'Mozilla/5.0 (iPhone) Safari/605.1.15'});
+    t.after(() => page.close());
+    await page.goto(origin + '/me');
+    await visible(page.getByText('홈 화면에 추가하면 알림을 받을 수 있어요'));
+    assert.equal(await page.getByRole('button', {name: '알림 켜기'}).count(), 0);
+    assert.deepEqual(writes, []);
   });
 
   test('SCR-149–151 loads the approved diary layout and redraw controls', async t => {

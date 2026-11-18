@@ -1,8 +1,8 @@
-const CACHE = 'marong-pet-shell-v12';
+const CACHE = 'marong-pet-shell-v13';
 const SHELL = '/';
 const FILES = ['/static/pet.css', '/static/pet.js', '/static/home.js', '/static/creation.js',
   '/static/member.js', '/static/diary.js', '/static/report.js', '/static/orders.js', '/static/settings.js', '/static/call.js',
-  '/static/closet.js', '/static/shop.js', '/static/diary-decor.js',
+  '/static/closet.js', '/static/shop.js', '/static/diary-decor.js', '/static/push-control.js',
   '/static/call-capture.js', '/static/call-playback.js', '/static/pet.webmanifest', '/static/pet-icon.png', '/static/pet-welcome.webp'];
 
 self.addEventListener('install', event => {

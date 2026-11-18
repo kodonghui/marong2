@@ -1,6 +1,7 @@
 import {action, AI_NOTICE, api, banner, button, CONSENT, currency, dateLabel, el, Failure, header,
   link, notice, picture, show, showTabs, text} from './pet.js';
 import {pendingCard} from './home.js';
+import {pushControl} from './push-control.js';
 
 const stages = {
   photos: ['traits', '사진을 살펴보고 있어요'], traits: ['traits', '특징표 고치기'],
@@ -54,20 +55,30 @@ function waitForUpdate(id, onData) {
 }
 
 async function uploadable(file) {
-  const bitmap = await createImageBitmap(file);
+  let source, url;
   try {
-    const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+    try { source = await createImageBitmap(file); }
+    catch {
+      url = URL.createObjectURL(file);
+      source = new Image();
+      source.src = url;
+      await source.decode();
+    }
+    const scale = Math.min(1, 1600 / Math.max(source.width, source.height));
     const canvas = el('canvas');
-    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    canvas.width = Math.max(1, Math.round(source.width * scale));
+    canvas.height = Math.max(1, Math.round(source.height * scale));
     const context = canvas.getContext('2d', {alpha: false});
     context.fillStyle = '#fff';
     context.fillRect(0, 0, canvas.width, canvas.height);
-    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    const jpeg = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', .88));
+    context.drawImage(source, 0, 0, canvas.width, canvas.height);
+    const jpeg = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', .9));
     if (!jpeg) throw new TypeError('photo');
     return jpeg;
-  } finally { bitmap.close(); }
+  } finally {
+    source?.close?.();
+    if (url) URL.revokeObjectURL(url);
+  }
 }
 
 async function photos(me) {
@@ -271,15 +282,17 @@ async function preview(job, me) {
     me.freeTickets > 0 ? ticket : null, outlet, text(`${dateLabel(job.expiresAt)}까지 결제하지 않으면 지워요`, 'muted'), dialog);
 }
 
-function candidates(job) {
+function candidates(job, me) {
   if (job.state === 'failed_candidates') {
     show(notice('그림을 그리지 못했어요. 결제는 자동으로 취소했어요.', link('주문 내역 보기', '/me/orders')), link('새로 만들기', '/create'));
     return;
   }
   if (job.state === 'sheet_needs_operator') { show(notice('조금 더 걸려요. 다 되면 알려 드릴게요.')); return; }
+  const alerts = job.kind === 'living' && ['paid', 'chosen'].includes(job.state)
+    ? pushControl(me, {waiting: true}) : null;
   if (job.state === 'chosen') {
     show(picture(`/api/media/${job.chosenId}`, '고른 그림'),
-      notice('표정을 그리고 있어요. 다 되면 이름을 지어 줘요'));
+      notice('표정을 그리고 있어요. 다 되면 이름을 지어 줘요'), alerts);
   } else {
     let selected;
     const outlet = output();
@@ -306,12 +319,13 @@ function candidates(job) {
     show(job.state === 'paid' ? notice('그림 후보 4장을 그리고 있어요. 몇 분 걸려요. 화면을 닫아도 돼요') : null,
       el('div', {class: 'grid'}, cards), job.state === 'candidates' ? choose : null,
       job.state === 'candidates' ? redraw : null,
-      job.state === 'candidates' && !job.regenerationsLeft ? text('다시 그리기를 다 썼어요.', 'muted') : null, outlet, sheet);
+      job.state === 'candidates' && !job.regenerationsLeft ? text('다시 그리기를 다 썼어요.', 'muted') : null,
+      alerts, outlet, sheet);
   }
   if (job.state === 'paid' || job.state === 'chosen') {
     waitForUpdate(job.id, next => {
       if (next.state === job.state && next.candidates.length === job.candidates.length) return false;
-      if (stages[next.state]?.[0] === 'candidates') candidates(next);
+      if (stages[next.state]?.[0] === 'candidates') candidates(next, me);
       else location.replace(creationPath(next));
       return true;
     });
@@ -370,6 +384,6 @@ export async function creation(path) {
   header({traits: '특징표 고치기', preview: '미리 보기와 결제', candidates: '그림 후보 고르기', name: '이름 짓기'}[stage], home);
   if (stage === 'traits') traits(job);
   else if (stage === 'preview') await preview(job, me);
-  else if (stage === 'candidates') candidates(job);
+  else if (stage === 'candidates') candidates(job, me);
   else if (stage === 'name') namePet(job);
 }

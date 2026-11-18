@@ -5,6 +5,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from .push import SENDER
 
 STATIC = Path(__file__).with_name("static")
 VOICE_STATIC = STATIC.parents[2] / "tools" / "vertex_live" / "static"
@@ -14,6 +15,7 @@ SAFE_HOST = re.compile(r"^[a-zA-Z0-9.-]+(?::[0-9]{1,5})?$")
 ASSETS = {
     "pet.css", "pet.js", "home.js", "creation.js", "member.js", "diary.js", "pet.webmanifest", "pet-icon.png",
     "pet-welcome.webp", "report.js", "orders.js", "settings.js", "call.js", "closet.js", "shop.js", "diary-decor.js",
+    "push-control.js",
 }
 LEGAL = {"terms.html", "privacy.html", "overseas.html"}
 HEADERS = {
@@ -42,6 +44,10 @@ def register(app, *, legal_dir=None, item_dir=None):
 
     async def worker(_request):
         return web.FileResponse(STATIC / "pet-worker.js", headers=HEADERS)
+
+    async def push_key(_request):
+        key = getattr(app.get(SENDER), "public_key", None)
+        return web.json_response({"publicKey": key}, headers={**HEADERS, "Cache-Control": "no-store"})
 
     async def thumbnail(request):
         path = (item_root / request.match_info["id"] / "thumb.webp").resolve()
@@ -74,6 +80,7 @@ def register(app, *, legal_dir=None, item_dir=None):
     app.router.add_get(r"/static/items/{id:[0-9a-fA-F-]{36}}/thumb.webp", thumbnail)
     app.router.add_get(r"/static/backgrounds/{name:[a-z0-9_]{1,40}}.webp", background)
     app.router.add_get("/static/backgrounds/stages.json", stages)
+    app.router.add_get("/static/push-key.json", push_key)
     app.router.add_get("/static/{file}", asset)
     app.router.add_get("/pet-worker.js", worker)
     app.router.add_get("/", page)

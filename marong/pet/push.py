@@ -2,18 +2,21 @@
 
 import asyncio
 import json
+import os
 import re
-from base64 import urlsafe_b64decode
+from base64 import urlsafe_b64decode, urlsafe_b64encode
 from urllib.parse import urlsplit
 
 from aiohttp import web
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from .http import POOL, Problem, body_json, require_member, uuid_param
+from .settings import SettingsError
 
 _KEY = re.compile(r"[a-zA-Z0-9_-]+={0,2}\Z")
-_HOSTS = {"fcm.googleapis.com", "updates.push.services.mozilla.com", "web.push.apple.com"}
-_WINDOWS = ".notify.windows.com"
+_HOSTS = {"fcm.googleapis.com", "updates.push.services.mozilla.com"}
+_HOST_SUFFIXES = (".notify.windows.com", ".push.apple.com")
 _LINES = {
     "sheet": "캐릭터 시트가 완성됐어요.",
     "proactive": "말을 걸었어요",
@@ -30,7 +33,7 @@ def endpoint_allowed(endpoint):
         url = urlsplit(endpoint)
         host = url.hostname or ""
         return (url.scheme == "https" and url.port is None and url.netloc.lower() == host and not url.fragment
-                and len(url.path) > 1 and (host in _HOSTS or host.endswith(_WINDOWS)))
+                and len(url.path) > 1 and (host in _HOSTS or host.endswith(_HOST_SUFFIXES)))
     except ValueError:
         return False
 
@@ -82,7 +85,18 @@ async def remove(req):
 
 class VapidSender:
     def __init__(self, private_key, subject):
-        self.private_key, self.subject = private_key, subject
+        from py_vapid import Vapid
+
+        try:
+            self.signer = Vapid.from_file(private_key) if os.path.isfile(private_key) else Vapid.from_string(private_key)
+            point = self.signer.public_key.public_bytes(serialization.Encoding.X962,
+                                                        serialization.PublicFormat.UncompressedPoint)
+            if len(point) != 65:
+                raise ValueError("invalid public point")
+        except Exception:
+            raise SettingsError("the VAPID key is invalid") from None
+        self.public_key = urlsafe_b64encode(point).decode("ascii").rstrip("=")
+        self.subject = subject
 
     def _post(self, row, payload):
         import requests
@@ -96,7 +110,7 @@ class VapidSender:
             session.trust_env = False
             subscription = {"endpoint": row["endpoint"], "keys": {"p256dh": row["p256dh"], "auth": row["auth"]}}
             try:
-                response = webpush(subscription, payload, vapid_private_key=self.private_key,
+                response = webpush(subscription, payload, vapid_private_key=self.signer,
                                    vapid_claims={"sub": self.subject}, ttl=3600, timeout=5, requests_session=session)
                 return response.status_code
             except WebPushException as error:

@@ -3,6 +3,7 @@ import {action, AI_NOTICE, api, banner, button, CONSENT, dateLabel, el, errorTex
 
 import {mediaId, reportControl} from './report.js';
 import {rechargeSheet} from './orders.js';
+import {pushControl} from './push-control.js';
 
 const HOME = {label: '홈', url: '/'};
 const LEGAL = '/static/legal/';
@@ -207,7 +208,7 @@ export async function account() {
       text('문의할 때 알려 주세요', 'muted'),
       me.freeTickets ? text(`무료 만들기권 ${me.freeTickets}장`) : null,
       text(`본인인증 · ${me.identityVerified ? '했어요' : '안 했어요'}`)),
-    link('한도와 구독', '/me/plan'), link('주문 내역', '/me/orders'), panel,
+    link('한도와 구독', '/me/plan'), link('주문 내역', '/me/orders'), pushControl(me), panel,
     el('div', {class: 'row'}, link('이용약관', LEGAL + 'terms.html', 'plain'),
       link('개인정보 처리방침', LEGAL + 'privacy.html', 'plain')), logout,
     button('계정 지우기', () => deletion.showModal(), 'plain danger'), deletion);
