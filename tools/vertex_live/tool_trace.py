@@ -24,13 +24,13 @@ LABELS = {
              "schedule_cancel", "recall", "current_time", "end_call"},
     "stop_reason": {"end_turn", "tool_use", "pause_turn", "max_tokens", "stop_sequence",
                     "refusal", "model_context_window_exceeded"},
-    "result": {"ok", "rejected", "invalid_result", "no_tool_blocks", "step_limit",
+    "result": {"ok", "rejected", "invalid_result", "no_tool_blocks",
                "time", "found", "not_found", "ask_which", "refused", "unavailable",
                "not_saved", "ending", "memory_unavailable", "temporary_error"},
 }
 NUMBERS = {"round", "offered", "requested", "results_attempted", "results_sent",
            "web_searches", "web_fetches", "status_code"}
-STAGES = {"text_turn", "model_request", "tool_dispatch", "voice_setup", "voice_tool",
+STAGES = {"text_turn", "model_request", "tool_node", "tool_dispatch", "voice_setup", "voice_tool",
           "provider_send", "voice_search"}
 ROOT_STAGES = {"text_turn", "voice_setup", "voice_tool", "voice_search"}
 ERRORS = {"timeout", "cancelled", "invalid_input", "provider_http_error",

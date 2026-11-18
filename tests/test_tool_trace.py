@@ -18,7 +18,7 @@ sys.path[:0] = [str(ROOT), str(ROOT / "tools" / "vertex_live")]
 
 from fakes import ScriptedLLM, message, text, tool_use
 from live_session import LiveSession
-from marong.agent import Agent, Incoming, MAX_STEPS
+from marong.agent import Agent, Incoming
 from tools.vertex_live import tool_trace as text_trace
 import tool_trace as voice_trace
 
@@ -62,9 +62,10 @@ class ToolTraceTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(PRIVATE_FIXTURE, data)
         for root, *children in self.capture.traces:
             self.assertTrue(root["end_time"])
+            ids = {run["id"] for run in [root, *children]}
             for child in children:
                 self.assertEqual(child["trace_id"], root["id"])
-                self.assertEqual(child["parent_run_id"], root["id"])
+                self.assertIn(child["parent_run_id"], ids)
 
     def text_agent(self, respond):
         options = SimpleNamespace(anthropic_model="fixture", llm_max_tokens=100, anthropic_effort=None)
@@ -87,10 +88,11 @@ class ToolTraceTest(unittest.IsolatedAsyncioTestCase):
         agent = self.text_agent(respond)
         self.assertEqual((await self.ask(agent))[0], PRIVATE_FIXTURE)
         agent.store.set_name.assert_awaited_once()
-        root, first, dispatch, followup = self.capture.traces[0]
+        root, first, tool_node, dispatch, followup = self.capture.traces[0]
         self.assertEqual(root["outputs"]["surface"], "kakao_chat")
         self.assertEqual(first["outputs"]["requested"], 1)
         self.assertEqual(dispatch["outputs"], {"round": 1, "tool": "set_name", "offered": 1, "result": "ok"})
+        self.assertEqual(dispatch["parent_run_id"], tool_node["id"])
         self.assertEqual(followup["outputs"]["results_sent"], 1)
 
     async def test_text_unknown_tool_and_provider_400_after_result(self):
@@ -104,7 +106,7 @@ class ToolTraceTest(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(Rejected):
             await self.ask(self.text_agent(respond))
-        _, _, dispatch, followup = self.capture.traces[0]
+        _, _, _, dispatch, followup = self.capture.traces[0]
         self.assertEqual(dispatch["outputs"]["tool"], "other")
         self.assertEqual(dispatch["outputs"]["offered"], 0)
         self.assertEqual(dispatch["outputs"]["result"], "rejected")
@@ -113,14 +115,42 @@ class ToolTraceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(followup["outputs"]["status_code"], 400)
         self.assertEqual(followup["error"], "provider_http_error")
 
-    async def test_text_final_round_cannot_submit_tool_result(self):
-        agent = self.text_agent(lambda body: message([tool_use("set_name", {"name": "가명"})], "tool_use"))
-        await self.ask(agent)
-        self.assertEqual(agent.store.set_name.await_count, MAX_STEPS)
+    async def test_text_graph_returns_every_tool_result_after_six_rounds(self):
+        def respond(body):
+            turn = (len(body["messages"]) - 1) // 2
+            if turn:
+                result = body["messages"][-1]["content"][0]
+                self.assertEqual(result["tool_use_id"], f"tool-{turn}")
+                self.assertFalse(result.get("is_error"))
+            if turn < 6:
+                return message([tool_use("set_name", {"name": "가명"}, f"tool-{turn + 1}")], "tool_use")
+            return message([text("확인했어")])
+
+        agent = self.text_agent(respond)
+        answer, meta = await self.ask(agent)
+        self.assertEqual(answer, "확인했어")
+        self.assertEqual(meta["calls"], 7)
+        self.assertEqual(agent.store.set_name.await_count, 6)
         root, *children = self.capture.traces[0]
-        self.assertEqual(root["outputs"]["result"], "step_limit")
-        self.assertEqual(root["outputs"]["requested"], 1)
-        self.assertEqual(children[-1]["name"], "tool_dispatch")
+        self.assertNotIn("error", root)
+        self.assertEqual(sum(row["name"] == "tool_node" for row in children), 6)
+        self.assertEqual(children[-1]["name"], "model_request")
+        self.assertEqual(children[-1]["outputs"]["results_sent"], 1)
+
+    async def test_repeated_tools_stop_at_existing_deadline(self):
+        agent = self.text_agent(lambda body: message([tool_use("set_name", {"name": "가명"})], "tool_use"))
+        original = agent.llm.create
+
+        async def slow_create(body, timeout):
+            await asyncio.sleep(0.015)
+            return await original(body, timeout)
+
+        agent.llm.create = slow_create
+        deadline = asyncio.get_running_loop().time() + 0.10
+        with self.assertRaises(TimeoutError):
+            await agent.ask([], [], Incoming(PRIVATE_FIXTURE, PRIVATE_FIXTURE, "시험"), deadline)
+        root, *_ = self.capture.traces[0]
+        self.assertEqual(root["error"], "timeout")
 
     async def test_provider_sdk_timeout_is_marked_at_model_request(self):
         url = "https://example.invalid/" + PRIVATE_FIXTURE
