@@ -104,3 +104,8 @@ input:not([type="checkbox"],[type="radio"],[type="file"]), select, textarea {
 .report-choices > legend { margin-bottom: 10px; font-weight: 700 }
 .report-choices > label { display: flex; flex-direction: row; align-items: center; gap: 6px }
 .report-source { overflow-wrap: anywhere }
+
+.call-card { justify-items: center; text-align: center; }
+.call-card > .stack { width: 100%; }
+.call-face { width: min(200px, 100%); aspect-ratio: 1; margin-inline: auto; border-radius: 50%; overflow: hidden; }
+.call-face img { width: 100%; height: 100%; object-fit: contain; }

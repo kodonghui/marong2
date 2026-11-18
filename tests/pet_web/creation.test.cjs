@@ -37,6 +37,7 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
   let selected = null;
   let memberPet = {...pet, intro: {personality: ['느긋함'], likes: '산책', dislikes: '', callMe: '누나'}};
   const writes = [];
+  let callStarts = 0;
   const order = {id: orderId, orderNo: 'P20261117-ABC123', product: 'item', itemName: '털모자',
     amountKrw: 1200, vatKrw: 109, status: 'fulfilled', createdAt: '2026-11-17T06:40:00Z',
     withdrawable: true, withdrawalNote: '한 번 입히면 철회할 수 없어요.'};
@@ -112,6 +113,10 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
     if (pathname === `/api/pets/${petId}/messages`) return json(res, {items: [{
       id: candidateId, role: 'pet', kind: 'greeting', text: '누나, 나 왔어!',
     }], before: null});
+    if (pathname === `/api/pets/${petId}/calls` && req.method === 'POST') {
+      callStarts += 1;
+      return json(res, {token: 'synthetic-call-token', wsUrl: 'ws://' + req.headers.host + '/pet-call'}, 201);
+    }
     if (pathname === `/api/pets/${petId}`) return json(res, memberPet);
     if (pathname === `/api/pets/${petId}/mode`) {
       const payload = JSON.parse(await body(req));
@@ -143,7 +148,10 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
     }
     const file = pathname.startsWith('/static/') || pathname === '/pet-worker.js' ? basename(pathname) : 'index.html';
     try {
-      const bytes = await readFile(path.join(assets, file));
+      const worklets = {'call-playback.js': 'playback.js', 'call-capture.js': 'capture.js'};
+      const filename = Object.hasOwn(worklets, file)
+        ? path.resolve(__dirname, '../../tools/vertex_live/static', worklets[file]) : path.join(assets, file);
+      const bytes = await readFile(filename);
       res.writeHead(200, {'Content-Type': type[path.extname(file)]});
       res.end(bytes);
     } catch {
@@ -153,7 +161,7 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => { server.closeAllConnections(); server.close(); });
-  return {origin: `http://127.0.0.1:${server.address().port}`, writes};
+  return {origin: `http://127.0.0.1:${server.address().port}`, writes, get callStarts() { return callStarts; }};
 }
 
 const basename = name => name.split('/').at(-1);
@@ -162,7 +170,9 @@ async function visible(locator) { await locator.waitFor({state: 'visible'}); }
 module.exports = {fixture};
 
 if (require.main === module) {
-  before(async () => { browser = await chromium.launch(); });
+  before(async () => { browser = await chromium.launch({
+    args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+  }); });
   after(async () => { await browser.close(); });
 
   for (const width of [360, 430]) {
@@ -197,6 +207,75 @@ if (require.main === module) {
       assert.deepEqual(errors, []);
     });
   }
+
+  test('SCR-148 at 390px: mic denial, disclosure, PCM, quota ending and return', async t => {
+    const app = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 390, height: 844}});
+    t.after(() => page.close());
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const route = '/pets/' + petId + '/call';
+    let gateway;
+    const micBlock = page.addInitScript(() => {
+      const getMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      navigator.mediaDevices.getUserMedia = opts => {
+        if (!window.allowMic) return Promise.reject(new DOMException('denied', 'NotAllowedError'));
+        return getMedia(opts).then(stream => {
+          window.testTracks = stream.getTracks();
+          return stream;
+        });
+      };
+      const Worklet = window.AudioWorkletNode;
+      window.callAudio = false;
+      window.AudioWorkletNode = class extends Worklet {
+        constructor(...args) {
+          super(...args);
+          if (args[1] === 'playback-pcm') this.port.addEventListener('message', event => {
+            if (event.data.playedMs > 0) window.callAudio = true;
+          });
+        }
+      };
+    });
+    await micBlock;
+    let authenticate, capture;
+    const auth = new Promise(resolve => { authenticate = resolve; });
+    const pcm = new Promise(resolve => { capture = resolve; });
+    await page.routeWebSocket('**/pet-call', ws => {
+      gateway = ws;
+      ws.onMessage(data => {
+        if (typeof data === 'string') authenticate(JSON.parse(data));
+        else capture(data.length);
+      });
+    });
+    await page.goto(app.origin + route);
+    await visible(page.getByText('통화는 1분마다 오늘 한도를 써요 · 지금 60%'));
+    await page.getByRole('button', {name: '전화 걸기'}).click();
+    await visible(page.getByText('마이크를 허용해야 통화할 수 있어요'));
+    assert.equal(app.callStarts, 0);
+    await page.evaluate(() => { window.allowMic = true; });
+    await page.getByRole('button', {name: '다시 해 보기'}).click();
+    assert.deepEqual(await auth, {type: 'auth', token: 'synthetic-call-token'});
+    await visible(page.getByText('AI로 만든 목소리예요', {exact: true}));
+    const packet = Buffer.alloc(24 + 4800);
+    packet.write('MRG2');
+    packet.writeUInt32BE(2400, 20);
+    for (let i = 24; i < packet.length; i += 2) packet.writeInt16LE(1000, i);
+    gateway.send(packet);
+    gateway.send(JSON.stringify({type: 'audio_end', turn: 0, epoch: 0}));
+    await page.waitForFunction(() => window.callAudio);
+    gateway.send(JSON.stringify({type: 'ready'}));
+    assert.equal(await pcm, 3200);
+    assert.equal(await page.getByText(/지금 60%/).count(), 0);
+    gateway.send(JSON.stringify({type: 'ending', reason: 'quota'}));
+    await visible(page.getByText(/졸려서 자러 가요/));
+    gateway.send(JSON.stringify({type: 'ended', reason: 'quota'}));
+    await visible(page.getByText('통화했어요', {exact: true}));
+    assert.equal(await page.evaluate(() => window.testTracks.every(track => track.readyState === 'ended')), true);
+    assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true);
+    await page.getByRole('link', {name: '대화로 돌아가기'}).click();
+    await visible(page.getByText('누나, 나 왔어!', {exact: true}));
+    assert.deepEqual(errors, []);
+  });
 
   test('SCR-140–141: login failure, mandatory consents and retained invite form', async t => {
     const {origin, writes} = await fixture(t, {signedIn: false, invite: true});

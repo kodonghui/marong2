@@ -1,14 +1,18 @@
 """Serve the pet web app and its public static documents (TASK-370)."""
 
+import re
 from pathlib import Path
 
 from aiohttp import web
 
 
 STATIC = Path(__file__).with_name("static")
+VOICE_STATIC = STATIC.parents[2] / "tools" / "vertex_live" / "static"
+WORKLETS = {"call-capture.js": "capture.js", "call-playback.js": "playback.js"}
+SAFE_HOST = re.compile(r"^[a-zA-Z0-9.-]+(?::[0-9]{1,5})?$")
 ASSETS = {
     "pet.css", "pet.js", "home.js", "creation.js", "member.js", "diary.js", "pet.webmanifest", "pet-icon.png",
-    "pet-welcome.webp", "report.js", "orders.js", "settings.js",
+    "pet-welcome.webp", "report.js", "orders.js", "settings.js", "call.js",
 }
 LEGAL = {"terms.html", "privacy.html", "overseas.html"}
 HEADERS = {
@@ -20,13 +24,17 @@ HEADERS = {
 
 
 def register(app, *, legal_dir=None):
-    async def page(_request):
-        return web.FileResponse(STATIC / "index.html", headers=HEADERS)
+    async def page(request):
+        headers = HEADERS
+        if request.path.endswith("/call") and SAFE_HOST.fullmatch(request.host):
+            csp = HEADERS["Content-Security-Policy"]
+            headers = {**HEADERS, "Content-Security-Policy": f"{csp}; connect-src 'self' wss://{request.host} ws://{request.host}"}
+        return web.FileResponse(STATIC / "index.html", headers=headers)
 
     async def asset(request):
         name = request.match_info["file"]
-        path = STATIC / name
-        if name not in ASSETS or not path.is_file():
+        path = VOICE_STATIC / WORKLETS[name] if name in WORKLETS else STATIC / name
+        if (name not in ASSETS and name not in WORKLETS) or not path.is_file():
             raise web.HTTPNotFound()
         return web.FileResponse(path, headers=HEADERS)
 

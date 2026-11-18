@@ -3,6 +3,7 @@ import {creation} from './creation.js';
 import {account, petScreen} from './member.js';
 import {diary} from './diary.js';
 import {orders, paymentReturn} from './orders.js';
+import {callScreen} from './call.js';
 import {settings, farewell} from './settings.js';
 
 export const page = document.querySelector('#page');
@@ -81,6 +82,7 @@ export class Failure extends Error {
     this.code = details.code || 'server_error';
     this.trace = details.traceId;
     this.photo = details.photo;
+    this.prompt = details.prompt;
   }
 }
 
@@ -189,6 +191,7 @@ async function start() {
     else if (path === '/create' || path.startsWith('/create/')) await creation(path);
     else if (/^\/pets\/[^/]+$/.test(path)) await petScreen(path.split('/')[2]);
     else if (/^\/pets\/[^/]+\/diary(?:\/[^/]+)?$/.test(path)) await diary(path);
+    else if (/^\/pets\/[^/]+\/call$/.test(path)) await callScreen(path.split('/')[2]);
     else if (/^\/pets\/[^/]+\/settings$/.test(path)) await settings(path.split('/')[2]);
     else if (/^\/pets\/[^/]+\/farewell$/.test(path)) await farewell(path.split('/')[2]);
     else if (path === '/me') await account();
