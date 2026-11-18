@@ -104,3 +104,26 @@ test('TC-346: loading, feature off, permissions, and recoverable response states
   await page.getByRole('button', {name: '다시 해 볼게'}).click();
   await page.getByText(/아직 따로 적어 둔 건 없어/).waitFor();
 });
+
+
+test('TC-345: consent buttons use numeric card ID and reflect the answer', options, async t => {
+  const {page, site} = await open(t);
+  const card = {id: 22, kind: 'memory_ok', status: 'open', step: null, answer: null,
+    expiresAt: LAST_DAY, options: [{value: 'keep', label: '기억해'}, {value: 'forget', label: '잊어'}]};
+  site.state.messages = [{id: 44, from: 'marong', via: 'app', kind: 'chat', at: LAST_DAY,
+    text: '그랬구나.\n\n이거 기억해 둬도 돼?', card}];
+  const choices = [];
+  await page.route('**/chat/persona/api/cards/22/answer', route => {
+    const body = route.request().postDataJSON();
+    choices.push(body.value);
+    const updated = {...card, status: 'answered', answer: body.value};
+    site.state.messages[0].card = updated;
+    return route.fulfill({json: {card: updated, effect: 'memory_forgotten', sentence: null}});
+  });
+  await page.goto(site.url + '/chat/');
+  const group = page.getByRole('radiogroup', {name: '이거 기억해 둬도 돼?'});
+  await group.getByRole('radio', {name: '기억해', exact: true}).waitFor();
+  await group.getByRole('radio', {name: '잊어', exact: true}).click();
+  await page.getByText('✓ 잊어', {exact: true}).waitFor();
+  assert.deepEqual(choices, ['forget']);
+});
