@@ -21,6 +21,7 @@ from marong.discord_store import DiscordStore
 from marong.embed import Embeddings
 from marong.fcm import FCM
 from marong.google_calendar import DEFAULT_PORT, GoogleCalendar, GoogleConfig, serve as serve_google
+from marong.graphs.memory import run_text_memory
 from marong.llm import LLM
 from marong.memory import MemoryWorker
 from marong.shopping import FETCH_DAILY, ShopFetch
@@ -154,6 +155,9 @@ async def main():
         emb.start()
         if worker:
             tasks.append(asyncio.create_task(worker.run()))
+        if store.friend_memory_enabled:
+            tasks.append(asyncio.create_task(
+                run_text_memory(store, settings.database_url, llm, settings.anthropic_model)))
         agent = DiscordAgent(settings, store, emb, llm, on_saved=worker.kick if worker else None,
                              first_replies=first_replies, google=google, shop=shop, web=web)
         agent.route = route

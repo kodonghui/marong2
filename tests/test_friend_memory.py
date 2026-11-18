@@ -1,7 +1,9 @@
 """TC-330 with isolated PostgreSQL, the service roles and a fake graph node."""
 
 import asyncio
+import json
 from datetime import datetime, time, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -9,7 +11,7 @@ from psycopg.conninfo import make_conninfo
 
 from marong.friend_card import KST
 from marong.friend_memory import MemoryExtraction, apply_ops, expire_loops, list_for_turn, memory_page
-from marong.graphs.memory import LEASE, MemoryQueue, checkpoint_pool, compile_graph
+from marong.graphs.memory import LEASE, MemoryQueue, checkpoint_pool, compile_graph, run_text_memory
 from marong.store import Store
 from pg import ROOT, TestDB
 from test_persona_schema import assert_sqlstate, prepare
@@ -240,13 +242,55 @@ async def check_queue(db):
         await store.close()
 
 
+async def check_worker(db):
+    [(friend,)] = db.admin("INSERT INTO marong.friends(name) VALUES ('worker fixture') RETURNING id")
+    db.admin("INSERT INTO marong.people(user_key,friend_id) VALUES ('worker:dm',%s)", (friend,))
+    db.admin("INSERT INTO marong.rooms(room_key,is_channel) VALUES ('worker:dm',true)")
+    with patch.dict("os.environ", {"MARONG_FRIEND_MEMORY": "shadow"}):
+        store = Store(db.app_url)
+    await store.open(wait=True)
+    try:
+        message = await store.add_message("worker:dm", "user", "사과가 좋아", "worker:dm")
+        db.admin("UPDATE marong.memory_jobs SET due_at=now() WHERE friend_id=%s AND source='text'", (friend,))
+        requests = []
+
+        class FakeLLM:
+            async def create_once(self, body, timeout):
+                requests.append(body)
+                assert timeout == 60
+                assert body["output_config"]["format"]["type"] == "json_schema"
+                [statement] = json.loads(body["messages"][0]["content"])["messages"]
+                assert statement["id"] == message
+                result = {"ops": [{"op": "add", "message_id": message, "quote": "사과가 좋아",
+                                   "item": {"kind": "preference", "text": "사과를 좋아함", "sensitive": None,
+                                            "scope": "friend", "share": "known", "valid_until": None}}]}
+                return SimpleNamespace(stop_reason="end_turn", content=[
+                    SimpleNamespace(type="text", text=json.dumps(result, ensure_ascii=False))])
+
+        worker = asyncio.create_task(run_text_memory(store, db.app_url, FakeLLM(), "fixture"))
+        try:
+            async with asyncio.timeout(10):
+                while db.admin("SELECT last_outcome FROM marong.memory_jobs WHERE friend_id=%s", (friend,)) != [("ok",)]:
+                    await asyncio.sleep(0.05)
+            assert len(requests) == 1
+            assert db.admin("SELECT status,message_id FROM marong.memory_items WHERE friend_id=%s", (friend,)) == [
+                ("current", message)]
+        finally:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+    finally:
+        await store.close()
+
+
 if __name__ == "__main__":
     db = TestDB()
     try:
         prepare(db)
         asyncio.run(check_queue(db))
+        asyncio.run(check_worker(db))
     finally:
         db.close()
     print("TC-330: debounced text, call eligibility, concurrent claims, lease recovery, fencing and ID-only checkpoints passed")
     print("TC-331–334: synthetic extraction, room scope, replacement, call provenance and loop expiry passed")
     print("TC-335: tool evidence, private list and room-scoped visibility passed")
+    print("Text runtime: scheduled message reached the structured client and was stored in one attempt")

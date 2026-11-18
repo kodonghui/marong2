@@ -181,3 +181,28 @@ def checkpoint_pool(dsn):
         kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row,
                 "options": "-c search_path=talk_graph,public"},
     )
+
+
+async def run_text_memory(store, dsn, llm, model):
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    from langsmith import tracing_context
+
+    from ..friend_memory import MemoryExtraction, StructuredInference
+
+    queue = MemoryQueue(store.pool)
+    extraction = MemoryExtraction(store.pool, StructuredInference(llm, model))
+    while True:
+        try:
+            async with checkpoint_pool(dsn) as pool:
+                saver = AsyncPostgresSaver(pool)
+                async with store.pool.connection() as conn, conn.transaction():
+                    await conn.execute(
+                        "SELECT pg_advisory_xact_lock(hashtextextended('talk_graph:setup',0))"
+                    )
+                    await saver.setup()
+                graph = compile_graph(queue, extraction.prepare, extraction.persist, checkpointer=saver)
+                with tracing_context(enabled=False):
+                    await run_queue(queue, graph, "text")
+        except Exception:
+            log.error("friend_memory_worker_setup_failed source=text")
+            await asyncio.sleep(10)

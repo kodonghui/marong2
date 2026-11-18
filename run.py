@@ -19,6 +19,7 @@ from marong.app import BotApp
 from marong.config import load_dotenv, load_settings
 from marong.embed import Embeddings
 from marong.gateway import FatalGatewayError, Gateway
+from marong.graphs.memory import run_text_memory
 from marong.knowledge import knowledge_files
 from marong.llm import LLM, brief
 from marong.memory import MemoryWorker
@@ -210,6 +211,8 @@ async def main(mode: str, args: list[str] | None = None) -> int:
             if mode == "chat":
                 await chat(agent)
                 return 0
+            if store.friend_memory_enabled:
+                tasks.append(asyncio.create_task(run_text_memory(store, s.database_url, llm, s.anthropic_model)))
             app = BotApp(s, agent, http)
             if s.proactive:
                 tasks.append(asyncio.create_task(Proactive(s, store, agent, http, app.room_lock).run()))
