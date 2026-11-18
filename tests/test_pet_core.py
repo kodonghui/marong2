@@ -254,11 +254,16 @@ async def check_http(admin_dsn, dsn, directory):
                 await error(await client.get(f"/api/media/{item}", headers=headers(token_a)), "not_found", 404)
             response = await client.get(url, headers=headers(token_a))
             assert response.status == 200 and response.content_type == "image/png"
-            assert response.headers["Cache-Control"] == "private, max-age=31536000, immutable"
+            assert response.headers["Cache-Control"] == "no-store"
             assert await response.read() == art
             cookie = response.cookies[COOKIE]
             assert cookie["secure"] and cookie["httponly"] and cookie["samesite"] == "Lax"
             assert 0 < int(cookie["max-age"]) <= 3 * 24 * 3600
+            # A reused file validator must still go through authorization after account switching.
+            etag = response.headers["ETag"]
+            assert (await client.get(url, headers=headers(token_a, **{"If-None-Match": etag}))).status == 304
+            await error(await client.get(url, headers=headers(token_b, **{"If-None-Match": etag})), "not_found", 404)
+            await error(await client.get(url, headers={"If-None-Match": etag}), "unauthenticated", 401)
 
             write_route = "/test/write"
             await error(await client.put(write_route, headers=headers(token_a)), "cross_site", 403)

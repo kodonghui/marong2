@@ -89,7 +89,7 @@ async def guard(req, handler):
         logger.error("pet_request_failed trace=%s member=%s", req["trace"],
                      member_ref(member["member_no"]) if member else "-")
         response = problem_response(req, Problem("server_error"))
-    response.headers["Cache-Control"] = req.get("cache", "no-store") if response.status == 200 else "no-store"
+    response.headers["Cache-Control"] = "no-store"
     response.headers["X-Content-Type-Options"] = "nosniff"
     if req.get("member") and COOKIE not in response.cookies and response.status < 500:
         remaining = (req["member"]["expires_at"] - datetime.now(timezone.utc)).total_seconds()
@@ -159,5 +159,4 @@ async def read_media(req):
     source = (root / row["storage_key"]).resolve()
     if not source.is_relative_to(root) or not source.is_file():
         raise Problem("not_found")
-    req["cache"] = "private, max-age=31536000, immutable"
     return web.FileResponse(source, headers={"Content-Type": row["content_type"]})
