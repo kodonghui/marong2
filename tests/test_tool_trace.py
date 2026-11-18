@@ -86,34 +86,55 @@ class ToolTraceTest(unittest.IsolatedAsyncioTestCase):
         with TemporaryDirectory() as directory:
             config = Path(directory) / "owner-app-io"
             with patch.object(text_trace, "OWNER_APP_IO_FILE", config):
-                def send(friend_id):
+                def send(friend_id, *, mixed=False):
                     with text_trace.step("app_turn", surface="app_chat") as span:
-                        span.app_message(friend_id, "Show this exact test message")
+                        span.app_message(friend_id, "Show this exact test message", room_key="own", user_key="my-user")
+                        with text_trace.app_step("recent_memory") as history:
+                            rows = [{"room_key": "own", "user_key": "my-user", "role": "user",
+                                     "content": "An earlier owner message"}]
+                            if mixed:
+                                rows.append({"room_key": "linked", "role": "assistant", "content": PRIVATE_FIXTURE})
+                            history.io(outputs={"records": rows})
                         with text_trace.step("tool_dispatch", span, tool="schedule_list") as tool:
-                            tool.io(inputs={"arguments": {"start": "2026-11-26", "id": PRIVATE_FIXTURE}})
-                            tool.io(outputs={"response": {"type": "tool_result", "content": "No events found"}})
+                            tool.io(inputs={"arguments": {"start": "2026-11-26", "calendar": "Personal", "limit": 12}})
+                            tool.io(outputs={"response": {"type": "tool_result", "tool_use_id": "toolu_abc",
+                                                          "content": "No events found", "is_error": False}})
                         with text_trace.app_step("model_request") as model:
                             model.io(inputs={"request": {"system": PRIVATE_FIXTURE, "messages": [
-                                {"role": "user", "content": PRIVATE_FIXTURE + "\nShow this exact test message"},
+                                {"role": "user", "content": "(11/19) Show this exact test message"},
+                                {"role": "assistant", "content": PRIVATE_FIXTURE if mixed else "Earlier owner reply"},
                                 {"role": "user", "content": [{"type": "tool_result", "content": "No events found"}]},
-                            ]}})
+                            ], "max_tokens": 123, "api_key": PRIVATE_FIXTURE,
+                                "tools": [{"name": "schedule_list", "input_schema": {"properties": {"range": {
+                                    "type": ["string", "null"], "description": "Requested date range"}}}}]}})
                         span.app_reply("Exact test reply. Bearer " + PRIVATE_FIXTURE)
                     return self.capture.traces[-1]
 
                 config.write_text("1\n", encoding="utf-8")
-                other, other_tool, _ = send(2)
+                other, _, other_tool, _ = send(2)
                 self.assertEqual(other["inputs"]["message"]["content"], text_trace.MASKED)
                 self.assertEqual(other_tool["outputs"]["response"]["content"], text_trace.MASKED)
-                owner, tool, model = send(1)
+                owner, history, tool, model = send(1)
                 self.assertEqual(owner["inputs"]["message"]["content"], "Show this exact test message")
-                self.assertEqual(owner["outputs"]["reply"]["content"], "Exact test reply. " + text_trace.MASKED)
+                self.assertEqual(owner["outputs"]["reply"]["content"], "Exact test reply. [인증정보 제외]")
                 self.assertEqual(owner["tags"], ["owner-app-io"])
-                self.assertEqual(tool["inputs"]["arguments"], {"start": "2026-11-26", "id": text_trace.MASKED})
+                self.assertEqual(history["outputs"]["records"][0]["content"], "An earlier owner message")
+                self.assertEqual(tool["inputs"]["arguments"], {"start": "2026-11-26", "calendar": "Personal", "limit": 12})
                 self.assertEqual(tool["outputs"]["response"]["content"], "No events found")
+                self.assertEqual(tool["outputs"]["response"]["tool_use_id"], "toolu_abc")
+                self.assertIs(tool["outputs"]["response"]["is_error"], False)
                 request = model["inputs"]["request"]
-                self.assertEqual(request["system"], text_trace.MASKED)
-                self.assertEqual(request["messages"][0]["content"], text_trace.MASKED + "Show this exact test message")
-                self.assertEqual(request["messages"][1]["content"][0]["content"], "No events found")
+                self.assertIn("excluded", request["system"])
+                self.assertNotIn("api_key", request)
+                self.assertEqual(request["max_tokens"], 123)
+                self.assertEqual(request["messages"][0]["content"], "(11/19) Show this exact test message")
+                self.assertEqual(request["messages"][1]["content"], "Earlier owner reply")
+                self.assertEqual(request["messages"][2]["content"][0]["content"], "No events found")
+                self.assertEqual(request["tools"][0]["input_schema"]["properties"]["range"]["type"], ["string", "null"])
+                _, mixed_history, _, mixed_model = send(1, mixed=True)
+                self.assertEqual(mixed_history["outputs"]["excluded_other_rooms"], 1)
+                self.assertEqual(mixed_model["inputs"]["request"]["messages"][0]["content"], "Show this exact test message")
+                self.assertIn("excluded", mixed_model["inputs"]["request"]["messages"][1]["content"])
                 following, *_ = send(1)
                 self.assertEqual(following["outputs"]["reply"], owner["outputs"]["reply"])
                 config.write_text("", encoding="utf-8")

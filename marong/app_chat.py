@@ -386,7 +386,7 @@ class AppChat:
     async def _answer(self, who: dict, saved_id: int, text: str, key: str, preference) -> None:
         with trace_step("app_turn", surface="app_chat") as trace:
             if trace:
-                trace.app_message(who["friend_id"], text)
+                trace.app_message(who["friend_id"], text, room_key=who["room_key"], user_key=who["user_key"])
                 self.reply_traces[saved_id] = (time.monotonic(), trace)
                 if len(self.reply_traces) > 256:
                     self.reply_traces.popitem(last=False)

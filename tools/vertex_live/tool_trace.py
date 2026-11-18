@@ -56,14 +56,17 @@ MODEL_NAME = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,95}\Z")
 MASKED = "[가림]"
 OWNER_APP_IO_FILE = Path("/etc/marong-tool-trace/owner-app-io")
 OWNER_APP_IO_CREDENTIAL = re.compile(
-    r"(?:\b(?:hms-|sk-|ghp_|lsv2_|AIza|xox[baprs]-)[\w-]{10,}"
-    r"|\bBearer\s+[\w.=-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)",
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"
+    r"|\b(?:hms-|sk-|gh[pousr]_|github_pat_|lsv2_|AIza|xox[baprs]-)[\w-]{10,}"
+    r"|\bBearer\s+[\w.=-]{10,}|\beyJ[\w-]{8,}\.[\w-]+\.[\w-]+",
     re.IGNORECASE,
 )
-OWNER_SCHEDULE_TOOLS = {"schedule_list", "schedule_add", "schedule_cancel"}
-OWNER_SCHEDULE_FIELDS = {"start", "end", "title", "remind_at", "repeat", "say", "call", "event_at", "action"}
-OWNER_MODEL_STAGES = {"model_request", "model_attempt"}
-OWNER_REPLY_STAGES = {"reply_prepare", "reply_save", "reply_push", "app_http_delivery"}
+PRIVATE_FIELDS = {
+    "authorization", "cookie", "set_cookie", "api_key", "client_secret", "access_token",
+    "refresh_token", "password", "private_key", "signature", "reasoning_content",
+}
+PRIVATE_BLOCKS = {"image", "thinking", "redacted_thinking"}
+SHARED_MEMORY_STAGES = {"memory_summaries", "memory_notes", "memory_search", "discord_context", "call_context"}
 ROLES = {"system", "developer", "user", "assistant", "tool"}
 BLOCK_TYPES = {"text", "image", "thinking", "redacted_thinking", "tool_use", "tool_result",
                "server_tool_use", "web_search_tool_result", "web_fetch_tool_result", "function",
@@ -86,7 +89,7 @@ active = ContextVar("active_marong_trace", default=None)
 log = logging.getLogger(__name__)
 
 
-def _masked(value, depth=0, field=None, *, owner=None, path=()):
+def _masked(value, depth=0, field=None):
     """Keep protocol structure, allowlisted labels and counts, and drop arbitrary keys and values."""
     if value is None:
         return None
@@ -104,21 +107,17 @@ def _masked(value, depth=0, field=None, *, owner=None, path=()):
                          or "input_schema" in value or field == "function")):
                 result[key] = entry
             else:
-                result[key] = _masked(entry, depth + 1, key, owner=owner, path=(*path, key) if owner else ())
+                result[key] = _masked(entry, depth + 1, key)
         if len(result) < len(value):
             result["_masked_fields"] = len(value) - len(result)
         return result
     if isinstance(value, (list, tuple)):
         if len(value) <= MAX_PAYLOAD_ITEMS:
-            return [_masked(item, depth + 1, field, owner=owner, path=path) for item in value]
+            return [_masked(item, depth + 1, field) for item in value]
         half = MAX_PAYLOAD_ITEMS // 2
-        return ([_masked(item, depth + 1, field, owner=owner, path=path) for item in value[:half]]
+        return ([_masked(item, depth + 1, field) for item in value[:half]]
                 + [{"_omitted_items": len(value) - MAX_PAYLOAD_ITEMS}]
-                + [_masked(item, depth + 1, field, owner=owner, path=path) for item in value[-half:]])
-    if owner:
-        visible = owner(value, path)
-        if visible is not None:
-            return visible
+                + [_masked(item, depth + 1, field) for item in value[-half:]])
     if type(value) is str:
         if (field == "role" and value in ROLES) or (field == "type" and value in BLOCK_TYPES):
             return value
@@ -129,7 +128,7 @@ def _masked(value, depth=0, field=None, *, owner=None, path=()):
                 pass
             else:
                 if isinstance(decoded, dict):
-                    return _masked(decoded, depth + 1, owner=owner, path=path)
+                    return _masked(decoded, depth + 1)
     return MASKED
 
 
@@ -183,55 +182,112 @@ class Span:
     def io(self, *, inputs=None, outputs=None):
         if self.root.data["name"] != "app_turn":
             return
-        owner = self._owner_value if self.root._owner_app_io else None
+        encode = self._owner_payload if self.root._owner_app_io else _masked
         if inputs is not None:
-            self.data["inputs"].update(_masked(inputs, owner=owner))
+            self.data["inputs"].update(encode(inputs))
         if outputs is not None:
-            self.data["outputs"].update(_masked(outputs, owner=owner))
+            self.data["outputs"].update(encode(outputs))
 
-    def app_message(self, friend_id, text):
-        self.io(inputs={"message": {"role": "user", "content": text}})
+    def app_message(self, friend_id, text, *, room_key=None, user_key=None):
         if self.data["name"] == "app_turn" and _show_owner_app_io(friend_id):
             self._owner_app_io = True
             self._owner_message = text
-            self._owner_tool_results = set()
+            self._owner_room = room_key
+            self._owner_user = user_key
+            self._owner_full_history = False
             self.data["tags"] = ["owner-app-io"]
-            self.data["inputs"]["message"]["content"] = OWNER_APP_IO_CREDENTIAL.sub(MASKED, text)
+        self.io(inputs={"message": {"role": "user", "content": text}})
 
     def app_reply(self, text):
         self.io(outputs={"reply": {"role": "assistant", "content": text}})
-        if self._owner_app_io:
-            self.data["outputs"]["reply"]["content"] = OWNER_APP_IO_CREDENTIAL.sub(MASKED, text)
 
-    def _owner_value(self, value, path):
-        """Expose this turn's text and the authenticated account's schedule values."""
+    def _owns_room_row(self, row):
+        return (
+            self.root._owner_room is not None
+            and isinstance(row, dict)
+            and row.get("room_key") == self.root._owner_room
+            and (row.get("role") == "assistant"
+                 or (row.get("role") == "user" and self.root._owner_user is not None
+                     and row.get("user_key") == self.root._owner_user))
+        )
+
+    def _owner_payload(self, payload):
         stage = self.data["name"]
-        field = path[-1]
-        schedule_tool = self.data["outputs"].get("tool") in OWNER_SCHEDULE_TOOLS
-        if ((stage == "tool_dispatch" and schedule_tool and path[0] == "arguments")
-                or (stage == "calendar_tool" and path[0] == "arguments")
-                or (stage in {"schedules_context", "calendar_context", "schedule_storage"} and path[0] == "records")):
-            if field in OWNER_SCHEDULE_FIELDS and type(value) in (str, bool):
-                return OWNER_APP_IO_CREDENTIAL.sub(MASKED, value) if type(value) is str else value
-            if field in OWNER_SCHEDULE_FIELDS and type(value) is datetime:
-                return value.isoformat()
-        if type(value) is not str:
-            return None
-        if stage == "tool_dispatch" and schedule_tool and path == ("response", "content"):
-            self.root._owner_tool_results.add(value)
-            return OWNER_APP_IO_CREDENTIAL.sub(MASKED, value)
-        if stage in OWNER_REPLY_STAGES and field in {"reply", "content"}:
-            return OWNER_APP_IO_CREDENTIAL.sub(MASKED, value)
-        if stage in OWNER_MODEL_STAGES and path[0] == "response" and field in {"content", "text"}:
-            return OWNER_APP_IO_CREDENTIAL.sub(MASKED, value)
-        if stage in OWNER_MODEL_STAGES | {"context"} and "messages" in path and field in {"content", "text"}:
-            if value in self.root._owner_tool_results:
-                return OWNER_APP_IO_CREDENTIAL.sub(MASKED, value)
-            message = self.root._owner_message
-            # The agent can prefix a timestamp and merge consecutive user messages into one block.
-            if message and value.endswith(message):
-                return (MASKED if value != message else "") + OWNER_APP_IO_CREDENTIAL.sub(MASKED, message)
-        return None
+        if stage == "recent_memory" and isinstance(payload.get("records"), list):
+            records = payload["records"]
+            own_records = [record for record in records if self._owns_room_row(record)]
+            self.root._owner_full_history = len(own_records) == len(records)
+            payload = {
+                **payload,
+                "records": own_records,
+                "excluded_other_rooms": len(records) - len(own_records),
+            }
+        if stage == "friend_context":
+            # This lookup returns information from other accounts, including shared notes.
+            records = payload.get("records")
+            payload = {"record_count": len(records)} if isinstance(records, list) else {}
+        return self._owner_json(payload, memory=stage in SHARED_MEMORY_STAGES)
+
+    def _owner_json(self, value, *, depth=0, memory=False, field=None):
+        if depth >= 32:
+            return {"excluded": "nesting limit"}
+        if isinstance(value, SimpleNamespace) or type(value).__module__.startswith("anthropic.types."):
+            value = vars(value)
+        if isinstance(value, dict):
+            if isinstance(value.get("type"), str) and value["type"] in PRIVATE_BLOCKS:
+                return {"type": value["type"], "excluded": "attachment or provider reasoning"}
+            if value.get("role") in ("system", "developer"):
+                return {"role": value["role"], "excluded": "system context includes shared private data"}
+            result = {}
+            for key, item in value.items():
+                if type(key) is not str or key.lower().replace("-", "_") in PRIVATE_FIELDS:
+                    continue
+                if memory and key in {"content", "text", "name", "user_key", "room_key", "pair"}:
+                    continue
+                if key == "system":
+                    result[key] = {"excluded": "system context includes shared private data"}
+                elif memory and key == "query" and isinstance(item, str):
+                    current = self.root._owner_message
+                    result[key] = current if item.endswith(current) else {"excluded": "historical text"}
+                    if isinstance(result[key], str):
+                        result[key] = OWNER_APP_IO_CREDENTIAL.sub("[인증정보 제외]", result[key])
+                else:
+                    result[key] = self._owner_json(item, depth=depth + 1, memory=memory, field=key)
+            return result
+        if isinstance(value, (list, tuple)):
+            if field == "messages":
+                value = [self._owner_model_message(item) for item in value]
+            return [self._owner_json(item, depth=depth + 1, memory=memory) for item in value]
+        if isinstance(value, str):
+            return OWNER_APP_IO_CREDENTIAL.sub("[인증정보 제외]", value)
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if value is None or type(value) in (bool, int, float):
+            return value
+        return {"type": type(value).__name__}
+
+    def _owner_model_message(self, item):
+        if self.root._owner_full_history or not isinstance(item, dict):
+            return item
+        content = item.get("content")
+        if item.get("role") == "tool":
+            return item
+        current = self.root._owner_message
+        if isinstance(content, list):
+            def visible(block):
+                if not isinstance(block, dict):
+                    block = vars(block) if hasattr(block, "__dict__") else {}
+                text = block.get("text")
+                if block.get("type") == "text" and isinstance(text, str) and current and text.endswith(current):
+                    return {"type": "text", "text": current}
+                if block.get("type") in ("tool_use", "tool_result"):
+                    return block
+                return {"type": block.get("type"), "excluded": "unverified history"}
+            return {**item, "content": [visible(block) for block in content]}
+        if isinstance(content, str):
+            actual = current if current and content.endswith(current) else {"excluded": "unverified history"}
+            return {**item, "content": actual}
+        return item
 
     def model(self, provider, model):
         if provider in {"anthropic", "deepseek"} and isinstance(model, str) and MODEL_NAME.fullmatch(model):
