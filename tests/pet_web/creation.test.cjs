@@ -1495,6 +1495,49 @@ if (require.main === module) {
     assert.ok(reads[2] - reads[1] >= 4900, 'expression poll starts after five seconds');
   });
 
+  test('SCR-146 identifies an invalid field, keeps the draft, and only submits corrected values', async t => {
+    const {origin, writes} = await fixture(t, {creationState: 'sheet_ready'});
+    const page = await browser.newPage({viewport: {width: 360, height: 844}});
+    t.after(() => page.close());
+    await page.goto(`${origin}/create/${creationId}/name`);
+    const name = page.getByLabel('이름', {exact: true});
+    const callMe = page.getByLabel('나를 부르는 말', {exact: true});
+    const submit = page.getByRole('button', {name: '만나러 가기'});
+    const nameError = page.locator('#pet-profile-name-error');
+    const callMeError = page.locator('#pet-profile-callMe-error');
+    assert.equal(await nameError.isVisible(), false);
+    assert.equal(await submit.isDisabled(), true);
+
+    await name.fill('도토리!');
+    await callMe.fill('누나');
+    await visible(nameError);
+    assert.match(await nameError.textContent(), /입력을 확인해 주세요\. 1~12자/);
+    assert.equal(await name.getAttribute('aria-invalid'), 'true');
+    assert.equal(await name.getAttribute('aria-describedby'), 'pet-profile-name-error');
+    assert.equal(await submit.isDisabled(), true);
+    await page.locator('form').evaluate(form => form.requestSubmit());
+    assert.equal(writes.length, 0);
+
+    await page.reload();
+    await visible(nameError);
+    assert.equal(await name.inputValue(), '도토리!');
+    assert.equal(await callMe.inputValue(), '누나');
+    await name.fill(' 도토리-1 ');
+    assert.equal(await nameError.isVisible(), false);
+    assert.equal(await name.getAttribute('aria-invalid'), null);
+
+    await callMe.fill(' ');
+    await visible(callMeError);
+    assert.equal(await submit.isDisabled(), true);
+    await callMe.fill('누나');
+    assert.equal(await callMeError.isVisible(), false);
+    assert.equal(await submit.isEnabled(), true);
+    await submit.click();
+    await page.waitForURL(`**/pets/${petId}`);
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].name, '도토리-1');
+  });
+
   test('SCR-146 keeps the draft across reloads and shows progress until naming succeeds', async t => {
     const finish = Promise.withResolvers();
     t.after(finish.resolve);

@@ -589,6 +589,20 @@ function namePet(job) {
   const form = el('form', {}, stringField('이름', 'name', 12), checks('성격 (최대 3개)', 'personality', profiles),
     stringField('좋아하는 것', 'likes', 60), stringField('싫어하는 것', 'dislikes', 60),
     stringField('나를 부르는 말', 'callMe', 10), greeting, outlet, submit);
+  const rules = [
+    {key: 'name', limit: 12, required: true, pattern: /^[가-힣A-Za-z0-9 -]+$/,
+      hint: '1~12자, 한글·영문·숫자·공백·하이픈'},
+    {key: 'likes', limit: 60, hint: '60자 이하'},
+    {key: 'dislikes', limit: 60, hint: '60자 이하'},
+    {key: 'callMe', limit: 10, required: true, hint: '1~10자'},
+  ];
+  for (const rule of rules) {
+    rule.control = form.elements.namedItem(rule.key);
+    rule.message = el('small', {id: `pet-profile-${rule.key}-error`, class: 'error',
+      'aria-live': 'polite', hidden: true}, `입력을 확인해 주세요. ${rule.hint}`);
+    rule.control.closest('label').after(rule.message);
+    rule.control.setAttribute('aria-describedby', rule.message.id);
+  }
   const key = `pet:profile:${job.id}`;
   const restored = sessionStorage.getItem(key);
   if (restored) {
@@ -605,20 +619,33 @@ function namePet(job) {
     const values = new FormData(form);
     return {...Object.fromEntries(values), personality: values.getAll('personality')};
   }
-  function update() {
-    if (submit.hasAttribute('aria-busy')) return;
+  function update(showMissing = false) {
     const data = draft();
-    submit.disabled = !/^[가-힣A-Za-z0-9 -]{1,12}$/.test(data.name.trim()) || !data.callMe.trim();
+    let valid = true;
+    for (const rule of rules) {
+      const original = data[rule.key];
+      const trimmed = original.trim();
+      const invalid = (rule.required && !trimmed) || [...trimmed].length > rule.limit
+        || /[\x00-\x1f\ud800-\udfff]/u.test(original) || (rule.pattern && !rule.pattern.test(trimmed));
+      if (invalid) valid = false;
+      const showError = invalid && (showMissing || Boolean(original));
+      rule.message.hidden = !showError;
+      if (showError) rule.control.setAttribute('aria-invalid', 'true');
+      else rule.control.removeAttribute('aria-invalid');
+    }
+    if (!submit.hasAttribute('aria-busy')) submit.disabled = !valid;
+    return valid;
   }
   update();
   form.addEventListener('input', () => { sessionStorage.setItem(key, JSON.stringify(draft())); update(); });
   form.addEventListener('submit', async event => {
     event.preventDefault();
+    if (submit.hasAttribute('aria-busy') || !update(true)) return;
     await action(submit, outlet, async () => {
       const {name, ...intro} = draft();
       greeting.hidden = false;
       try {
-        const pet = await changeCreation(job, 'finish', {method: 'POST', body: {name, intro}});
+        const pet = await changeCreation(job, 'finish', {method: 'POST', body: {name: name.trim(), intro}});
         if (!pet) return;
         sessionStorage.removeItem(key);
         location.assign(`/pets/${pet.id}`);
@@ -626,7 +653,7 @@ function namePet(job) {
     });
     update();
   });
-  show(banner(AI_NOTICE), picture(`/api/media/${job.chosenId}`, '고른 정면 그림'),
+  show(banner(AI_NOTICE), picture(`/api/media/${job.chosenId}`, '고른 정면 그림'), el('small', {}, 'AI가 그린 그림'),
     job.kind === 'memorial' ? el('small', {}, '❀ 추억') : null, el('h2', {}, '이름을 지어 주세요'), form);
 }
 

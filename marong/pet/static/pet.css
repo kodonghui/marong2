@@ -138,6 +138,7 @@ input::placeholder, textarea::placeholder { color: var(--hint); opacity: 1 }
 .check input { accent-color: var(--accent); margin: 0 }
 .date-fields { display: grid; grid-template-columns: 1.35fr 1fr 1fr; gap: 8px }
 .error { color: var(--danger) }
+input[aria-invalid="true"] { border-color: var(--danger) }
 fieldset[aria-invalid="true"] legend { color: var(--danger) }
 .notice { text-align: center; padding-block: 12px }
 .picture .retry-picture { position: absolute; inset: 0; background: var(--raised); padding: 8px; margin: auto }
