@@ -47,7 +47,7 @@ small, .muted { color: var(--muted) }
 .card, .skeleton, .sheet { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px }
 .skeleton { min-height: 78px; background: var(--raised) }
 .home-action-placeholder { min-height: 48px }
-.shop-label-placeholder { min-height: 32px }
+.label-placeholder { min-height: 32px }
 .shop-preview-placeholder { aspect-ratio: 3 / 2 }
 .card.pet.archived, .card.pet.diary-unwritten { opacity: .65 }
 .diary-art-frame.drawing { opacity: .65 }
@@ -126,6 +126,7 @@ button.diary-sticker[aria-pressed="true"] { border-color: var(--accent) }
 .diary-controls { display: flex; justify-content: space-between; gap: 8px }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap }
 .busy[aria-busy="true"]::after { content: ""; display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite }
+.farewell-writing .busy[aria-busy="true"]::after { animation-duration: 1.6s }
 @keyframes spin { to { transform: rotate(1turn) } }
 @media (prefers-reduced-motion: reduce) { .busy[aria-busy="true"]::after { animation: none } }
 

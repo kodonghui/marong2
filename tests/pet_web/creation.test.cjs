@@ -1896,6 +1896,81 @@ if (require.main === module) {
     assert.deepEqual(writes, [{mode: 'memorial'}, {kind: 'letter'}]);
   });
 
+  test('SCR-154 shows loading and writing, then lets a letter proceed when drawings are paused', async t => {
+    const {origin,writes} = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 360, height: 780}});
+    t.after(() => page.close());
+    const profile = Promise.withResolvers();
+    const paused = Promise.withResolvers();
+    t.after(profile.resolve);
+    t.after(paused.resolve);
+    const api = `**/api/pets/${petId}`;
+    await page.route(api, async route => {
+      await profile.promise;
+      await route.fulfill({json: {...pet, mode: 'memorial'}});
+    });
+    await page.route(api + '/farewell', async route => {
+      if (route.request().postDataJSON().kind === 'picture') {
+        await paused.promise;
+        await route.fulfill({status: 409, json: {code: 'budget_paused'}});
+      } else await route.continue();
+    });
+    await page.goto(`${origin}/pets/${petId}/farewell`);
+    await page.waitForFunction(() => document.querySelectorAll('#page .skeleton').length === 4);
+    assert.equal(await page.locator('#page').getAttribute('aria-busy'), 'true');
+    profile.resolve();
+    const drawing = page.getByRole('radio', {name: '함께한 장면 한 장'});
+    const submit = page.getByRole('button', {name: '시작하기', exact: true});
+    await drawing.check();
+    await page.getByLabel('함께한 장면', {exact: true}).fill('시험 산책');
+    await submit.click();
+    await visible(page.getByText('콩이가 쓰고 있어요', {exact: true}));
+    assert.equal(await submit.count(), 0);
+    paused.resolve();
+    await visible(page.getByText('편지는 지금 받을 수 있어요'));
+    assert.equal(await drawing.isDisabled(), true);
+    assert.equal(await submit.isDisabled(), true);
+    await page.getByRole('radio', {name: '마지막 편지 받기'}).check();
+    await submit.click();
+    await visible(page.getByText('같이 산책한 날이 정말 좋았어.'));
+    assert.deepEqual(writes, [{kind: 'letter'}]);
+  });
+
+  test('SCR-154 applies a permission change and retries a failed farewell with the selected scene', async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 430, height: 780}});
+    t.after(() => page.close());
+    const api = `**/api/pets/${petId}`;
+    await page.route(api, route => route.fulfill({json: {...pet, mode: 'memorial'}}));
+    const submissions = [];
+    const results = [{status: 409, json: {code: 'consent_required'}},
+      {status: 503, json: {code: 'farewell_failed'}},
+      {json: {date:'2026-11-17', body:'시험 편지', picture:'/static/pet-icon.png', kind:'farewell'}}];
+    await page.route(api + '/farewell', route => {
+      submissions.push(route.request().postDataJSON());
+      return route.fulfill(results.shift());
+    });
+    const url = `${origin}/pets/${petId}/farewell`;
+    async function drawScene() {
+      await page.getByRole('radio', {name: '함께한 장면 한 장'}).check();
+      await page.getByLabel('함께한 장면', {exact: true}).fill('시험 장면');
+      await page.getByRole('button', {name: '시작하기', exact: true}).click();
+    }
+    await page.goto(url);
+    await drawScene();
+    const settings = page.getByRole('link', {name: '설정에서 바꾸기', exact: true});
+    await visible(settings);
+    assert.equal(await settings.getAttribute('href'), '/me#consents');
+    assert.equal(await page.getByRole('button', {name: '시작하기', exact: true}).count(), 0);
+    await page.reload();
+    await drawScene();
+    await visible(page.getByText('지금은 쓰지 못했어요. 잠시 뒤 다시 해 주세요.'));
+    assert.equal(await page.getByLabel('함께한 장면', {exact: true}).inputValue(), '시험 장면');
+    await page.getByRole('button', {name: '다시 하기', exact: true}).click();
+    await visible(page.getByRole('img', {name: 'AI가 그린 그림'}));
+    assert.deepEqual(submissions, Array(3).fill({kind:'picture', sceneNote:'시험 장면'}));
+  });
+
   test('SCR-153 resets stale mode actions from the current server state', async t => {
     const {origin} = await fixture(t);
     const page = await browser.newPage({viewport: {width: 360, height: 800}});

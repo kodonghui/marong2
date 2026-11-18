@@ -24,7 +24,7 @@ function shopAccess(pets) {
 export async function shop() {
   header('상점', {label: '홈', url: '/'});
   showTabs(null);
-  show(el('div', {class: 'skeleton shop-label-placeholder', 'aria-hidden': 'true'}),
+  show(el('div', {class: 'skeleton label-placeholder', 'aria-hidden': 'true'}),
     el('div', {class: 'grid'}, Array.from({length: 6}, () => el('div', {class: 'skeleton', 'aria-hidden': 'true'}))));
   page.setAttribute('aria-busy', 'true');
   const [{items: pets}, me] = await Promise.all([api('/api/pets'), api('/api/me')]);
@@ -78,7 +78,7 @@ export async function shopItem(id) {
   header('아이템 보기', {label: '상점', url});
   showTabs(null);
   show(el('div', {class: 'skeleton shop-preview-placeholder', 'aria-hidden': 'true'}),
-    ...Array.from({length: 3}, () => el('div', {class: 'skeleton shop-label-placeholder', 'aria-hidden': 'true'})));
+    ...Array.from({length: 3}, () => el('div', {class: 'skeleton label-placeholder', 'aria-hidden': 'true'})));
   page.setAttribute('aria-busy', 'true');
   const [{items: pets}, me] = await Promise.all([api('/api/pets'), api('/api/me')]);
   const living = alive(pets);

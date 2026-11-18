@@ -1,9 +1,14 @@
-import {action, api, banner, button, CONSENT, dateLabel, el, errorText, header, link, notice, picture,
+import {action, api, banner, button, CONSENT, dateLabel, el, errorText, header, link, notice, page, picture,
   show, showTabs, text, today} from './pet.js';
 
 const PERSONALITY = ['활발함', '얌전함', '겁이 많음', '먹보', '애교 많음', '고집 셈', '호기심 많음', '느긋함'];
 const deadline = new Intl.DateTimeFormat('ko-KR', {timeZone: 'Asia/Seoul', month: 'long', day: 'numeric',
   hour: 'numeric', minute: 'numeric'});
+
+function activity(message, className = '') {
+  return el('div', {class: `row ${className}`, role: 'status'}, text(message),
+    el('span', {class: 'busy', 'aria-hidden': 'true', 'aria-busy': 'true'}));
+}
 
 function confirmation(trigger, confirmText, content, task, {danger = false, enabled = () => true} = {}) {
   const outcome = el('div', {'aria-live': 'polite'});
@@ -59,8 +64,7 @@ function exportsPanel(id, url) {
   const saved = sessionStorage.getItem(key);
   let timer;
   function pending() {
-    root.replaceChildren(el('div', {class: 'row', role: 'status'}, text('만들고 있어요', 'muted'),
-      el('span', {class: 'busy', 'aria-hidden': 'true', 'aria-busy': 'true'})));
+    root.replaceChildren(activity('만들고 있어요', 'muted'));
   }
   function reset() {
     clearTimeout(timer);
@@ -201,12 +205,18 @@ export async function farewell(id) {
   const url = `/api${screen}`;
   header('작별 의식', {label: '돌아가기', url: screen + '/settings'});
   showTabs(null);
+  show(...Array.from({length: 4}, (_, index) =>
+    el('div', {class: index < 2 ? 'skeleton label-placeholder' : 'skeleton', 'aria-hidden': 'true'})));
+  page.setAttribute('aria-busy', 'true');
   const [pet, me] = await Promise.all([api(url), api('/api/me')]);
   const back = link('돌아가기', screen + '/settings');
   const already = () => show(notice('작별 의식은 한 번만 할 수 있어요.',
     link('마지막 장 보기', screen + '/diary')));
-  if (pet.mode !== 'memorial') { show(notice('추억 모드에서만 할 수 있어요.', back)); return; }
-  if (!me.overseasTransfer) { show(banner(CONSENT, link('설정에서 바꾸기', '/me#consents')), back); return; }
+  const wrongMode = () => show(notice('추억 모드에서만 할 수 있어요.', back));
+  const needsConsent = () => show(banner(CONSENT, link('설정에서 바꾸기', '/me#consents')), back);
+  if (pet.mode !== 'memorial') { wrongMode(); return; }
+  if (pet.status === 'archived') { show(notice('보관한 아이예요', back)); return; }
+  if (!me.overseasTransfer) { needsConsent(); return; }
   if (pet.farewellDone) { already(); return; }
   const choices = [['letter', '마지막 편지 받기'], ['picture', '함께한 장면 한 장']];
   const outcome = el('div', {'aria-live': 'polite'});
@@ -224,7 +234,7 @@ export async function farewell(id) {
   async function write() {
     const kind = form.elements.kind.value;
     if (!kind) return;
-    show(notice(`${pet.name}가 쓰고 있어요`));
+    show(el('section', {class: 'card stack notice'}, activity(`${pet.name}가 쓰고 있어요`, 'farewell-writing')));
     try {
       const entry = await api(url + '/farewell', {method: 'POST', body: {
         kind, ...(kind === 'picture' ? {sceneNote: note.value} : {}),
@@ -241,8 +251,16 @@ export async function farewell(id) {
           el('div', {class: 'row'}, archive, link('그대로 두기', screen), archiveResult)));
     } catch (error) {
       if (error.code === 'farewell_done') { already(); return; }
+      if (error.code === 'wrong_state') { wrongMode(); return; }
+      if (error.code === 'consent_required') { needsConsent(); return; }
       show(headline, form);
       if (error.code === 'budget_paused') {
+        const drawing = form.querySelector('input[value="picture"]');
+        drawing.checked = false;
+        drawing.disabled = true;
+        scene.hidden = true;
+        start.disabled = true;
+        start.textContent = '시작하기';
         outcome.replaceChildren(banner('오늘은 새 그림과 통화가 쉬어요. 글로는 계속 이야기할 수 있어요.',
           text('편지는 지금 받을 수 있어요')));
       } else if (error.code === 'farewell_failed') {
