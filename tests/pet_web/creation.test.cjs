@@ -1335,6 +1335,178 @@ if (require.main === module) {
     assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true);
   });
 
+  test('SCR-149 pins the farewell, shows weather and keeps skipped days out', async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 360, height: 790}});
+    t.after(() => page.close());
+    const roots = `/pets/${petId}/diary`;
+    const hold = Promise.withResolvers();
+    t.after(hold.resolve);
+    await page.route('**/api' + roots + '?*', async route => {
+      await hold.promise;
+      await route.fulfill({json: {items: [
+        {date: '2026-11-17', kind: 'day', status: 'ready', title: '산책 간 날', weather: '맑음'},
+        {date: '2026-11-15', kind: 'day', status: 'skipped', title: '표시하면 안 되는 일기'},
+        {date: '2026-11-16', kind: 'day', status: 'failed'},
+        {date: '2026-11-14', kind: 'farewell', status: 'ready'},
+      ]}});
+    });
+    await page.goto(origin + roots + '?month=2026-11');
+    await page.waitForFunction(() => document.querySelectorAll('.diary-card-placeholder').length === 3);
+    assert.equal(await page.locator('#page').getAttribute('aria-busy'),'true');
+    hold.resolve();
+    const cards = page.locator('.card.pet');
+    assert.match(await cards.first().innerText(), /마지막 장/);
+    await visible(page.getByRole('link', {name: /산책 간 날/}).getByText('맑음'));
+    const failed = page.getByRole('link', {name: /쓰지 못한 날/});
+    assert.equal(await failed.evaluate(node => getComputedStyle(node).opacity), '0.65');
+    assert.equal(await page.getByText('표시하면 안 되는 일기').count(), 0);
+    await page.route('**/api' + roots + '/2026-11-14', route =>
+      route.fulfill({status: 404, json: {code: 'not_found'}}));
+    await cards.first().click();
+    await visible(page.getByText('찾을 수 없어요.', {exact:true}));
+    assert.equal(await page.getByRole('link', {name: '일기장으로', exact: true}).getAttribute('href'), roots);
+  });
+
+  test('SCR-150 uses the exact pending share error and falls back to viewing the PNG', async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 430, height: 790}});
+    t.after(() => page.close());
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'canShare', {value: () => false});
+    });
+    let calls = 0;
+    await page.route('**/card.png', route => ++calls === 1
+      ? route.fulfill({status: 409, json: {code: 'wrong_state', detail: '시험 기본 글'}})
+      : route.fulfill({path: path.join(assets, 'pet-icon.png'), contentType: 'image/png'}));
+    await page.goto(`${origin}/pets/${petId}/diary/2026-11-17`);
+    const share = page.getByRole('button', {name: '카드로 공유'});
+    await share.click();
+    await visible(page.getByText('아직 다 쓰지 않은 일기예요', {exact:true}));
+    assert.equal(await page.getByRole('dialog').count(), 0);
+    await share.click();
+    const dialog = page.getByRole('dialog');
+    await visible(dialog.getByText('그림을 길게 눌러 저장해요'));
+    const image = dialog.getByRole('img', {name: '공유할 일기 카드'});
+    assert.match(await image.getAttribute('src'), /^blob:/);
+    assert.ok(await image.evaluate(async item => { await item.decode(); return item.naturalWidth; }) > 0);
+    await dialog.getByRole('button', {name:'닫기'}).click();
+    await dialog.waitFor({state:'detached'});
+    assert.equal(calls, 2);
+  });
+
+  test('SCR-151 refreshes a stale redraw and retains the old page until polling completes', {timeout: 18_000}, async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 430, height: 790}});
+    t.after(() => page.close());
+    await page.clock.install();
+    await page.addInitScript(() => {
+      Object.defineProperty(document, 'hidden', {get: () => Boolean(window.diaryHidden)});
+    });
+    const quota = Promise.withResolvers();
+    t.after(quota.resolve);
+    let stage = 'idle';
+    let readCount = 0;
+    await page.route('**/api/me/quota', async route => { await quota.promise; await route.continue(); });
+    const date = '2026-11-17';
+    const api = `**/api/pets/${petId}/diary/${date}`;
+    await page.route(api, route => {
+      readCount += 1;
+      const complete = stage === 'refreshed';
+      const drawing = stage === 'busy';
+      if (drawing) stage = 'refreshed';
+      return route.fulfill({json: {date, kind:'day', status:'ready', title:'시험 일기', body:'시험 일기 본문',
+        redrawsLeft: drawing || complete ? 1 : 2, drawing, lastRedraw: complete ? 'ok' : null,
+        picture: complete ? '/static/pet-icon.png' : '/static/pet-welcome.webp'}});
+    });
+    await page.route(api + '/redraw', route => {
+      stage = 'busy';
+      return route.fulfill({status:409, json:{code:'busy'}});
+    });
+    await page.goto(`${origin}/pets/${petId}/diary/${date}`);
+    const outer = page.getByRole('button', {name: /^새 그림으로 다시 그리기/});
+    await outer.click();
+    const dialog = page.getByRole('dialog', {name: '새 그림으로 다시 그리기'});
+    await visible(dialog.getByLabel('한도를 불러오는 중'));
+    const draw = dialog.getByRole('button', {name: /^그리기/});
+    assert.equal(await draw.isEnabled(), true);
+    quota.resolve();
+    await visible(dialog.getByText('새 그림은 오늘 한도를 써요 · 지금 60%'));
+    await draw.click();
+    await visible(page.getByText('새 그림을 그리는 중이에요',{exact:true}));
+    assert.equal(await page.locator('.diary-art-frame').evaluate(node => getComputedStyle(node).opacity), '0.65');
+    assert.equal(await outer.isDisabled(), true);
+    assert.equal(await page.getByRole('button', {name:'꾸미기'}).isDisabled(), true);
+    assert.equal(readCount, 2);
+    await page.evaluate(() => {
+      window.diaryHidden = true;
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted:true}));
+    });
+    await page.clock.fastForward(6_000);
+    assert.equal(readCount, 2);
+    await page.evaluate(() => {
+      window.diaryHidden = false;
+      window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted:true}));
+    });
+    await visible(page.getByText('새 그림이에요',{exact:true}));
+    assert.equal(readCount, 3);
+    assert.equal(await page.locator('.diary-art-frame img').getAttribute('src'), '/static/pet-icon.png');
+    assert.equal(await outer.isEnabled(), true);
+  });
+
+  test('SCR-151 keeps notes and disables redraw after a hard rejection', async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage();
+    t.after(() => page.close());
+    const date = '2026-11-17';
+    const api = `**/api/pets/${petId}/diary/${date}/redraw`;
+    for (const [code, message] of [
+      ['redraw_limit', '다시 그리기를 다 썼어요.'],
+      ['budget_paused', '오늘은 새 그림과 통화가 쉬어요. 글로는 계속 이야기할 수 있어요.'],
+      ['consent_required', '사진과 대화를 해외 AI 회사로 보내는 데 동의해야 쓸 수 있어요. 설정에서 바꿀 수 있어요.'],
+    ]) {
+      const respond = route => route.fulfill({status:409, json:{code, detail:message}});
+      await page.route(api,respond);
+      await page.goto(`${origin}/pets/${petId}/diary/${date}`);
+      const outer=page.getByRole('button',{name:/^새 그림으로 다시 그리기/});
+      await outer.click();
+      const dialog=page.getByRole('dialog',{name:'새 그림으로 다시 그리기'});
+      const note=dialog.getByLabel('어떤 그림이면 좋을까요?');
+      await note.fill('시험 메모');
+      const draw=dialog.getByRole('button',{name:/^그리기/});
+      await draw.click();
+      await visible(dialog.getByText(message,{exact:true}));
+      assert.equal(await note.inputValue(),'시험 메모');
+      assert.equal(await draw.isDisabled(),true);
+      if (code==='consent_required') assert.equal(await dialog.getByRole('link',{name:'설정에서 바꾸기'}).getAttribute('href'),'/me#consents');
+      await dialog.getByRole('button',{name:'닫기'}).click();
+      assert.equal(await outer.isDisabled(),true);
+      await page.unroute(api,respond);
+    }
+  });
+
+  test('SCR-150 redraw timeout keeps the original diary and offers a fresh read', async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage();
+    t.after(() => page.close());
+    await page.clock.install();
+    const date = '2026-11-17';
+    await page.route(`**/api/pets/${petId}/diary/${date}`, route => route.fulfill({json: {
+      date, kind:'day', status:'ready', title:'기존 일기', body:'그림을 기다리며 읽을 글',
+      redrawsLeft:1, drawing:true, picture:'/static/pet-welcome.webp',
+    }}));
+    await page.goto(`${origin}/pets/${petId}/diary/${date}`);
+    const title=page.getByRole('heading',{name:'기존 일기'});
+    await visible(title);
+    await page.clock.fastForward(120_100);
+    await visible(page.getByText('오래 걸리네요. 조금 뒤에 다시 열어 주세요'));
+    await visible(title);
+    assert.equal(await page.locator('.diary-art-frame img').getAttribute('src'),'/static/pet-welcome.webp');
+    assert.equal(await page.getByRole('button',{name:/^새 그림으로 다시 그리기/}).isDisabled(),true);
+    await visible(page.getByRole('button',{name:'다시 해 보기',exact:true}));
+  });
+
   test('SCR-150 uses the saved composition and only navigates to visible dates', async t => {
     const {origin} = await fixture(t, {diaryDays: true});
     const page = await browser.newPage({viewport: {width: 430, height: 790}});

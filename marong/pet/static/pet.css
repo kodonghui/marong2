@@ -47,7 +47,11 @@ small, .muted { color: var(--muted) }
 .card, .skeleton, .sheet { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px }
 .skeleton { min-height: 78px; background: var(--raised) }
 .home-action-placeholder { min-height: 48px }
-.card.pet.archived { opacity: .65 }
+.card.pet.archived, .card.pet.diary-unwritten { opacity: .65 }
+.diary-art-frame.drawing { opacity: .65 }
+.diary-quota-placeholder, .diary-heading-placeholder { min-height: 32px }
+.diary-line-placeholder { min-height: 24px; padding: 6px }
+.diary-picture-placeholder { aspect-ratio: 3 / 2 }
 #offline:not([hidden]) + #page .card.pet { opacity: .55 }
 .card.pet small { margin-left: 6px }
 progress { width: 100%; accent-color: var(--accent) }
