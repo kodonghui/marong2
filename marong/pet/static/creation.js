@@ -491,13 +491,30 @@ function candidates(job, me) {
     show(notice('그림을 그리지 못했어요. 결제는 자동으로 취소했어요.', link('주문 내역 보기', '/me/orders')), link('새로 만들기', '/create'));
     return;
   }
-  if (job.state === 'sheet_needs_operator') { show(notice('조금 더 걸려요. 다 되면 알려 드릴게요.')); return; }
+  if (job.state === 'sheet_needs_operator') {
+    show(job.chosenId ? picture(`/api/media/${job.chosenId}`, '고른 그림') : null,
+      notice('조금 더 걸려요. 다 되면 알려 드릴게요.'));
+    return;
+  }
   const alerts = job.kind === 'living' && ['paid', 'chosen'].includes(job.state)
     ? pushControl(me, {waiting: true}) : null;
   if (job.state === 'chosen') {
     show(picture(`/api/media/${job.chosenId}`, '고른 그림'),
+      el('small', {}, 'AI가 그린 그림'),
       notice('표정을 그리고 있어요. 다 되면 이름을 지어 줘요'), alerts);
   } else {
+    const drawing = job.state === 'paid';
+    const currentRound = 2 - job.regenerationsLeft;
+    const visibleCandidates = drawing
+      ? job.candidates.filter(item => item.round < currentRound)
+      : job.candidates;
+    const completedInRound = drawing ? job.candidates.filter(item => item.round === currentRound) : [];
+    const drawingGrid = drawing ? el('div', {class: 'grid', 'aria-busy': 'true'},
+      Array.from({length: 4}, (_, index) => {
+        const completed = completedInRound[index];
+        return completed ? picture(completed.url, 'AI가 그린 후보')
+          : el('div', {class: 'picture skeleton', 'aria-hidden': 'true'});
+      })) : null;
     let selected;
     const outlet = output();
     const choiceGroup = el('fieldset', {class: 'grid', 'aria-label': '그림 후보'});
@@ -511,7 +528,7 @@ function candidates(job, me) {
     }), 'primary');
     choose.disabled = true;
     const zoom = el('dialog', {class: 'sheet stack', 'aria-label': '그림 크게 보기'});
-    const cards = job.candidates.map(item => {
+    const cards = visibleCandidates.map(item => {
       const control = el('input', {type: 'radio', name: 'candidate', value: item.id, disabled: job.state !== 'candidates',
         onchange: () => { selected = item.id; choose.disabled = false; }});
       const card = el('label', {class: 'candidate-option stack'}, control, picture(item.url, 'AI가 그린 후보'),
@@ -547,8 +564,10 @@ function candidates(job, me) {
       retry, button('닫기', () => sheet.close()));
     const redraw = button(`다시 그려 주세요 · ${job.regenerationsLeft}번 남음`, () => sheet.showModal());
     redraw.disabled = !job.regenerationsLeft;
-    show(job.state === 'paid' ? notice('그림 후보 4장을 그리고 있어요. 몇 분 걸려요. 화면을 닫아도 돼요') : null,
-      choiceGroup, job.state === 'candidates' ? choose : null,
+    show(visibleCandidates.length ? choiceGroup : null, drawingGrid,
+      drawing ? notice('그림 후보 4장을 그리고 있어요. 몇 분 걸려요. 화면을 닫아도 돼요',
+        el('span', {class: 'busy', 'aria-busy': 'true', 'aria-hidden': 'true'})) : null,
+      job.state === 'candidates' ? choose : null,
       job.state === 'candidates' ? redraw : null,
       job.state === 'candidates' ? limit : null,
       alerts, outlet, sheet, zoom);

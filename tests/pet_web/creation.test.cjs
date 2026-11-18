@@ -1421,6 +1421,60 @@ if (require.main === module) {
     assert.deepEqual(sent, [{note: '시험 메모'}]);
   });
 
+  test('SCR-145 shows four drawing slots and retains previous candidates until redraw completes', async t => {
+    const {origin} = await fixture(t, {creationState: 'paid'});
+    const page = await browser.newPage({viewport: {width: 360, height: 844}});
+    t.after(() => page.close());
+    const previous = {id: candidateId, url: '/static/pet-icon.png', round: 0};
+    const next = {id: '00000000-0000-4000-8000-000000000903', url: '/static/pet-icon.png', round: 1};
+    const creation = {id: creationId, state: 'paid', kind: 'living', regenerationsLeft: 2, candidates: []};
+    await page.route(`**/api/creations/${creationId}`, route => route.fulfill({json: creation}));
+    const url = `${origin}/create/${creationId}/candidates`;
+
+    await page.goto(url);
+    const busy = page.locator('.grid[aria-busy="true"]');
+    await visible(busy);
+    assert.equal(await busy.locator('.skeleton').count(), 4);
+    assert.equal(await page.getByRole('radio', {name: /AI가 그린 후보/}).count(), 0);
+
+    Object.assign(creation, {regenerationsLeft: 1, candidates: [previous]});
+    await page.reload();
+    const oldCandidate = page.getByRole('radio', {name: /AI가 그린 후보/});
+    await visible(oldCandidate);
+    assert.equal(await oldCandidate.isDisabled(), true);
+    assert.equal(await busy.locator('.skeleton').count(), 4);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+
+    creation.candidates = [previous, next];
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await visible(busy.getByRole('img', {name: 'AI가 그린 후보'}));
+    assert.equal(await busy.locator('.skeleton').count(), 3);
+    assert.equal(await oldCandidate.count(), 1);
+
+    creation.state = 'candidates';
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await busy.waitFor({state: 'detached'});
+    const candidates = page.getByRole('radio', {name: /AI가 그린 후보/});
+    assert.equal(await candidates.count(), 2);
+    await candidates.first().check();
+    assert.equal(await page.getByRole('button', {name: '이 그림으로 할게요'}).isEnabled(), true);
+  });
+
+  test('SCR-145 keeps the chosen portrait visible while the sheet needs operator review', async t => {
+    const {origin} = await fixture(t, {creationState: 'chosen'});
+    const page = await browser.newPage({viewport: {width: 430, height: 844}});
+    t.after(() => page.close());
+    await page.route(`**/api/creations/${creationId}`, route => route.fulfill({json: {
+      id: creationId, state: 'sheet_needs_operator', kind: 'living', chosenId: candidateId, candidates: [],
+    }}));
+    await page.goto(`${origin}/create/${creationId}/candidates`);
+    await visible(page.getByText('조금 더 걸려요. 다 되면 알려 드릴게요.'));
+    const portrait = page.getByRole('img', {name: '고른 그림'});
+    await visible(portrait);
+    assert.equal(await portrait.getAttribute('src'), '/api/media/' + candidateId);
+    assert.equal(await page.getByRole('button', {name: '이 그림으로 할게요'}).count(), 0);
+  });
+
   test('SCR-145 waits five seconds between candidate and expression status checks', {timeout: 20_000}, async t => {
     const {origin} = await fixture(t, {creationState: 'paid'});
     const page = await browser.newPage();
