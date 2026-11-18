@@ -48,6 +48,33 @@ async def extract(turns):
     return result,data.get('usageMetadata',{})
 
 
+async def extract_friend_memory(payload):
+    from marong.friend_memory import GUIDE, operation_schema
+
+    body = {
+        "systemInstruction": {"parts": [{"text": GUIDE}]},
+        "contents": [{"role": "user", "parts": [{
+            "text": json.dumps(payload, ensure_ascii=False, default=str),
+        }]}],
+        "generationConfig": {
+            "responseMimeType": "application/json", "responseJsonSchema": operation_schema(),
+            "maxOutputTokens": 6000, "thinkingConfig": {"thinkingLevel": "LOW"},
+        },
+    }
+    url = (f"https://aiplatform.googleapis.com/v1/projects/{PROJECT}/locations/global/"
+           f"publishers/google/models/{TEXT_MODEL}:generateContent")
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as http:
+        async with http.post(url, headers=await google_headers(), json=body) as response:
+            if response.status != 200:
+                raise RuntimeError("friend_memory_provider_failed")
+            data = await response.json()
+    candidate = data["candidates"][0]
+    if candidate.get("finishReason") != "STOP":
+        raise ValueError("incomplete memory operations")
+    parts = candidate["content"]["parts"]
+    return json.loads("".join(part.get("text", "") for part in parts if not part.get("thought")))
+
+
 class State(TypedDict):
     call_id:str
     caller_id:int
@@ -143,10 +170,22 @@ class Organizer:
         return graph.compile(checkpointer=checkpointer)
 
     async def fail(self,call_id):
-        async with self.store.pool.connection() as c:
-            await c.execute("""UPDATE call.calls SET organize_status='failed',organize_lease_until=NULL,
+        async with self.store.pool.connection() as c,c.transaction():
+            cur = await c.execute("""UPDATE call.calls SET organize_status='failed',organize_lease_until=NULL,
               organize_next_at=now()+make_interval(secs=>CASE organize_attempts WHEN 1 THEN 10 WHEN 2 THEN 60 ELSE 300 END)
-              WHERE id=%s AND organize_status='running'""",(call_id,))
+              WHERE id=%s AND organize_status='running' RETURNING caller_id,organize_attempts""",(call_id,))
+            row = await cur.fetchone()
+            if row and row["organize_attempts"] >= 3 and self.friend_memory_enabled:
+                await self.reserve_friend_memory(c, call_id, row["caller_id"])
+
+    async def run_friend_memory(self, saver, infer=extract_friend_memory):
+        from marong.friend_memory import MemoryExtraction
+        from marong.graphs.memory import MemoryQueue, compile_graph, run_queue
+
+        queue = MemoryQueue(self.store.pool)
+        extraction = MemoryExtraction(self.store.pool, infer)
+        graph = compile_graph(queue, extraction.prepare, extraction.persist, checkpointer=saver)
+        await run_queue(queue, graph, "call")
 
     async def maintenance(self):
         async with self.store.pool.connection() as c,c.transaction():
@@ -172,18 +211,34 @@ async def main():
     dsn=os.environ['MARONG_CALL_DSN'];store=MemoryStore(dsn);await store.open()
     async with checkpoint_pool(dsn) as pool:
         saver=AsyncPostgresSaver(pool)
-        await saver.setup();worker=Organizer(store);graph=worker.graph(saver);last_sweep=0
-        while True:
+        await saver.setup()
+        worker = Organizer(store)
+        async with asyncio.TaskGroup() as tasks:
+            if worker.friend_memory_enabled:
+                tasks.create_task(worker.run_friend_memory(saver))
+            await run_organizer(worker, saver)
+
+
+async def run_organizer(worker, saver):
+    graph = worker.graph(saver)
+    last_sweep = 0
+    while True:
+        try:
+            if time.monotonic() - last_sweep > 3600:
+                await worker.maintenance()
+                last_sweep = time.monotonic()
+            job = await worker.claim()
+            if not job:
+                await asyncio.sleep(2)
+                continue
+            call_id = job["call_id"]
             try:
-                if time.monotonic()-last_sweep>3600:
-                    await worker.maintenance();last_sweep=time.monotonic()
-                job=await worker.claim()
-                if job:
-                    try:await graph.ainvoke(job,{'configurable':{'thread_id':'call:'+job['call_id']}})
-                    except Exception as error:
-                        print('organize_failed',type(error).__name__,flush=True);await worker.fail(job['call_id'])
-                else:await asyncio.sleep(2)
+                await graph.ainvoke(job, {"configurable": {"thread_id": "call:" + call_id}})
             except Exception as error:
-                print('worker_retry',type(error).__name__,flush=True);await asyncio.sleep(5)
+                print("organize_failed", type(error).__name__, flush=True)
+                await worker.fail(call_id)
+        except Exception as error:
+            print("worker_retry", type(error).__name__, flush=True)
+            await asyncio.sleep(5)
 
 if __name__=='__main__':asyncio.run(main())

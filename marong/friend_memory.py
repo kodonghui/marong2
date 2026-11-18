@@ -7,9 +7,7 @@ import re
 from datetime import date, datetime, time, timedelta
 
 from .friend_card import KST, OPTIONS
-from .llm import text_of
-from .memory import SHARE_BLOCK
-from .safety import owner_private
+from .safety import SHARE_BLOCK, owner_private
 
 log = logging.getLogger("friend_memory")
 KINDS = {"fact", "preference", "event", "relation", "hard"}
@@ -247,6 +245,8 @@ class StructuredInference:
         self.model = model
 
     async def __call__(self, payload):
+        from .llm import text_of
+
         response = await self.llm.create_once({
             "model": self.model, "max_tokens": 6000, "system": GUIDE,
             "messages": [{"role": "user", "content": json.dumps(payload, ensure_ascii=False, default=str)}],

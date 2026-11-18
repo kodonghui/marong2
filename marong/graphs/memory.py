@@ -86,7 +86,7 @@ class MemoryQueue:
                 ids = await message_ids(conn, row["friend_id"], row["watermark"])
         return MemoryState(friend_id=row["friend_id"], source=source, token=str(token),
                            message_ids=ids[:MAX_MESSAGES], next_message_id=ids[MAX_MESSAGES] if len(ids) > MAX_MESSAGES else None,
-                           call_ids=list(map(str, row["calls"])))
+                           call_ids=list(map(str, row["calls"][:1])))
 
     async def finish(self, state, outcome, apply=None):
         """Publish results and advance the cursor in the same transaction under the lease."""

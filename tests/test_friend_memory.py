@@ -282,15 +282,68 @@ async def check_worker(db):
         await store.close()
 
 
+async def check_call_worker(db):
+    from call_memory import MemoryStore
+    from organizer import Organizer, checkpoint_pool as call_checkpoint_pool
+
+    [(friend,)] = db.admin("INSERT INTO marong.friends(name) VALUES ('call worker fixture') RETURNING id")
+    [(caller,)] = db.admin("INSERT INTO call.callers(friend_id) VALUES (%s) RETURNING id", (friend,))
+    [(call,)] = db.admin("""
+        INSERT INTO call.calls(caller_id,client_id,prompt_version,voice,status,ended_at,end_reason,
+                               organize_status,organize_attempts)
+        VALUES (%s,gen_random_uuid(),'fixture','fixture','ended',now(),'hangup','running',3) RETURNING id
+    """, (caller,))
+    [(segment,)] = db.admin("INSERT INTO call.segments(call_id,mode,client_id) VALUES (%s,'start',gen_random_uuid()) RETURNING id",
+                           (call,))
+    [(turn,)] = db.admin("""
+        INSERT INTO call.turns(call_id,segment_id,seq,role,content,started_at,ended_at)
+        VALUES (%s,%s,1,'user','다음 주에 이사해',now(),now()) RETURNING id
+    """, (call, segment))
+    dsn = make_conninfo(db.admin_url, user="marong_call")
+    store = MemoryStore(dsn)
+    await store.pool.open(wait=True)
+    try:
+        with patch.dict("os.environ", {"MARONG_FRIEND_MEMORY": "shadow"}):
+            organizer = Organizer(store)
+        await organizer.fail(call)
+        assert db.admin("SELECT calls FROM marong.memory_jobs WHERE friend_id=%s", (friend,)) == [([call],)]
+        await organizer.fail(call)
+
+        async def infer(payload):
+            [statement] = payload["messages"]
+            assert statement["id"] == turn and statement["channel"] == "call"
+            return {"ops": [{"op": "loop_open", "message_id": turn, "quote": "다음 주에 이사해",
+                             "text": "이사", "due": None, "sensitivity": "low"}]}
+
+        async with call_checkpoint_pool(dsn) as pool:
+            saver = AsyncPostgresSaver(pool)
+            await saver.setup()
+            worker = asyncio.create_task(organizer.run_friend_memory(saver, infer))
+            try:
+                async with asyncio.timeout(10):
+                    while db.admin("SELECT last_outcome FROM marong.memory_jobs WHERE friend_id=%s", (friend,)) != [("ok",)]:
+                        await asyncio.sleep(0.05)
+                assert db.admin("SELECT text,channel,call_turn_id FROM marong.open_loops WHERE friend_id=%s", (friend,)) == [
+                    ("이사", "call", turn)]
+                assert_sqlstate(db, "marong", "SELECT 1 FROM call.turns WHERE false", "42501")
+            finally:
+                worker.cancel()
+                await asyncio.gather(worker, return_exceptions=True)
+    finally:
+        await store.close()
+
+
 if __name__ == "__main__":
     db = TestDB()
     try:
         prepare(db)
         asyncio.run(check_queue(db))
         asyncio.run(check_worker(db))
+        asyncio.run(check_call_worker(db))
     finally:
         db.close()
     print("TC-330: debounced text, call eligibility, concurrent claims, lease recovery, fencing and ID-only checkpoints passed")
     print("TC-331–334: synthetic extraction, room scope, replacement, call provenance and loop expiry passed")
     print("TC-335: tool evidence, private list and room-scoped visibility passed")
     print("Text runtime: scheduled message reached the structured client and was stored in one attempt")
+    print("TC-341: the call organizer saved a sourced open loop after legacy organization failed")
