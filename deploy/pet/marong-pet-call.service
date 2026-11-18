@@ -1,0 +1,23 @@
+[Unit]
+Description=Marong pet call gateway
+After=network-online.target marong-pet.service
+Wants=network-online.target marong-pet.service
+
+[Service]
+Type=simple
+User=marong_pet
+Group=marong_pet
+WorkingDirectory=/opt/marong-pet
+EnvironmentFile=/etc/marong-pet/call.env
+ExecStart=/opt/marong-pet/.venv/bin/python /opt/marong-pet/tools/vertex_live/pet_call.py
+Restart=on-failure
+RestartSec=10s
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

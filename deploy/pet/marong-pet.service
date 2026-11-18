@@ -1,0 +1,28 @@
+[Unit]
+Description=Marong pet web service
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=marong_pet
+Group=marong_pet
+WorkingDirectory=/opt/marong-pet
+Environment=PET_SIGNUP=invite
+Environment=PET_MEDIA_DIR=/var/lib/marong-pet/media
+EnvironmentFile=/etc/marong-pet/app.env
+ExecStart=/opt/marong-pet/.venv/bin/python /opt/marong-pet/run_pet.py
+Restart=on-failure
+RestartSec=10s
+RestartPreventExitStatus=2
+StateDirectory=marong-pet
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

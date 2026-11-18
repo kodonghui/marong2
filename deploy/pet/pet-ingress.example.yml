@@ -1,0 +1,9 @@
+# Local validation example. Replace the reserved hostname only once the public name is approved.
+ingress:
+  - hostname: pet.example.invalid
+    path: '^/pet-call$'
+    service: http://127.0.0.1:8798
+  - hostname: pet.example.invalid
+    path: '^(/(api|static|create|pets|shop|me)(/|$)|/(healthz|signup|pet-worker[.]js|pay/return)$|/?$)'
+    service: http://127.0.0.1:8797
+  - service: http_status:404
