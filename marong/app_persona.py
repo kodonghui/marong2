@@ -11,6 +11,7 @@ from aiohttp import web
 
 from .app_chat import Problem, bad
 from .friend_card import CardError, ModelRun, card_sentence, choices
+from .friend_memory import memory_page
 from .persona_instructions import LIMIT, InterpretationError, interpret, refusal_lines
 from .style import check as check_style
 
@@ -221,6 +222,13 @@ class AppPersona:
                 message["card"] = serialize_question(card, now)
         return messages
 
+    async def memories(self, req):
+        who = await self._who(req)
+        if getattr(self.chat.agent, "friend_memory_mode", "off") != "on":
+            raise Problem("feature_off")
+        before = self.chat._number(req.query.get("before"), "before", minimum=1, maximum=2**63 - 1)
+        return self.chat._json(200, await memory_page(self.cards.store.pool, who["friend_id"], before))
+
     def register(self, app):
         app.router.add_get("/chat/persona/", self.page)
         app.router.add_get("/chat/persona/instructions", self.page)
@@ -232,4 +240,5 @@ class AppPersona:
         app.router.add_get(BASE + "/instructions", self.get_instruction)
         app.router.add_put(BASE + "/instructions", self.put_instruction)
         app.router.add_delete(BASE + "/instructions", self.clear_instruction)
+        app.router.add_get(BASE + "/memories", self.memories)
         app.router.add_post(BASE + "/cards/{cardId}/answer", self.answer)

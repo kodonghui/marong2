@@ -489,6 +489,8 @@ class DiscordAgent(Agent):
     async def _run_tool(self, block, msg):
         if block.name == "card_update":
             return await self._card_update(block, msg)
+        if block.name == "memory_list":
+            return await super()._run_tool(block, msg)
         result = {"type": "tool_result", "tool_use_id": block.id}
         friend_id = getattr(msg, "friend_id", None)
         if block.name not in SCHEDULE_TOOL_NAMES or not friend_id:

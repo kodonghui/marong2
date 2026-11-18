@@ -27,6 +27,7 @@ from .cache_warm import hour_writes
 from .capabilities import TEXT_FEATURE_NAMES, availability, description as feature_description, text_matrix
 from .config import PER_DAY_MAX, Settings, proactive_schedule
 from .friend_card import CARD_UPDATE, KST, QUESTIONS, CardError, FriendCards, ModelRun, proposal_text, question_choices, text_choice
+from .friend_memory import MEMORY_LIST_TOOL, list_for_turn
 from .persona_prompt import FriendPrompt, append_prefix
 from .persona_instructions import InterpretationError, REFUSAL, interpret, refusal_lines
 from .safety import Safety, difficult, owner_private
@@ -208,6 +209,7 @@ class Agent:
         self.llm = llm
         self.on_saved = on_saved or (lambda: None)  # 메시지가 쌓일 때마다 뒤 작업(임베딩·요약)을 깨움
         self.friend_cards = FriendCards(store) if os.getenv("MARONG_FRIEND_CARD") == "on" else None
+        self.friend_memory_mode = os.getenv("MARONG_FRIEND_MEMORY", "off")
         self.friend_prompt = FriendPrompt()
         self.safety = Safety(store, self._safety_classify, model=settings.anthropic_model) if os.getenv("MARONG_SAFETY") == "on" else None
         self._held: dict[tuple[str, str], int] = {}  # (방, 친구) → 묶어 답하려고 저장만 해 둔 첫 말의 id
@@ -1004,7 +1006,12 @@ class Agent:
         return [SET_NAME_TOOL, owner, *self._card_tools(msg)]
 
     def _card_tools(self, msg):
-        return [CARD_UPDATE] if self.friend_cards and getattr(msg, "card_actor", None) else []
+        if not self.friend_cards or not getattr(msg, "card_actor", None):
+            return []
+        tools = [CARD_UPDATE]
+        if getattr(self, "friend_memory_mode", "off") == "on":
+            tools.append(MEMORY_LIST_TOOL)
+        return tools
 
     async def _card_update(self, block, msg):
         result = {"type": "tool_result", "tool_use_id": block.id, "is_error": True}
@@ -1130,6 +1137,8 @@ class Agent:
         result = {"type": "tool_result", "tool_use_id": block.id}
         if block.name == "card_update":
             return await self._card_update(block, msg)
+        if block.name == "memory_list":
+            return await self._list_memory(block, msg, result)
         if block.name == "ask_owner":
             return await self._ask_owner(block, msg, result)
         if block.name != "set_name":
@@ -1145,6 +1154,19 @@ class Agent:
                     "is_error": True}
         log.info("set_name user=%s", short_key(msg.user_key))
         return {**result, "content": f"저장했어. 이제부터 '{name}'(이)라고 불러."}
+
+    async def _list_memory(self, block, msg, result):
+        actor, source = getattr(msg, "card_actor", None), getattr(msg, "card_message", None)
+        if getattr(self, "friend_memory_mode", "off") != "on" or not actor or not source:
+            return {**result, "content": "지금은 이 기억을 볼 수 없어.", "is_error": True}
+        try:
+            found = await list_for_turn(self.store.pool, actor, msg.room_key, source, block.id, block.input or {})
+        except Exception as error:
+            log.warning("memory_list_failed %s", type(error).__name__)
+            return {**result, "content": "지금은 기억을 불러오지 못했어.", "is_error": True}
+        if found is None:
+            return {**result, "content": "지금 말한 친구의 기억만 볼 수 있어.", "is_error": True}
+        return {**result, "content": json.dumps(found, ensure_ascii=False)}
 
     async def _ask_owner(self, block, msg: Incoming, result: dict) -> dict:
         if any(owner_private(value) for value in (block.input or {}).values() if isinstance(value, str)):

@@ -36,6 +36,86 @@ GUIDE = (
     "민감한 기억은 공개 범위를 self로 둬. 계획·일정의 valid_until은 그 날짜에 7일을 더한 날이고 "
     "나머지는 null이야. 열린 일이 끝났다고 했으면 그 고리를 닫아. 모호하면 연산을 만들지 마."
 )
+MEMORY_LIST_TOOL = {
+    "name": "memory_list",
+    "description": "친구 본인이 자신에 대해 어떤 기억을 두고 있는지 또는 어디서 들었는지 물을 때 써. 들은 날과 채널을 답에 붙여.",
+    "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+}
+
+
+def item_view(row, private):
+    value = {"id": row["id"], "kind": row["kind"], "text": row["text"],
+             "heardAt": row["heard_at"].astimezone(KST).isoformat(), "channel": row["channel"],
+             "scope": "group" if row["room_key"] else "me", "sensitive": row["sensitive"] is not None,
+             "validUntil": row["valid_until"].isoformat() if row["valid_until"] else None}
+    if private:
+        value["quote"] = row["quote"]
+    return value
+
+
+async def read_items(conn, friend, *, before=None, group=None, limit=100):
+    sql = """
+        SELECT id,kind,text,heard_at,channel,quote,room_key,sensitive,valid_until
+        FROM marong.memory_items i WHERE friend_id=%s AND status='current'
+          AND (valid_until IS NULL OR valid_until>=%s)
+    """
+    parameters = [friend, datetime.now(KST).date()]
+    if before is not None:
+        sql += """
+          AND (heard_at,id) < (SELECT heard_at,id FROM marong.memory_items
+             WHERE friend_id=i.friend_id AND id=%s)
+        """
+        parameters.append(before)
+    if group is not None:
+        sql += " AND room_key=%s AND sensitive IS NULL AND share='known'"
+        parameters.append(group)
+    query = await conn.execute(sql + " ORDER BY heard_at DESC,id DESC LIMIT %s", (*parameters, limit + 1))
+    rows = await query.fetchall()
+    return [item_view(row, group is None) for row in rows[:limit]], len(rows) > limit
+
+
+async def memory_page(pool, friend, before=None):
+    async with pool.connection() as conn:
+        items, more = await read_items(conn, friend, before=before)
+        loops = []
+        if before is None:
+            query = await conn.execute("""
+                SELECT id,text,due,opened_at,channel FROM marong.open_loops
+                WHERE friend_id=%s AND status='open' AND expires_at>now() ORDER BY due NULLS LAST,id LIMIT 50
+            """, (friend,))
+            loops = [{"id": row["id"], "text": row["text"], "due": row["due"].isoformat() if row["due"] else None,
+                      "heardAt": row["opened_at"].astimezone(KST).isoformat(), "channel": row["channel"]}
+                     for row in await query.fetchall()]
+    return {"items": items, "loops": loops, "hasMore": more}
+
+
+async def list_for_turn(pool, friend, room, source_id, request_id, args):
+    if not isinstance(request_id, str) or not 1 <= len(request_id) <= 100:
+        return None
+    async with pool.connection() as conn, conn.transaction():
+        query = await conn.execute("""
+            SELECT r.is_channel FROM marong.messages m JOIN marong.people p USING(user_key)
+              JOIN marong.rooms r USING(room_key)
+            WHERE m.id=%s AND m.room_key=%s AND m.role='user' AND p.friend_id=%s
+        """, (source_id, room, friend))
+        speaker = await query.fetchone()
+        outcome, why = "refused", "not_speaker"
+        rows, hint = [], None
+        if speaker and args:
+            outcome, why = "invalid", "other_friend"
+        elif speaker:
+            group = None if speaker["is_channel"] else room
+            rows, _ = await read_items(conn, friend, group=group, limit=5)
+            outcome, why = ("ok" if rows else "none_matched"), None
+            if group:
+                hint = "나머지는 둘이 있을 때 말해 줄게."
+        await conn.execute("""
+            INSERT INTO marong.persona_tool_calls(friend_id,room_key,message_id,tool,request_key,outcome,why,arg_chars)
+            VALUES (%s,%s,%s,'memory_list',%s,%s,%s,0) ON CONFLICT(friend_id,request_key) DO NOTHING
+        """, (friend, room, source_id if speaker else None, request_id, outcome, why))
+    if outcome in {"invalid", "refused"}:
+        return None
+    return {"items": rows, "hint": hint if rows or hint else "아직 따로 적어 둔 건 없어."}
 
 
 async def evidence(conn, state):

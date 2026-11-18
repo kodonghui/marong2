@@ -8,7 +8,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.conninfo import make_conninfo
 
 from marong.friend_card import KST
-from marong.friend_memory import MemoryExtraction, apply_ops, expire_loops
+from marong.friend_memory import MemoryExtraction, apply_ops, expire_loops, list_for_turn, memory_page
 from marong.graphs.memory import LEASE, MemoryQueue, checkpoint_pool, compile_graph
 from marong.store import Store
 from pg import ROOT, TestDB
@@ -222,6 +222,20 @@ async def check_queue(db):
         finally:
             await call_store.close()
         assert_sqlstate(db, "marong", "SELECT 1 FROM call.turns WHERE false", "42501")
+        page = await memory_page(store.pool, friend)
+        assert {row["channel"] for row in page["items"]} == {"kakao_group", "call"}
+        assert all("quote" in row and "room_key" not in row for row in page["items"])
+        assert await memory_page(store.pool, friend + 1) == {"items": [], "loops": [], "hasMore": False}
+        after = await memory_page(store.pool, friend, before=page["items"][0]["id"])
+        assert after["items"] == page["items"][1:] and not after["loops"]
+        direct = await list_for_turn(store.pool, friend, "fixture:dm", private, "list-private", {})
+        group = await list_for_turn(store.pool, friend, "fixture:group", newer, "list-group", {})
+        assert {row["channel"] for row in direct["items"]} == {"kakao_group", "call"}
+        assert len(group["items"]) == 1 and "quote" not in group["items"][0] and group["hint"]
+        assert await list_for_turn(store.pool, friend, "fixture:group", private, "list-forged", {}) is None
+        assert await list_for_turn(store.pool, friend, "fixture:dm", private, "list-other", {"friend_id": 77}) is None
+        assert db.admin("SELECT outcome FROM marong.persona_tool_calls ORDER BY id") == [
+            ("ok",), ("ok",), ("refused",), ("invalid",)]
     finally:
         await store.close()
 
@@ -235,3 +249,4 @@ if __name__ == "__main__":
         db.close()
     print("TC-330: debounced text, call eligibility, concurrent claims, lease recovery, fencing and ID-only checkpoints passed")
     print("TC-331–334: synthetic extraction, room scope, replacement, call provenance and loop expiry passed")
+    print("TC-335: tool evidence, private list and room-scoped visibility passed")
