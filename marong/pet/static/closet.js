@@ -156,8 +156,25 @@ export async function closet(id) {
     if (saving || !navigator.onLine) return;
     saving = true;
     for (const entry of [...slots.children, ...grid.querySelectorAll('button')]) entry.disabled = entry !== control;
-    const next = {...wear, [item.slot]: wear[item.slot] === item.itemId ? null : item.itemId};
+    const requested = wear[item.slot] === item.itemId ? null : item.itemId;
     await action(control, outlet, async () => {
+      try { pet = await api(`/api${url}`); }
+      catch (error) {
+        if (error.status !== 404) throw error;
+        show(notice('찾을 수 없어요.', link('홈으로', '/')));
+        return;
+      }
+      wear = outfitOf(pet);
+      if (pet.status === 'archived') {
+        show(notice('보관한 아이예요.', link('돌아가기', url)));
+        return;
+      }
+      if (wear[item.slot] === requested || (requested === null && wear[item.slot] !== item.itemId)) {
+        if (requested) item.withdrawableUntil = null;
+        outlet.replaceChildren(text('화면을 새로 고쳤어요.'));
+        return;
+      }
+      const next = {...wear, [item.slot]: requested};
       preview(next);
       try {
         pet = await api(`/api${url}/outfit`, {method: 'PUT', body: next});
@@ -178,7 +195,7 @@ export async function closet(id) {
       }
     });
     saving = false;
-    render();
+    if (grid.isConnected) render();
   }
 
   function render() {

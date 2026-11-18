@@ -2890,6 +2890,46 @@ if (require.main === module) {
     assert.deepEqual(writes, [{head: null, body: null, neck: null}]);
   });
 
+  test('SCR-152 preserves other slots and does not remove a different item from a stale tab', async t => {
+    const {origin} = await fixture(t, {closetMode: 'living'});
+    const page = await browser.newPage({viewport: {width: 360, height: 844}});
+    t.after(() => page.close());
+    const bodyId = '00000000-0000-4000-8000-000000000956';
+    const otherHat = '00000000-0000-4000-8000-000000000957';
+    const api = '/api/pets/' + petId;
+    let current = {...pet, template: 'dog_small', outfit: {head: garmentId, body: null, neck: null}};
+    const writes = [];
+    await page.route('**' + api, route => route.fulfill({json: current}));
+    await page.route('**' + api + '/outfit', route => {
+      const outfit = route.request().postDataJSON();
+      writes.push(outfit);
+      current = {...current, outfit};
+      return route.fulfill({json: current});
+    });
+    await page.route('**/api/items/*/layer?*', route => route.fulfill({
+      path: path.join(assets, 'pet-icon.png'), contentType: 'image/png',
+    }));
+    const url = origin + '/pets/' + petId + '/closet';
+    const worn = page.getByRole('button', {name: '✓ 털모자', exact: true});
+    await page.goto(url);
+    await visible(worn);
+    current = {...current, outfit: {...current.outfit, body: bodyId}};
+    await worn.click();
+    await visible(page.getByRole('button', {name: '털모자', exact: true}));
+    assert.deepEqual(writes, [{head: null, body: bodyId, neck: null}]);
+    assert.equal(await page.locator('[data-slot=body]').count(), 1);
+
+    current = {...current, outfit: {...current.outfit, head: garmentId}};
+    await page.reload();
+    await visible(worn);
+    current = {...current, outfit: {...current.outfit, head: otherHat}};
+    await worn.click();
+    await visible(page.getByText('화면을 새로 고쳤어요.', {exact: true}));
+    await visible(page.getByRole('button', {name: '털모자', exact: true}));
+    assert.equal(writes.length, 1);
+    assert.match(await page.locator('[data-slot=head]').getAttribute('src'), new RegExp(otherHat));
+  });
+
   test('SCR-152 restores the outfit on a wrong-slot response and hides shopping for a memorial pet', async t => {
     const {origin, writes} = await fixture(t, {closetMode: 'memorial', outfitFailure: true});
     const page = await browser.newPage({viewport: {width: 430, height: 780}});
