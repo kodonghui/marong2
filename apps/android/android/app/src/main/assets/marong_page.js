@@ -271,6 +271,7 @@
     // Back from Android's settings or another app: notifications may have been turned on or off.
     listen('MarongPush', 'resumed', () => {
       syncChat(false, true);
+      window.dispatchEvent(new Event('marongdevice'));
       report();
     });
     syncChat(false, true);
@@ -298,6 +299,7 @@
       // The chat menu's buttons (SCR-109, SPEC-140). Each returns false when the app cannot do it.
       openNotificationSettings: (channel) => send('MarongPush', 'openNotificationSettings', channel === 'ring' ? { channel: 'ring' } : {}),
       openFullScreenSettings: () => send('MarongPush', 'openFullScreenSettings'),
+      openInstallSettings: () => send('MarongPush', 'openInstallSettings'),
       deviceState: () => Promise.resolve(ask('MarongPush', 'state')).catch(() => null),
     }),
   });

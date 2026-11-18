@@ -20,6 +20,7 @@ final class Channels {
     static final String REMINDER = "marong_reminder";
     /** Marong's own call: the phone's ringtone as a call. */
     static final String RING = "marong_ring";
+    static final String UPDATE = "marong_update";
 
     static final long[] RING_VIBRATION = { 0, 800, 800 };
 
@@ -72,5 +73,10 @@ final class Channels {
         manager.createNotificationChannel(talk);
         manager.createNotificationChannel(reminder);
         manager.createNotificationChannel(ring);
+        NotificationChannel update = new NotificationChannel(UPDATE, context.getString(R.string.update_channel_name),
+            NotificationManager.IMPORTANCE_LOW);
+        update.setDescription(context.getString(R.string.update_channel_description));
+        update.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
+        manager.createNotificationChannel(update);
     }
 }

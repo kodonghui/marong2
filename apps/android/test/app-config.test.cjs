@@ -20,6 +20,8 @@ const OWN_PERMISSIONS = [
   'android.permission.MODIFY_AUDIO_SETTINGS', // SPEC-106
   'android.permission.POST_NOTIFICATIONS', // SPEC-103, messages (app-chat SPEC-121), rings (app-ring SPEC-132)
   'android.permission.RECORD_AUDIO', // SPEC-106
+   'android.permission.REQUEST_INSTALL_PACKAGES', // SPEC-299
+   'android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION', // SPEC-299
   'android.permission.USE_FULL_SCREEN_INTENT', // app-ring SPEC-132, SPEC-133: the ring screen over the lock screen
 ];
 // What the built app asks for once the libraries' manifests are merged in (docs/app-chat.md TC-133).
@@ -35,7 +37,7 @@ test('TC-118: the app asks for exactly the permissions the spec names', () => {
   assert.deepEqual(permissionsOf(manifest), OWN_PERMISSIONS);
 });
 
-test('TC-133: the built app, with the libraries merged in, asks for no more than these', (t) => {
+test('TC-133/226: the built app, with the libraries merged in, asks for exactly 13 permissions', (t) => {
   const merged = path.join(APP, 'android', 'app', 'build', 'intermediates', 'merged_manifests', 'release',
     'processReleaseManifest', 'AndroidManifest.xml');
   if (!fs.existsSync(merged)) {
@@ -67,6 +69,10 @@ test('TC-133, TC-146: only FCM and the ring notification reach the new parts of 
   assert.match(block('RingActivity'), /android:exported="false"/);
   assert.match(block('RingActivity'), /android:excludeFromRecents="true"/);
   assert.match(block('RingDeclineReceiver'), /android:exported="false"/);
+  assert.match(block('AppUpdateJob'), /android:permission="android.permission.BIND_JOB_SERVICE"/);
+  assert.match(block('AppUpdateJob'), /android:exported="false"/);
+  assert.match(block('AppUpdateReceiver'), /android:exported="false"/);
+  assert.match(manifest, /<action android:name="android\.intent\.action\.MY_PACKAGE_REPLACED" \/>/);
 });
 
 test('TC-133: google-services.json stays out of Git (SPEC-127)', () => {

@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 from aiohttp import web
 import psycopg
 
+from .app_release import AppReleases
 from .app_store import APP_KEY
 from .discord_dm import DEFAULT_ORIGIN, DiscordIncoming, proactive_preference
 from .google_calendar import LINK_MARK, command as google_command
@@ -43,6 +44,7 @@ FILES = {"": ("index.html", "text/html"), "chat.js": ("chat.js", "text/javascrip
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 FID = re.compile(r"[A-Za-z0-9_-]{16,200}\Z")
 VERSION = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\Z")
+RELEASE_CHECK_PATH = "/chat/api/app/release"
 NUMBER = re.compile(r"[0-9]{1,18}\Z")
 PROBLEMS = {
     "invalid_request": (400, "요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)"),
@@ -52,6 +54,7 @@ PROBLEMS = {
     "no_dm": (403, "이 친구의 디스코드 DM 연결이 없거나 아직 DM을 한 번도 보내지 않음"),
     "too_many_messages": (429, "1분에 20번 넘게 보냄"),
     "no_picture": (404, "그 이름의 그림이 없음"),
+    "no_release": (404, "지금 받을 수 있는 앱 파일이 아님"),
     "feature_off": (403, "이 기능이 꺼져 있음"),
     "needs_owner": (403, "선톡을 늘리는 요청은 동희님이 정함"),
     "not_found": (404, "이 계정으로 찾을 수 없음"),
@@ -83,7 +86,7 @@ def bad(*errors) -> Problem:
 
 class AppChat:
     def __init__(self, store, agent, client, access, push, *, origin: str = DEFAULT_ORIGIN, port: int = DEFAULT_PORT,
-                 timezone: str = "Asia/Seoul", clock=time.monotonic):
+                 timezone: str = "Asia/Seoul", clock=time.monotonic, releases: AppReleases | None = None):
         self.store = store
         self.agent = agent      # DiscordAgent: the same one that answers the Discord DM
         self.client = client    # DiscordDM: its room locks keep one answer at a time per room
@@ -93,6 +96,7 @@ class AppChat:
         self.port = port
         self.tz = ZoneInfo(timezone)
         self.clock = clock
+        self.releases = releases if releases is not None else AppReleases()
         self.tick = asyncio.Event()          # set and replaced whenever a message is saved in this process
         self.waiters = defaultdict(list)     # friend id -> events of their waits, oldest first
         self.sent = defaultdict(deque)       # friend id -> when their last messages came (rate limit)
@@ -147,12 +151,16 @@ class AppChat:
         except Exception as e:
             log.error("app_chat_error %s trace=%s", type(e).__name__, trace)
             res = self._problem(Problem("internal"), trace)
+        if req.method == "GET" and req.path == RELEASE_CHECK_PATH:
+            prefix, _, version = req.headers.get("User-Agent", "").partition("/")
+            if prefix == "MarongApp" and VERSION.fullmatch(version):
+                log.info("app_release check version=%s status=%d", version, res.status)
         res.headers.update(HEADERS)
         if req.get("cache") and res.status == 200:  # a picture of a picture set never changes (API-140)
             res.headers["Cache-Control"] = req["cache"]
         return res
 
-    async def _who(self, req, write: bool = False) -> dict:
+    async def _who(self, req, write: bool = False, *, require_dm: bool = True) -> dict:
         """The signed-in call friend and their DM room (SPEC-111). Writes must come from the call address."""
         if write and req.headers.get("Origin") != self.origin:
             raise Problem("cross_site")
@@ -164,9 +172,33 @@ class AppChat:
         who = await self.store.app_login(email_hash)
         if not who or not who["enabled"]:
             raise Problem("not_allowed")
-        if not who["room_key"] or not who["channel_id"]:
+        if require_dm and (not who["room_key"] or not who["channel_id"]):
             raise Problem("no_dm")
         return who
+
+    async def app_release(self, req):
+        await self._who(req, require_dm=False)
+        release = await asyncio.to_thread(self.releases.latest)
+        return self._json(200, release.public()) if release else web.Response(status=204)
+
+    async def app_apk(self, req):
+        await self._who(req, require_dm=False)
+        opened = await asyncio.to_thread(self.releases.open, req.match_info["file"])
+        if opened is None:
+            raise Problem("no_release")
+        release, file = opened
+        with file:
+            res = web.StreamResponse(headers={**HEADERS, "Content-Length": str(release.size),
+                                              "Content-Type": "application/vnd.android.package-archive"})
+            try:
+                await res.prepare(req)
+                while chunk := await asyncio.to_thread(file.read, 65536):
+                    await res.write(chunk)
+                await res.write_eof()
+            except ConnectionError:
+                return res  # the phone disconnected, so no complete download was served
+        log.info("app_release apk sent code=%d", release.code)
+        return res
 
     @staticmethod
     async def _body(req) -> dict:
@@ -465,6 +497,8 @@ class AppChat:
         app.router.add_get("/chat/api/messages/wait", self.wait)
         app.router.add_put("/chat/api/devices/{installId}", self.device)
         app.router.add_get("/chat/topics/{set}/{file}", self.picture)
+        app.router.add_get(RELEASE_CHECK_PATH, self.app_release, allow_head=False)
+        app.router.add_get("/chat/app/{file:.*}", self.app_apk, allow_head=False)
         self.persona.register(app)
         return app
 

@@ -127,7 +127,6 @@ describe('chat page', { skip }, () => {
 
   it('TC-132, TC-123: a sent message shows at once as 보내는 중, then Marong writing and her reply', async () => {
     reset();
-    site.state.reply = { afterMs: 1500, text: '응! 나도 반가워' };
     site.state.postDelayMs = 400;
     const { context, page } = await openChat();
     await ready(page);
@@ -136,8 +135,11 @@ describe('chat page', { skip }, () => {
     await page.waitForSelector('.message.me.sending');
     assert.equal(await page.textContent('.message.me.sending time'), '보내는 중');
     assert.equal(await page.inputValue('#text'), '', 'the box is emptied');
+    await page.waitForSelector('li[data-id="36"]');
+    site.takeUp(36);
     await page.waitForFunction(() => !document.getElementById('typing').hidden);
     await shot(page, 'chat-typing');
+    site.answer(36, '응! 나도 반가워');
     await page.waitForFunction(() => [...document.querySelectorAll('.bubble')].some((b) => b.textContent === '응! 나도 반가워'));
     assert.equal(await page.isHidden('#typing'), true, 'writing ends with her reply');
     assert.equal(await page.locator('.message.sending').count(), 0);
@@ -171,7 +173,6 @@ describe('chat page', { skip }, () => {
     reset();
     site.state.read = 34;
     site.state.answered = 29;
-    site.state.reply = { pickupMs: 900, afterMs: 2800, text: '응, 다 읽었어!' };
     const { context, page } = await openChat({ at: NIGHT });
     await ready(page);
     assert.equal(await readOf(page, 34).textContent(), '읽음', 'on opening: read and not answered yet');
@@ -186,6 +187,7 @@ describe('chat page', { skip }, () => {
     assert.equal(await readOf(page, 36).count(), 0, 'sent, not read yet');
     assert.equal(await page.isHidden('#typing'), true);
     const began = Date.now();
+    site.takeUp(36);
     await readOf(page, 36).waitFor();
     assert.ok(Date.now() - began < 1500, `읽음 after ${Date.now() - began} ms`);
     assert.equal(await page.isVisible('#typing'), true, '대답 중 with it');
@@ -199,6 +201,7 @@ describe('chat page', { skip }, () => {
       return log.scrollHeight - log.scrollTop - log.clientHeight < 2;
     }), true, 'the end of the log stays in view');
     await shot(page, 'chat-read-typing-night');
+    site.answer(36, '응, 다 읽었어!');
     await bubbleShown(page, '응, 다 읽었어!');
     assert.equal(await page.locator('.read').count(), 0, 'answered: no 읽음 left');
     assert.equal(await page.isHidden('#typing'), true, '대답 중 ends with her answer');
@@ -237,13 +240,15 @@ describe('chat page', { skip }, () => {
   it('TC-157: a server from before 읽음 shows no 읽음, and 대답 중 still works', async () => {
     reset();
     site.state.marks = false;
-    site.state.reply = { pickupMs: 300, afterMs: 1500, text: '옛 서버 답' };
     const { context, page } = await openChat();
     await ready(page);
     await page.fill('#text', '안녕');
     await page.click('#send');
+    await page.waitForSelector('li[data-id="36"]');
+    site.takeUp(36);
     await page.waitForFunction(() => !document.getElementById('typing').hidden);
     assert.equal(await page.locator('.read').count(), 0);
+    site.answer(36, '옛 서버 답');
     await bubbleShown(page, '옛 서버 답');
     assert.equal(await page.locator('.read').count(), 0);
     assert.equal(await page.isHidden('#typing'), true);
@@ -528,6 +533,41 @@ describe('chat page', { skip }, () => {
       assert.equal(await noDevice.page.isHidden(id), true, `${id} hidden`);
     }
     await noDevice.context.close();
+  });
+
+  it('TC-225: the update row opens settings and re-reads the Android permission in both themes', async () => {
+    for (const at of [DAY, NIGHT]) {
+      const { page } = await openChat({ at, device: { viewport: { width: 360, height: 800 } }, init: () => {
+        window.updatePermission = false;
+        window.updateSettings = 0;
+        window.__marongApp = {
+          deviceState: async () => ({ installUpdates: window.updatePermission }),
+          openInstallSettings: () => { window.updateSettings += 1; },
+        };
+      } });
+      await ready(page);
+      await page.click('#menu-button');
+      const row = page.locator('.menu-update');
+      await row.waitFor({ state: 'visible' });
+      assert.equal(await row.locator('p').textContent(), '자동 업데이트: 꺼짐 · 켜 두면 새 버전이 저절로 깔려');
+      await row.getByRole('button', { name: '켜기' }).click();
+      assert.equal(await page.evaluate(() => window.updateSettings), 1);
+      const bounds = await row.boundingBox();
+      assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 360, 'the update row fits 360px');
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 360);
+      await page.evaluate(() => {
+        window.updatePermission = true;
+        window.dispatchEvent(new Event('marongdevice'));
+      });
+      await page.waitForFunction(() => document.querySelector('.menu-update p').textContent === '자동 업데이트: 켜짐');
+      assert.equal(await row.locator('button').isHidden(), true);
+    }
+    for (const init of [null, () => { window.__marongApp = { deviceState: async () => ({}) }; }]) {
+      const { page } = await openChat({ init });
+      await ready(page);
+      await page.click('#menu-button');
+      assert.equal(await page.locator('.menu-update').isHidden(), true, 'browser and older app have no update row');
+    }
   });
 
   it("SPEC-123 with the app's page script: the phone report, chat on screen, and the menu after a change", async () => {

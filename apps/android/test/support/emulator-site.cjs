@@ -39,7 +39,8 @@ function route(report) {
   return { fid, delivery, ring: ringRoute };
 }
 
-async function startEmulatorSite({ port = 8787, fidFile = null, log = () => {} } = {}) {
+async function startEmulatorSite({ port = 8787, fidFile = null, log = () => {},
+  update = { release: null, apk: null, mode: 'normal' } } = {}) {
   const chat = await startChatSite({ waitMs: 25_000 });
   const call = await startCallSite({ log, ready: (url) => ({ ring: RING_IN_URL.test(url) }) });
   chat.state.me.body = { ...chat.state.me.body, delivery: { to: 'discord', reason: 'no_device' },
@@ -47,6 +48,7 @@ async function startEmulatorSite({ port = 8787, fidFile = null, log = () => {} }
   const chatPort = Number(new URL(chat.url).port);
   const callPort = Number(new URL(call.url).port);
   const reports = [];
+  const updateRequests = [];
   const agent = new http.Agent({ keepAlive: true });
   const tunnels = new Set();
 
@@ -72,6 +74,39 @@ async function startEmulatorSite({ port = 8787, fidFile = null, log = () => {} }
     req.on('data', (chunk) => chunks.push(chunk));
     req.on('end', () => {
       const body = Buffer.concat(chunks);
+      if (pathname === '/chat/api/app/release' || pathname.startsWith('/chat/app/')) {
+        updateRequests.push({ path: pathname, method: req.method, query: Boolean(search), body: body.length,
+          headers: Object.keys(req.headers).sort(), agent: req.headers['user-agent'],
+          hasFixtureCookie: (req.headers.cookie || '').includes('marong_fixture=logged_in') });
+        res.setHeader('Cache-Control', 'no-store');
+        if (pathname === '/chat/api/app/release') {
+          if (update.mode === 'redirect') {
+            res.writeHead(302, { Location: '/fixture-login' }).end();
+          } else if (update.release) {
+            res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(update.release));
+          } else {
+            res.writeHead(204).end();
+          }
+          return;
+        }
+        if (pathname !== update.release?.url || !update.apk || update.mode === 'missing') {
+          res.writeHead(404).end();
+          return;
+        }
+        const apk = update.apk;
+        res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+        res.setHeader('Content-Length', apk.length + (update.mode === 'oversize' ? 1 : 0));
+        res.writeHead(200);
+        if (update.mode === 'truncate') {
+          res.write(apk.subarray(0, 8192), () => res.destroy());
+        } else {
+          res.end(update.mode === 'oversize' ? Buffer.concat([apk, Buffer.alloc(1)]) : apk);
+        }
+        return;
+      }
+      if (req.method === 'GET' && pathname === '/') {
+        res.setHeader('Set-Cookie', 'marong_fixture=logged_in; Path=/; HttpOnly; SameSite=Lax');
+      }
       if (toChat && req.method === 'PUT' && DEVICE_PATH.test(pathname)) report(body.toString('utf8'));
       const upstream = http.request({ host: '127.0.0.1', port: toChat ? chatPort : callPort, method: req.method,
         path: req.url, headers: req.headers, agent }, (answer) => {
@@ -112,6 +147,7 @@ async function startEmulatorSite({ port = 8787, fidFile = null, log = () => {} }
     chat,
     call,
     reports,
+    updateRequests,
     async close() {
       for (const side of tunnels) side.destroy();
       front.closeAllConnections?.();

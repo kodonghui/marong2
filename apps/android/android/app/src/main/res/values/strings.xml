@@ -27,4 +27,9 @@
     <string name="ring_hello_text">마롱이가 먼저 걸었어요</string>
     <string name="ring_answer">받기</string>
     <string name="ring_decline">거절</string>
+    <string name="update_channel_name">앱 업데이트</string>
+    <string name="update_channel_description">마롱이 앱 새 버전을 깔 때 확인이 필요하면 알려 줘요.</string>
+    <string name="update_notification_title">마롱이 앱 새 버전이 있어요</string>
+    <string name="update_notification_body">눌러서 업데이트해 줘. (%1$s)</string>
+    <string name="update_notification_public">마롱이 앱 새 버전</string>
 </resources>
