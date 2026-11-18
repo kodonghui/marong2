@@ -204,6 +204,10 @@ async function start() {
     else if (/^\/shop\/[^/]+$/.test(path)) await shopItem(path.split('/')[2]);
     else if (path === '/pay/return') await paymentReturn();
     else failurePage(new Failure(404));
+    if (sessionStorage.getItem('pet:creation-refresh') === path) {
+      sessionStorage.removeItem('pet:creation-refresh');
+      page.prepend(banner('화면을 새로 고쳤어요.'));
+    }
   } catch (error) {
     failurePage(error);
   }

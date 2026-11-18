@@ -37,10 +37,11 @@ async function body(request) {
 async function fixture(t, {signedIn = true, consent = true, invite = false, reportLimited = false, payment = 'fulfilled',
   closetMode, paymentsEnabled = false, layerFailure = false, outfitFailure = false, orderRetry = false,
   diaryDecor = false, subscription, exhaustedRedraw = false, diaryDays = false, chatNotices = [],
-  creationState, pushKey = null} = {}) {
+  creationState, pushKey = null, holdTraits, holdFinish} = {}) {
   let member = signedIn;
   let state = creationState;
-  let selected = null;
+  let selected = creationState === 'sheet_ready' ? candidateId : null;
+  let currentTraits = {...traits};
   let memberPet = {...pet, intro: {personality: ['느긋함'], likes: '산책', dislikes: '', callMe: '누나'}};
   if (diaryDays) memberPet = {...memberPet, template: 'dog_small',
     sheet: {...memberPet.sheet, smile: '/static/pet-welcome.webp'}};
@@ -59,7 +60,7 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
     withdrawable: true, withdrawalNote: '한 번 입히면 철회할 수 없어요.'};
   function job() {
     const preview = ['previewed', 'paid', 'candidates', 'chosen', 'sheet_ready', 'done'].includes(state);
-    return {id: creationId, state, kind: 'living', traits, multiplePets: false,
+    return {id: creationId, state, kind: 'living', traits: currentTraits, multiplePets: false,
       preview: preview ? '/static/pet-icon.png' : null, regenerationsLeft: 2,
       candidates: ['candidates', 'chosen'].includes(state) ? [{id: candidateId, url: '/static/pet-icon.png'}] : [],
       chosenId: selected, petId: state === 'done' ? petId : null, priceKrw: 5900, expiresAt: '2026-12-17T00:00:00Z'};
@@ -143,7 +144,14 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
       if (req.method === 'GET') return json(res, job());
       const data = JSON.parse(await body(req));
       writes.push(data);
-      if (stage === 'confirm-traits') state = 'traits_confirmed';
+      if (stage === 'traits' || stage === 'confirm-traits') {
+        if (stage === 'traits') await holdTraits?.(data);
+        if (state !== 'traits') return json(res, {code: 'wrong_state'}, 409);
+        if (stage === 'traits') {
+          if (data.breedGuess === '거절 입력') return json(res, {code: 'invalid_input'}, 400);
+          currentTraits = {...currentTraits, ...data};
+        } else state = 'traits_confirmed';
+      }
       if (stage === 'preview') { state = 'previewed'; return json(res, {}, 202); }
       if (stage === 'checkout') {
         if (data.useFreeTicket !== true || !/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(data.idempotencyKey)) {
@@ -157,7 +165,11 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
         state = 'sheet_ready';
         return json(res, job(), 202);
       }
-      if (stage === 'finish') { state = 'done'; return json(res, pet, 201); }
+      if (stage === 'finish') {
+        await holdFinish?.();
+        state = 'done';
+        return json(res, pet, 201);
+      }
       return json(res, job());
     }
     if (pathname === `/api/media/${candidateId}`) {
@@ -431,6 +443,76 @@ if (require.main === module) {
     await page.goto(origin + '/create');
     await visible(page.getByRole('link', {name: '설정에서 바꾸기'}));
     assert.equal(await page.getByRole('button', {name: '올리기'}).count(), 0);
+  });
+
+  test('SCR-143 saves the changed field, waits for its receipt, and refreshes a stale tab', async t => {
+    const hold = Promise.withResolvers();
+    t.after(hold.resolve);
+    const {origin, writes} = await fixture(t, {creationState: 'traits',
+      holdTraits: data => data.breedGuess === '믹스' ? hold.promise : undefined});
+    const context = await browser.newContext({viewport: {width: 360, height: 820}});
+    t.after(() => context.close());
+    const [first, stale] = await Promise.all([context.newPage(), context.newPage()]);
+    const documentUrl = `${origin}/create/${creationId}/traits`;
+    const apiUrl = `${origin}/api/creations/${creationId}`;
+    await Promise.all([first.goto(documentUrl), stale.goto(documentUrl)]);
+    const breed = first.getByLabel('품종 추정');
+    await breed.fill('거절 입력');
+    await breed.blur();
+    const breedStatus = first.locator('label:has([name=breedGuess]) + div');
+    await visible(breedStatus.getByText('입력을 확인해 주세요.'));
+    await breed.fill('믹스');
+    await breed.blur();
+    await visible(breedStatus.locator('xpath=self::*[@aria-busy="true"]'));
+    const confirm = first.getByRole('button', {name: '이대로 만들기'});
+    await confirm.click();
+    assert.equal(await confirm.isDisabled(), true);
+    assert.deepEqual(writes, [{breedGuess: '거절 입력'}, {breedGuess: '믹스'}]);
+
+    await stale.request.patch(apiUrl + '/traits', {data: {patternNotes: '다른 탭에서 고친 메모'}});
+    hold.resolve();
+    await visible(first.getByRole('heading', {name: '미리 보기와 결제'}));
+    const fromApi = await (await first.request.get(apiUrl)).json();
+    assert.equal(fromApi.traits.breedGuess, '믹스');
+    assert.equal(fromApi.traits.patternNotes, '다른 탭에서 고친 메모');
+    assert.deepEqual(writes.slice(2), [{patternNotes: '다른 탭에서 고친 메모'}, {}]);
+
+    const lateEdit = stale.getByLabel('품종 추정');
+    await lateEdit.fill('늦게 고친 값');
+    await lateEdit.blur();
+    await stale.waitForURL('**/preview');
+    await visible(stale.getByText('화면을 새로 고쳤어요.'));
+    assert.equal((await (await stale.request.get(apiUrl)).json()).traits.breedGuess, '믹스');
+  });
+
+  test('SCR-146 keeps the draft across reloads and shows progress until naming succeeds', async t => {
+    const finish = Promise.withResolvers();
+    t.after(finish.resolve);
+    const {origin, writes} = await fixture(t, {creationState: 'sheet_ready', holdFinish: () => finish.promise});
+    const page = await browser.newPage({viewport: {width: 430, height: 820}});
+    t.after(() => page.close());
+    await page.goto(`${origin}/create/${creationId}/name`);
+    const name = page.getByLabel('이름', {exact: true});
+    const callMe = page.getByLabel('나를 부르는 말');
+    await name.fill('도토리');
+    await callMe.fill('누나');
+    await page.getByRole('checkbox', {name: '느긋함'}).check();
+    for (let index = 0; index < 2; index++) {
+      await page.reload();
+      await visible(name);
+      assert.equal(await name.inputValue(), '도토리');
+      assert.equal(await callMe.inputValue(), '누나');
+      assert.equal(await page.getByRole('checkbox', {name: '느긋함'}).isChecked(), true);
+    }
+    const submit = page.getByRole('button', {name: '만나러 가기'});
+    await submit.click();
+    await visible(page.getByText('첫 인사를 준비하고 있어요'));
+    assert.equal(await submit.isDisabled(), true);
+    finish.resolve();
+    await page.waitForURL(`**/pets/${petId}`);
+    await visible(page.getByText('누나, 나 왔어!'));
+    assert.equal(await page.evaluate(key => sessionStorage.getItem(key), `pet:profile:${creationId}`), null);
+    assert.deepEqual(writes[0].intro.personality, ['느긋함']);
   });
 
   test('SCR-142 encodes photo fallback locally at 1600px JPEG 0.9 and explains unsupported HEIC', async t => {

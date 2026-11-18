@@ -1,4 +1,4 @@
-import {action, AI_NOTICE, api, banner, button, CONSENT, currency, dateLabel, el, Failure, header,
+import {action, AI_NOTICE, api, banner, button, CONSENT, currency, dateLabel, el, errorText, Failure, header,
   link, notice, picture, show, showTabs, text} from './pet.js';
 import {pendingCard} from './home.js';
 import {pushControl} from './push-control.js';
@@ -20,6 +20,18 @@ const home = {label: '홈', url: '/'};
 const consentNotice = () => banner(CONSENT, link('설정에서 바꾸기', '/me#consents', 'plain'));
 const again = (message, label = '사진 다시 고르기') => notice(message, link(label, '/create', 'button primary'));
 const output = () => el('div', {'aria-live': 'polite'});
+
+async function changeCreation(job, operation, options, {refreshBusy = false} = {}) {
+  const path = `/api/creations/${job.id}`;
+  try { return await api(`${path}/${operation}`, options); }
+  catch (error) {
+    if (error.code !== 'wrong_state' && !(refreshBusy && error.code === 'busy')) throw error;
+    const target = creationPath(await api(path));
+    sessionStorage.setItem('pet:creation-refresh', target);
+    location.replace(target);
+    return null;
+  }
+}
 
 function waitForUpdate(id, onData) {
   const began = Date.now();
@@ -217,23 +229,80 @@ function traits(job) {
   const t = job.traits;
   const outlet = output();
   const submit = el('button', {type: 'submit', class: 'primary'}, '이대로 만들기');
-  const form = el('form', {}, selectField('종', 'species', t.species), stringField('품종 추정', 'breedGuess', 30, t.breedGuess),
+  const fields = el('fieldset', {class: 'stack'}, selectField('종', 'species', t.species), stringField('품종 추정', 'breedGuess', 30, t.breedGuess),
     checks('털 색 (1~3개)', 'coatColors', colors, t.coatColors),
     selectField('무늬', 'pattern', t.pattern), stringField('무늬 설명', 'patternNotes', 60, t.patternNotes),
     text('사진에서 보는 방향으로 적어요', 'muted'),
     selectField('귀 모양', 'earShape', t.earShape), selectField('눈 색', 'eyeColor', t.eyeColor),
     selectField('체격', 'build', t.build), selectField('털 길이', 'furLength', t.furLength),
-    stringField('특징', 'distinctive', 60, t.distinctive), outlet, submit);
+    stringField('특징', 'distinctive', 60, t.distinctive));
+  const form = el('form', {}, fields, outlet, submit);
+  const feedback = new Map();
+  for (const input of fields.querySelectorAll('[name]')) {
+    if (feedback.has(input.name)) continue;
+    const status = el('div', {class: 'busy', 'aria-live': 'polite', hidden: true});
+    const group = input.name === 'coatColors' ? input.closest('fieldset') : input.closest('label');
+    group.after(status);
+    feedback.set(input.name, status);
+  }
+
+  const modified = new Set();
+  const acknowledged = {...t, coatColors: [...t.coatColors].sort()};
+  let pending = Promise.resolve();
+  let confirming = false, refreshing = false;
+  const readField = (values, name) => name === 'coatColors' ? values.getAll(name).sort() : values.get(name);
+  const changed = (name, value) => name === 'coatColors'
+    ? value.join(',') !== acknowledged[name].join(',') : value !== acknowledged[name];
+
+  async function save(name, value) {
+    const status = feedback.get(name);
+    status.replaceChildren();
+    if (!changed(name, value)) {
+      status.hidden = true;
+      return;
+    }
+    status.hidden = false;
+    status.setAttribute('aria-busy', 'true');
+    try {
+      if (name === 'coatColors' && !value.length) throw new Failure(400, {code: 'invalid_input'});
+      const result = await changeCreation(job, 'traits', {method: 'PATCH', body: {[name]: value}});
+      if (result === null) refreshing = true;
+      else acknowledged[name] = value;
+    } catch (error) {
+      errorText(error, status);
+      throw error;
+    } finally {
+      status.removeAttribute('aria-busy');
+      status.hidden = !status.childElementCount;
+    }
+  }
+
+  form.addEventListener('input', event => {
+    if (feedback.has(event.target.name)) modified.add(event.target.name);
+  });
+  form.addEventListener('change', event => {
+    const {name} = event.target;
+    if (confirming || refreshing || !navigator.onLine || !feedback.has(name)) return;
+    modified.add(name);
+    const value = readField(new FormData(form), name);
+    pending = pending.then(() => refreshing ? null : save(name, value)).catch(() => {});
+  });
   form.addEventListener('submit', event => {
     event.preventDefault();
     action(submit, outlet, async () => {
       const values = new FormData(form);
-      const body = Object.fromEntries(values);
-      body.coatColors = values.getAll('coatColors');
-      if (!body.coatColors.length) throw new Failure(400, {code: 'invalid_input'});
-      await api(`/api/creations/${job.id}/traits`, {method: 'PATCH', body});
-      const next = await api(`/api/creations/${job.id}/confirm-traits`, {method: 'POST', body: {}});
-      location.assign(creationPath(next));
+      confirming = fields.disabled = true;
+      try {
+        await pending;
+        for (const name of modified) {
+          if (refreshing) return;
+          try { await save(name, readField(values, name)); }
+          catch { return; }
+        }
+        if (refreshing) return;
+        const next = await changeCreation(job, 'confirm-traits', {method: 'POST', body: {}});
+        if (next) location.assign(creationPath(next));
+      } finally { confirming = fields.disabled = false; }
     });
   });
   show(job.multiplePets ? banner('사진에 여러 아이가 있어요. 한 아이만 나온 사진이면 더 닮아요', link('사진 다시 고르기', '/create', 'plain')) : null, form);
@@ -242,10 +311,11 @@ function traits(job) {
 async function preview(job, me) {
   if (job.state === 'expired') { show(again('30일이 지나 미리 보기와 사진을 지웠어요.', '새로 만들기')); return; }
   const outlet = output();
-  const path = `/api/creations/${job.id}`;
   if (!job.preview) {
     const draw = button(job.failure === 'preview_failed' ? '다시 그리기' : '미리 보기 그리기', () => action(draw, outlet, async () => {
-      try { await api(path + '/preview', {method: 'POST', body: {}}); }
+      try {
+        if (await changeCreation(job, 'preview', {method: 'POST', body: {}}) === null) return;
+      }
       catch (error) { if (error.code !== 'busy') throw error; }
       show(notice('그리고 있어요', text('1분쯤 걸려요.', 'muted')));
       waitForUpdate(job.id, next => {
@@ -263,7 +333,8 @@ async function preview(job, me) {
     const key = `pet:free-checkout:${job.id}`;
     const idempotencyKey = sessionStorage.getItem(key) || crypto.randomUUID();
     sessionStorage.setItem(key, idempotencyKey);
-    await api(path + '/checkout', {method: 'POST', body: {useFreeTicket: true, idempotencyKey}});
+    const result = await changeCreation(job, 'checkout', {method: 'POST', body: {useFreeTicket: true, idempotencyKey}});
+    if (result === null) return;
     sessionStorage.removeItem(key);
     location.assign(`/create/${job.id}/candidates`);
   }));
@@ -297,9 +368,8 @@ function candidates(job, me) {
     let selected;
     const outlet = output();
     const choose = button('이 그림으로 할게요', () => action(choose, outlet, async () => {
-      const next = await api(`/api/creations/${job.id}/choose`, {method: 'POST', body: {candidateId: selected}});
+      const next = await changeCreation(job, 'choose', {method: 'POST', body: {candidateId: selected}});
       if (next?.state) location.replace(creationPath(next));
-      else location.reload();
     }), 'primary');
     choose.disabled = true;
     const cards = job.candidates.map(item => el('label', {class: 'stack'},
@@ -309,8 +379,9 @@ function candidates(job, me) {
     const note = el('textarea', {maxlength: 100, rows: 3});
     const remakeOutlet = output();
     const retry = button('다시 그려 주세요', () => action(retry, remakeOutlet, async () => {
-      await api(`/api/creations/${job.id}/regenerate`, {method: 'POST', body: {note: note.value.trim()}});
-      location.reload();
+      const next = await changeCreation(job, 'regenerate',
+        {method: 'POST', body: {note: note.value.trim()}}, {refreshBusy: true});
+      if (next) location.replace(creationPath(next));
     }), 'primary');
     const sheet = el('dialog', {class: 'sheet stack'}, el('label', {}, '어떻게 다시 그릴까요?', note), remakeOutlet,
       retry, button('닫기', () => sheet.close()));
@@ -334,10 +405,11 @@ function candidates(job, me) {
 
 function namePet(job) {
   const outlet = output();
+  const greeting = el('p', {class: 'muted', role: 'status', hidden: true}, '첫 인사를 준비하고 있어요');
   const submit = el('button', {type: 'submit', class: 'primary', disabled: true}, '만나러 가기');
   const form = el('form', {}, stringField('이름', 'name', 12), checks('성격 (최대 3개)', 'personality', profiles),
     stringField('좋아하는 것', 'likes', 60), stringField('싫어하는 것', 'dislikes', 60),
-    stringField('나를 부르는 말', 'callMe', 10), outlet, submit);
+    stringField('나를 부르는 말', 'callMe', 10), greeting, outlet, submit);
   const key = `pet:profile:${job.id}`;
   const restored = sessionStorage.getItem(key);
   if (restored) {
@@ -349,7 +421,6 @@ function namePet(job) {
       }
       form.querySelector('input[type="checkbox"]')?.dispatchEvent(new Event('change', {bubbles: true}));
     } catch {}
-    sessionStorage.removeItem(key);
   }
   function draft() {
     const values = new FormData(form);
@@ -365,9 +436,13 @@ function namePet(job) {
     event.preventDefault();
     action(submit, outlet, async () => {
       const {name, ...intro} = draft();
-      const pet = await api(`/api/creations/${job.id}/finish`, {method: 'POST', body: {name, intro}});
-      sessionStorage.removeItem(key);
-      location.assign(`/pets/${pet.id}`);
+      greeting.hidden = false;
+      try {
+        const pet = await changeCreation(job, 'finish', {method: 'POST', body: {name, intro}});
+        if (!pet) return;
+        sessionStorage.removeItem(key);
+        location.assign(`/pets/${pet.id}`);
+      } finally { greeting.hidden = true; }
     });
   });
   show(banner(AI_NOTICE), picture(`/api/media/${job.chosenId}`, '고른 정면 그림'),
