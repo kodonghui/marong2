@@ -58,6 +58,15 @@ function exportsPanel(id, url) {
   const outcome = el('div', {'aria-live': 'polite'});
   const saved = sessionStorage.getItem(key);
   let timer;
+  function pending() {
+    root.replaceChildren(el('div', {class: 'row', role: 'status'}, text('만들고 있어요', 'muted'),
+      el('span', {class: 'busy', 'aria-hidden': 'true', 'aria-busy': 'true'})));
+  }
+  function reset() {
+    clearTimeout(timer);
+    sessionStorage.removeItem(key);
+    root.replaceChildren(startButton(), outcome);
+  }
   function retry(error) {
     if (error?.code === 'export_limit') {
       const blocked = el('button', {type: 'button', disabled: true}, '기록 내보내기');
@@ -67,19 +76,24 @@ function exportsPanel(id, url) {
     root.replaceChildren(text('내보내지 못했어요. 횟수는 세지 않았어요.'), startButton('다시 하기'), outcome);
   }
   function display(job) {
+    clearTimeout(timer);
     if (job.status === 'done') {
       const expires = new Date(job.readyUntil);
-      if (job.readyUntil && expires.getTime() > Date.now()) {
-        root.replaceChildren(link(`받기 · ${deadline.format(expires)}까지`, `/api/exports/${job.id}/download`));
-      } else {
-        sessionStorage.removeItem(key);
-        root.replaceChildren(startButton(), outcome);
-      }
+      const remaining = expires.getTime() - Date.now();
+      if (!job.readyUntil || !(remaining > 0)) { reset(); return; }
+      const download = link(`받기 · ${deadline.format(expires)}까지`, `/api/exports/${job.id}/download`);
+      download.addEventListener('click', event => {
+        if (Date.now() < expires.getTime()) return;
+        event.preventDefault();
+        reset();
+      });
+      root.replaceChildren(download);
+      timer = setTimeout(reset, remaining);
     } else if (job.status === 'failed' || job.status === 'expired') {
       sessionStorage.removeItem(key);
       retry();
     } else {
-      root.replaceChildren(text('만들고 있어요', 'muted'));
+      pending();
       timer = setTimeout(() => void poll(job.id), 5_000);
     }
   }
@@ -88,12 +102,14 @@ function exportsPanel(id, url) {
     try { display(await api(`/api/exports/${jobId}`)); }
     catch (error) {
       if (error.status === 404) {
-        sessionStorage.removeItem(key);
-        root.replaceChildren(startButton(), outcome);
+        reset();
       } else {
         const notice = el('div', {'aria-live': 'polite'});
         errorText(error, notice);
-        root.replaceChildren(notice, button('다시 하기', () => void poll(jobId)));
+        root.replaceChildren(notice, button('다시 하기', () => {
+          pending();
+          void poll(jobId);
+        }));
       }
     }
   }
@@ -110,9 +126,18 @@ function exportsPanel(id, url) {
     }));
     return start;
   }
-  root.replaceChildren(startButton(), outcome);
-  if (saved) queueMicrotask(() => void poll(saved));
-  window.addEventListener('pagehide', () => clearTimeout(timer), {once: true});
+  if (saved) {
+    pending();
+    queueMicrotask(() => void poll(saved));
+  } else root.replaceChildren(startButton(), outcome);
+  window.addEventListener('pagehide', () => clearTimeout(timer));
+  window.addEventListener('pageshow', event => {
+    const current = sessionStorage.getItem(key);
+    if (event.persisted && current) {
+      pending();
+      void poll(current);
+    }
+  });
   return root;
 }
 

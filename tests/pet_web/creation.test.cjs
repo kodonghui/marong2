@@ -1948,6 +1948,66 @@ if (require.main === module) {
     assert.equal(await download.getAttribute('href'), '/api/exports/' + orderId + '/download');
   });
 
+  test('SCR-153 resumes an export without offering a second request and hides an expired download', async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 360, height: 780}});
+    t.after(() => page.close());
+    const release = Promise.withResolvers();
+    t.after(release.resolve);
+    const requests = [];
+    const saved = 'pet:export:' + petId;
+    await page.clock.install();
+    await page.route('**/api/pets/*/export', route => {
+      requests.push('start');
+      return route.fulfill({status: 202, json: {id: orderId, status: 'queued'}});
+    });
+    await page.route('**/api/exports/' + orderId, async route => {
+      requests.push('read');
+      await release.promise;
+      const now = await page.evaluate(() => Date.now());
+      await route.fulfill({json: {id: orderId, status: 'done', readyUntil: new Date(now + 2000).toISOString()}});
+    });
+    await page.goto(origin + '/pets/' + petId + '/settings');
+    const start = page.getByRole('button', {name: '기록 내보내기', exact: true});
+    await start.click();
+    await visible(page.getByText('만들고 있어요', {exact: true}));
+    await page.reload();
+    await visible(page.getByText('만들고 있어요', {exact: true}));
+    assert.equal(await start.count(), 0);
+    assert.equal(await page.evaluate(key => sessionStorage.getItem(key), saved), orderId);
+    release.resolve();
+    const download = page.getByRole('link', {name: /^받기 · /});
+    await visible(download);
+    assert.deepEqual(requests, ['start', 'read']);
+    await page.clock.fastForward(2100);
+    await visible(start);
+    assert.equal(await download.count(), 0);
+    assert.equal(await page.evaluate(key => sessionStorage.getItem(key), saved), null);
+  });
+
+  test('SCR-153 retries a failed export without counting it and disables the daily limit', async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 430, height: 780}});
+    t.after(() => page.close());
+    await page.clock.install();
+    let starts = 0;
+    await page.route('**/api/pets/*/export', route => {
+      starts += 1;
+      return starts === 1 ? route.fulfill({status: 202, json: {id: orderId, status: 'queued'}})
+        : route.fulfill({status: 429, json: {code: 'export_limit'}});
+    });
+    await page.route('**/api/exports/' + orderId, route => route.fulfill({json: {id: orderId, status: 'failed'}}));
+    await page.goto(origin + '/pets/' + petId + '/settings');
+    await page.getByRole('button', {name: '기록 내보내기', exact: true}).click();
+    await visible(page.getByText('만들고 있어요', {exact: true}));
+    await page.clock.fastForward(5000);
+    await visible(page.getByText('내보내지 못했어요. 횟수는 세지 않았어요.', {exact: true}));
+    await page.getByRole('button', {name: '다시 하기', exact: true}).click();
+    await visible(page.getByText('오늘은 이미 내보냈어요.', {exact: true}));
+    assert.equal(await page.getByRole('button', {name: '기록 내보내기', exact: true}).isDisabled(), true);
+    assert.equal(starts, 2);
+  });
+
   test('SCR-152 at 360px: withdrawal notice, equip, take off and slots', async t => {
     const {origin, writes} = await fixture(t, {closetMode: 'living'});
     const page = await browser.newPage({viewport: {width: 360, height: 780}});
