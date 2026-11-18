@@ -1979,6 +1979,69 @@ if (require.main === module) {
     }
   });
 
+  test('SCR-151 keeps a redraw note across reload and refreshes an already accepted request before retrying', async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage();
+    t.after(() => page.close());
+    const date = '2026-11-17';
+    const api = `**/api/pets/${petId}/diary/${date}`;
+    let reads = 0, writes = 0;
+    await page.route(api, route => {
+      reads += 1;
+      return route.fulfill({json: {date, kind: 'day', status: 'ready', title: '시험 일기', body: '본문',
+        redrawsLeft: writes ? 1 : 2, drawing: false, lastRedraw: writes ? 'ok' : null,
+        picture: writes ? '/static/pet-icon.png' : '/static/pet-welcome.webp'}});
+    });
+    await page.route(api + '/redraw', route => {
+      writes += 1;
+      assert.deepEqual(route.request().postDataJSON(), {note: '눈 내리는 곳'});
+      return route.abort('connectionreset');
+    });
+    await page.goto(`${origin}/pets/${petId}/diary/${date}`);
+    const outer = page.getByRole('button', {name: /^새 그림으로 다시 그리기/});
+    const dialog = page.getByRole('dialog', {name: '새 그림으로 다시 그리기'});
+    const note = dialog.getByLabel('어떤 그림이면 좋을까요?');
+    const draw = dialog.getByRole('button', {name: /^그리기/});
+    await outer.click();
+    await note.fill('눈 내리는 곳');
+    await draw.click();
+    await visible(dialog.getByText('잠시 뒤 다시 해 주세요.', {exact: true}));
+    assert.equal(writes, 1);
+    assert.equal(await note.inputValue(), '눈 내리는 곳');
+    await page.reload();
+    await outer.click();
+    assert.equal(await note.inputValue(), '눈 내리는 곳');
+    assert.equal(writes, 1);
+    await draw.click();
+    await visible(page.getByText('화면을 새로 고쳤어요.', {exact: true}));
+    assert.equal(await dialog.count(), 0);
+    assert.equal(reads, 3);
+    assert.equal(writes, 1);
+    assert.equal(await page.locator('.diary-art-frame img').getAttribute('src'), '/static/pet-icon.png');
+  });
+
+  test('SCR-150 stops polling a redraw when the diary is removed', async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage();
+    t.after(() => page.close());
+    await page.clock.install();
+    const date = '2026-11-17';
+    let reads = 0;
+    await page.route(`**/api/pets/${petId}/diary/${date}`, route => {
+      reads += 1;
+      return reads === 1 ? route.fulfill({json: {date, kind: 'day', status: 'ready', title: '시험 일기',
+        body: '본문', redrawsLeft: 1, drawing: true, picture: '/static/pet-welcome.webp'}})
+        : route.fulfill({status: 404, json: {code: 'not_found'}});
+    });
+    await page.goto(`${origin}/pets/${petId}/diary/${date}`);
+    await visible(page.getByText('새 그림을 그리는 중이에요'));
+    await page.clock.fastForward(2_100);
+    await visible(page.getByText('찾을 수 없어요.', {exact: true}));
+    assert.equal(await page.getByRole('link', {name: '일기장으로'}).getAttribute('href'), `/pets/${petId}/diary`);
+    await page.clock.fastForward(8_000);
+    assert.equal(reads, 2);
+  });
+
   test('SCR-150 redraw timeout keeps the original diary and offers a fresh read', async t => {
     const {origin} = await fixture(t);
     const page = await browser.newPage();

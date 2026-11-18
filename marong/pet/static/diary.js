@@ -133,7 +133,13 @@ function observeDraw(pet, href, path, pages, drawing) {
         sheet(pet, href, path, entry, pages, entry.lastRedraw === 'ok' ? '새 그림이에요'
           : entry.lastRedraw === 'failed' ? '그리지 못했어요. 한도는 돌려드렸어요.' : null);
       }
-    } catch (error) { if (error.status === 401) stop(); }
+    } catch (error) {
+      if (error.status === 401) stop();
+      if (error.status === 404) {
+        stop();
+        missingDiary(href);
+      }
+    }
     finally { fetching = false; schedule(); }
   }
   function visibility() {
@@ -155,16 +161,40 @@ function observeDraw(pet, href, path, pages, drawing) {
 
 function redrawDialog(pet, path, entry, update, block) {
   const quotaLine = el('div', {class: 'skeleton diary-quota-placeholder', 'aria-label': '한도를 불러오는 중'});
+  const noteKey = `pet:diary-redraw-note:${path}`;
+  const requestKey = `pet:diary-redraw-unconfirmed:${path}`;
   const note = el('textarea', {maxlength: 100, rows: 3, placeholder: '눈 오는 공원으로'});
+  note.value = sessionStorage.getItem(noteKey) || '';
+  note.addEventListener('input', () => {
+    if (note.value) sessionStorage.setItem(noteKey, note.value);
+    else sessionStorage.removeItem(noteKey);
+  });
   const outcome = el('div', {'aria-live': 'polite'});
   let blocked = false;
   const draw = button(`그리기 · ${entry.redrawsLeft}번 남음`, async () => {
     await action(draw, outcome, async () => {
       try {
-        await api(path + '/redraw', {method: 'POST', body: {note: note.value.trim()}});
+        let redrawsLeft = entry.redrawsLeft;
+        const unconfirmed = sessionStorage.getItem(requestKey);
+        if (unconfirmed !== null) {
+          const latest = await api(path);
+          if (latest.drawing || latest.redrawsLeft < Number(unconfirmed) || latest.status !== 'ready') {
+            sessionStorage.removeItem(requestKey);
+            modal.close();
+            update(latest, '화면을 새로 고쳤어요.');
+            return;
+          }
+          redrawsLeft = latest.redrawsLeft;
+        }
+        const draft = note.value;
+        sessionStorage.setItem(requestKey, String(redrawsLeft));
+        await api(path + '/redraw', {method: 'POST', body: {note: draft.trim()}});
+        sessionStorage.removeItem(requestKey);
+        if (note.value === draft) sessionStorage.removeItem(noteKey);
         modal.close();
         update({...entry, drawing: true});
       } catch (error) {
+        if (error.status >= 400 && error.status < 500) sessionStorage.removeItem(requestKey);
         if (error.code === 'quota_exhausted' && error.prompt === 'recharge' && pet.mode === 'living') {
           modal.close();
           await rechargeSheet(pet, true);
@@ -224,7 +254,7 @@ function sheet(pet, href, path, entry, pages, status, reopenEditor = false) {
   const outcome = el('div', {'aria-live': 'polite'});
   const redraw = button(`새 그림으로 다시 그리기 · ${entry.redrawsLeft}번 남음`, () => {
     if (redraw.disabled || !navigator.onLine) return;
-    redrawDialog(pet, path, entry, next => sheet(pet, href, path, next, pages), message => {
+    redrawDialog(pet, path, entry, (next, status) => sheet(pet, href, path, next, pages, status), message => {
       redraw.disabled = true;
       outcome.replaceChildren(banner(message));
     });
