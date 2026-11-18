@@ -483,6 +483,13 @@ if (require.main === module) {
     await page.getByRole('button', {name: '보내기'}).click();
     const retry = page.getByRole('button', {name: '다시 보내기'});
     await visible(retry);
+    const entry = page.getByLabel('콩이에게 할 말');
+    await entry.fill('별도로 쓰던 시험 초안');
+    await page.reload();
+    await visible(retry);
+    assert.equal(await entry.inputValue(), '별도로 쓰던 시험 초안');
+    assert.equal(await page.getByText('같은 요청으로 다시 보내기', {exact: true}).count(), 1);
+    assert.equal(submitted.length, 1);
     await page.evaluate(() => { window.sentBeforeOffline = true; });
     await context.setOffline(true);
     await page.waitForFunction(() => document.querySelector('.composer textarea').disabled);
@@ -499,6 +506,8 @@ if (require.main === module) {
     assert.equal(new Set(submitted.map(data => data.clientId)).size, 1);
     await visible(page.getByText('같은 요청으로 다시 보내기', {exact: true}));
     assert.equal(await page.getByText('보내지 못했어요', {exact: true}).count(), 0);
+    assert.equal(await entry.inputValue(), '별도로 쓰던 시험 초안');
+    assert.equal(await page.evaluate(id => sessionStorage.getItem('pet:pending-sends:' + id), petId), null);
   });
 
   test('SCR-147 reconciles an accepted send recovered after its response was lost', async t => {
@@ -537,6 +546,7 @@ if (require.main === module) {
     await retry.waitFor({state: 'detached'});
     assert.equal(await page.getByText(message, {exact: true}).count(), 1);
     assert.equal(sends, 1);
+    assert.equal(await page.evaluate(id => sessionStorage.getItem('pet:pending-sends:' + id), petId), null);
   });
 
   test('SCR-147 loads older history at the top and keeps the reading position when replies arrive', {timeout: 15_000}, async t => {

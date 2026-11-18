@@ -62,6 +62,18 @@ export async function petScreen(id) {
   const outlet = el('div', {'aria-live': 'polite'});
   const bubbles = new Map();
   const pendingSends = new Map();
+  const pendingKey = `pet:pending-sends:${id}`;
+  const unconfirmed = new Map();
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(pendingKey));
+    if (Array.isArray(stored)) {
+      for (const payload of stored) {
+        if (typeof payload?.clientId === 'string' && typeof payload.text === 'string') {
+          unconfirmed.set(payload.clientId, {clientId: payload.clientId, text: payload.text});
+        }
+      }
+    }
+  } catch {}
   let cursor = before;
   let streamAnchor = items[0]?.id;
   function bubble(row) {
@@ -80,9 +92,16 @@ export async function petScreen(id) {
         {background: snapshot.backgroundId, expression: snapshot.expression}) : null;
     return el('div', {class: 'bubble'}, scene, message, el('small', {class: 'muted'}, 'AI'), report);
   }
+  function persistPending() {
+    try {
+      if (unconfirmed.size) sessionStorage.setItem(pendingKey, JSON.stringify([...unconfirmed.values()]));
+      else sessionStorage.removeItem(pendingKey);
+    } catch {}
+  }
   function settle(clientId) {
     pendingSends.get(clientId)?.remove();
     pendingSends.delete(clientId);
+    if (unconfirmed.delete(clientId)) persistPending();
   }
   function renderBubble(row, {move = false} = {}) {
     if (row.role === 'member' && row.clientId) settle(row.clientId);
@@ -186,11 +205,13 @@ export async function petScreen(id) {
         } else offerRetry(payload, feedback);
         updateComposer();
       } else if (['archived', 'consent_required'].includes(error.code) || error.status === 401) {
-        if (!entry.value) entry.value = payload.text;
-        sessionStorage.setItem(draftKey, entry.value);
+        if (!entry.value) {
+          entry.value = payload.text;
+          sessionStorage.setItem(draftKey, entry.value);
+          settle(payload.clientId);
+        } else offerRetry(payload, feedback);
         sendBlocked = true;
         updateComposer();
-        settle(payload.clientId);
         if (error.code === 'archived' || error.code === 'consent_required') location.reload();
         else errorText(error, outlet);
       } else offerRetry(payload, feedback);
@@ -206,19 +227,27 @@ export async function petScreen(id) {
     again.disabled = entry.disabled;
     feedback.replaceChildren(text('보내지 못했어요', 'error'), again);
   }
+  function addPending(payload) {
+    const feedback = el('div');
+    const pending = el('div', {class: 'bubble member'}, text(payload.text), feedback);
+    pendingSends.set(payload.clientId, pending);
+    timeline.append(pending);
+    empty?.remove();
+    return feedback;
+  }
+  for (const payload of unconfirmed.values()) offerRetry(payload, addPending(payload));
+  timeline.scrollTop = timeline.scrollHeight;
   form.addEventListener('submit', event => {
     event.preventDefault();
     const message = entry.value.trim();
     if (!message || entry.disabled || !navigator.onLine) return;
     const payload = {text: message, clientId: crypto.randomUUID()};
-    const feedback = el('div');
-    const pending = el('div', {class: 'bubble member'}, text(message), feedback);
-    pendingSends.set(payload.clientId, pending);
-    timeline.append(pending);
+    unconfirmed.set(payload.clientId, payload);
+    persistPending();
+    const feedback = addPending(payload);
     timeline.scrollTop = timeline.scrollHeight;
     entry.value = '';
     sessionStorage.removeItem(draftKey);
-    empty?.remove();
     void send(payload, feedback);
   });
   chat.append(asleep, form);
