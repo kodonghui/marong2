@@ -276,6 +276,10 @@ def register(app, budget, *, config=None, available=None, clock=None):
     async def start(req):
         member = (await require_member(req))["id"]
         pet = uuid_param(req.match_info["id"])
+        async with app[POOL].connection() as conn:
+            owned = await conn.execute("SELECT 1 FROM pet.pets WHERE member_id=%s AND id=%s", (member, pet))
+            if not await owned.fetchone():
+                raise Problem("not_found")
         await app[budget].allow("call")
         at = clock()
         token = token_urlsafe(32)
