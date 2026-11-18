@@ -3,7 +3,7 @@
 import asyncio
 import json
 from base64 import b64decode
-from datetime import date
+from datetime import date, timedelta
 from hashlib import sha256
 from pathlib import Path
 from secrets import token_urlsafe
@@ -132,6 +132,8 @@ async def check_inventory(admin, app_dsn, directory):
             await equip(memorial, memorial_pet, head=str(ended))
             (first_use,) = conn.execute("SELECT used_at FROM pet.orders WHERE id=%s", (purchase,)).fetchone()
             assert first_use is not None
+            assert conn.execute("SELECT count(*) FROM pet.proactive_turns WHERE pet_id=%s",
+                                (memorial_pet,)).fetchone() == (0,)
             await equip(memorial, memorial_pet, head=str(ended))
             assert conn.execute("SELECT used_at FROM pet.orders WHERE id=%s", (purchase,)).fetchone() == (first_use,)
             [used] = await items(inventory, memorial_cookie)
@@ -155,7 +157,7 @@ async def check_diary_decoration(conn, pool, member, pet, other_member, outfit, 
                (%s,'wear','시험 머리띠','head','fixture','{}')
     """, (theme, font, pack, Jsonb({"contents": ["star-small"]}), second_hat))
     orders = {}
-    for item in (theme, pack):
+    for item in (theme, pack, first_hat):
         (orders[item],) = conn.execute("""
             INSERT INTO pet.orders(order_no,member_id,product,item_id,amount_krw,vat_krw,withdrawal_rule,
                                    status,idempotency_key,paid_at)
@@ -163,7 +165,7 @@ async def check_diary_decoration(conn, pool, member, pet, other_member, outfit, 
         """, (f"fixture-{item}", member, item, uuid4())).fetchone()
         conn.execute("INSERT INTO pet.inventory(member_id,item_id,source,order_id) VALUES (%s,%s,'order',%s)",
                      (member, item, orders[item]))
-    for item in (font, first_hat, second_hat):
+    for item in (font, second_hat):
         conn.execute("INSERT INTO pet.inventory(member_id,item_id,source) VALUES (%s,%s,'free_default')", (member, item))
     day = date(2026, 11, 17)
     (diary,) = conn.execute("""
@@ -183,6 +185,10 @@ async def check_diary_decoration(conn, pool, member, pet, other_member, outfit, 
     for head in (first_hat, second_hat):
         await change(apply_outfit, member, outfit_input({"head": str(head), "body": None, "neck": str(outfit)}))
         assert conn.execute("SELECT head_item FROM pet.decor WHERE pet_id=%s", (pet,)).fetchone() == (head,)
+    await change(apply_outfit, member, outfit_input({"head": str(first_hat), "body": None, "neck": str(outfit)}))
+    assert conn.execute("""
+        SELECT item_id,kind,status,slot_at-created_at FROM pet.proactive_turns WHERE pet_id=%s
+    """, (pet,)).fetchall() == [(first_hat, "item_reaction", "planned", timedelta(minutes=3))]
 
     def order_used(item):
         return conn.execute("SELECT used_at FROM pet.orders WHERE id=%s", (orders[item],)).fetchone()[0]

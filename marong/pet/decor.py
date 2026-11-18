@@ -25,7 +25,7 @@ async def lock_owned_pet(conn, member, pet):
     if not await owner.fetchone():
         raise Problem("unauthenticated")
     found = await conn.execute("""
-        SELECT p.status,d.head_item,d.body_item,d.neck_item,d.theme_item,d.font_item
+        SELECT p.status,p.mode,d.head_item,d.body_item,d.neck_item,d.theme_item,d.font_item
         FROM pet.pets p LEFT JOIN pet.decor d ON d.pet_id=p.id
         WHERE p.id=%s AND p.member_id=%s FOR UPDATE OF p
     """, (pet, member))
@@ -38,7 +38,8 @@ async def lock_owned_pet(conn, member, pet):
 async def owned_items(conn, member, wanted):
     ids = sorted(set(wanted) - {None})
     result = await conn.execute("""
-        SELECT i.id,i.kind,i.slot,i.assets,h.order_id FROM pet.inventory h JOIN pet.items i ON i.id=h.item_id
+        SELECT i.id,i.kind,i.slot,i.assets,i.is_default,h.order_id
+        FROM pet.inventory h JOIN pet.items i ON i.id=h.item_id
         WHERE h.member_id=%s AND h.item_id=ANY(%s::uuid[]) AND h.withdrawn_at IS NULL
         ORDER BY h.item_id FOR UPDATE OF h
     """, (member, ids))
@@ -61,6 +62,7 @@ async def apply_outfit(conn, member, pet, outfit):
         raise Problem("archived")
     owned = await owned_items(conn, member, outfit.values())
     used_orders = set()
+    reactions = []
     for slot in SLOTS:
         item = outfit[slot]
         if item is None:
@@ -70,6 +72,8 @@ async def apply_outfit(conn, member, pet, outfit):
             raise Problem("wrong_slot")
         if item != current[slot + "_item"] and row["order_id"] is not None:
             used_orders.add(row["order_id"])
+            if current["mode"] == "living" and not row["is_default"]:
+                reactions.append(item)
     await conn.execute("""
         INSERT INTO pet.decor(pet_id,head_item,body_item,neck_item) VALUES (%s,%s,%s,%s)
         ON CONFLICT(pet_id) DO UPDATE SET head_item=EXCLUDED.head_item,body_item=EXCLUDED.body_item,
@@ -78,6 +82,13 @@ async def apply_outfit(conn, member, pet, outfit):
               (EXCLUDED.head_item,EXCLUDED.body_item,EXCLUDED.neck_item)
     """, (pet, *(outfit[slot] for slot in SLOTS)))
     await mark_used(conn, member, used_orders)
+    if reactions:
+        await conn.execute("""
+            INSERT INTO pet.proactive_turns(member_id,pet_id,kind,slot_at,item_id)
+            SELECT %s,%s,'item_reaction',now()+interval '3 minutes',item
+            FROM unnest(%s::uuid[]) AS item
+            ON CONFLICT(pet_id,item_id) WHERE item_id IS NOT NULL DO NOTHING
+        """, (member, pet, reactions))
 
 
 def style_input(data):
