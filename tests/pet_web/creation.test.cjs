@@ -13,6 +13,8 @@ const candidateId = '00000000-0000-4000-8000-000000000901';
 const orderId = '00000000-0000-4000-8000-000000000920';
 const petId = '00000000-0000-4000-8000-000000000902';
 const garmentId = '00000000-0000-4000-8000-000000000942';
+const themeId = '00000000-0000-4000-8000-000000000943';
+const stickerPackId = '00000000-0000-4000-8000-000000000944';
 const traits = {species: 'dog', breedGuess: '푸들', coatColors: ['갈색'], pattern: '단색',
   patternNotes: '', earShape: '늘어진 귀', eyeColor: '갈색', build: '작음', furLength: '곱슬', distinctive: ''};
 const pet = {id: petId, name: '콩이', status: 'active', mode: 'living', shopEntry: true,
@@ -33,7 +35,8 @@ async function body(request) {
 }
 
 async function fixture(t, {signedIn = true, consent = true, invite = false, reportLimited = false, payment = 'fulfilled',
-  closetMode, paymentsEnabled = false, layerFailure = false, outfitFailure = false, orderRetry = false} = {}) {
+  closetMode, paymentsEnabled = false, layerFailure = false, outfitFailure = false, orderRetry = false,
+  diaryDecor = false} = {}) {
   let member = signedIn;
   let state;
   let selected = null;
@@ -43,6 +46,7 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
     template: 'dog_small', outfit: {head: null, body: null, neck: null}};
   let needsConfirmation = true;
   let ownsGarment = false;
+  let diaryStickers = [];
   const writes = [];
   let callStarts = 0;
   const order = {id: orderId, orderNo: 'P20261117-ABC123', product: 'item', itemName: '털모자',
@@ -71,9 +75,15 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
     }
     if (pathname === '/api/me/quota') return json(res, {percent: 60});
     if (pathname === '/api/pets') return json(res, {items: state === 'done' ? [pet] : closetMode ? [memberPet] : []});
-    if (pathname === '/api/me/inventory') return json(res, {items: [{itemId: garmentId, kind: 'wear', name: '털모자',
-      slot: 'head', source: 'order', wornBy: [], contents: [],
-      withdrawableUntil: needsConfirmation ? '2026-12-17T00:00:00Z' : null}]});
+    if (pathname === '/api/me/inventory') {
+      const items = [{itemId: garmentId, kind: 'wear', name: '털모자', slot: 'head', source: 'order',
+        wornBy: [], contents: [], withdrawableUntil: needsConfirmation ? '2026-12-17T00:00:00Z' : null}];
+      if (diaryDecor) items.push(
+        {itemId: themeId, kind: 'theme', name: '군밤 테마', withdrawableUntil: '2026-12-17T00:00:00Z'},
+        {itemId: stickerPackId, kind: 'sticker_pack', name: '별 스티커', contents: ['star-small']},
+      );
+      return json(res, {items});
+    }
     if (pathname === '/api/shop') return json(res, {items: [null, 'wear'].includes(searchParams.get('kind')) ? [{
       id: garmentId, kind: 'wear', name: '털모자', priceKrw: 1200, slot: 'head',
       limited: true, saleEndsAt: '2026-11-30T00:00:00Z', owned: ownsGarment, purchasable: paymentsEnabled, contents: [],
@@ -171,9 +181,20 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
       res.writeHead(200, {'Content-Type': 'text/event-stream'});
       return res.end('event: ping\ndata: {}\n\n');
     }
-    if (pathname === `/api/pets/${petId}/diary` || pathname === `/api/pets/${petId}/diary/2026-11-17`) {
+    if (pathname === `/api/pets/${petId}/diary-style` && req.method === 'PUT') {
+      const diaryStyle = JSON.parse(await body(req));
+      writes.push(diaryStyle);
+      memberPet = {...memberPet, diaryStyle};
+      return json(res, memberPet);
+    }
+    if (pathname === `/api/pets/${petId}/diary` || pathname.startsWith(`/api/pets/${petId}/diary/2026-11-17`)) {
+      if (pathname.endsWith('/stickers') && req.method === 'PUT') {
+        diaryStickers = JSON.parse(await body(req));
+        writes.push(diaryStickers);
+      }
       const entry = {date: '2026-11-17', title: '산책 간 날', weather: '맑음', status: 'ready', kind: 'day',
-        body: '오늘은 공원에서 낙엽을 밟았어.', picture: '/static/pet-welcome.webp', redrawsLeft: 2, drawing: false};
+        body: '오늘은 공원에서 낙엽을 밟았어.', picture: '/static/pet-welcome.webp', redrawsLeft: 2, drawing: false,
+        stickers: diaryStickers};
       return json(res, pathname.endsWith('/diary') ? {items: [entry]} : entry);
     }
     if (pathname.startsWith('/api/')) return json(res, {code: 'not_found'}, 404);
@@ -181,7 +202,9 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
       res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
       return res.end('<!doctype html><html lang="ko"><title>시험 문서</title><p>화면 시험용 문서</p>');
     }
-    if (pathname === `/static/items/${garmentId}/thumb.webp` || pathname.startsWith('/static/backgrounds/')) {
+    if (pathname === `/static/items/${garmentId}/thumb.webp` || pathname.startsWith('/static/backgrounds/')
+      || pathname === `/static/items/${themeId}/background.webp`
+      || pathname === `/static/items/${stickerPackId}/stickers/star-small.webp`) {
       res.writeHead(200, {'Content-Type': 'image/webp'});
       return res.end(await readFile(path.join(assets, 'pet-welcome.webp')));
     }
@@ -360,6 +383,46 @@ if (require.main === module) {
     await visible(page.getByText('오늘은 공원에서 낙엽을 밟았어.'));
     await page.getByRole('button', {name: /새 그림으로 다시 그리기/}).click();
     await visible(page.getByRole('dialog').getByText('어떤 그림이면 좋을까요?'));
+    assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true);
+  });
+
+  test('SCR-150 previews owned decor, asks before paid use and saves a moved sticker', async t => {
+    const {origin, writes} = await fixture(t, {diaryDecor: true});
+    const page = await browser.newPage({viewport: {width: 360, height: 790}});
+    t.after(() => page.close());
+    await page.goto(`${origin}/pets/${petId}/diary/2026-11-17`);
+    const decorate = page.getByRole('button', {name: '꾸미기'});
+    const pick = page.getByRole('button', {name: '군밤 테마'});
+    const confirm = page.getByRole('dialog');
+    const paper = page.locator('.diary-paper');
+    await decorate.click();
+    await pick.click();
+    await visible(confirm.getByText('이 테마를 쓰면 청약철회할 수 없어요. 쓸까요?'));
+    await confirm.getByRole('button', {name: '아니요'}).click();
+    assert.equal(await paper.evaluate(node => node.style.backgroundImage), '');
+    await pick.click();
+    await confirm.getByRole('button', {name: '쓸게요'}).click();
+    await page.waitForFunction(id => document.querySelector('.diary-paper').style.backgroundImage.includes(id), themeId);
+    await page.getByRole('button', {name: '취소'}).click();
+    await visible(decorate);
+    assert.equal(await paper.evaluate(node => node.style.backgroundImage), '');
+    assert.deepEqual(writes, []);
+    await decorate.click();
+    await pick.click();
+    await confirm.getByRole('button', {name: '쓸게요'}).click();
+    await page.getByRole('button', {name: '스티커', exact: true}).click();
+    await page.getByRole('button', {name: '별 스티커'}).click();
+    const marker = page.getByRole('button', {name: '스티커 1'});
+    await marker.press('ArrowRight');
+    await page.getByRole('button', {name: '저장', exact: true}).click();
+    await visible(decorate);
+    assert.deepEqual(writes, [{themeId, fontId: null}, [
+      {packId: stickerPackId, sticker: 'star-small', x: .52, y: .5, scale: 1, rotate: 0},
+    ]]);
+    await page.reload();
+    await visible(decorate);
+    assert.match(await paper.evaluate(node => node.style.backgroundImage), new RegExp(themeId));
+    assert.equal(await page.locator('.diary-stickers img').count(), 1);
     assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true);
   });
 

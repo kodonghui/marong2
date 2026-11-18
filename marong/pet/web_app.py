@@ -12,7 +12,7 @@ WORKLETS = {"call-capture.js": "capture.js", "call-playback.js": "playback.js"}
 SAFE_HOST = re.compile(r"^[a-zA-Z0-9.-]+(?::[0-9]{1,5})?$")
 ASSETS = {
     "pet.css", "pet.js", "home.js", "creation.js", "member.js", "diary.js", "pet.webmanifest", "pet-icon.png",
-    "pet-welcome.webp", "report.js", "orders.js", "settings.js", "call.js", "closet.js", "shop.js",
+    "pet-welcome.webp", "report.js", "orders.js", "settings.js", "call.js", "closet.js", "shop.js", "diary-decor.js",
 }
 LEGAL = {"terms.html", "privacy.html", "overseas.html"}
 HEADERS = {

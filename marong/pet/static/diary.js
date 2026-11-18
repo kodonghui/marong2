@@ -2,6 +2,7 @@ import {action, api, banner, button, dateLabel, el, Failure, header, link, notic
   picture, show, text, today} from './pet.js';
 
 import {mediaId, reportControl} from './report.js';
+import {decorateDiary, paintDiary} from './diary-decor.js';
 
 const outcomes = {
   pending: '아직 쓰는 중이에요. 조금 뒤에 다시 와 주세요.',
@@ -116,14 +117,21 @@ function sheet(pet, href, path, entry, status) {
   const reported = el('div', {role: 'status'});
   const report = pictureId ? reportControl({targetType: 'picture', targetId: pictureId, preview: artwork},
     '그림 신고', reported, artworkView) : null;
-  show(drawing, status ? banner(status) : null,
-    el('article', {class: 'diary-paper stack'},
-      el('small', {}, entry.kind === 'farewell' ? '❀ 마지막 장' : dateLabel(entry.date)),
-      el('h2', {}, entry.title), entry.weather ? el('small', {}, entry.weather) : null,
-      artworkView,
-      entry.picture ? el('small', {}, 'AI가 그린 그림') : null,
-      text(entry.body || '', 'diary-body')),
-    el('div', {class: 'row'}, editable ? redraw : null, send, report), outcome, reported);
+  const frame = el('div', {class: 'diary-art-frame'}, artworkView, el('div', {class: 'diary-stickers'}));
+  const paper = el('article', {class: 'diary-paper stack'},
+    el('small', {}, entry.kind === 'farewell' ? '❀ 마지막 장' : dateLabel(entry.date)),
+    el('h2', {}, entry.title), entry.weather ? el('small', {}, entry.weather) : null, frame,
+    entry.picture ? el('small', {}, 'AI가 그린 그림') : null, text(entry.body || '', 'diary-body'));
+  const editor = el('div');
+  const decorate = button('꾸미기', () => action(decorate, outcome, async () => {
+    await decorateDiary(pet, path, entry, paper, frame, editor,
+      (savedPet, savedEntry) => sheet(savedPet, href, path, savedEntry));
+    actions.hidden = true;
+  }));
+  decorate.disabled = entry.drawing;
+  const actions = el('div', {class: 'row diary-actions'}, editable ? [decorate, redraw] : null, send, report);
+  if (entry.kind !== 'farewell') paintDiary(paper, frame, pet.diaryStyle || {}, entry.stickers || []);
+  show(drawing, status ? banner(status) : null, paper, actions, editor, outcome, reported);
   if (entry.drawing) observeDraw(pet, href, path);
   if (editable && location.hash === '#redraw') {
     history.replaceState(null, '', location.pathname + location.search);
