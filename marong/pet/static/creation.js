@@ -247,12 +247,13 @@ function traits(job) {
   }
 
   const modified = new Set();
-  const acknowledged = {...t, coatColors: [...t.coatColors].sort()};
+  const acknowledged = {...t};
   let pending = Promise.resolve();
   let confirming = false, refreshing = false;
-  const readField = (values, name) => name === 'coatColors' ? values.getAll(name).sort() : values.get(name);
+  const readField = (values, name) => name === 'coatColors' ? values.getAll(name) : values.get(name);
   const changed = (name, value) => name === 'coatColors'
-    ? value.join(',') !== acknowledged[name].join(',') : value !== acknowledged[name];
+    ? value.length !== acknowledged[name].length || value.some(color => !acknowledged[name].includes(color))
+    : value !== acknowledged[name];
 
   async function save(name, value) {
     const status = feedback.get(name);
@@ -368,7 +369,8 @@ function candidates(job, me) {
     let selected;
     const outlet = output();
     const choose = button('이 그림으로 할게요', () => action(choose, outlet, async () => {
-      const next = await changeCreation(job, 'choose', {method: 'POST', body: {candidateId: selected}});
+      const next = await changeCreation(job, 'choose',
+        {method: 'POST', body: {candidateId: selected}}, {refreshBusy: true});
       if (next?.state) location.replace(creationPath(next));
     }), 'primary');
     choose.disabled = true;

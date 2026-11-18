@@ -37,7 +37,7 @@ async function body(request) {
 async function fixture(t, {signedIn = true, consent = true, invite = false, reportLimited = false, payment = 'fulfilled',
   closetMode, paymentsEnabled = false, layerFailure = false, outfitFailure = false, orderRetry = false,
   diaryDecor = false, subscription, exhaustedRedraw = false, diaryDays = false, chatNotices = [],
-  creationState, pushKey = null, holdTraits, holdFinish} = {}) {
+  creationState, pushKey = null, holdTraits, holdFinish, chooseBusy = false} = {}) {
   let member = signedIn;
   let state = creationState;
   let selected = creationState === 'sheet_ready' ? candidateId : null;
@@ -162,6 +162,10 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
       }
       if (stage === 'choose') {
         selected = data.candidateId;
+        if (chooseBusy) {
+          state = 'chosen';
+          return json(res, {code: 'busy'}, 409);
+        }
         state = 'sheet_ready';
         return json(res, job(), 202);
       }
@@ -483,6 +487,18 @@ if (require.main === module) {
     await stale.waitForURL('**/preview');
     await visible(stale.getByText('화면을 새로 고쳤어요.'));
     assert.equal((await (await stale.request.get(apiUrl)).json()).traits.breedGuess, '믹스');
+  });
+
+  test('SCR-145 refreshes the chosen picture when another tab has already picked it', async t => {
+    const {origin, writes} = await fixture(t, {creationState: 'candidates', chooseBusy: true});
+    const page = await browser.newPage();
+    t.after(() => page.close());
+    await page.goto(`${origin}/create/${creationId}/candidates`);
+    await page.getByRole('radio', {name: 'AI가 그린 후보 AI가 그린 그림'}).check();
+    await page.getByRole('button', {name: '이 그림으로 할게요'}).click();
+    await visible(page.getByText('표정을 그리고 있어요. 다 되면 이름을 지어 줘요'));
+    await visible(page.getByText('화면을 새로 고쳤어요.'));
+    assert.deepEqual(writes, [{candidateId}]);
   });
 
   test('SCR-146 keeps the draft across reloads and shows progress until naming succeeds', async t => {
