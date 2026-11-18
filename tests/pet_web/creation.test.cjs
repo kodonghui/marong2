@@ -64,7 +64,7 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
       assert.match(upload, /name="kind"\r\n\r\nliving/);
       assert.match(upload, /name="photos"; filename="photo-1.jpg"/);
       state = 'traits';
-      return json(res, {creationId}, 202);
+      return json(res, job(), 202);
     }
     if (pathname.startsWith(`/api/creations/${creationId}`)) {
       const stage = pathname.split('/')[4];
@@ -73,7 +73,13 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
       writes.push(data);
       if (stage === 'confirm-traits') state = 'traits_confirmed';
       if (stage === 'preview') { state = 'previewed'; return json(res, {}, 202); }
-      if (stage === 'checkout') { state = 'candidates'; return json(res, {pg: null}); }
+      if (stage === 'checkout') {
+        if (data.useFreeTicket !== true || !/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(data.idempotencyKey)) {
+          return json(res, {code: 'invalid_input'}, 400);
+        }
+        state = 'candidates';
+        return json(res, {pg: null});
+      }
       if (stage === 'choose') {
         selected = data.candidateId;
         state = 'sheet_ready';

@@ -146,7 +146,7 @@ async function photos(me) {
       slots.filter(slot => slot.blob).forEach((slot, index) => body.append('photos', slot.blob, `photo-${index + 1}.jpg`));
       outcome.replaceChildren(text('사진을 올리고 있어요', 'muted'));
       const data = await api('/api/creations', {method: 'POST', body, timeout: 60_000});
-      location.assign(`/create/${data.creationId}/traits`);
+      location.assign(creationPath(data));
     });
   });
   show(...top, form);
@@ -249,7 +249,11 @@ async function preview(job, me) {
     return;
   }
   const ticket = button(`만들기권으로 만들기(${me.freeTickets}장 있어요)`, () => action(ticket, outlet, async () => {
-    await api(path + '/checkout', {method: 'POST', body: {useFreeTicket: true}});
+    const key = `pet:free-checkout:${job.id}`;
+    const idempotencyKey = sessionStorage.getItem(key) || crypto.randomUUID();
+    sessionStorage.setItem(key, idempotencyKey);
+    await api(path + '/checkout', {method: 'POST', body: {useFreeTicket: true, idempotencyKey}});
+    sessionStorage.removeItem(key);
     location.assign(`/create/${job.id}/candidates`);
   }));
   const price = `${currency.format(job.priceKrw)}원(부가세 포함)`;
