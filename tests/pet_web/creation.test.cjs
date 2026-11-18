@@ -2457,6 +2457,28 @@ if (require.main === module) {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 360);
   });
 
+  test('SCR-152 shows the item thumbnail when its outfit layer fails, then recovers after removal', async t => {
+    const {origin, writes} = await fixture(t, {closetMode: 'living', layerFailure: true, wearingFixture: true});
+    const page = await browser.newPage({viewport: {width: 360, height: 780}});
+    t.after(() => page.close());
+    await page.goto(origin + '/pets/' + petId + '/closet');
+    const preview = page.locator('.outfit-stage');
+    const fallback = preview.getByRole('img', {name: '털모자'});
+    await visible(page.getByRole('status').getByText('미리 보기를 불러오지 못했어요'));
+    await visible(fallback);
+    assert.match(await fallback.getAttribute('src'), /thumb\.webp$/);
+    assert.equal(await preview.locator('.outfit-layer, .outfit-background').count(), 0);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 360);
+    assert.deepEqual(writes, []);
+
+    await page.getByRole('button', {name: '✓ 털모자', exact: true}).click();
+    await visible(preview.getByRole('img', {name: '콩이'}));
+    await visible(page.getByRole('button', {name: '털모자', exact: true}));
+    assert.equal(await fallback.count(), 0);
+    assert.equal(await page.getByText('미리 보기를 불러오지 못했어요').isVisible(), false);
+    assert.deepEqual(writes, [{head: null, body: null, neck: null}]);
+  });
+
   test('SCR-152 restores the outfit on a wrong-slot response and hides shopping for a memorial pet', async t => {
     const {origin, writes} = await fixture(t, {closetMode: 'memorial', outfitFailure: true});
     const page = await browser.newPage({viewport: {width: 430, height: 780}});

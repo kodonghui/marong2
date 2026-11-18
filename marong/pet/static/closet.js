@@ -139,7 +139,17 @@ export async function closet(id) {
   });
 
   function preview(value) {
-    stage.replaceChildren(petLayers(pet, value, '미리 보기를 불러오지 못했어요'));
+    const message = '미리 보기를 불러오지 못했어요';
+    const layers = petLayers(pet, value, message, {
+      onLayerError: itemId => {
+        if (stage.firstElementChild !== layers) return;
+        const item = items.find(entry => entry.itemId === itemId);
+        stage.replaceChildren(el('div', {class: 'stack'},
+          el('div', {class: 'outfit-stage'}, itemThumb(itemId, item?.name || '')),
+          el('div', {role: 'status'}, text(message, 'muted'))));
+      },
+    });
+    stage.replaceChildren(layers);
   }
 
   async function update(item, control) {
