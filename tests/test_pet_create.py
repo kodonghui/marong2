@@ -3,25 +3,29 @@
 import argparse
 import asyncio
 import tempfile
+from dataclasses import replace
+from datetime import datetime, timezone
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 from secrets import token_urlsafe
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import psycopg
 from aiohttp import FormData, web
 from aiohttp.test_utils import TestClient, TestServer
-from PIL import Image
+from PIL import Image, ImageDraw
+from psycopg.types.json import Jsonb
 
 from marong.pet.creations import cleanup
-from marong.pet.http import COOKIE, POOL, cookie_hash
+from marong.pet.http import COOKIE, POOL, Problem, cookie_hash
 from marong.pet.photos import MASK, load_detector, sanitize
+from marong.pet.quota import quota_day
 from marong.pet.settings import Settings
 from marong.pet.traits import next_traits
 from pg import TestDB
-from run_pet import make_app
+from run_pet import BUDGET, make_app
 from test_pet_core import fixtures
 
 ORIGIN = "https://pet.example.test"
@@ -356,6 +360,94 @@ async def check_vision_adapter():
     assert (recorded[0].entry, recorded[0].result, recorded[0].input_tokens) == ("AI-30", "ok", 42)
 
 
+def preview_fixture(*, opaque=False):
+    image = Image.new("RGBA", (1024, 1024), (0, 0, 0, 255 if opaque else 0))
+    ImageDraw.Draw(image).ellipse((32, 32, 300, 300), fill=(80, 120, 160, 255))
+    data = BytesIO()
+    image.save(data, "PNG")
+    return data.getvalue()
+
+
+async def check_preview(admin, dsn, directory):
+    with psycopg.connect(admin) as conn:
+        member, token = add_member(conn)
+        _, stranger = add_member(conn)
+        creations = [conn.execute("""
+            INSERT INTO pet.creations(member_id,kind,state,template,traits)
+            VALUES (%s,'living','traits_confirmed','dog_small',%s) RETURNING id
+        """, (member, Jsonb(TRAITS))).fetchone()[0] for _ in range(4)]
+    settings = replace(Settings.read({"PET_DATABASE_URL": dsn, "PET_MONTHLY_BUDGET_KRW": "50000",
+                                      "PET_ORIGIN": ORIGIN, "PET_MEDIA_DIR": str(directory)}),
+                       image_model="fixture-primary", image_fallback_model="fixture-secondary")
+    mode = "fail"
+    received = []
+    release_failure = asyncio.Event()
+
+    async def renderer(*, model, template, traits):
+        assert template == "dog_small" and traits["coatColors"] == ["갈색"]
+        assert "petVisible" not in traits and "multiplePets" not in traits and "confidence" not in traits
+        received.append(model)
+        if mode == "fail":
+            await release_failure.wait()
+            return preview_fixture(opaque=True)
+        if mode == "fallback" and model == "fixture-primary":
+            raise ValueError("fixture provider failure")
+        return preview_fixture()
+
+    app = make_app(settings, preview_renderer=renderer)
+    async with TestClient(TestServer(app)) as client:
+        async def request(ident, status, token=token, *, origin=ORIGIN):
+            result = await client.post(f"/api/creations/{ident}/preview", headers=headers(token, origin=origin))
+            data = await result.json()
+            assert result.status == status, data
+            return data
+
+        async def wait_status(ident, *, ok):
+            for _ in range(100):
+                reply = await client.get(f"/api/creations/{ident}", headers=headers(token))
+                data = await reply.json()
+                if ok and data["state"] == "previewed" or not ok and data["failure"] == "preview_failed":
+                    return data
+                await asyncio.sleep(0.05)
+            raise AssertionError("preview did not settle")
+
+        first = creations[0]
+        assert (await request(first, 401, None))["code"] == "unauthenticated"
+        assert (await request(first, 403, origin="https://else.test"))["code"] == "cross_site"
+        assert (await request(first, 404, stranger))["code"] == "not_found"
+        assert (await request("bad", 400))["code"] == "invalid_input"
+        allow = AsyncMock(side_effect=Problem("budget_paused"))
+        with patch.object(app[BUDGET], "allow", allow):
+            assert (await request(first, 409))["code"] == "budget_paused"
+
+        assert (await request(first, 202))["state"] == "traits_confirmed"
+        assert (await request(first, 409))["code"] == "busy"
+        release_failure.set()
+        assert (await wait_status(first, ok=False))["state"] == "traits_confirmed"
+        assert received == ["fixture-primary", "fixture-secondary"]
+        day = quota_day(datetime.now(timezone.utc))
+        with psycopg.connect(admin) as conn:
+            assert conn.execute("SELECT previews FROM pet.member_days WHERE member_id=%s AND day=%s",
+                                (member, day)).fetchone() == (0,)
+        assert not list(directory.glob("previews/*.png"))
+
+        mode = "fallback"
+        received.clear()
+        await request(first, 202)
+        art = await wait_status(first, ok=True)
+        assert received == ["fixture-primary", "fixture-secondary"] and art["preview"]
+        saved = await client.get(art["preview"], headers=headers(token))
+        assert saved.status == 200 and saved.headers["Cache-Control"] == "no-store"
+        assert (await request(first, 409))["code"] == "wrong_state"
+        mode = "success"
+        for ident in creations[1:3]:
+            await request(ident, 202)
+            await wait_status(ident, ok=True)
+        limited = await request(creations[3], 429)
+        assert limited["code"] == "preview_limit"
+        assert datetime.fromisoformat(limited["resetsAt"]).hour == 4
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model")
@@ -373,7 +465,10 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as path:
             asyncio.run(check_traits(admin, dsn, Path(path)))
         asyncio.run(check_vision_adapter())
+        with tempfile.TemporaryDirectory() as path:
+            asyncio.run(check_preview(admin, dsn, Path(path)))
     finally:
         db.close()
     print("TC-394–395: upload contract, metadata removal, local masking, limits, transaction and member isolation verified")
     print("TC-396–397: traits, correction, confirmation, retries, owner-only status and preview expiry verified")
+    print("TC-398: opaque-output rejection, fallback, success-only quota and budget gate verified")
