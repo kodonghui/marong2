@@ -23,7 +23,8 @@ from marong.pet.http import COOKIE, POOL, Problem, cookie_hash
 from marong.pet.settings import Settings
 from marong.pet.inventory import TEMPLATES
 from marong.pet.refunds import refund_item
-from marong.pet.subscriptions import reconcile_cancellations
+from marong.pet.quota import KST
+from marong.pet.subscriptions import activate_paid, next_period, reconcile_cancellations
 from pg import TestDB
 from run_pet import make_app
 from test_pet_core import fixtures
@@ -312,12 +313,23 @@ async def check_subscription(conn, client, pool, member, own, other, revoke):
         INSERT INTO pet.orders(order_no,member_id,product,amount_krw,vat_krw,withdrawal_rule,status,idempotency_key,paid_at)
         VALUES ('fixture-sub',%s,'subscription_month',9900,900,'fixture','fulfilled',%s,now()) RETURNING id
     """, (member, uuid4())).fetchone()
-    (subscription, ends) = conn.execute("""
-        INSERT INTO pet.subscriptions(member_id,status,billing_key_enc,price_krw,first_order_id,period_start,
-                                      period_end,next_charge_at,new_price_krw,new_price_from)
-        VALUES (%s,'active',%s,9900,%s,now(),now()+interval '1 month',now()+interval '1 month',10900,current_date+45)
-        RETURNING id,period_end
-    """, (member, b"fixture-encrypted-key", order)).fetchone()
+    now = datetime.now(timezone.utc)
+    paid = {"id": order, "member_id": member, "product": "subscription_month", "amount_krw": 9900}
+    async with pool.connection() as session, session.transaction():
+        row = await activate_paid(session, paid, b"fixture-encrypted-key", now)
+        assert await activate_paid(session, paid, b"fixture-encrypted-key", now) == row
+        try:
+            await activate_paid(session, {**paid, "id": uuid4()}, b"fixture-encrypted-key", now)
+            raise AssertionError("a second subscription was accepted")
+        except Problem as error:
+            assert error.code == "already_subscribed"
+    subscription, ends = row["id"], row["period_end"]
+    assert row["next_charge_at"].astimezone(KST).hour == 9
+    assert next_period(datetime(2028, 1, 31, 15, 32, tzinfo=KST)) == (
+        datetime(2028, 2, 29, 15, 32, tzinfo=KST), datetime(2028, 2, 29, 9, tzinfo=KST),
+    )
+    conn.execute("UPDATE pet.subscriptions SET new_price_krw=10900,new_price_from=current_date+45 WHERE id=%s",
+                 (subscription,))
     assert (await (await client.get(path, headers=other)).json())["status"] == "none"
     assert (await client.post(path + "/price-consent", headers=own)).status == 403
     response = await client.post(path + "/price-consent", headers=writes)

@@ -1,13 +1,14 @@
 """Member subscription view, scheduled cancellation, and price consent (SPEC-359)."""
 
 import asyncio
+from calendar import monthrange
 from datetime import datetime, timezone
 
 from aiohttp import web
 
 from .http import POOL, Problem, require_member
 from .log import logger
-from .quota import KST
+from .quota import KST, _day
 
 MONTHLY_PRICE_KRW = 9900
 
@@ -37,6 +38,36 @@ async def active_owner(conn, member):
     cursor = await conn.execute("SELECT 1 FROM pet.members WHERE id=%s AND status='active' FOR UPDATE", (member,))
     if not await cursor.fetchone():
         raise Problem("unauthenticated")
+
+
+def next_period(start):
+    local = start.astimezone(KST)
+    year, month = local.year + (local.month == 12), local.month % 12 + 1
+    end = local.replace(year=year, month=month, day=min(local.day, monthrange(year, month)[1]))
+    charge = end.replace(hour=9, minute=0, second=0, microsecond=0)
+    return end, charge
+
+
+async def activate_paid(conn, order, encrypted_key, at):
+    """Activate a verified first payment and its quota inside the caller's transaction."""
+    if order["product"] != "subscription_month" or not isinstance(encrypted_key, bytes) or not encrypted_key:
+        raise Problem("wrong_state")
+    member = order["member_id"]
+    await active_owner(conn, member)
+    prior = await current(conn, member, lock=True)
+    if prior and prior["first_order_id"] == order["id"]:
+        return prior
+    if prior and prior["status"] != "ended":
+        raise Problem("already_subscribed")
+    end, charge = next_period(at)
+    cursor = await conn.execute("""
+        INSERT INTO pet.subscriptions(member_id,status,billing_key_enc,price_krw,first_order_id,
+                                      period_start,period_end,next_charge_at)
+        VALUES (%s,'active',%s,%s,%s,%s,%s,%s) RETURNING *
+    """, (member, encrypted_key, order["amount_krw"], order["id"], at, end, charge))
+    subscription = await cursor.fetchone()
+    await _day(conn, member, at)
+    return subscription
 
 
 async def apply_price_consent(conn, member, at):
