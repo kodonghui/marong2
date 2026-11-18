@@ -22,7 +22,7 @@ from marong.pet.decor import apply_outfit, apply_stickers, apply_style, outfit_i
 from marong.pet.http import COOKIE, POOL, Problem, cookie_hash
 from marong.pet.settings import Settings
 from marong.pet.inventory import TEMPLATES
-from marong.pet.refunds import refund_item
+from marong.pet.refunds import withdraw_order
 from marong.pet.quota import KST
 from marong.pet.subscriptions import activate_paid, next_period, reconcile_cancellations
 from pg import TestDB
@@ -274,7 +274,7 @@ async def check_item_refund(conn, pool, member, other, pet, item):
     async def attempt(who, at=now, *, reason=None):
         try:
             async with pool.connection() as session:
-                return await refund_item(session, who, order, gateway, at)
+                return await withdraw_order(session, who, order, gateway, at)
         except Problem as error:
             assert reason is not None and error.extra.get("reason", error.code) == reason
 
