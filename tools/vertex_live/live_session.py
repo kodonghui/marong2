@@ -178,7 +178,7 @@ class LiveSession:
                     except (ValueError,TypeError):continue
                     if not isinstance(item,dict):continue
                     if item.get('type')=='stop':self.explicit=True;return
-                    if self.entry_transport=='discord':continue
+                    if self.entry_transport in ('discord','pet'):continue
                     if item.get('type')=='playback_stats':self.stats(item);continue
                     if item.get('type')=='audio_transport' and item.get('mode')=='pcm':
                         reason=item.get('reason')

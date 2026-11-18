@@ -120,7 +120,7 @@ class PetVoice(LiveSession):
     def __init__(self, ws, config, headers, ident, species, instructions):
         voice = config.dog_voice if species == "dog" else config.cat_voice
         super().__init__(ws, ident, None, None, build_setup(config, voice, instructions), headers,
-                         {}, {}, config.region, CALL_MODEL, voice, ident)
+                         {}, {}, config.region, CALL_MODEL, voice, ident, entry_transport="pet")
         self.call_id = ident
         self.final_turns = {}
 
@@ -152,9 +152,9 @@ async def watch_quota(calls, ident, voice, state, *, started, interval=60, grace
         if quota != "exhausted":
             continue
         state["reason"] = "quota"
-        await voice.emit({"type": "ending", "reason": "quota"})
         try:
             async with asyncio.timeout(grace):
+                await voice.emit({"type": "ending", "reason": "quota"})
                 await voice.say_goodbye()
                 await asyncio.sleep(grace)
         except TimeoutError:
@@ -249,7 +249,8 @@ def main():
     from google.auth.transport.requests import Request
 
     config = GatewayConfig.read(os.environ)
-    audio = notice_pcm(Path(os.environ["PET_CALL_NOTICE_WAV"]))
+    bundled_notice = Path(__file__).with_name("assets") / "pet-call-notice.wav"
+    audio = notice_pcm(Path(os.environ.get("PET_CALL_NOTICE_WAV", str(bundled_notice))))
     credentials, _ = default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
     credential_lock = asyncio.Lock()
 
