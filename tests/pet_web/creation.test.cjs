@@ -1181,6 +1181,46 @@ if (require.main === module) {
     assert.deepEqual(writes, [{mode: 'memorial'}, {kind: 'letter'}]);
   });
 
+  test('SCR-153 resets stale mode actions from the current server state', async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 360, height: 800}});
+    t.after(() => page.close());
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    for (const example of [
+      {mode: 'living', trigger: '무지개다리를 건넜어요', confirm: '추억 모드로 바꾸기',
+        endpoint: 'mode', code: 'archived', next: {mode: 'memorial', status: 'archived'},
+        notice: '화면을 새로 고쳤어요.', available: '꺼내기'},
+      {mode: 'memorial', trigger: /함께 사는 아이로 되돌리기 ·/, confirm: '함께 사는 아이로 되돌리기',
+        endpoint: 'mode', code: 'revert_window_passed', next: {mode: 'memorial', revertUntil: past},
+        notice: '추억 모드로 바꾼 지 7일이 지나 되돌릴 수 없어요.', available: '보관하기'},
+      {mode: 'memorial', trigger: '보관하기', confirm: '보관하기',
+        endpoint: 'archive', code: 'not_memorial', next: {mode: 'living'},
+        notice: '함께 사는 아이는 보관하지 않아요.', available: '무지개다리를 건넜어요'},
+    ]) {
+      let state = {...pet, mode: example.mode, revertUntil: future};
+      let reads = 0;
+      const petRoute = `**/api/pets/${petId}`;
+      const actionRoute = `${petRoute}/${example.endpoint}`;
+      const read = route => { reads += 1; return route.fulfill({json: state}); };
+      const refuse = route => {
+        state = {...state, ...example.next};
+        return route.fulfill({status: 409, json: {code: example.code}});
+      };
+      await page.route(petRoute, read);
+      await page.route(actionRoute, refuse);
+      await page.goto(`${origin}/pets/${petId}/settings`);
+      await page.getByRole('button', {name: example.trigger, exact: typeof example.trigger === 'string'}).click();
+      await page.getByRole('dialog').getByRole('button', {name: example.confirm, exact: true}).click();
+      await visible(page.getByText(example.notice, {exact: true}));
+      await visible(page.getByRole('button', {name: example.available, exact: true}));
+      assert.equal(await page.getByRole('button', {name: example.trigger}).count(), 0);
+      assert.equal(reads, 2, example.code);
+      await page.unroute(actionRoute, refuse);
+      await page.unroute(petRoute, read);
+    }
+  });
+
   test('SCR-153 keeps the export ID through polling and exposes the authorized download route', async t => {
     const {origin} = await fixture(t);
     const page = await browser.newPage({viewport: {width: 430, height: 780}});

@@ -125,9 +125,21 @@ export async function settings(id) {
   const pet = await api(url);
   const archived = pet.status === 'archived';
   const memorial = pet.mode === 'memorial';
-  const post = (endpoint, body) => api(url + endpoint, {method: 'POST', body});
+  const refreshKey = `pet:settings-refresh:${id}`;
+  const refreshed = sessionStorage.getItem(refreshKey);
+  sessionStorage.removeItem(refreshKey);
+  const stale = {
+    archived: '화면을 새로 고쳤어요.',
+    revert_window_passed: '추억 모드로 바꾼 지 7일이 지나 되돌릴 수 없어요.',
+    not_memorial: '함께 사는 아이는 보관하지 않아요.',
+  };
   async function change(endpoint, body) {
-    await post(endpoint, body);
+    try {
+      await api(url + endpoint, {method: 'POST', body});
+    } catch (error) {
+      if (error.status !== 409 || !Object.hasOwn(stale, error.code)) throw error;
+      sessionStorage.setItem(refreshKey, stale[error.code]);
+    }
     location.reload();
   }
   const date = el('input', {type: 'date', max: today()});
@@ -150,7 +162,7 @@ export async function settings(id) {
   }, {danger: true, enabled: () => name.value === pet.name});
   const unarchiveOutcome = el('div', {'aria-live': 'polite'});
   const unarchive = button('꺼내기', () => action(unarchive, unarchiveOutcome, () => change('/unarchive')));
-  show(el('h2', {}, memorial ? `❀ ${pet.name}` : pet.name),
+  show(refreshed ? banner(refreshed) : null, el('h2', {}, memorial ? `❀ ${pet.name}` : pet.name),
     archived ? notice('보관한 아이예요', unarchive) : profile(pet, url),
     archived ? unarchiveOutcome : null,
     !memorial && !archived ? mode : null,
