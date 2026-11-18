@@ -10,6 +10,8 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
+from .graphs.memory import lock_message_writer, schedule_text
+
 log = logging.getLogger("store")
 
 SCHEMA_VERSION = 9
@@ -142,6 +144,7 @@ class Store:
         # Keep privacy filters on when injection is disabled during a rollback.
         self.call_context_enabled = os.getenv('MARONG_CALL_CONTEXT', '1') == '1'
         self.discord_context_enabled = os.getenv("MARONG_DISCORD_CONTEXT") == "1"
+        self.friend_memory_enabled = os.getenv("MARONG_FRIEND_MEMORY") in {"shadow", "on"}
 
     def _call_guard(self, kind: str, source_id: str, room: str, requested: str = '%(room)s', expression=False) -> str:
         if not self.call_bridge:
@@ -213,10 +216,20 @@ class Store:
     async def add_message(self, room_key: str, role: str, content: str, user_key: str | None = None,
                           kakao_id: str | None = None, reply_to: int | None = None, meta: dict | None = None) -> int | None:
         """새 메시지 id. 같은 카카오 메시지가 이미 저장돼 있으면 None."""
-        row = await self._one(
+        insert = (
             "INSERT INTO marong.messages (room_key, user_key, role, content, kakao_id, reply_to, meta) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (room_key, kakao_id) DO NOTHING RETURNING id",
-            (room_key, user_key, role, content, kakao_id, reply_to, Jsonb(meta or {})))
+            "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (room_key, kakao_id) DO NOTHING RETURNING id,created_at"
+        )
+        values = (room_key, user_key, role, content, kakao_id, reply_to, Jsonb(meta or {}))
+        if not (self.friend_memory_enabled and role == "user" and user_key):
+            row = await self._one(insert, values)
+        else:
+            async with self.pool.connection() as conn, conn.transaction():
+                friend_id = await lock_message_writer(conn, user_key)
+                cursor = await conn.execute(insert, values)
+                row = await cursor.fetchone()
+                if row and friend_id is not None:
+                    await schedule_text(conn, friend_id, row["created_at"])
         return row["id"] if row else None
 
     def _reply_rooms(self, room: str) -> str:

@@ -58,6 +58,7 @@ class State(TypedDict):
 class Organizer:
     def __init__(self,store,extractor=extract):
         self.store=store;self.extractor=extractor
+        self.friend_memory_enabled = os.getenv("MARONG_FRIEND_MEMORY") in {"shadow", "on"}
 
     async def claim(self):
         async with self.store.pool.connection() as c,c.transaction():
@@ -115,9 +116,26 @@ class Organizer:
                   VALUES(%s,%s,%s,%s,%s) ON CONFLICT(call_id) DO UPDATE SET summary=EXCLUDED.summary,
                   truncated=EXCLUDED.truncated,updated_at=now() WHERE call.cards.forgotten_at IS NULL""",(call_id,summary,trimmed,TEXT_MODEL,PROMPT))
             await c.execute("UPDATE call.calls SET organize_status=%s,organized_at=now(),organize_lease_until=NULL WHERE id=%s",('done' if users else 'skipped',call_id))
+            if self.friend_memory_enabled and users:
+                await self.reserve_friend_memory(c, call_id, state["caller_id"])
             await c.execute("""INSERT INTO call.ai_runs(kind,call_id,trace_id,model,prompt_version,thinking,sent_at,total_ms,input_tokens,output_tokens,outcome)
               VALUES('organize',%s,%s,%s,%s,'LOW',now(),%s,%s,%s,'ok')""",(call_id,'organize:'+call_id,TEXT_MODEL,PROMPT,round((time.monotonic()-started)*1000),usage.get('promptTokenCount'),usage.get('candidatesTokenCount')))
         return {'saved':len(verified)}
+
+    @staticmethod
+    async def reserve_friend_memory(conn, call_id, caller_id):
+        await conn.execute(
+            """INSERT INTO marong.memory_jobs AS work(friend_id,source,due_at,calls)
+            SELECT caller.friend_id,'call',now(),ARRAY[ended.id]
+            FROM call.callers caller JOIN call.calls ended ON ended.caller_id=caller.id
+            WHERE caller.id=%s AND ended.id=%s AND ended.status='ended' AND ended.deleted_at IS NULL
+               AND EXISTS(SELECT 1 FROM call.turns t WHERE t.call_id=ended.id AND t.role='user'
+                          AND t.finalized AND NOT t.interrupted AND t.forgotten_at IS NULL)
+            ON CONFLICT(friend_id,source) DO UPDATE
+              SET calls=work.calls||excluded.calls,due_at=least(work.due_at,excluded.due_at),updated_at=now()
+              WHERE NOT work.calls @> excluded.calls""",
+            (caller_id, call_id),
+        )
 
     def graph(self,checkpointer=None):
         graph=StateGraph(State);graph.add_node('load',self.load);graph.add_node('organize',self.organize)
