@@ -677,6 +677,42 @@ async def check_forget_dialogue(db):
         actual, _ = await agent._reply(Incoming(private,"forget-tool-user","그거 잊어 줘"), None, None,
                                        "그거 잊어 줘", 2)
         assert actual == "지금은 못 지웠어"
+
+        # Reports read through the bot role and the existing transcript view.
+        import psycopg
+        from psycopg.rows import dict_row
+        from tools.report import call_transcripts, fetch
+
+        echo = await store.add_message(private, "assistant", "가상 옛 답변", reply_to=source,
+                                       meta={"delivered": True})
+        [(caller,)] = db.admin("INSERT INTO call.callers(friend_id) VALUES (%s) RETURNING id", (owner,))
+        [(call,)] = db.admin("""
+            INSERT INTO call.calls(caller_id,client_id,prompt_version,voice,status,ended_at,end_reason)
+            VALUES (%s,gen_random_uuid(),'fixture','fixture','ended',now(),'client') RETURNING id
+        """, (caller,))
+        [(segment,)] = db.admin("""
+            INSERT INTO call.segments(call_id,mode,client_id) VALUES (%s,'start',gen_random_uuid()) RETURNING id
+        """, (call,))
+        [(turn,), (kept_turn,)] = db.admin("""
+            INSERT INTO call.turns(call_id,segment_id,seq,role,content,started_at,ended_at,finalized)
+            VALUES (%s,%s,1,'user','잊을 합성 통화',now(),now(),true),
+                   (%s,%s,2,'user','남은 합성 통화',now(),now(),true) RETURNING id
+        """, (call, segment, call, segment))
+        [(voice_item,)] = db.admin("""
+            INSERT INTO marong.memory_items(friend_id,kind,text,channel,call_turn_id,quote,heard_at,source)
+            VALUES (%s,'fact','합성 통화','call',%s,'잊을 합성 통화',now(),'call') RETURNING id
+        """, (owner, turn))
+        await forget_selected(store.pool, owner, "item", voice_item, "fixture-voice-report", via="screen")
+        assert db.admin("SELECT forgotten_at FROM call.turns WHERE id=%s", (turn,)) == [(None,)]
+        with psycopg.connect(db.app_url, row_factory=dict_row) as report:
+            report.read_only = True
+            start, end = datetime.now(timezone.utc)-timedelta(days=2), datetime.now(timezone.utc)+timedelta(seconds=1)
+            data = fetch(report, start, end, vectors=False)
+            visible = {row["id"] for row in data["messages"]}
+            assert not {source, echo, raw} & visible
+            assert not {source, echo, raw} & set(data["ref_messages"])
+            turns = {row["id"] for row in call_transcripts(report, start, end)}
+            assert kept_turn in turns and turn not in turns
     finally:
         await store.close()
 
@@ -706,3 +742,5 @@ if __name__ == "__main__":
     print("TC-339/340: scoped group input, cached prefix, transient recall, shadow parity and concurrent forget fencing")
 
     print("TC-336 dialogue: owner intent, ambiguity, original-only marking, idempotency and commit-before-ack")
+
+    print("TC-336 report: excluded original and reply plus marked call without raw-table changes")
