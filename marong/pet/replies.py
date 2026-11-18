@@ -42,6 +42,7 @@ def normalized(text):
 
 GUARD = tuple(normalized(line) for line in Path(__file__).with_name("guard_words.txt").read_text(
     encoding="utf-8").splitlines() if line.strip())
+CRISIS_NUMBER = re.compile(r"(?<!\d)(?:109|119)(?!\d)")
 
 
 def bad_reply(content):
@@ -53,7 +54,7 @@ def bad_reply(content):
 
 def chat_reply(content):
     # Apply the guard to the whole draft, even if an offending clause would be cut.
-    if bad_reply(content):
+    if bad_reply(content) or CRISIS_NUMBER.search(content):
         return None
     text = content.strip()
     ends = [match.end() for match in SENTENCE.finditer(text) if match.end() <= 300]

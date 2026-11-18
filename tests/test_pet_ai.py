@@ -90,6 +90,7 @@ async def check_chat():
         ([long], " ".join(["가" * 95 + "."] * 3), 1),
         (["가" * 301, approved], approved, 2),
         (["충\u3000전 해", approved], approved, 2),
+        (["109로 전화해.", approved], approved, 2),
         (["오늘도 좋아! " * 6 + "더 있어 줘", "진짜 내가 돌아왔어"], FALLBACK, 2),
         (["수의사 안 가도 돼", approved], approved, 2),
         ([None], FALLBACK, 1),
