@@ -36,7 +36,7 @@ async function body(request) {
 
 async function fixture(t, {signedIn = true, consent = true, invite = false, reportLimited = false, payment = 'fulfilled',
   closetMode, paymentsEnabled = false, layerFailure = false, outfitFailure = false, orderRetry = false,
-  diaryDecor = false} = {}) {
+  diaryDecor = false, subscription} = {}) {
   let member = signedIn;
   let state;
   let selected = null;
@@ -47,6 +47,7 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
   let needsConfirmation = true;
   let ownsGarment = false;
   let diaryStickers = [];
+  let plan = subscription || {status: 'none', priceKrw: 9900, periodEnd: null, nextChargeAt: null, newPrice: null};
   const writes = [];
   let callStarts = 0;
   const order = {id: orderId, orderNo: 'P20261117-ABC123', product: 'item', itemName: '털모자',
@@ -74,6 +75,17 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
       return json(res, {}, 201);
     }
     if (pathname === '/api/me/quota') return json(res, {percent: 60});
+    if (pathname === '/api/subscription') return json(res, plan);
+    if (pathname === '/api/subscription/cancel' && req.method === 'POST') {
+      writes.push('cancel');
+      plan = {...plan, status: 'canceling', nextChargeAt: null, newPrice: null};
+      return json(res, plan);
+    }
+    if (pathname === '/api/subscription/price-consent' && req.method === 'POST') {
+      writes.push('price-consent');
+      plan = {...plan, newPrice: {...plan.newPrice, agreed: true}};
+      return json(res, plan);
+    }
     if (pathname === '/api/pets') return json(res, {items: state === 'done' ? [pet] : closetMode ? [memberPet] : []});
     if (pathname === '/api/me/inventory') {
       const items = [{itemId: garmentId, kind: 'wear', name: '털모자', slot: 'head', source: 'order',
@@ -423,6 +435,36 @@ if (require.main === module) {
     await visible(decorate);
     assert.match(await paper.evaluate(node => node.style.backgroundImage), new RegExp(themeId));
     assert.equal(await page.locator('.diary-stickers img').count(), 1);
+    assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true);
+  });
+
+  test('SCR-160 shows quota, disabled payments, price consent and two-step cancellation', async t => {
+    const page = await browser.newPage({viewport: {width: 360, height: 790}});
+    t.after(() => page.close());
+    const free = await fixture(t);
+    await page.goto(free.origin + '/me/plan');
+    await visible(page.getByText('60% · 새벽 4시에 다시 차요'));
+    await visible(page.getByText('결제는 곧 열려요.'));
+    assert(await page.getByRole('button', {name: '구독하기'}).isDisabled());
+    assert(await page.getByRole('button', {name: '절반 채우기'}).isDisabled());
+    assert.deepEqual(free.writes, []);
+    const subscription = {status: 'active', priceKrw: 9900, periodEnd: '2026-12-17T00:00:00Z',
+      nextChargeAt: '2026-12-17T00:00:00Z', newPrice: {priceKrw: 10900, from: '2026-12-20', agreed: false}};
+    const active = await fixture(t, {subscription, paymentsEnabled: true});
+    await page.goto(active.origin + '/me/plan');
+    await visible(page.getByText('구독 중 · 다음 결제 12월 17일 · 9,900원'));
+    await visible(page.getByText(/12월 20일부터 월 10,900원으로 바뀌어요/));
+    await page.getByRole('button', {name: '동의하기'}).click();
+    await visible(page.getByText('동의했어요'));
+    await page.getByRole('button', {name: '해지하기'}).click();
+    const dialog = page.getByRole('dialog');
+    await visible(dialog.getByRole('heading', {name: '구독 해지'}));
+    assert.deepEqual(active.writes, ['price-consent']);
+    await dialog.getByRole('button', {name: '해지하기'}).click();
+    await dialog.waitFor({state: 'hidden'});
+    await visible(page.getByText('12월 17일까지 하루 한도 2배예요. 그 뒤 끝나요.'));
+    assert.equal(await page.getByRole('button', {name: '해지하기'}).count(), 0);
+    assert.deepEqual(active.writes, ['price-consent', 'cancel']);
     assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true);
   });
 

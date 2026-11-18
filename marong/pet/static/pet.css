@@ -46,6 +46,7 @@ small, .muted { color: var(--muted) }
 .stack, form, fieldset { display: flex; flex-direction: column; gap: 12px; min-width: 0 }
 .card, .skeleton, .sheet { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px }
 .skeleton { min-height: 78px; background: var(--raised) }
+progress { width: 100%; accent-color: var(--accent) }
 .portrait { max-width: 280px; width: 100%; margin-inline: auto }
 .banner { padding: 10px 14px; font-size: 13px; background: var(--raised); border-radius: 10px }
 .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px }

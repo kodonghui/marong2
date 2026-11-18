@@ -1,4 +1,4 @@
-const CACHE = 'marong-pet-shell-v9';
+const CACHE = 'marong-pet-shell-v10';
 const SHELL = '/';
 const FILES = ['/static/pet.css', '/static/pet.js', '/static/home.js', '/static/creation.js',
   '/static/member.js', '/static/diary.js', '/static/report.js', '/static/orders.js', '/static/settings.js', '/static/call.js',

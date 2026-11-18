@@ -1,4 +1,5 @@
-import {action, api, button, currency, dateLabel, el, errorText, header, link, notice, show, showTabs, text} from './pet.js';
+import {action, api, button, currency, dateLabel, el, errorText, Failure, header, link, notice, show, showTabs, text} from './pet.js';
+import {business} from './shop.js';
 
 const ORDERS = '/me/orders';
 const PRODUCT = {
@@ -52,6 +53,94 @@ export async function orders() {
   show(...Array.from({length: 4}, () => el('div', {class: 'skeleton', 'aria-hidden': 'true'})));
   const {items} = await api('/api/orders');
   show(...(items.length ? items.map(showOrder) : [notice('주문이 없어요.')]));
+}
+
+const price = amount => `${currency.format(amount)}원`;
+const RECHARGE = {recharge_half: ['절반 채우기', 1500], recharge_full: ['가득 채우기', 2900]};
+
+function purchaseControl(product, label, amount, member, render) {
+  const buy = button(label, () => modal.showModal(), 'primary');
+  buy.disabled = !member.paymentsEnabled;
+  if (buy.disabled) return buy;
+  const outcome = el('div', {'aria-live': 'polite'});
+  const subscription = product === 'subscription_month';
+  const key = crypto.randomUUID();
+  const confirm = button('결제하기', () => action(confirm, outcome, async () => {
+    try {
+      const {pg, order} = await api('/api/orders', {method: 'POST', body: {product, idempotencyKey: key}});
+      if (pg || order.status !== 'fulfilled') throw new Failure(503);
+      modal.close();
+      await render();
+    } catch (error) {
+      if (error.code === 'already_subscribed') {
+        modal.close();
+        await render();
+      } else if (error.code === 'identity_required') {
+        outcome.replaceChildren(notice('첫 결제 전에 본인인증을 한 번 해 주세요.', link('내 정보', '/me')));
+      } else {
+        throw error;
+      }
+    }
+  }), 'primary');
+  const modal = el('dialog', {class: 'sheet stack'}, el('h2', {}, label),
+    text(subscription ? `하루 한도 2배 · 월 ${price(amount)}` : price(amount)),
+    subscription ? text('한 달마다 갱신돼요. 한도와 구독 화면에서 해지할 수 있어요.') : null,
+    text(subscription ? '결제 7일 안이고 늘어난 한도를 쓰지 않았으면 철회할 수 있어요'
+      : '충전권은 사면 바로 채워져 철회할 수 없어요'),
+    business(member), outcome, confirm, button('닫기', () => modal.close()));
+  return el('div', {class: 'stack'}, buy, modal);
+}
+
+function planCard(plan, member, render) {
+  const card = el('article', {class: 'card stack'}, el('h2', {}, '구독'));
+  const outcome = el('div', {'aria-live': 'polite'});
+  async function change(operation) {
+    try { await api('/api/subscription/' + operation, {method: 'POST'}); }
+    catch (error) { if (error.status !== 409) throw error; }
+    await render();
+  }
+  if (plan.status === 'active') {
+    const next = plan.nextChargeAt ? ` · 다음 결제 ${dateLabel(plan.nextChargeAt)}` : '';
+    card.append(text(`구독 중${next} · ${price(plan.priceKrw)}`));
+    const confirm = button('해지하기', () => action(confirm, outcome, () => change('cancel')), 'danger');
+    const modal = el('dialog', {class: 'sheet stack'}, el('h2', {}, '구독 해지'),
+      text(`${dateLabel(plan.periodEnd)}까지 하루 한도 2배예요. 그 뒤 끝나요.`),
+      outcome, confirm, button('닫기', () => modal.close()));
+    card.append(button('해지하기', () => modal.showModal(), 'plain'), modal);
+    if (plan.newPrice) {
+      const {priceKrw, from, agreed} = plan.newPrice;
+      const priceNotice = `${dateLabel(from)}부터 월 ${price(priceKrw)}으로 바뀌어요. 동의하지 않으면 그날 끝나요.`;
+      const response = el('div', {'aria-live': 'polite'});
+      const agree = button('동의하기', () => action(agree, response, () => change('price-consent')), 'primary');
+      card.prepend(notice(priceNotice, [agreed ? text('동의했어요') : agree, response]));
+    }
+  } else if (plan.status === 'canceling') {
+    card.append(text(`${dateLabel(plan.periodEnd)}까지 하루 한도 2배예요. 그 뒤 끝나요.`));
+  } else {
+    card.append(text(`하루 한도 2배 · 월 ${price(plan.priceKrw)}`),
+      purchaseControl('subscription_month', '구독하기', plan.priceKrw, member, render));
+  }
+  return card;
+}
+
+export async function plan() {
+  header('한도와 구독', {label: '내 정보', url: '/me'});
+  showTabs(null);
+  show(...Array.from({length: 3}, () => el('div', {class: 'skeleton', 'aria-hidden': 'true'})));
+  async function render() {
+    const [member, quota, subscription] = await Promise.all([
+      api('/api/me'), api('/api/me/quota'), api('/api/subscription'),
+    ]);
+    const gauge = el('progress', {max: 100, value: quota.percent, 'aria-label': '오늘 한도'});
+    const heading = el('section', {class: 'card stack'}, el('h2', {}, '오늘 한도'), gauge,
+      text(`${quota.percent}% · 새벽 4시에 다시 차요`));
+    const recharge = el('section', {id: 'recharge', class: 'card stack'}, el('h2', {}, '충전권'),
+      Object.entries(RECHARGE).map(([product, [label, amount]]) => el('div', {class: 'row'},
+        el('span', {class: 'grow'}, price(amount)), purchaseControl(product, label, amount, member, render))));
+    show(heading, !member.paymentsEnabled ? notice('결제는 곧 열려요.') : null,
+      recharge, planCard(subscription, member, render));
+  }
+  await render();
 }
 
 function returnHref() {

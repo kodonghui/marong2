@@ -8,7 +8,7 @@ const part = encodeURIComponent;
 const alive = pets => pets.filter(pet => pet.mode === 'living' && pet.status === 'active');
 const price = item => `${currency.format(item.priceKrw)}원`;
 
-function business(me) {
+export function business(me) {
   if (!me.business) return null;
   return el('details', {class: 'card'}, el('summary', {}, '사업자 정보'),
     el('dl', {}, ...Object.entries(me.business).flatMap(([key, value]) => [el('dt', {}, key), el('dd', {}, value)])));

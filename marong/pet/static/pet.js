@@ -2,7 +2,7 @@ import {home, signup} from './home.js';
 import {creation} from './creation.js';
 import {account, petScreen} from './member.js';
 import {diary} from './diary.js';
-import {orders, paymentReturn} from './orders.js';
+import {orders, paymentReturn, plan} from './orders.js';
 import {callScreen} from './call.js';
 import {settings, farewell} from './settings.js';
 import {closet} from './closet.js';
@@ -198,6 +198,7 @@ async function start() {
     else if (/^\/pets\/[^/]+\/settings$/.test(path)) await settings(path.split('/')[2]);
     else if (/^\/pets\/[^/]+\/farewell$/.test(path)) await farewell(path.split('/')[2]);
     else if (path === '/me') await account();
+    else if (path === '/me/plan') await plan();
     else if (path === '/me/orders') await orders();
     else if (path === '/shop') await shop();
     else if (/^\/shop\/[^/]+$/.test(path)) await shopItem(path.split('/')[2]);
