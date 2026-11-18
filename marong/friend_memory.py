@@ -4,9 +4,12 @@ import asyncio
 import json
 import logging
 import re
-from datetime import date, datetime, time, timedelta
+from contextlib import asynccontextmanager
+from datetime import date, datetime, time, timedelta, timezone
+from time import monotonic
+from uuid import uuid4
 
-from .friend_card import KST, OPTIONS
+from .friend_card import KST, OPTIONS, ModelRun
 from .safety import SHARE_BLOCK, owner_private
 
 log = logging.getLogger("friend_memory")
@@ -39,6 +42,34 @@ MEMORY_LIST_TOOL = {
     "description": "친구 본인이 자신에 대해 어떤 기억을 두고 있는지 또는 어디서 들었는지 물을 때 써. 들은 날과 채널을 답에 붙여.",
     "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
 }
+
+
+@asynccontextmanager
+async def measure_extraction(cards, friend, model, *, thinking=None):
+    sent_at, start = datetime.now(timezone.utc), monotonic()
+    stats, outcome, error_code = {}, "ok", None
+    try:
+        yield stats
+    except (Exception, asyncio.CancelledError) as error:
+        error_code = type(error).__name__
+        if isinstance(error, TimeoutError) or error_code == "APITimeoutError":
+            outcome = "timeout"
+        elif isinstance(error, ValueError):
+            outcome = "invalid"
+        else:
+            outcome = "error"
+        raise
+    finally:
+        try:
+            await asyncio.wait_for(cards.record_run(ModelRun(
+                "memory_ops", uuid4().hex, model, "memory-ops-v1", sent_at, outcome,
+                friend_id=friend, thinking=thinking, total_ms=round((monotonic() - start) * 1000),
+                error_code=error_code, **stats,
+            )), timeout=1)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.warning("friend_memory_run_metric_failed")
 
 
 def item_view(row, private):
@@ -235,7 +266,7 @@ class MemoryExtraction:
             """, (state["friend_id"],))
             payload = {"today": today.isoformat(), "messages": statements, "current": await items.fetchall(),
                        "loops": await loops.fetchall()}
-        return await asyncio.wait_for(self.infer(payload), timeout=60)
+        return await asyncio.wait_for(self.infer(payload, state["friend_id"]), timeout=60)
 
     @staticmethod
     async def persist(conn, state, result):
@@ -244,11 +275,12 @@ class MemoryExtraction:
 
 
 class StructuredInference:
-    def __init__(self, llm, model):
+    def __init__(self, llm, model, cards):
         self.llm = llm
         self.model = model
+        self.cards = cards
 
-    async def __call__(self, payload):
+    async def __call__(self, payload, friend):
         from anthropic import APIConnectionError, APITimeoutError
 
         from .llm import text_of
@@ -258,15 +290,24 @@ class StructuredInference:
             "messages": [{"role": "user", "content": json.dumps(payload, ensure_ascii=False, default=str)}],
             "output_config": {"format": {"type": "json_schema", "schema": operation_schema()}},
         }
-        try:
-            response = await self.llm.create_once(request, 60)
-        except APITimeoutError:
-            raise
-        except APIConnectionError:
-            response = await self.llm.create_once(request, 60)
-        if response.stop_reason != "end_turn":
-            raise ValueError("incomplete memory operations")
-        return json.loads(text_of(response))
+        for attempt in range(2):
+            try:
+                async with measure_extraction(self.cards, friend, self.model) as stats:
+                    response = await self.llm.create_once(request, 60)
+                    usage = getattr(response, "usage", None)
+                    stats.update(input_tokens=getattr(usage, "input_tokens", None),
+                                 output_tokens=getattr(usage, "output_tokens", None),
+                                 cache_read_tokens=getattr(usage, "cache_read_input_tokens", None),
+                                 cache_write_tokens=getattr(usage, "cache_creation_input_tokens", None))
+                    if response.stop_reason != "end_turn":
+                        raise ValueError("incomplete memory operations")
+                    stats["stop_reason"] = "end_turn"
+                    return json.loads(text_of(response))
+            except APITimeoutError:
+                raise
+            except APIConnectionError:
+                if attempt:
+                    raise
 
 
 def verify(raw, rows):

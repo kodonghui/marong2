@@ -130,7 +130,8 @@ async def check_queue(db):
                 "scope": "friend", "share": "known", "valid_until": None}
         op = {"op": "add", "item": item, "message_id": message, "quote": "딸기가 좋아"}
 
-        async def infer(payload):
+        async def infer(payload, actor):
+            assert actor == friend
             [statement] = payload["messages"]
             assert statement["channel"] == "kakao_group" and statement["room"] == "fixture:group"
             assert "Earlier group context" in statement["context"]
@@ -270,7 +271,8 @@ async def check_worker(db):
                                    "item": {"kind": "preference", "text": "사과를 좋아함", "sensitive": None,
                                             "scope": "friend", "share": "known", "valid_until": None}}]}
                 return SimpleNamespace(stop_reason="end_turn", content=[
-                    SimpleNamespace(type="text", text=json.dumps(result, ensure_ascii=False))])
+                    SimpleNamespace(type="text", text=json.dumps(result, ensure_ascii=False))],
+                    usage=SimpleNamespace(input_tokens=11, output_tokens=5))
 
         with patch.dict("os.environ", {"MARONG_MEMORY_MODEL": "fixture-ledger"}):
             worker = asyncio.create_task(run_text_memory(store, db.app_url, FakeLLM(), "fixture"))
@@ -282,6 +284,10 @@ async def check_worker(db):
             assert len(requests) == 2
             assert db.admin("SELECT status,message_id FROM marong.memory_items WHERE friend_id=%s", (friend,)) == [
                 ("current", message)]
+            assert db.admin("""
+                SELECT outcome,input_tokens,output_tokens,error_code FROM marong.persona_ai_runs
+                WHERE friend_id=%s AND kind='memory_ops' ORDER BY id
+            """, (friend,)) == [("error", None, None, "APIConnectionError"), ("ok", 11, 5, None)]
         finally:
             worker.cancel()
             await asyncio.gather(worker, return_exceptions=True)
@@ -331,7 +337,7 @@ async def check_call_worker(db):
                 result.status = 200
                 result.json = AsyncMock(return_value={"candidates": [{
                     "finishReason": "STOP", "content": {"parts": [{"text": json.dumps(output, ensure_ascii=False)}]},
-                }]})
+                }], "usageMetadata": {"promptTokenCount": 20, "candidatesTokenCount": 8}})
                 worker = asyncio.create_task(organizer.run_friend_memory(saver))
                 try:
                     async with asyncio.timeout(10):
@@ -346,6 +352,10 @@ async def check_call_worker(db):
                     assert body["generationConfig"]["responseJsonSchema"]["type"] == "object"
                     [statement] = json.loads(body["contents"][0]["parts"][0]["text"])["messages"]
                     assert statement["id"] == turn and statement["channel"] == "call"
+                    assert db.admin("""
+                        SELECT outcome,input_tokens,output_tokens,thinking FROM marong.persona_ai_runs
+                        WHERE friend_id=%s AND kind='memory_ops'
+                    """, (friend,)) == [("ok", 20, 8, "LOW")]
                 finally:
                     worker.cancel()
                     await asyncio.gather(worker, return_exceptions=True)

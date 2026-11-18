@@ -188,10 +188,12 @@ async def run_text_memory(store, dsn, llm, model):
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
     from langsmith import tracing_context
 
+    from ..friend_card import FriendCards
     from ..friend_memory import MemoryExtraction, StructuredInference
 
     queue = MemoryQueue(store.pool)
-    extraction = MemoryExtraction(store.pool, StructuredInference(llm, os.getenv("MARONG_MEMORY_MODEL") or model))
+    inference = StructuredInference(llm, os.getenv("MARONG_MEMORY_MODEL") or model, FriendCards(store))
+    extraction = MemoryExtraction(store.pool, inference)
     while True:
         try:
             async with checkpoint_pool(dsn) as pool:

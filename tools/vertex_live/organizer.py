@@ -48,8 +48,8 @@ async def extract(turns):
     return result,data.get('usageMetadata',{})
 
 
-async def extract_friend_memory(payload):
-    from marong.friend_memory import GUIDE, operation_schema
+async def extract_friend_memory(payload, friend, *, cards):
+    from marong.friend_memory import GUIDE, measure_extraction, operation_schema
 
     body = {
         "systemInstruction": {"parts": [{"text": GUIDE}]},
@@ -67,19 +67,24 @@ async def extract_friend_memory(payload):
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as http:
         for attempt in range(2):
             try:
-                async with http.post(url, headers=await google_headers(), json=body) as response:
-                    if response.status != 200:
-                        raise RuntimeError("friend_memory_provider_failed")
-                    data = await response.json()
-                break
+                async with measure_extraction(cards, friend, model, thinking="LOW") as stats:
+                    async with http.post(url, headers=await google_headers(), json=body) as response:
+                        if response.status != 200:
+                            raise RuntimeError("friend_memory_provider_failed")
+                        data = await response.json()
+                    usage = data.get("usageMetadata", {})
+                    stats.update(input_tokens=usage.get("promptTokenCount"),
+                                 output_tokens=usage.get("candidatesTokenCount"),
+                                 cache_read_tokens=usage.get("cachedContentTokenCount"))
+                    candidate = data["candidates"][0]
+                    if candidate.get("finishReason") != "STOP":
+                        raise ValueError("incomplete memory operations")
+                    stats["stop_reason"] = "STOP"
+                    parts = candidate["content"]["parts"]
+                    return json.loads("".join(part.get("text", "") for part in parts if not part.get("thought")))
             except aiohttp.ClientConnectionError as error:
                 if attempt or isinstance(error, TimeoutError):
                     raise
-    candidate = data["candidates"][0]
-    if candidate.get("finishReason") != "STOP":
-        raise ValueError("incomplete memory operations")
-    parts = candidate["content"]["parts"]
-    return json.loads("".join(part.get("text", "") for part in parts if not part.get("thought")))
 
 
 class State(TypedDict):
@@ -185,12 +190,15 @@ class Organizer:
             if row and row["organize_attempts"] >= 3 and self.friend_memory_enabled:
                 await self.reserve_friend_memory(c, call_id, row["caller_id"])
 
-    async def run_friend_memory(self, saver, infer=extract_friend_memory):
+    async def run_friend_memory(self, saver):
+        from functools import partial
+
+        from marong.friend_card import FriendCards
         from marong.friend_memory import MemoryExtraction
         from marong.graphs.memory import MemoryQueue, compile_graph, run_queue
 
         queue = MemoryQueue(self.store.pool)
-        extraction = MemoryExtraction(self.store.pool, infer)
+        extraction = MemoryExtraction(self.store.pool, partial(extract_friend_memory, cards=FriendCards(self.store)))
         graph = compile_graph(queue, extraction.prepare, extraction.persist, checkpointer=saver)
         await run_queue(queue, graph, "call")
 
