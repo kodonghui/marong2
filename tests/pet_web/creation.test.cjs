@@ -880,6 +880,67 @@ if (require.main === module) {
     assert.equal(await page.getByRole('button', {name: '올리기'}).count(), 0);
   });
 
+  test('SCR-142 shows upload progress, marks the rejected slot and retries without losing photos', {timeout: 15_000}, async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 360, height: 800}});
+    t.after(() => page.close());
+    const hold = Promise.withResolvers();
+    const firstRequest = Promise.withResolvers();
+    t.after(hold.resolve);
+    const attempts = [];
+    const rejected = '2번째 사진을 열 수 없어요. JPEG나 PNG, 8MB 이하로 올려 주세요.';
+    const unavailable = '사진을 확인하지 못했어요. 잠시 뒤 다시 해 주세요.';
+    await page.route('**/api/creations', async route => {
+      if (route.request().method() !== 'POST') return route.continue();
+      attempts.push(route.request().postDataBuffer().toString('latin1'));
+      if (attempts.length === 1) {
+        firstRequest.resolve();
+        await hold.promise;
+        return route.fulfill({status: 400, json: {code: 'invalid_photo', detail: rejected, photo: 2}});
+      }
+      if (attempts.length === 2) return route.fulfill({status: 413,
+        json: {code: 'too_large', detail: '사진이 너무 커요. 다시 골라 주세요.'}});
+      if (attempts.length === 3) return route.fulfill({status: 503,
+        json: {code: 'photo_check_unavailable', detail: unavailable}});
+      return route.continue();
+    });
+    await page.goto(origin + '/create');
+    await page.getByRole('radio', {name: '함께 사는 아이'}).check();
+    const sample = path.join(assets, 'pet-icon.png');
+    await page.getByLabel('정면 얼굴', {exact: true}).setInputFiles(sample);
+    await page.getByLabel('전신', {exact: true}).setInputFiles(sample);
+    const upload = page.getByRole('button', {name: '올리기', exact:true});
+    await upload.click();
+    await firstRequest.promise;
+    await visible(page.getByRole('progressbar', {name: '사진을 올리고 있어요'}));
+    assert.equal(await upload.isDisabled(), true);
+    await page.locator('form').evaluate(form => form.requestSubmit());
+    assert.equal(attempts.length, 1);
+    hold.resolve();
+    const image = page.getByRole('img', {name: '정면 얼굴'});
+    const badSlot = page.locator('.slots > div').nth(2);
+    await visible(badSlot.getByText(rejected, {exact: true}));
+    assert.equal(await badSlot.locator('.picture').getAttribute('aria-invalid'), 'true');
+    assert.equal(await upload.isDisabled(), true);
+    assert.equal(await image.isVisible(), true);
+    assert.match(attempts[0], /filename="photo-2.jpg"/);
+    await page.getByRole('button', {name: '전신 사진 빼기'}).click();
+    assert.equal(await badSlot.locator('.picture').getAttribute('aria-invalid'), null);
+    await upload.click();
+    await visible(page.getByText('사진이 너무 커요. 다시 골라 주세요.'));
+    assert.equal(await image.isVisible(), true);
+    await upload.click();
+    await visible(page.getByText(unavailable, {exact: true}));
+    assert.equal(await image.isVisible(), true);
+    await page.getByRole('button', {name: '다시 올리기'}).click();
+    await page.waitForURL('**/traits');
+    assert.equal(attempts.length, 4);
+    for (const attempt of attempts.slice(1)) {
+      assert.match(attempt, /filename="photo-1.jpg"/);
+      assert.doesNotMatch(attempt, /filename="photo-2.jpg"/);
+    }
+  });
+
   test('SCR-143 saves the changed field, waits for its receipt, and refreshes a stale tab', async t => {
     const hold = Promise.withResolvers();
     t.after(hold.resolve);

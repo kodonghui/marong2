@@ -1,5 +1,5 @@
 import {action, AI_NOTICE, api, banner, button, CONSENT, currency, dateLabel, el, errorText, Failure, header,
-  link, notice, picture, show, showTabs, text} from './pet.js';
+  link, notice, picture, show, showTabs, signIn, text} from './pet.js';
 import {pendingCard} from './home.js';
 import {pushControl} from './push-control.js';
 
@@ -93,6 +93,30 @@ async function uploadable(file) {
   }
 }
 
+function uploadPhotos(body, progress) {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open('POST', '/api/creations');
+    request.setRequestHeader('Accept', 'application/json');
+    request.timeout = 60_000;
+    request.responseType = 'json';
+    request.upload.addEventListener('progress', event => {
+      if (event.lengthComputable && event.total > 0) progress.value = event.loaded * 100 / event.total;
+    });
+    request.addEventListener('load', () => {
+      if (request.status === 202 && request.response?.id) {
+        resolve(request.response);
+        return;
+      }
+      if (request.status === 401) signIn();
+      reject(new Failure(request.status, request.response || {}));
+    });
+    const failed = () => reject(new Failure(0));
+    for (const type of ['error', 'abort', 'timeout']) request.addEventListener(type, failed);
+    request.send(body);
+  });
+}
+
 async function photos(me) {
   const [{items: pets}, {items: jobs}] = await Promise.all([api('/api/pets'), api('/api/creations')]);
   header('아이 만들기', home);
@@ -113,8 +137,9 @@ async function photos(me) {
   const form = el('form', {}, kind, chosen,
     text('정면 얼굴, 귀와 무늬가 보이는 사진, 전신 한 장이면 가장 닮아요', 'muted'),
     text('사람이 함께 찍히면 얼굴은 회색으로 가려요', 'muted'), outcome, submit);
-  const update = () => { submit.disabled = !new FormData(form).get('kind') || !slots.some(slot => slot.blob)
-    || slots.some(slot => slot.loading); };
+  let uploading = false;
+  const update = () => { submit.disabled = uploading || !kind.querySelector('input:checked')
+    || !slots.some(slot => slot.blob) || slots.some(slot => slot.loading || slot.invalid); };
 
   for (let index = 0; index < slots.length; index++) {
     const slot = slots[index];
@@ -122,11 +147,17 @@ async function photos(me) {
     const input = el('input', {type: 'file', accept: 'image/*,.heic,.heif', class: 'sr-only', 'aria-label': label});
     const preview = el('div', {class: 'picture'}, text(label, 'muted'));
     const warning = el('small', {'aria-live': 'polite', class: 'error'});
+    slot.showError = message => {
+      slot.invalid = Boolean(message);
+      warning.textContent = message;
+      if (message) preview.setAttribute('aria-invalid', 'true');
+      else preview.removeAttribute('aria-invalid');
+    };
     const clear = button('×', () => {
       if (slot.url) URL.revokeObjectURL(slot.url);
       Object.assign(slot, {url: null, blob: null, loading: false});
       preview.replaceChildren(text(label, 'muted'));
-      warning.textContent = '';
+      slot.showError('');
       clear.hidden = true;
       input.value = '';
       update();
@@ -136,9 +167,10 @@ async function photos(me) {
     input.addEventListener('change', async () => {
       const file = input.files[0];
       if (!file) return;
+      const invalidBefore = slot.invalid;
       slot.loading = true;
       input.disabled = true;
-      warning.textContent = '';
+      slot.showError('');
       update();
       try {
         const blob = await uploadable(file);
@@ -147,8 +179,10 @@ async function photos(me) {
         preview.replaceChildren(el('img', {src: slot.url, alt: label}));
         clear.hidden = false;
       } catch {
-        warning.textContent = /\.(heic|heif)$/i.test(file.name) ? '사진 앱에서 JPEG로 저장해 주세요'
+        const message = /\.(heic|heif)$/i.test(file.name) ? '사진 앱에서 JPEG로 저장해 주세요'
           : `${index + 1}번째 사진을 열 수 없어요. JPEG나 PNG, 8MB 이하로 올려 주세요.`;
+        if (invalidBefore) slot.showError(message);
+        else warning.textContent = message;
       } finally {
         input.value = '';
         input.disabled = false;
@@ -161,16 +195,44 @@ async function photos(me) {
     chosen.append(el('div', {class: 'stack'}, preview, input, pick, clear, warning));
   }
   form.addEventListener('input', update);
-  form.addEventListener('submit', event => {
+  form.addEventListener('submit', async event => {
     event.preventDefault();
-    action(submit, outcome, async () => {
+    if (submit.disabled || uploading) return;
+    await action(submit, outcome, async () => {
       const body = new FormData();
+      const sent = slots.filter(slot => slot.blob);
       body.set('kind', new FormData(form).get('kind'));
-      slots.filter(slot => slot.blob).forEach((slot, index) => body.append('photos', slot.blob, `photo-${index + 1}.jpg`));
-      outcome.replaceChildren(text('사진을 올리고 있어요', 'muted'));
-      const data = await api('/api/creations', {method: 'POST', body, timeout: 60_000});
-      location.assign(creationPath(data));
+      sent.forEach((slot, index) => body.append('photos', slot.blob, `photo-${index + 1}.jpg`));
+      const progress = el('progress', {max: 100, 'aria-label': '사진을 올리고 있어요'});
+      outcome.replaceChildren(text('사진을 올리고 있어요', 'muted'), progress);
+      uploading = true;
+      kind.disabled = true;
+      chosen.inert = true;
+      submit.textContent = '올리기';
+      try {
+        const data = await uploadPhotos(body, progress);
+        location.assign(creationPath(data));
+      } catch (error) {
+        const invalid = sent[error.photo - 1];
+        if (error.code === 'invalid_photo' && invalid) {
+          outcome.replaceChildren();
+          invalid.showError(error.message);
+        } else if (error.code === 'photo_check_unavailable') {
+          submit.textContent = '다시 올리기';
+          throw error;
+        } else if (error.code === 'consent_required') {
+          show(...top, consentNotice());
+        } else if (error.code === 'pet_limit' || error.code === 'too_many_creations') {
+          const latest = await api('/api/creations').catch(() => ({items: jobs}));
+          show(...latest.items.map(pendingCard), notice(error.message));
+        } else throw error;
+      } finally {
+        uploading = false;
+        kind.disabled = false;
+        chosen.inert = false;
+      }
     });
+    update();
   });
   show(...top, form);
 }
