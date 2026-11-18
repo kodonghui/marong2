@@ -1,6 +1,7 @@
-"""Owner-scoped conversation and reply scheduling (SPEC-327–328)."""
+"""Owner-scoped conversation, crisis notices and reply scheduling (SPEC-327–330)."""
 
 import asyncio
+from collections import deque
 from datetime import datetime, time, timedelta, timezone
 import json
 import re
@@ -8,12 +9,19 @@ import re
 from aiohttp import web
 from psycopg.types.json import Jsonb
 
+from ..safety import CONTEXT_PLAN, judge
 from .account import require_overseas
 from .http import POOL, Problem, body_json, require_member, uuid_param
 from .quota import KST, _day
 
 
 DELAY = timedelta(seconds=8)
+SIGNAL_WINDOW = timedelta(minutes=30)
+CRISIS_GAP = timedelta(days=3)
+CRISIS_HELP = "자살예방상담전화 109 · 24시간"
+CRISIS_URGENT = "이미 다쳤으면 119"
+CLAUSES = re.compile(r"[,，;；.!?。！？\n]+\s*")
+BEREAVEMENT_INTENT = re.compile(r"따라\s*가고\s*싶")
 SEQ = re.compile(r"[0-9]{1,19}\Z")
 COLUMNS = "id,seq,role,kind,content,composite,client_id,created_at"
 
@@ -33,6 +41,70 @@ async def owned(conn, member, pet, *, lock=False):
     if row is None:
         raise Problem("not_found")
     return row
+
+
+def crisis_signal(content, nearby=()):
+    direct = judge(content, nearby)
+    if direct in {"plan", "injury"}:
+        return direct
+    *earlier, last = CLAUSES.split(content.strip().rstrip(".!?。！？"))
+    if CONTEXT_PLAN.fullmatch(last):
+        context = (*nearby, *earlier)
+        if judge(last, context) == "plan" or any(BEREAVEMENT_INTENT.search(line) for line in context):
+            return "plan"
+    return None
+
+
+async def same_crisis(conn, member, pet, notice, row, at):
+    last_signal = notice["created_at"]
+    if at - last_signal < CRISIS_GAP:
+        return True
+    context = deque(maxlen=5)
+    # Reuse the private transcript so an episode survives worker restarts without another copy of the messages.
+    async with conn.cursor("pet_crisis_history") as history:
+        await history.execute("""
+            SELECT content,created_at FROM pet.messages
+            WHERE member_id=%s AND pet_id=%s AND role='member' AND kind='chat' AND seq<%s AND created_at>=%s
+            ORDER BY seq
+        """, (member, pet, row["seq"], last_signal - SIGNAL_WINDOW))
+        async for previous in history:
+            when = previous["created_at"]
+            if when - last_signal >= CRISIS_GAP:
+                return False
+            nearby = [text for seen, text in context if when - seen <= SIGNAL_WINDOW]
+            if when > last_signal and crisis_signal(previous["content"], nearby):
+                last_signal = when
+            context.append((when, previous["content"]))
+    return at - last_signal < CRISIS_GAP
+
+
+async def add_crisis_notice(conn, member, pet, row, at):
+    signal = crisis_signal(row["content"])
+    # A short follow-up can supply the plan after a separate preceding message.
+    last_clause = CLAUSES.split(row["content"].strip().rstrip(".!?。！？"))[-1]
+    if signal is None and CONTEXT_PLAN.fullmatch(last_clause):
+        recent = await conn.execute("""
+            SELECT content FROM pet.messages
+            WHERE member_id=%s AND pet_id=%s AND role='member' AND kind='chat' AND seq<%s AND created_at>=%s
+            ORDER BY seq DESC LIMIT 5
+        """, (member, pet, row["seq"], at - SIGNAL_WINDOW))
+        signal = crisis_signal(row["content"], [item["content"] for item in await recent.fetchall()])
+    if signal is None:
+        return
+    content = CRISIS_URGENT if signal == "injury" else CRISIS_HELP
+    prior = await conn.execute("""
+        SELECT content,created_at FROM pet.messages
+        WHERE member_id=%s AND pet_id=%s AND role='system' AND kind='crisis_notice'
+        ORDER BY seq DESC LIMIT 1
+    """, (member, pet))
+    notice = await prior.fetchone()
+    if notice and (signal != "injury" or notice["content"] == CRISIS_URGENT):
+        if await same_crisis(conn, member, pet, notice, row, at):
+            return
+    await conn.execute("""
+        INSERT INTO pet.messages(member_id,pet_id,role,kind,content,created_at)
+        VALUES (%s,%s,'system','crisis_notice',%s,%s)
+    """, (member, pet, content, at))
 
 
 async def add_message(conn, member, pet, client, content, at):
@@ -67,6 +139,7 @@ async def add_message(conn, member, pet, client, content, at):
         "VALUES (%s,%s,'member','chat',%s,%s,%s) RETURNING " + COLUMNS, (member, pet, content, client, at),
     )
     row = await inserted.fetchone()
+    await add_crisis_notice(conn, member, pet, row, at)
     queued = await conn.execute("""
         SELECT id,status,ref FROM pet.jobs WHERE member_id=%s AND pet_id=%s AND kind='reply'
           AND status IN ('queued','running') ORDER BY queued_at,id LIMIT 1 FOR UPDATE

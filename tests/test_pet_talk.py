@@ -1,4 +1,4 @@
-"""TC-406–407 on the private pet database fixture."""
+"""TC-406–408 on the private pet database fixture."""
 
 import asyncio
 from datetime import datetime, time, timedelta
@@ -10,6 +10,7 @@ import psycopg
 from aiohttp.test_utils import TestClient, TestServer
 from psycopg.types.json import Jsonb
 
+from marong.pet.chat import CRISIS_HELP, CRISIS_URGENT, crisis_signal
 from marong.pet.http import COOKIE, POOL, cookie_hash
 from marong.pet.quota import KST, quota_day
 from marong.pet.replies import FALLBACK, reply_job
@@ -146,10 +147,72 @@ async def scenario(admin, dsn):
         assert result["items"][0]["kind"] == "reply_failed"
 
 
+async def crisis_scenario(admin, dsn):
+    at = datetime.now(KST) + timedelta(hours=1)
+    settings = Settings.read({"PET_DATABASE_URL": dsn, "PET_MONTHLY_BUDGET_KRW": "10000", "PET_ORIGIN": ORIGIN})
+    with psycopg.connect(admin) as conn:
+        owner, one = seed(conn, 3)
+        another, two = seed(conn, 4)
+        pet, sibling, other = add_pet(conn, owner), add_pet(conn, owner), add_pet(conn, another)
+        conn.execute("UPDATE pet.pets SET mode='memorial',memorial_since=now() WHERE id=%s", (pet,))
+    assert crisis_signal("따라가고 싶다, 오늘 밤에 할 거야") == "plan"
+    assert crisis_signal("오늘 밤에 할 거야", ["따라가고 싶다"]) == "plan"
+    assert crisis_signal("오늘 밤에 할 거야", ["오늘 숙제가 많아"]) is None
+    app = make_app(settings, chat_clock=lambda: at)
+    path = f"/api/pets/{pet}/messages"
+    async with TestClient(TestServer(app)) as http:
+        async def post(message, route=path, auth=one):
+            return await http.post(route, json={"text": message, "clientId": str(uuid4())}, headers=auth)
+
+        async def notices(route=path, auth=one):
+            response = await http.get(route, headers=auth)
+            return [item["text"] for item in (await response.json())["items"] if item["kind"] == "crisis_notice"
+                    and item["role"] == "system"]
+
+        grief = "그때 안락사 결정한 게 내 잘못 같아"
+        assert (await post(grief)).status == 201
+        assert not await notices()
+        with psycopg.connect(admin) as conn:
+            conn.execute("UPDATE pet.jobs SET run_after=now() WHERE pet_id=%s", (pet,))
+
+        async def comfort(_job, context, *, rewrite):
+            assert not rewrite and context["pet"]["mode"] == "memorial"
+            assert [item["content"] for item in context["incoming"]] == [grief]
+            return "그때 많이 힘들었겠다."
+
+        assert await reply_job(app[POOL], comfort)
+        assert (await (await http.get(path, headers=one)).json())["items"][0]["role"] == "pet"
+
+        plan = "따라가고 싶다, 오늘 밤에 할 거야"
+        stopped = await post(plan, auth=two)
+        assert stopped.status == 404
+        for response in await asyncio.gather(post(plan), post(plan)):
+            assert response.status == 201
+        assert await notices() == [CRISIS_HELP]
+        for isolated, auth in ((sibling, one), (other, two)):
+            route = f"/api/pets/{isolated}/messages"
+            assert (await post("오늘 밤에 할 거야", route, auth)).status == 201
+            assert not await notices(route, auth)
+
+        for _ in range(2):
+            at += timedelta(days=2)
+            assert (await post(plan)).status == 201
+            assert await notices() == [CRISIS_HELP]
+        at += timedelta(days=3)
+        assert (await post(plan)).status == 201
+        assert await notices() == [CRISIS_HELP, CRISIS_HELP]
+        for _ in range(2):
+            assert (await post("피가 안 멈춰")).status == 201
+        assert await notices() == [CRISIS_URGENT, CRISIS_HELP, CRISIS_HELP]
+
+
 if __name__ == "__main__":
     db = TestDB()
     try:
-        asyncio.run(scenario(*fixtures(db)))
+        addresses = fixtures(db)
+        asyncio.run(crisis_scenario(*addresses))
+        asyncio.run(scenario(*addresses))
     finally:
         db.close()
     print("TC-406–407: scoped messages, replay, 8-second batching, stale reply fencing, guard, SSE and 04:00 limits")
+    print("TC-408: separate crisis notice, grief, concurrent signals, isolation, episode continuity and escalation")

@@ -184,6 +184,7 @@ async def reply_job(pool, model):
             incoming = await current.fetchall()
             previous = await conn.execute("""
                 SELECT role,content FROM pet.messages WHERE member_id=%s AND pet_id=%s AND seq<%s
+                  AND kind<>'crisis_notice'
                   ORDER BY seq DESC LIMIT 80
             """, (member, pet, ref["first"]))
             context = {"pet": info, "past": list(reversed(await previous.fetchall())),
