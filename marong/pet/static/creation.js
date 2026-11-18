@@ -137,7 +137,6 @@ function uploadPhotos(body, progress) {
 
 async function photos(me) {
   const [{items: pets}, {items: jobs}] = await Promise.all([api('/api/pets'), api('/api/creations')]);
-  header('아이 만들기', home);
   const top = jobs.map(pendingCard);
   if (!me.overseasTransfer) { show(...top, consentNotice()); return; }
   if (pets.length + jobs.length >= 5 || jobs.length >= 3) {
@@ -612,17 +611,47 @@ function namePet(job) {
     job.kind === 'memorial' ? el('small', {}, '❀ 추억') : null, el('h2', {}, '이름을 지어 주세요'), form);
 }
 
+function creationLoading(stage) {
+  const placeholder = (style = '') => el('div', {class: `skeleton ${style}`});
+  const squares = count => Array.from({length: count}, () => placeholder('picture'));
+  const lines = count => Array.from({length: count}, () => placeholder('label-placeholder'));
+  let contents;
+  switch (stage) {
+    case 'photos':
+      contents = [el('div', {class: 'row'}, placeholder('label-placeholder grow'), placeholder('label-placeholder grow')),
+        el('div', {class: 'slots'}, squares(3))];
+      break;
+    case 'traits':
+      contents = lines(9);
+      break;
+    case 'preview':
+      contents = [...squares(1), placeholder('home-action-placeholder')];
+      break;
+    case 'candidates':
+      contents = [el('div', {class: 'grid'}, squares(4))];
+      break;
+    case 'name':
+      contents = [...squares(1), ...lines(5)];
+      break;
+    default:
+      return;
+  }
+  show(el('section', {class: 'stack creation-loading', 'aria-hidden': 'true'}, contents));
+  page.setAttribute('aria-busy', 'true');
+}
+
 export async function creation(path) {
   showTabs(null);
-  if (path === '/create') { await photos(await api('/api/me')); return; }
+  if (path === '/create') {
+    header('아이 만들기', home);
+    creationLoading('photos');
+    await photos(await api('/api/me'));
+    return;
+  }
   const [, , id, stage] = path.split('/');
   header({traits: '특징표 고치기', preview: '미리 보기와 결제', candidates: '그림 후보 고르기', name: '이름 짓기'}[stage]
     || '아이 만들기', home);
-  if (stage === 'preview') {
-    show(el('div', {class: 'picture', 'aria-hidden': 'true'}),
-      el('div', {class: 'skeleton label-placeholder', 'aria-hidden': 'true'}));
-    page.setAttribute('aria-busy', 'true');
-  }
+  creationLoading(stage);
   const me = await api('/api/me');
   const job = await api(`/api/creations/${id}`);
   if (path !== creationPath(job)) { location.replace(creationPath(job)); return; }

@@ -1,4 +1,4 @@
-import {action, api, button, el, header, link, notice, show, showTabs, text} from './pet.js';
+import {action, api, button, el, header, link, notice, page, show, showTabs, text} from './pet.js';
 
 const POSITIONS = [['head', '머리'], ['body', '몸'], ['neck', '목']];
 const WEAR = '/api/me/inventory?kind=wear';
@@ -114,6 +114,10 @@ export function petLayers(pet, outfit, errorMessage, {onLayerError, background, 
 export async function closet(id) {
   const url = `/pets/${part(id)}`;
   header('옷 입히기', {label: '대화', url});
+  show(el('section', {class: 'stack closet-loading', 'aria-hidden': 'true'},
+    el('div', {class: 'skeleton outfit-stage'}),
+    el('div', {class: 'grid'}, Array.from({length: 4}, () => el('div', {class: 'skeleton'})))));
+  page.setAttribute('aria-busy', 'true');
   let pet = await api(`/api${url}`);
   if (pet.status === 'archived') {
     show(notice('보관한 아이예요.', link('돌아가기', url)));

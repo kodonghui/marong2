@@ -2377,12 +2377,67 @@ if (require.main === module) {
     assert.equal(starts, 2);
   });
 
+  test('SCR-142–146 draws the contracted loading states before showing creation controls', async t => {
+    const examples = [
+      ['/create', undefined, 5, 3, '올리기'],
+      [`/create/${creationId}/traits`, 'traits', 9, 0, '이대로 만들기'],
+      [`/create/${creationId}/preview`, 'traits_confirmed', 2, 1, '미리 보기 그리기'],
+      [`/create/${creationId}/candidates`, 'candidates', 4, 4, '이 그림으로 할게요'],
+      [`/create/${creationId}/name`, 'sheet_ready', 6, 1, '만나러 가기'],
+    ];
+    for (const [route, creationState, count, squares, button] of examples) {
+      const {origin, writes} = await fixture(t, {creationState});
+      for (const width of [360, 430]) {
+        const page = await browser.newPage({viewport: {width, height: 820}});
+        const member = Promise.withResolvers();
+        try {
+          await page.route('**/api/me', async request => {
+            await member.promise;
+            await request.continue();
+          }, {times: 1});
+          await page.goto(origin + route);
+          const loading = page.locator('.creation-loading');
+          await visible(loading);
+          assert.equal(await loading.getAttribute('aria-hidden'), 'true');
+          assert.equal(await page.locator('#page').getAttribute('aria-busy'), 'true');
+          assert.equal(await loading.locator('.skeleton').count(), count);
+          assert.equal(await loading.locator('.skeleton.picture').count(), squares);
+          assert.equal(await page.getByRole('button', {name: button, exact: true}).count(), 0);
+          assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true);
+          member.resolve();
+          await visible(page.getByRole('button', {name: button, exact: true}));
+          assert.equal(await loading.count(), 0);
+          assert.equal(await page.locator('#page').getAttribute('aria-busy'), 'false');
+        } finally {
+          member.resolve();
+          await page.close();
+        }
+      }
+      assert.deepEqual(writes, []);
+    }
+  });
+
   test('SCR-152 at 360px: withdrawal notice, equip, take off and slots', async t => {
     const {origin, writes} = await fixture(t, {closetMode: 'living'});
     const page = await browser.newPage({viewport: {width: 360, height: 780}});
     t.after(() => page.close());
+    const inventory = Promise.withResolvers();
+    t.after(inventory.resolve);
+    await page.route('**/api/me/inventory?kind=wear', async route => {
+      await inventory.promise;
+      await route.continue();
+    }, {times: 1});
     await page.goto(origin + '/pets/' + petId + '/closet');
+    const loading = page.locator('.closet-loading');
+    await visible(loading);
+    assert.equal(await loading.getAttribute('aria-hidden'), 'true');
+    assert.equal(await loading.locator('.outfit-stage').count(), 1);
+    assert.equal(await loading.locator('.grid .skeleton').count(), 4);
+    assert.equal(await page.locator('#page').getAttribute('aria-busy'), 'true');
+    inventory.resolve();
     await page.getByRole('button', {name: '털모자', exact: true}).click();
+    assert.equal(await loading.count(), 0);
+    assert.equal(await page.locator('#page').getAttribute('aria-busy'), 'false');
     const dialog = page.getByRole('dialog');
     await visible(dialog.getByText(/철회할 수 없어요/));
     await dialog.getByRole('button', {name: '아니요'}).click();
