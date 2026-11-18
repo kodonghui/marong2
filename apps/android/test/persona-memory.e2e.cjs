@@ -2,7 +2,13 @@
 
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {chromium} = require('playwright');
+let chromium;
+try {
+  ({chromium} = require('playwright'));
+} catch {
+  // Match the rest of the optional browser suite.
+}
+const options = {skip: chromium ? false : 'Playwright is not installed'};
 const {startChatSite} = require('./support/chat-site.cjs');
 const PHONE = {viewport: {width: 360, height: 820}, locale: 'ko-KR', isMobile: true, hasTouch: true};
 const LAST_DAY = '2026-11-17T10:00:00+09:00';
@@ -18,7 +24,7 @@ async function open(t) {
   return {page, site, url: site.url + '/chat/persona/memory'};
 }
 
-test('TC-346: mobile memory list, paging, confirmation, lost reply and idempotent retry', async t => {
+test('TC-346: mobile memory list, paging, confirmation, lost reply and idempotent retry', options, async t => {
   const {page, url} = await open(t);
   const keys = [];
   let removed = false;
@@ -63,7 +69,7 @@ test('TC-346: mobile memory list, paging, confirmation, lost reply and idempoten
   assert.equal(requests.at(-1), null);
 });
 
-test('TC-346: loading, feature off, permissions, and recoverable response states', async t => {
+test('TC-346: loading, feature off, permissions, and recoverable response states', options, async t => {
   const {page, url} = await open(t);
   let release;
   const held = new Promise(resolve => { release = resolve; });

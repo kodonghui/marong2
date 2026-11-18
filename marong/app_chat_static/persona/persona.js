@@ -276,7 +276,7 @@ function memoryRow(row, type) {
     details.append(reveal);
   }
   const forget = button('잊기', () => {
-    memory.selected = {type, id: row.id, key};
+    if (!selected) memory.selected = {type, id: row.id, key};
     renderMemory();
     $('memory-confirm')?.focus();
   }, 'text-button');
@@ -359,6 +359,10 @@ async function loadMemory({more = false, keepNotice = false} = {}) {
   $('reload').hidden = true;
   clearTimeout(retryTimer); retryTimer = null; retryDelay = 5000;
   try { sessionStorage.removeItem('marong.persona.login'); } catch {}
+  const content = $('content');
+  if (!cursor && !content.hidden && memory.more === r.data.hasMore
+      && JSON.stringify(memory.items) === JSON.stringify(r.data.items)
+      && JSON.stringify(memory.loops) === JSON.stringify(r.data.loops)) return;
   if (cursor) memory.items.push(...r.data.items);
   else {
     memory.items = r.data.items;
@@ -366,7 +370,7 @@ async function loadMemory({more = false, keepNotice = false} = {}) {
     memory.quotes.clear();
   }
   memory.more = r.data.hasMore;
-  $('content').hidden = false;
+  content.hidden = false;
   started = true;
   renderMemory();
 }
