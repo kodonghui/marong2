@@ -3,6 +3,7 @@ import {creation} from './creation.js';
 import {account, petScreen} from './member.js';
 import {diary} from './diary.js';
 import {orders, paymentReturn} from './orders.js';
+import {settings, farewell} from './settings.js';
 
 export const page = document.querySelector('#page');
 const tabs = document.querySelector('#tabs');
@@ -188,6 +189,8 @@ async function start() {
     else if (path === '/create' || path.startsWith('/create/')) await creation(path);
     else if (/^\/pets\/[^/]+$/.test(path)) await petScreen(path.split('/')[2]);
     else if (/^\/pets\/[^/]+\/diary(?:\/[^/]+)?$/.test(path)) await diary(path);
+    else if (/^\/pets\/[^/]+\/settings$/.test(path)) await settings(path.split('/')[2]);
+    else if (/^\/pets\/[^/]+\/farewell$/.test(path)) await farewell(path.split('/')[2]);
     else if (path === '/me') await account();
     else if (path === '/me/orders') await orders();
     else if (path === '/pay/return') await paymentReturn();

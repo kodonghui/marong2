@@ -35,6 +35,7 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
   let member = signedIn;
   let state;
   let selected = null;
+  let memberPet = {...pet, intro: {personality: ['느긋함'], likes: '산책', dislikes: '', callMe: '누나'}};
   const writes = [];
   const order = {id: orderId, orderNo: 'P20261117-ABC123', product: 'item', itemName: '털모자',
     amountKrw: 1200, vatKrw: 109, status: 'fulfilled', createdAt: '2026-11-17T06:40:00Z',
@@ -111,7 +112,21 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
     if (pathname === `/api/pets/${petId}/messages`) return json(res, {items: [{
       id: candidateId, role: 'pet', kind: 'greeting', text: '누나, 나 왔어!',
     }], before: null});
-    if (pathname === `/api/pets/${petId}`) return json(res, pet);
+    if (pathname === `/api/pets/${petId}`) return json(res, memberPet);
+    if (pathname === `/api/pets/${petId}/mode`) {
+      const payload = JSON.parse(await body(req));
+      writes.push(payload);
+      memberPet = {...memberPet, mode: payload.mode, revertUntil: new Date(Date.now() + 86400000).toISOString()};
+      return json(res, memberPet);
+    }
+    if (pathname === `/api/pets/${petId}/farewell`) {
+      const payload = JSON.parse(await body(req));
+      writes.push(payload);
+      return json(res, {date: '2026-11-17', body: '같이 산책한 날이 정말 좋았어.', kind: 'farewell'});
+    }
+    if (pathname === `/api/pets/${petId}/export`) return json(res, {id: orderId, status: 'queued'}, 202);
+    if (pathname === `/api/exports/${orderId}`) return json(res, {id: orderId, status: 'done',
+      readyUntil: new Date(Date.now() + 86400000).toISOString()});
     if (pathname === `/api/pets/${petId}/events`) {
       res.writeHead(200, {'Content-Type': 'text/event-stream'});
       return res.end('event: ping\ndata: {}\n\n');
@@ -279,5 +294,40 @@ if (require.main === module) {
         assert.deepEqual(writes, payment === 'canceled' ? [] : [{paymentKey: 'fixture', amount: 1200}]);
       } finally { await page.close(); }
     }
+  });
+
+  test('SCR-153–154 confirms memorial mode, creates a farewell page, and protects deletion', async t => {
+    const {origin, writes} = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 360, height: 780}});
+    t.after(() => page.close());
+    await page.goto(origin + '/pets/' + petId + '/settings');
+    await page.getByRole('button', {name: '아이 지우기'}).click();
+    const dialog = page.getByRole('dialog');
+    assert.equal(await dialog.getByRole('button', {name: '지우기', exact: true}).isDisabled(), true);
+    await dialog.getByLabel('아이 이름').fill('콩이');
+    assert.equal(await dialog.getByRole('button', {name: '지우기', exact: true}).isEnabled(), true);
+    await dialog.getByRole('button', {name: '아니에요'}).click();
+    await page.getByRole('button', {name: '무지개다리를 건넜어요'}).click();
+    await visible(dialog.getByText('7일 안에 되돌릴 수 있어요'));
+    await dialog.getByRole('button', {name: '추억 모드로 바꾸기'}).click();
+    await page.getByRole('link', {name: '작별 의식'}).click();
+    await page.getByLabel('마지막 편지 받기').check();
+    await page.getByRole('button', {name: '시작하기'}).click();
+    await visible(page.getByText('같이 산책한 날이 정말 좋았어.'));
+    assert.equal(await page.getByRole('link', {name: '일기장 마지막 장에 남겼어요'}).getAttribute('href'),
+      '/pets/' + petId + '/diary/2026-11-17');
+    assert.deepEqual(writes, [{mode: 'memorial'}, {kind: 'letter'}]);
+  });
+
+  test('SCR-153 keeps the export ID through polling and exposes the authorized download route', async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 430, height: 780}});
+    t.after(() => page.close());
+    await page.goto(origin + '/pets/' + petId + '/settings');
+    await page.getByRole('button', {name: '기록 내보내기'}).click();
+    await visible(page.getByText('만들고 있어요', {exact: true}));
+    const download = page.getByRole('link', {name: /^받기 · /});
+    await visible(download);
+    assert.equal(await download.getAttribute('href'), '/api/exports/' + orderId + '/download');
   });
 }
