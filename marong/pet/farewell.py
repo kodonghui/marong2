@@ -35,7 +35,8 @@ def letter_ok(value):
 def entry_view(row, *, drawing=False):
     return {"date": row["day"].isoformat(), "kind": row["kind"], "status": row["status"],
             "title": row["title"], "weather": row["weather"], "body": row["body"], "mood": row["mood"],
-            "composite": row["composite"], "picture": media_url(row["picture_id"]), "redrawsLeft": 2 - row["redraws"],
+            "composite": row["composite"], "picture": media_url(row["picture_id"]) if row["picture_id"] else None,
+            "redrawsLeft": 2 - row["redraws"],
             "drawing": drawing, "stickers": row["stickers"]}
 
 
