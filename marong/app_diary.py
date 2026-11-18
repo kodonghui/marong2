@@ -223,13 +223,13 @@ class AppDiary:
         friend = (await self.chat._who(req))["friend_id"]
         drawing_id = req.match_info["id"]
         if not UUID.fullmatch(drawing_id.lower()):
-            raise Problem("not_found")
+            raise Problem("not_found", title="없는 그림이거나 로그인한 친구의 그림이 아님")
         row = await self.store._one(
             """SELECT g.image, g.format FROM marong.diary_drawings g JOIN marong.diaries d ON d.id=g.diary_id
             WHERE d.friend_id=%s AND g.id=%s""", (friend, drawing_id),
         )
         if row is None:
-            raise Problem("not_found")
+            raise Problem("not_found", title="없는 그림이거나 로그인한 친구의 그림이 아님")
         req["cache"] = "private, max-age=31536000, immutable"
         return web.Response(body=row["image"], content_type=f"image/{row['format']}")
 
