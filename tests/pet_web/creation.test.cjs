@@ -467,8 +467,9 @@ if (require.main === module) {
 
   test('SCR-147 retries a failed send with the same client id and one retry prompt', async t => {
     const {origin} = await fixture(t);
-    const page = await browser.newPage();
-    t.after(() => page.close());
+    const context = await browser.newContext();
+    t.after(() => context.close());
+    const page = await context.newPage();
     const submitted = [];
     await page.route('**/api/pets/*/messages', async route => {
       if (route.request().method() !== 'POST') return route.continue();
@@ -481,6 +482,13 @@ if (require.main === module) {
     await page.getByLabel('콩이에게 할 말').fill('같은 요청으로 다시 보내기');
     await page.getByRole('button', {name: '보내기'}).click();
     const retry = page.getByRole('button', {name: '다시 보내기'});
+    await visible(retry);
+    await page.evaluate(() => { window.sentBeforeOffline = true; });
+    await context.setOffline(true);
+    await page.waitForFunction(() => document.querySelector('.composer textarea').disabled);
+    await context.setOffline(false);
+    await page.waitForFunction(() => !document.querySelector('.composer textarea').disabled);
+    assert.equal(await page.evaluate(() => window.sentBeforeOffline), true);
     await retry.click();
     await visible(retry);
     assert.equal(await page.getByText('보내지 못했어요', {exact: true}).count(), 1);
@@ -491,6 +499,44 @@ if (require.main === module) {
     assert.equal(new Set(submitted.map(data => data.clientId)).size, 1);
     await visible(page.getByText('같은 요청으로 다시 보내기', {exact: true}));
     assert.equal(await page.getByText('보내지 못했어요', {exact: true}).count(), 0);
+  });
+
+  test('SCR-147 reconciles an accepted send recovered after its response was lost', async t => {
+    const {origin} = await fixture(t);
+    const context = await browser.newContext();
+    t.after(() => context.close());
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      window.chatStreams = [];
+      window.EventSource = class extends EventTarget {
+        constructor() { super(); window.chatStreams.push(this); }
+        close() {}
+      };
+    });
+    const greeting = {id: 'first', role: 'pet', kind: 'greeting', text: '처음 인사'};
+    let saved = null;
+    let sends = 0;
+    await page.route('**/api/pets/*/messages', route => {
+      if (route.request().method() === 'POST') {
+        sends += 1;
+        saved = {...route.request().postDataJSON(), id: 'accepted', role: 'member', kind: 'chat'};
+        return route.abort('connectionreset');
+      }
+      return route.fulfill({json: {items: saved ? [saved, greeting] : [greeting], before: null}});
+    });
+    await page.goto(`${origin}/pets/${petId}`);
+    const message = '서버에는 도착한 한 문장';
+    await page.getByLabel('콩이에게 할 말').fill(message);
+    await page.getByRole('button', {name: '보내기'}).click();
+    const retry = page.getByRole('button', {name: '다시 보내기'});
+    await visible(retry);
+    await context.setOffline(true);
+    await context.setOffline(false);
+    await page.waitForFunction(() => window.chatStreams.length === 2);
+    await page.evaluate(() => window.chatStreams[1].dispatchEvent(new Event('open')));
+    await retry.waitFor({state: 'detached'});
+    assert.equal(await page.getByText(message, {exact: true}).count(), 1);
+    assert.equal(sends, 1);
   });
 
   test('SCR-148 at 390px: mic denial, disclosure, PCM, quota ending and return', async t => {

@@ -185,13 +185,18 @@ async function start() {
   navigator.serviceWorker?.register('/pet-worker.js').catch(() => {});
   offline.hidden = navigator.onLine;
   window.addEventListener('offline', () => { offline.hidden = false; });
-  window.addEventListener('online', () => { location.reload(); });
+  let restoreConnection;
+  window.addEventListener('online', () => {
+    if (!restoreConnection) { location.reload(); return; }
+    offline.hidden = true;
+    restoreConnection();
+  });
   const path = location.pathname;
   try {
     if (path === '/') await home();
     else if (path === '/signup') await signup();
     else if (path === '/create' || path.startsWith('/create/')) await creation(path);
-    else if (/^\/pets\/[^/]+$/.test(path)) await petScreen(path.split('/')[2]);
+    else if (/^\/pets\/[^/]+$/.test(path)) restoreConnection = await petScreen(path.split('/')[2]);
     else if (/^\/pets\/[^/]+\/diary(?:\/[^/]+)?$/.test(path)) await diary(path);
     else if (/^\/pets\/[^/]+\/call$/.test(path)) await callScreen(path.split('/')[2]);
     else if (/^\/pets\/[^/]+\/closet$/.test(path)) await closet(path.split('/')[2]);

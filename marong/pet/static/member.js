@@ -48,6 +48,7 @@ export async function petScreen(id) {
   reconnecting.hidden = true;
   const outlet = el('div', {'aria-live': 'polite'});
   const bubbles = new Map();
+  const pendingSends = new Map();
   let cursor = before;
   let streamAnchor = items[0]?.id;
   function bubble(row) {
@@ -66,7 +67,12 @@ export async function petScreen(id) {
         {background: snapshot.backgroundId, expression: snapshot.expression}) : null;
     return el('div', {class: 'bubble'}, scene, message, el('small', {class: 'muted'}, 'AI'), report);
   }
+  function settle(clientId) {
+    pendingSends.get(clientId)?.remove();
+    pendingSends.delete(clientId);
+  }
   function renderBubble(row, {move = false} = {}) {
+    if (row.role === 'member' && row.clientId) settle(row.clientId);
     const known = row.id && bubbles.get(row.id);
     if (known) return move ? known : null;
     const item = bubble(row);
@@ -111,25 +117,26 @@ export async function petScreen(id) {
   entry.addEventListener('input', () => sessionStorage.setItem(draftKey, entry.value));
   const form = el('form', {class: 'composer'}, entry, submit);
 
-  async function send(payload, pending, feedback) {
+  async function send(payload, feedback) {
     try {
       const message = await api(path + '/messages', {method: 'POST', body: payload});
-      pending.remove();
+      settle(payload.clientId);
       append([message]);
     } catch (error) {
+      if (!pendingSends.has(payload.clientId)) return;
       if (['asleep', 'archived', 'consent_required'].includes(error.code) || error.status === 401) {
         if (!entry.value) entry.value = payload.text;
         sessionStorage.setItem(draftKey, entry.value);
         sendBlocked = true;
         updateComposer();
-        pending.remove();
+        settle(payload.clientId);
         if (error.code === 'archived' || error.code === 'consent_required') location.reload();
         else errorText(error, outlet);
       } else {
         const again = button('다시 보내기', () => {
           if (!navigator.onLine) return;
           feedback.replaceChildren();
-          void send(payload, pending, feedback);
+          void send(payload, feedback);
         }, 'plain');
         feedback.replaceChildren(text('보내지 못했어요', 'error'), again);
       }
@@ -142,12 +149,13 @@ export async function petScreen(id) {
     const payload = {text: message, clientId: crypto.randomUUID()};
     const feedback = el('div');
     const pending = el('div', {class: 'bubble member'}, text(message), feedback);
+    pendingSends.set(payload.clientId, pending);
     timeline.append(pending);
     timeline.scrollTop = timeline.scrollHeight;
     entry.value = '';
     sessionStorage.removeItem(draftKey);
     empty?.remove();
-    void send(payload, pending, feedback);
+    void send(payload, feedback);
   });
   chat.append(form);
   if (items.length === 1 && items[0].kind === 'greeting' && !entry.disabled) entry.focus();
@@ -223,18 +231,24 @@ export async function petScreen(id) {
     source.addEventListener('error', () => retry(source));
   }
   connect();
-  function disconnected() {
-    updateComposer();
+  function suspend() {
     if (events) retry(events);
     clearTimeout(reconnect);
   }
-  window.addEventListener('offline', disconnected);
-  window.addEventListener('pagehide', () => {
-    window.removeEventListener('offline', disconnected);
-    events?.close();
-    events = null;
-    clearTimeout(reconnect);
-  }, {once: true});
+  function resume() {
+    updateComposer();
+    if (!events) {
+      clearTimeout(reconnect);
+      connect();
+    }
+  }
+  window.addEventListener('offline', () => {
+    updateComposer();
+    suspend();
+  });
+  window.addEventListener('pagehide', suspend);
+  window.addEventListener('pageshow', event => { if (event.persisted) resume(); });
+  return resume;
 }
 
 export async function account() {
