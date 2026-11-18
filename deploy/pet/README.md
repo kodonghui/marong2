@@ -19,6 +19,12 @@ TASK-377 · SPEC-368 · TC-428
 - 웹의 `PET_CALL_WS_URL`은 공개 주소의 `wss://…/pet-call`, `PET_CALL_HEALTH_URL`은 `http://127.0.0.1:8798/healthz`다.
 - 통화 `call.env`의 `PET_ORIGIN`은 웹의 값과 같고, `PET_CALL_BACKEND=http://127.0.0.1:8797`, `PET_CALL_PORT=8798`을 사용한다. `PET_CALL_VERTEX_PROJECT`, `PET_CALL_VERTEX_REGION`, `PET_CALL_DOG_VOICE`, `PET_CALL_CAT_VOICE`와 해당 실행 사용자가 읽을 수 있는 통화 공급자 인증을 설정한다. `PET_CALL_INTERNAL_SECRET`은 두 환경 파일에서 같은 새 비밀값을 사용한다.
 
+## 얼굴 가리기 모델 준비
+
+[OpenCV Zoo의 고정 커밋](https://github.com/opencv/opencv_zoo/tree/f12e12798e8314f7c074a6656816c048dcc95b7a/models/face_detection_yunet)에서 [YuNet ONNX 원본](https://media.githubusercontent.com/media/opencv/opencv_zoo/f12e12798e8314f7c074a6656816c048dcc95b7a/models/face_detection_yunet/face_detection_yunet_2023mar.onnx)과 [MIT 라이선스](https://raw.githubusercontent.com/opencv/opencv_zoo/f12e12798e8314f7c074a6656816c048dcc95b7a/models/face_detection_yunet/LICENSE)를 받는다. 원본 크기는 232,589바이트이며 SHA-256은 `8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4`다.
+
+검증한 파일과 라이선스를 `/opt/marong-pet/assets/`에 보관한다. `PET_YUNET_MODEL_PATH`에는 ONNX의 절대 경로를 넣는다. 서비스 사용자가 파일을 읽고 같은 가상환경에서 `marong.pet.photos.load_detector()`로 불러올 수 있는지 확인한 뒤 공개 경로를 연결한다. 웹의 `/healthz` 확인과 별도로 이 검사를 실행한다.
+
 ## 반영 확인과 되돌리기
 
 공개 주소에서 건강 확인 200, 초대 없는 가입 403 `invite_required`, 주문 409 `payments_off`를 확인한다. 인증이 필요한 시험은 전용 시험 회원을 사용한다. 새 서비스 로그를 5분 동안 보면서 Traceback과 ERROR가 각각 0건인지, 기존 서비스 실행 시각·파일 해시·기존 DB 상태가 반영 전과 같은지 확인한다.
