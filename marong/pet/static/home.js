@@ -102,7 +102,10 @@ function birthDate(values) {
 export async function signup() {
   header('가입', {label: '홈', url: '/'});
   showTabs(null);
-  const invite = el('label', {hidden: true}, '초대 코드', el('input', {name: 'inviteCode', maxlength: 8, autocapitalize: 'characters'}));
+  const inviteError = el('div', {id: 'signup-invite-error', 'aria-live': 'polite'});
+  const inviteInput = el('input', {name: 'inviteCode', maxlength: 8, autocapitalize: 'characters',
+    'aria-describedby': inviteError.id});
+  const invite = el('div', {class: 'stack', hidden: true}, el('label', {}, '초대 코드', inviteInput), inviteError);
   const outcome = el('div', {'aria-live': 'polite'});
   const dateError = el('div', {id: 'birth-date-error', 'aria-live': 'polite'});
   const consentError = el('div', {id: 'signup-consent-error', 'aria-live': 'polite'});
@@ -120,17 +123,40 @@ export async function signup() {
       text('동의하지 않으면 캐릭터 만들기와 대화를 할 수 없어요. 나중에 설정에서 바꿀 수 있어요', 'muted')),
     invite, outcome, submit);
   const required = ['agreeTerms', 'agreePrivacy', 'aiNoticeConfirmed'];
-  const ready = () => {
-    const values = new FormData(form);
-    return birthDate(values) && required.every(name => values.has(name));
+  const inviteCode = values => values.get('inviteCode').trim().toUpperCase();
+  const validInvite = code => /^[A-Z0-9]{8}$/.test(code);
+  const ready = (values = new FormData(form)) => navigator.onLine && birthDate(values) && required.every(name => values.has(name))
+    && (invite.hidden || validInvite(inviteCode(values)));
+  const refreshSubmit = values => {
+    if (!submit.hasAttribute('aria-busy')) submit.disabled = !ready(values);
   };
   form.addEventListener('input', event => {
-    for (const [section, error] of [[dateFields, dateError], [consentFields, consentError]]) {
-      if (!section.contains(event.target)) continue;
-      section.removeAttribute('aria-invalid');
-      error.replaceChildren();
+    const values = new FormData(form);
+    if (dateFields.contains(event.target)) {
+      const complete = ['year', 'month', 'day'].every(name => values.get(name));
+      if (complete && !birthDate(values)) {
+        dateFields.setAttribute('aria-invalid', 'true');
+        dateError.replaceChildren(text('입력을 확인해 주세요.', 'error'));
+      } else {
+        dateFields.removeAttribute('aria-invalid');
+        dateError.replaceChildren();
+      }
     }
-    if (!submit.hasAttribute('aria-busy')) submit.disabled = !ready();
+    if (consentFields.contains(event.target)) {
+      consentFields.removeAttribute('aria-invalid');
+      consentError.replaceChildren();
+    }
+    if (event.target === inviteInput) {
+      const code = inviteCode(values);
+      if (code && !validInvite(code)) {
+        inviteInput.setAttribute('aria-invalid', 'true');
+        inviteError.replaceChildren(text('입력을 확인해 주세요. 8자, 영문·숫자', 'error'));
+      } else {
+        inviteInput.removeAttribute('aria-invalid');
+        inviteError.replaceChildren();
+      }
+    }
+    refreshSubmit(values);
   });
   form.addEventListener('submit', async event => {
     event.preventDefault();
@@ -143,14 +169,17 @@ export async function signup() {
       const values = new FormData(form);
       const data = {birthDate: birthDate(values)};
       for (const name of [...required, 'overseasTransfer']) data[name] = values.has(name);
-      const code = values.get('inviteCode').trim().toUpperCase();
+      const code = inviteCode(values);
       if (code) data.inviteCode = code;
       try {
         await api('/api/signup', {method: 'POST', body: data, auth: false});
         location.replace('/');
       } catch (error) {
-        if (error.code === 'invite_required') invite.hidden = false;
-        if (error.code === 'underage') show(notice('이 서비스는 만 19세 이상만 쓸 수 있어요.', link('처음으로', '/')));
+        if (error.code === 'invite_required') {
+          invite.hidden = false;
+          inviteInput.focus();
+          errorText(error, outcome);
+        } else if (error.code === 'underage') show(notice('이 서비스는 만 19세 이상만 쓸 수 있어요.', link('처음으로', '/')));
         else if (error.code === 'already_member') show(notice('이미 가입했어요.', link('홈으로', '/')));
         else if (error.status === 401) show(notice('가입 시간이 지났어요. 다시 로그인해 주세요.', link('처음으로', '/')));
         else if (error.code === 'invalid_input') {
@@ -162,7 +191,9 @@ export async function signup() {
         } else errorText(error, outcome);
       }
     });
-    if (form.isConnected) submit.disabled = !ready();
+    if (form.isConnected) refreshSubmit();
   });
+  window.addEventListener('offline', () => refreshSubmit());
   show(form);
+  return refreshSubmit;
 }

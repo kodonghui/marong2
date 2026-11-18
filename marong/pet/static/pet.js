@@ -200,7 +200,7 @@ async function start() {
   const path = location.pathname;
   try {
     if (path === '/') await home();
-    else if (path === '/signup') await signup();
+    else if (path === '/signup') restoreConnection = await signup();
     else if (path === '/create' || path.startsWith('/create/')) await creation(path);
     else if (/^\/pets\/[^/]+$/.test(path)) restoreConnection = await petScreen(path.split('/')[2]);
     else if (/^\/pets\/[^/]+\/diary(?:\/[^/]+)?$/.test(path)) await diary(path);
