@@ -507,6 +507,10 @@ async def check_reply_context(db):
         recalled = await add_memory(friend, direct, "서점 취향 검색", kind="hard")
         await add_memory(friend, group, "공개 운동회 일정", share="known")
         await add_memory(other, direct, "다른 친구 비공개")
+        await store.add_message(group, "user", "같은 방 등장", "context-other")
+        db.admin("UPDATE marong.friends SET share=true WHERE id=%s", (other,))
+        db.admin("INSERT INTO marong.shared_notes(friend_id,content,close_content) VALUES (%s,%s,%s)",
+                 (other, "- 공개 공유 소식", "- 친한 사이 한정 속사정"))
         with patch.dict("os.environ", {"BOT_TOKEN": "fixture", "ANTHROPIC_API_KEY": "fixture",
                                       "DATABASE_URL": db.app_url, "PROMPT_PATH": str(ROOT / "prompt.md")}):
             settings = load_settings()
@@ -546,6 +550,12 @@ async def check_reply_context(db):
         assert "공개 운동회 일정" in group_dump
         assert not any(clue in group_dump for clue in ("개인 고정 항목", "개인 민감 항목", "다른 친구 비공개"))
         assert "1:1 얘기도 이어서" not in group_dump
+        assert "공개 공유 소식" not in group_dump
+        group_msg.visible_friends = {friend, other}
+        group_system, _, _ = await context(group_msg, person)
+        assert "공개 공유 소식" in repr(group_system)
+        assert "친한 사이 한정 속사정" not in repr(group_system)
+        assert "다른 친구 비공개" not in repr(group_system)
 
         agent.friend_memory_mode = "shadow"
         shadow_system, shadow_messages, _ = await context(msg, person)

@@ -127,6 +127,7 @@ class DiscordIncoming(Incoming):
     presaved_id: int | None = None        # the in-app chat stored this text before answering (Agent.handle)
     channel: bool = False                 # a channel of the private server shared by friends, not the friend's own DM
     addressed: str | None = None          # (channel) "call" | "follow": Marong answers it. None: only read (stored)
+    visible_friends: set[int] | None = None  # linked friends allowed to read the current channel
     heard: list = field(default_factory=list)     # (channel) [(when, name, text)] other bots / unlinked people, not stored
     friends: list = field(default_factory=list)   # (channel) names of the friends linked to Marong on this server
 
@@ -997,6 +998,14 @@ class DiscordDM(discord.Client):
         incoming = items[-1]
         if addressed:
             incoming.heard, incoming.friends = self._heard_lines(room), friends
+            if (getattr(self.agent, "friend_memory_mode", "off") == "on"
+                    and getattr(msg.guild, "chunked", False)
+                    and msg.channel.type is discord.ChannelType.text):
+                try:
+                    visible = [str(member.id) for member in msg.channel.members if not member.bot]
+                    incoming.visible_friends = await asyncio.wait_for(self.store.visible_channel_friends(visible), .5)
+                except Exception as error:
+                    log.warning("discord_channel_roster_unavailable %s", type(error).__name__)
 
         async def reply(body):
             if incoming.reaction:
