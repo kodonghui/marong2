@@ -557,6 +557,24 @@ async def check_reply_context(db):
         assert "친한 사이 한정 속사정" not in repr(group_system)
         assert "다른 친구 비공개" not in repr(group_system)
 
+        semantic_phrase = "길 잃은 물건"
+        await add_memory(friend, direct, semantic_phrase, kind="hard")
+        agent.emb = SimpleNamespace(ready=True, model="fixture-semantic",
+            query=AsyncMock(return_value=[1, 0]), documents=AsyncMock(side_effect=lambda rows:
+                [[1, 0] if phrase == semantic_phrase else [0, 1] for phrase in rows]))
+        semantic = Incoming(direct, "context-author", "분실 관련 알려줘")
+        sem_system, sem_messages, _ = await context(semantic, person)
+        assert semantic_phrase in sem_messages[-1]["content"][-1]["text"]
+        assert semantic_phrase not in repr(sem_system)
+
+        async def delay(_):
+            await asyncio.sleep(3)
+        agent.emb.documents.side_effect = delay
+        with patch("marong.agent.EMBED_TIMEOUT_S", .03):
+            timeout_system, timeout_messages, _ = await context(semantic, person)
+        assert "# 고정 요약" in repr(timeout_system) and "# 찾은 기억" not in repr(timeout_messages)
+        agent.emb = embedding
+
         agent.friend_memory_mode = "shadow"
         shadow_system, shadow_messages, _ = await context(msg, person)
         assert "# 고정 요약" not in repr(shadow_system) and "# 찾은 기억" not in repr(shadow_messages)
