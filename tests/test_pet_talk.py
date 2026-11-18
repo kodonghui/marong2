@@ -127,7 +127,7 @@ async def scenario(admin, dsn):
                                 (owner,)).fetchone() == (4,)
         at = datetime.combine(quota_day(at) + timedelta(days=1), time(4), KST)
         with psycopg.connect(admin) as conn:
-            conn.execute("UPDATE pet.pets SET status='archived', archived_at=now() WHERE id=%s", (sibling,))
+            conn.execute("UPDATE pet.pets SET status='archived', mode='memorial', memorial_since=now() WHERE id=%s", (sibling,))
         rejected = await http.post(f"/api/pets/{sibling}/messages",
                                    json={"text": "안녕!", "clientId": str(uuid4())}, headers=one)
         assert rejected.status == 409 and (await rejected.json())["code"] == "archived"
