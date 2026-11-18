@@ -51,7 +51,7 @@ def item_view(row, private):
     return value
 
 
-async def read_items(conn, friend, *, before=None, group=None, limit=100):
+async def read_items(conn, friend, *, before=None, group=None, direct_room=None, limit=100):
     sql = """
         SELECT id,kind,text,heard_at,channel,quote,room_key,sensitive,valid_until
         FROM marong.memory_items i WHERE friend_id=%s AND status='current'
@@ -67,6 +67,9 @@ async def read_items(conn, friend, *, before=None, group=None, limit=100):
     if group is not None:
         sql += " AND room_key=%s AND sensitive IS NULL AND share='known'"
         parameters.append(group)
+    if direct_room is not None:
+        sql += " AND (room_key IS NULL OR room_key=%s)"
+        parameters.append(direct_room)
     query = await conn.execute(sql + " ORDER BY heard_at DESC,id DESC LIMIT %s", (*parameters, limit + 1))
     rows = await query.fetchall()
     return [item_view(row, group is None) for row in rows[:limit]], len(rows) > limit
@@ -103,7 +106,8 @@ async def list_for_turn(pool, friend, room, source_id, request_id, args):
             outcome, why = "invalid", "other_friend"
         elif speaker:
             group = None if speaker["is_channel"] else room
-            rows, _ = await read_items(conn, friend, group=group, limit=5)
+            rows, _ = await read_items(conn, friend, group=group,
+                                       direct_room=room if group is None else None, limit=5)
             outcome, why = ("ok" if rows else "none_matched"), None
             if group:
                 hint = "나머지는 둘이 있을 때 말해 줄게."

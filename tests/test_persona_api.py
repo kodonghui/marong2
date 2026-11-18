@@ -139,12 +139,36 @@ async def scenario(db):
             await check(await http.put(path, json={"text": source}, headers=one), 200)
             await check(await http.put(path, json={"text": source}, headers=one), 429, "too_many_requests")
 
+            memory_path = BASE + "/memories"
+            await check(await http.get(memory_path, headers=one), 403, "feature_off")
+            agent.friend_memory_mode = "shadow"
+            await check(await http.get(memory_path, headers=one), 403, "feature_off")
+            agent.friend_memory_mode = "on"
+            source_one = await store.add_message(ROOM, "user", "가을이 좋아", "fixture-one")
+            source_two = await store.add_message("fixture-persona-two", "user", "겨울이 좋아", "fixture-two")
+            db.admin("""
+                INSERT INTO marong.memory_items(friend_id,kind,text,status,heard_at,channel,message_id,quote,
+                                               share,sensitive,source)
+                VALUES (1,'preference','가을을 좋아함','current',now(),'app',%s,'가을이 좋아','self',NULL,'text'),
+                       (1,'fact','확인 대기','pending_ok',now(),'app',%s,'가을이 좋아','self','health','text'),
+                       (2,'preference','겨울을 좋아함','current',now(),'app',%s,'겨울이 좋아','self',NULL,'text')
+            """, (source_one, source_one, source_two))
+            response = await http.get(memory_path, headers=one)
+            assert response.headers["Cache-Control"] == "no-store"
+            [memory_one] = (await check(response, 200))["items"]
+            [memory_two] = (await check(await http.get(memory_path, headers=two), 200))["items"]
+            assert memory_one["quote"] == "가을이 좋아" and memory_two["quote"] == "겨울이 좋아"
+            foreign = await check(await http.get(f"{memory_path}?before={memory_two['id']}", headers=one), 200)
+            assert foreign == {"items": [], "loops": [], "hasMore": False}
+            await check(await http.get(f"{memory_path}?before=-1", headers=one), 400, "invalid_request")
+
             endpoints = (
                 ("GET", "/card", None), ("PATCH", "/card", {"lead": "lead"}),
                 ("POST", "/rules", {"kind": "avoid_topic", "text": "시험주제"}),
                 ("DELETE", "/rules/999999", None), ("GET", "/instructions", None),
                 ("PUT", "/instructions", {"text": "짧게 말해 줘"}), ("DELETE", "/instructions", None),
                 ("POST", "/cards/999999/answer", {"value": "yes"}),
+                ("GET", "/memories", None),
             )
             original_login = store.app_login.side_effect
             for method, suffix, body in endpoints:
@@ -183,3 +207,4 @@ if __name__ == "__main__":
     finally:
         db.close()
     print("TC-280–284 partial: friend card, writes, rule idempotency and question DTO with test Access")
+    print("TC-343: memory list status, owner isolation, inaccessible cursor and hidden consent state")

@@ -232,7 +232,7 @@ async def check_queue(db):
         assert after["items"] == page["items"][1:] and not after["loops"]
         direct = await list_for_turn(store.pool, friend, "fixture:dm", private, "list-private", {})
         group = await list_for_turn(store.pool, friend, "fixture:group", newer, "list-group", {})
-        assert {row["channel"] for row in direct["items"]} == {"kakao_group", "call"}
+        assert {row["channel"] for row in direct["items"]} == {"call"}
         assert len(group["items"]) == 1 and "quote" not in group["items"][0] and group["hint"]
         assert await list_for_turn(store.pool, friend, "fixture:group", private, "list-forged", {}) is None
         assert await list_for_turn(store.pool, friend, "fixture:dm", private, "list-other", {"friend_id": 77}) is None
