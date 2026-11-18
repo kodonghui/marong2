@@ -10,7 +10,7 @@ from .http import CONFIG, POOL, Problem, require_member, uuid_param
 SHOP_KINDS = {"wear", "sticker_pack", "theme", "theme_package"}
 INVENTORY_KINDS = SHOP_KINDS | {"font"}
 TEMPLATES = {"dog_small", "dog_large", "dog_long", "cat", "cat_round"}
-ASSET_NAME = re.compile(r"[a-z0-9_]{1,40}")
+ASSET_NAME = re.compile(r"[a-z0-9_-]{1,40}")
 ON_SALE = """i.sellable AND i.ended_at IS NULL AND i.sale_starts_at<=now()
               AND (i.sale_ends_at IS NULL OR i.sale_ends_at>now())"""
 

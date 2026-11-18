@@ -3,6 +3,7 @@
 import asyncio
 import json
 from base64 import b64decode
+from datetime import date
 from hashlib import sha256
 from pathlib import Path
 from secrets import token_urlsafe
@@ -16,7 +17,7 @@ from PIL import Image, ImageDraw
 from psycopg.types.json import Jsonb
 
 from marong.pet.auth import AuthConfig
-from marong.pet.decor import apply_outfit, outfit_input
+from marong.pet.decor import apply_outfit, apply_stickers, apply_style, outfit_input, stickers_input, style_input
 from marong.pet.http import COOKIE, POOL, Problem, cookie_hash
 from marong.pet.settings import Settings
 from marong.pet.inventory import TEMPLATES
@@ -140,6 +141,82 @@ async def check_inventory(admin, app_dsn, directory):
             assert removed["wornBy"] == []
             conn.execute("UPDATE pet.pets SET status='archived' WHERE id=%s", (memorial_pet,))
             await equip(memorial, memorial_pet, head=str(ended), required_error="archived")
+            await check_diary_decoration(conn, pool, member, pet, memorial, free, sale)
+
+
+async def check_diary_decoration(conn, pool, member, pet, other_member, outfit, unowned):
+    theme, font, pack, second_hat = (uuid4() for _ in range(4))
+    conn.execute("""
+        INSERT INTO pet.items(id,kind,name,slot,license_key,assets)
+        VALUES (%s,'theme','시험 테마',NULL,'fixture','{}'),
+               (%s,'font','시험 글꼴',NULL,'fixture','{}'),
+               (%s,'sticker_pack','시험 스티커',NULL,'fixture',%s),
+               (%s,'wear','시험 머리띠','head','fixture','{}')
+    """, (theme, font, pack, Jsonb({"contents": ["star-small"]}), second_hat))
+    orders = {}
+    for item in (theme, pack):
+        (orders[item],) = conn.execute("""
+            INSERT INTO pet.orders(order_no,member_id,product,item_id,amount_krw,vat_krw,withdrawal_rule,
+                                   status,idempotency_key,paid_at)
+            VALUES (%s,%s,'item',%s,1200,109,'fixture','fulfilled',%s,now()) RETURNING id
+        """, (f"fixture-{item}", member, item, uuid4())).fetchone()
+        conn.execute("INSERT INTO pet.inventory(member_id,item_id,source,order_id) VALUES (%s,%s,'order',%s)",
+                     (member, item, orders[item]))
+    for item in (font, unowned, second_hat):
+        conn.execute("INSERT INTO pet.inventory(member_id,item_id,source) VALUES (%s,%s,'free_default')", (member, item))
+    day = date(2026, 11, 17)
+    (diary,) = conn.execute("""
+        INSERT INTO pet.diary_entries(member_id,pet_id,day,status,title,body)
+        VALUES (%s,%s,%s,'pending','시험 일기','오늘은 바람이 시원했어.') RETURNING id
+    """, (member, pet, day)).fetchone()
+
+    async def change(operation, actor, *args, expected=None):
+        try:
+            async with pool.connection() as session, session.transaction():
+                result = await operation(session, actor, pet, *args)
+            assert expected is None
+            return result
+        except Problem as error:
+            assert error.code == expected
+
+    for head in (unowned, second_hat):
+        await change(apply_outfit, member, outfit_input({"head": str(head), "body": None, "neck": str(outfit)}))
+        assert conn.execute("SELECT head_item FROM pet.decor WHERE pet_id=%s", (pet,)).fetchone() == (head,)
+
+    def order_used(item):
+        return conn.execute("SELECT used_at FROM pet.orders WHERE id=%s", (orders[item],)).fetchone()[0]
+
+    style = style_input({"themeId": str(theme), "fontId": str(font)})
+    await change(apply_style, other_member, style, expected="not_found")
+    await change(apply_style, member, {**style, "font": theme}, expected="not_found")
+    assert order_used(theme) is None
+    await change(apply_style, member, style)
+    assert order_used(theme) is not None
+    assert conn.execute("SELECT neck_item,theme_item,font_item FROM pet.decor WHERE pet_id=%s",
+                        (pet,)).fetchone() == (outfit, theme, font)
+    await change(apply_style, member, style_input({"themeId": None, "fontId": None}))
+    assert conn.execute("SELECT neck_item,theme_item,font_item FROM pet.decor WHERE pet_id=%s",
+                        (pet,)).fetchone() == (outfit, None, None)
+
+    sticker = {"packId": str(pack), "sticker": "star-small", "x": 0, "y": 1, "scale": .5, "rotate": -45}
+    placed = stickers_input([sticker] * 10)
+    await change(apply_stickers, member, day, placed, expected="wrong_state")
+    conn.execute("UPDATE pet.diary_entries SET status='ready' WHERE id=%s", (diary,))
+    await change(apply_stickers, other_member, day, placed, expected="not_found")
+    await change(apply_stickers, member, day, stickers_input([{**sticker, "sticker": "absent"}]), expected="not_found")
+    assert order_used(pack) is None
+    result = await change(apply_stickers, member, day, placed)
+    first_use = order_used(pack)
+    assert result["stickers"] == placed and first_use is not None
+    for invalid in ([sticker] * 11, [{**sticker, "x": -.1}], [{**sticker, "scale": 2.1}], [{**sticker, "rotate": 46}]):
+        try:
+            stickers_input(invalid)
+            raise AssertionError("invalid sticker payload accepted")
+        except Problem as error:
+            assert error.code == "invalid_input"
+    assert conn.execute("SELECT stickers FROM pet.diary_entries WHERE id=%s", (diary,)).fetchone() == (placed,)
+    assert (await change(apply_stickers, member, day, []))["stickers"] == []
+    assert order_used(pack) == first_use
 
 
 def check_item_cli(admin, app_dsn, directory):
@@ -209,4 +286,4 @@ if __name__ == "__main__":
         db.close()
     print("TC-421: inventory scope, current sales, read-only previews, and owned ended layers passed")
     print("TC-422: missing layer, license, dimensions and pixel limits, atomic upload, and limited sale ending passed")
-    print("TC-423 outfit transaction: ownership, slot mismatch, wear, remove, archive and first use passed")
+    print("TC-423: owning, changing and removing outfits, diary styles, and stickers passed")
