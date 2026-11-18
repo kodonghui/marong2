@@ -127,21 +127,40 @@ async def notify(pool, member, pet, kind, *, send):
     delivered = 0
     for target in targets:
         payload = {"title": f'{target["name"]}(AI)', "body": line}
-        for _ in range(2):
-            try:
-                status = await send(target, payload)
-            except (OSError, TimeoutError):
-                status = 503
-            if status in (404, 410) or 200 <= status < 300:
-                async with pool.connection() as conn:
-                    if status in (404, 410):
-                        await conn.execute("DELETE FROM pet.push_subscriptions WHERE id=%s AND p256dh=%s AND auth=%s",
-                                           (target["id"], target["p256dh"], target["auth"]))
-                    else:
-                        await conn.execute("UPDATE pet.push_subscriptions SET last_ok_at=now() WHERE id=%s",
-                                           (target["id"],))
-                        delivered += 1
-                break
+        delivered += await deliver_one(pool, target, payload, send)
+    return delivered
+
+
+async def deliver_one(pool, target, payload, send):
+    for _ in range(2):
+        try:
+            status = await send(target, payload)
+        except (OSError, TimeoutError):
+            continue
+        if status in (404, 410):
+            async with pool.connection() as conn:
+                await conn.execute("DELETE FROM pet.push_subscriptions WHERE id=%s AND p256dh=%s AND auth=%s",
+                                   (target["id"], target["p256dh"], target["auth"]))
+            return False
+        if 200 <= status < 300:
+            async with pool.connection() as conn:
+                await conn.execute("UPDATE pet.push_subscriptions SET last_ok_at=now() WHERE id=%s", (target["id"],))
+            return True
+    return False
+
+
+async def notify_price_change(pool, members, amount, day, send):
+    async with pool.connection() as conn:
+        cursor = await conn.execute("""
+            SELECT s.* FROM pet.push_subscriptions s JOIN pet.members m ON m.id=s.member_id AND m.status='active'
+            WHERE s.member_id=ANY(%s::uuid[]) ORDER BY s.id
+        """, (members,))
+        targets = await cursor.fetchall()
+    payload = {"title": "마롱이", "url": "/me/plan",
+               "body": f"{day.month}월 {day.day}일부터 월 {amount:,}원으로 바뀌어요. 동의하지 않으면 그날 끝나요."}
+    delivered = 0
+    for target in targets:
+        delivered += await deliver_one(pool, target, payload, send)
     return delivered
 
 

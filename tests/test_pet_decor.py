@@ -24,7 +24,7 @@ from marong.pet.settings import Settings
 from marong.pet.inventory import TEMPLATES
 from marong.pet.refunds import withdraw_order
 from marong.pet.quota import KST
-from marong.pet.subscriptions import activate_paid, next_period, reconcile_cancellations
+from marong.pet.subscriptions import PriceChangeError, activate_paid, announce_price, next_period, reconcile_cancellations
 from pg import TestDB
 from run_pet import make_app
 from test_pet_core import fixtures
@@ -328,14 +328,33 @@ async def check_subscription(conn, client, pool, member, own, other, revoke):
     assert next_period(datetime(2028, 1, 31, 15, 32, tzinfo=KST)) == (
         datetime(2028, 2, 29, 15, 32, tzinfo=KST), datetime(2028, 2, 29, 9, tzinfo=KST),
     )
-    conn.execute("UPDATE pet.subscriptions SET new_price_krw=10900,new_price_from=current_date+45 WHERE id=%s",
-                 (subscription,))
+    conn.execute("""
+        INSERT INTO pet.push_subscriptions(member_id,endpoint,p256dh,auth)
+        VALUES (%s,'https://fcm.googleapis.com/fcm/send/fixture-price','fixture','fixture')
+    """, (member,))
+    today = now.astimezone(KST).date()
+    sender = AsyncMock(return_value=201)
+    try:
+        await announce_price(pool, 10900, today + timedelta(days=29), now, sender)
+        raise AssertionError("price change was accepted without 30 days' notice")
+    except PriceChangeError as error:
+        assert str(error) == "price_notice_too_soon"
+    sender.assert_not_awaited()
+    effective = today + timedelta(days=30)
+    assert await announce_price(pool, 10900, effective, now, sender) == (1, 1)
+    assert sender.await_args.args[0]["member_id"] == member
+    assert sender.await_args.args[1] == {
+        "title": "마롱이", "url": "/me/plan",
+        "body": f"{effective.month}월 {effective.day}일부터 월 10,900원으로 바뀌어요. 동의하지 않으면 그날 끝나요.",
+    }
     assert (await (await client.get(path, headers=other)).json())["status"] == "none"
     assert (await client.post(path + "/price-consent", headers=own)).status == 403
     response = await client.post(path + "/price-consent", headers=writes)
     assert response.status == 200 and (await response.json())["newPrice"]["agreed"] is True
     (agreed,) = conn.execute("SELECT new_price_agreed_at FROM pet.subscriptions WHERE id=%s", (subscription,)).fetchone()
     assert agreed is not None
+    assert await announce_price(pool, 10900, effective, now, sender) == (0, 0)
+    assert sender.await_count == 1
     await client.post(path + "/price-consent", headers=writes)
     assert conn.execute("SELECT new_price_agreed_at FROM pet.subscriptions WHERE id=%s",
                         (subscription,)).fetchone() == (agreed,)

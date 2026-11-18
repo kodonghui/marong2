@@ -9,10 +9,15 @@ from aiohttp import web
 
 from .http import POOL, Problem, require_member
 from .log import logger
+from .push import notify_price_change
 from .quota import KST, _day
 
 MONTHLY_PRICE_KRW = 9900
 RENEWAL_RULE = "2026-11-renewal"
+
+
+class PriceChangeError(ValueError):
+    pass
 
 
 def view(row):
@@ -78,11 +83,13 @@ def renewal_due(row, at):
             and row["next_charge_at"] is not None and scheduled <= at)
 
 
-async def cancel_renewal(conn, row, at, revoke):
+async def cancel_renewal(conn, row, at, revoke, *, end_now=False):
     cursor = await conn.execute("""
-        UPDATE pet.subscriptions SET status='canceling',canceled_at=%s,next_charge_at=NULL,retry_at=NULL
+        UPDATE pet.subscriptions SET status='canceling',canceled_at=%s,next_charge_at=NULL,retry_at=NULL,
+          period_end=CASE WHEN %s THEN greatest(period_start+interval '1 microsecond',least(period_end,%s))
+                   ELSE period_end END
         WHERE id=%s RETURNING *
-    """, (at, row["id"]))
+    """, (at, end_now, at, row["id"]))
     return await finish_cancellation(conn, await cursor.fetchone(), at, revoke)
 
 
@@ -92,12 +99,17 @@ async def reserve_renewal(pool, member, at, revoke):
     async with pool.connection() as conn, conn.transaction():
         await active_owner(conn, member)
         row = await current(conn, member, lock=True)
+        today = at.astimezone(KST).date()
+        if (row and row["status"] == "active" and row["new_price_from"] is not None
+                and row["new_price_agreed_at"] is None and row["new_price_from"] <= today):
+            await cancel_renewal(conn, row, at, revoke, end_now=True)
+            return None
         if not row or not renewal_due(row, at):
             return None
         scheduled = row["next_charge_at"].astimezone(KST).date()
         changed_price = row["new_price_from"] is not None and row["new_price_from"] <= scheduled
         if changed_price and row["new_price_agreed_at"] is None:
-            await cancel_renewal(conn, row, at, revoke)
+            await cancel_renewal(conn, row, at, revoke, end_now=True)
             return None
         target = f"marong-pet/renewal/{row['id']}/{row['period_end'].astimezone(KST).date()}"
         key = uuid5(NAMESPACE_URL, target)
@@ -171,6 +183,23 @@ async def apply_price_consent(conn, member, at):
     return await cursor.fetchone()
 
 
+async def announce_price(pool, amount, day, at, send=None):
+    if not 1 <= amount <= 100_000:
+        raise PriceChangeError("invalid_subscription_price")
+    if day < at.astimezone(KST).date() + timedelta(days=30):
+        raise PriceChangeError("price_notice_too_soon")
+    async with pool.connection() as conn, conn.transaction():
+        cursor = await conn.execute("""
+            UPDATE pet.subscriptions s SET new_price_krw=%s,new_price_from=%s,new_price_agreed_at=NULL
+            FROM pet.members m WHERE s.member_id=m.id AND m.status='active' AND s.status='active'
+              AND (s.new_price_krw,s.new_price_from) IS DISTINCT FROM (%s,%s)
+            RETURNING s.member_id
+        """, (amount, day, amount, day))
+        members = [row["member_id"] for row in await cursor.fetchall()]
+    delivered = await notify_price_change(pool, members, amount, day, send) if send and members else 0
+    return len(members), delivered
+
+
 async def request_cancel(conn, member, at, revoke):
     await active_owner(conn, member)
     row = await current(conn, member, lock=True)
@@ -226,9 +255,10 @@ async def reconcile_renewals(pool, at, gateway, revoke):
         cursor = await conn.execute("""
             SELECT s.member_id FROM pet.subscriptions s JOIN pet.members m ON m.id=s.member_id
             WHERE s.status='active' AND m.status='active' AND s.billing_key_enc IS NOT NULL
-              AND coalesce(s.retry_at,s.next_charge_at)<=%s
+              AND (coalesce(s.retry_at,s.next_charge_at)<=%s
+                OR (s.new_price_agreed_at IS NULL AND s.new_price_from<=%s))
             ORDER BY coalesce(s.retry_at,s.next_charge_at),s.id LIMIT 20
-        """, (at,))
+        """, (at, at.astimezone(KST).date()))
         rows = await cursor.fetchall()
     for row in rows:
         try:
