@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ko" data-theme="night">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>마롱이 · 맞춤형 지침</title>
+  <link rel="stylesheet" href="/chat/chat.css">
+  <link rel="stylesheet" href="/chat/persona/persona.css">
+  <script src="/chat/persona/persona.js" defer></script>
+</head>
+<body>
+  <main class="persona-page" data-page="instructions">
+    <header class="bar"><a href="/chat/persona/">‹ 친구 약속</a><h1>맞춤형 지침</h1></header>
+    <p class="feedback" id="feedback" role="status"></p>
+    <button id="reload" class="text-button" type="button" hidden>다시 해 볼게</button>
+    <div id="content" hidden>
+      <label for="instruction">말투나 대하는 방식을 편하게 적어 줘. 둘이 얘기할 때랑 통화에만 써</label>
+      <textarea id="instruction" rows="6" maxlength="500"
+        placeholder="예: 반말로 짧게 말해 줘. 내가 힘들다고 하면 해결책보다 먼저 들어줘."></textarea>
+      <p class="hint count" id="count">0/500</p>
+      <button id="save" class="primary" type="button" disabled>저장</button>
+      <button id="remove" class="text-button" type="button" hidden>지우기</button>
+      <section class="persona-box" id="confirm" hidden>
+        <p>적은 지침을 지울까? 다음 답부터 빠져</p>
+        <button id="approve" class="text-button" type="button">지우기</button>
+        <button id="cancel" class="text-button" type="button">그만</button>
+      </section>
+      <section id="understood-box" class="persona-box" hidden>
+        <h2>이렇게 이해했어</h2><p id="understood"></p><p class="hint" id="updated"></p>
+        <div id="moved"></div>
+      </section>
+      <p class="hint">위험할 때 하는 말과 사실은 지침으로 바꿀 수 없어</p>
+    </div>
+  </main>
+</body>
+</html>
