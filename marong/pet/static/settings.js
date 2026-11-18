@@ -191,7 +191,7 @@ export async function farewell(id) {
     try {
       const entry = await api(url + '/farewell', {method: 'POST', body: {
         kind, ...(kind === 'picture' ? {sceneNote: note.value} : {}),
-      }, timeout: 45_000});
+      }, timeout: kind === 'picture' ? 100_000 : 70_000});
       const archiveResult = el('div', {'aria-live': 'polite'});
       const archive = button('보관하기', () => action(archive, archiveResult, async () => {
         await api(url + '/archive', {method: 'POST'});
