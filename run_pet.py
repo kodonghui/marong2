@@ -19,6 +19,7 @@ from marong.pet.http import CONFIG, POOL, guard, read_media
 from marong.pet.quota import register as register_quota
 from marong.pet.push import VapidSender, register as register_push
 from marong.pet.replies import ChatModel, register as register_replies
+from marong.pet.reports import register as register_reports
 from marong.pet.settings import Settings, SettingsError
 
 log = logging.getLogger("pet")
@@ -31,7 +32,7 @@ async def health(_request):
 
 
 def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, push_sender=None,
-             chat_api_key=None, reply_model=None, chat_clock=None) -> web.Application:
+             chat_api_key=None, reply_model=None, chat_clock=None, report_clock=None) -> web.Application:
     app = web.Application(middlewares=[guard])
     app[CONFIG] = settings
 
@@ -66,6 +67,7 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
     register_quota(app)
     register_push(app, sender=push_sender)
     register_delete(app, revoke=revoke_billing_key)
+    register_reports(app, clock=report_clock)
     register_chat(app, **({"clock": chat_clock} if chat_clock else {}))
     if reply_model or chat_api_key:
         register_replies(app, reply_model or (lambda *args, **kwargs: app[CHAT](*args, **kwargs)))
