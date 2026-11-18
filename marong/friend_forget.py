@@ -220,13 +220,16 @@ async def resolve_request(conn, friend, room, message, key, speaker, args):
                 or not re.search(r"원문|메시지|그 말|그 문장|내가 한 말", evidence)):
             return "refused", "group_room" if not speaker["is_channel"] else "quote_missing", None, {}
         prior = await conn.execute("""
-            SELECT m.id,m.created_at FROM marong.messages m JOIN marong.people p USING(user_key)
+            SELECT m.id,m.created_at,m.content FROM marong.messages m JOIN marong.people p USING(user_key)
             WHERE m.room_key=%s AND p.friend_id=%s AND m.role='user' AND m.id<%s
                 AND strpos(lower(m.content),%s)>0
                 AND NOT EXISTS (SELECT 1 FROM marong.forget_marks f WHERE f.target_type='message' AND f.target_id=m.id)
-            ORDER BY m.id DESC LIMIT 2
+            ORDER BY m.id DESC LIMIT 31
         """, (room, friend, message, fragment))
-        matches = await prior.fetchall()
+        recent = await prior.fetchall()
+        if len(recent) > 30:
+            return "ask_which", None, None, {}
+        matches = [row for row in recent if not forget_intent(row["content"])]
         if len(matches) != 1:
             return ("ask_which" if matches else "none_matched"), None, None, {}
         source = matches[0]

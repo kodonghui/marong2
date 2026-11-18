@@ -649,6 +649,10 @@ async def check_forget_dialogue(db):
         assert result == {"status": "ok", "forgot": 0, "messages": 1}
         assert db.admin("SELECT content FROM marong.messages WHERE id=%s", (raw,)) == [("겨울나무표식 이야기",)]
         assert all(row["id"] != raw for row in await store.recent(private, 100))
+        repeat, _ = await ask(raw_args["quote"], "new-source-only-key", raw_args)
+        assert repeat["status"] == "none_matched"
+        assert db.admin("SELECT count(*) FROM marong.forget_marks WHERE friend_id=%s AND target_type='message'",
+                        (owner,)) == [(2,)]
 
         with patch.dict("os.environ", {"BOT_TOKEN": "fixture", "ANTHROPIC_API_KEY": "fixture",
                                       "DATABASE_URL": db.app_url, "PROMPT_PATH": str(ROOT / "prompt.md")}):
