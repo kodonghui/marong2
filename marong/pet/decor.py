@@ -40,7 +40,9 @@ async def owned_items(conn, member, wanted):
     result = await conn.execute("""
         SELECT i.id,i.kind,i.slot,i.assets,i.is_default,h.order_id
         FROM pet.inventory h JOIN pet.items i ON i.id=h.item_id
+        LEFT JOIN pet.orders o ON o.id=h.order_id AND o.member_id=h.member_id
         WHERE h.member_id=%s AND h.item_id=ANY(%s::uuid[]) AND h.withdrawn_at IS NULL
+          AND o.status IS DISTINCT FROM 'refund_pending'
         ORDER BY h.item_id FOR UPDATE OF h
     """, (member, ids))
     owned = {row["id"]: row for row in await result.fetchall()}

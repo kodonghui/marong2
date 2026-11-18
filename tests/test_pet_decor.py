@@ -3,12 +3,13 @@
 import asyncio
 import json
 from base64 import b64decode
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from hashlib import sha256
 from pathlib import Path
 from secrets import token_urlsafe
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import psycopg
@@ -21,6 +22,8 @@ from marong.pet.decor import apply_outfit, apply_stickers, apply_style, outfit_i
 from marong.pet.http import COOKIE, POOL, Problem, cookie_hash
 from marong.pet.settings import Settings
 from marong.pet.inventory import TEMPLATES
+from marong.pet.refunds import refund_item
+from marong.pet.subscriptions import reconcile_cancellations
 from pg import TestDB
 from run_pet import make_app
 from test_pet_core import fixtures
@@ -73,7 +76,9 @@ async def check_inventory(admin, app_dsn, directory):
             layers.mkdir(parents=True)
             (layers / "dog_small.png").write_bytes(PNG)
 
-        async with TestClient(TestServer(make_app(settings, auth_config=AuthConfig({}, b"synthetic-signing-secret")))) as client:
+        revoke = AsyncMock(side_effect=[False, True])
+        auth = AuthConfig({}, b"synthetic-signing-secret")
+        async with TestClient(TestServer(make_app(settings, auth_config=auth, revoke_billing_key=revoke))) as client:
             inventory = "/api/me/inventory"
             shop = "/api/shop"
             layer = lambda item, template="dog_small": f"/api/items/{item}/layer?template={template}"
@@ -145,6 +150,8 @@ async def check_inventory(admin, app_dsn, directory):
             await equip(memorial, memorial_pet, head=str(ended), required_error="archived")
             await check_diary_decoration(conn, pool, member, pet, memorial, free, sale)
             await check_diary_assets(conn, client, settings, member, own, memorial_cookie)
+            await check_item_refund(conn, pool, member, memorial, pet, future)
+            await check_subscription(conn, client, pool, member, own, memorial_cookie, revoke)
 
 
 async def check_diary_decoration(conn, pool, member, pet, other_member, outfit, first_hat):
@@ -250,6 +257,92 @@ async def check_diary_assets(conn, client, settings, member, own, other):
     assert (await client.get(f"/static/items/{sticker}/stickers/no-such.webp", headers=own)).status == 404
 
 
+async def check_item_refund(conn, pool, member, other, pet, item):
+    (order,) = conn.execute("""
+        INSERT INTO pet.orders(order_no,member_id,product,item_id,amount_krw,vat_krw,withdrawal_rule,
+                               status,idempotency_key,paid_at,pg_tx_id)
+        VALUES ('fixture-refund',%s,'item',%s,1200,109,'fixture','fulfilled',%s,now(),'fixture-refund')
+        RETURNING id
+    """, (member, item, uuid4())).fetchone()
+    conn.execute("INSERT INTO pet.inventory(member_id,item_id,source,order_id) VALUES (%s,%s,'order',%s)",
+                 (member, item, order))
+    conn.execute("INSERT INTO pet.inventory(member_id,item_id,source) VALUES (%s,%s,'free_default')", (other, item))
+    gateway = SimpleNamespace(cancel=AsyncMock(side_effect=[False, True]))
+    now = datetime.now(timezone.utc)
+
+    async def attempt(who, at=now, *, reason=None):
+        try:
+            async with pool.connection() as session:
+                return await refund_item(session, who, order, gateway, at)
+        except Problem as error:
+            assert reason is not None and error.extra.get("reason", error.code) == reason
+
+    assert await attempt(other, reason="not_found") is None
+    assert await attempt(member, now + timedelta(days=8), reason="expired") is None
+    conn.execute("UPDATE pet.orders SET used_at=%s WHERE id=%s", (now, order))
+    assert await attempt(member, reason="used") is None
+    gateway.cancel.assert_not_awaited()
+    conn.execute("UPDATE pet.orders SET used_at=NULL WHERE id=%s", (order,))
+    assert (await attempt(member))["status"] == "refund_pending"
+    try:
+        async with pool.connection() as session, session.transaction():
+            await apply_outfit(session, member, pet, outfit_input({"head": str(item), "body": None, "neck": None}))
+        raise AssertionError("outfit accepted while refund is unresolved")
+    except Problem as error:
+        assert error.code == "not_found"
+    # The first request was accepted within the withdrawal window. Its retry can finish after that window.
+    assert (await attempt(member, now + timedelta(days=8)))["status"] == "refunded"
+    assert (await attempt(member))["status"] == "refunded"
+    assert gateway.cancel.await_count == 2
+    assert conn.execute("""
+        SELECT member_id FROM pet.inventory WHERE item_id=%s AND withdrawn_at IS NULL
+    """, (item,)).fetchall() == [(other,)]
+
+
+async def check_subscription(conn, client, pool, member, own, other, revoke):
+    path = "/api/subscription"
+    writes = {**own, "Origin": "http://127.0.0.1"}
+    assert (await client.get(path)).status == 401
+    assert (await (await client.get(path, headers=own)).json()) == {
+        "status": "none", "priceKrw": 9900, "periodEnd": None, "nextChargeAt": None, "newPrice": None,
+    }
+    assert (await client.post(path + "/cancel", headers=writes)).status == 409
+    assert (await client.post(path + "/price-consent", headers=writes)).status == 409
+    (order,) = conn.execute("""
+        INSERT INTO pet.orders(order_no,member_id,product,amount_krw,vat_krw,withdrawal_rule,status,idempotency_key,paid_at)
+        VALUES ('fixture-sub',%s,'subscription_month',9900,900,'fixture','fulfilled',%s,now()) RETURNING id
+    """, (member, uuid4())).fetchone()
+    (subscription, ends) = conn.execute("""
+        INSERT INTO pet.subscriptions(member_id,status,billing_key_enc,price_krw,first_order_id,period_start,
+                                      period_end,next_charge_at,new_price_krw,new_price_from)
+        VALUES (%s,'active',%s,9900,%s,now(),now()+interval '1 month',now()+interval '1 month',10900,current_date+45)
+        RETURNING id,period_end
+    """, (member, b"fixture-encrypted-key", order)).fetchone()
+    assert (await (await client.get(path, headers=other)).json())["status"] == "none"
+    assert (await client.post(path + "/price-consent", headers=own)).status == 403
+    response = await client.post(path + "/price-consent", headers=writes)
+    assert response.status == 200 and (await response.json())["newPrice"]["agreed"] is True
+    (agreed,) = conn.execute("SELECT new_price_agreed_at FROM pet.subscriptions WHERE id=%s", (subscription,)).fetchone()
+    assert agreed is not None
+    await client.post(path + "/price-consent", headers=writes)
+    assert conn.execute("SELECT new_price_agreed_at FROM pet.subscriptions WHERE id=%s",
+                        (subscription,)).fetchone() == (agreed,)
+    canceled = await client.post(path + "/cancel", headers=writes)
+    assert canceled.status == 200
+    data = await canceled.json()
+    assert data["status"] == "canceling" and data["nextChargeAt"] is None
+    assert (await (await client.get("/api/me/quota", headers=own)).json())["percent"] == 100
+    assert conn.execute("SELECT quota_limit FROM pet.member_days WHERE member_id=%s", (member,)).fetchone() == (200,)
+    await reconcile_cancellations(pool, datetime.now(timezone.utc), revoke)
+    assert revoke.await_count == 2
+    assert conn.execute("SELECT billing_key_enc FROM pet.subscriptions WHERE id=%s",
+                        (subscription,)).fetchone() == (None,)
+    assert await (await client.post(path + "/cancel", headers=writes)).json() == data
+    assert revoke.await_count == 2
+    await reconcile_cancellations(pool, ends + timedelta(seconds=1), revoke)
+    assert (await (await client.get(path, headers=own)).json())["status"] == "ended"
+
+
 def check_item_cli(admin, app_dsn, directory):
     media = directory / "store"
     templates = directory / "templates"
@@ -318,3 +411,4 @@ if __name__ == "__main__":
     print("TC-421: inventory scope, current sales, read-only previews, and owned ended layers passed")
     print("TC-422: missing layer, license, dimensions and pixel limits, atomic upload, and limited sale ending passed")
     print("TC-423: owning, changing and removing outfits, diary styles, and stickers passed")
+    print("TC-425 partial: item refund retry, subscription view, cancellation, key revocation and price consent passed")

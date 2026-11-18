@@ -20,6 +20,7 @@ from marong.pet.inventory import register as register_inventory
 from marong.pet.quota import register as register_quota
 from marong.pet.push import VapidSender, register as register_push
 from marong.pet.settings import Settings, SettingsError
+from marong.pet.subscriptions import register as register_subscriptions
 
 log = logging.getLogger("pet")
 BUDGET = web.AppKey("pet_budget", Budget)
@@ -58,6 +59,7 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
     register_account(app)
     register_inventory(app)
     register_decor(app)
+    register_subscriptions(app, revoke_billing_key)
     register_quota(app)
     register_push(app, sender=push_sender)
     register_delete(app, revoke=revoke_billing_key)
