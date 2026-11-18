@@ -12,6 +12,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.conninfo import make_conninfo
 
 from marong.friend_card import KST
+from marong.friend_forget import forget_selected
 from marong.friend_memory import MemoryExtraction, apply_ops, expire_loops, list_for_turn, memory_page
 from marong.graphs.memory import LEASE, MemoryQueue, checkpoint_pool, compile_graph, run_text_memory
 from marong.store import Store
@@ -363,6 +364,71 @@ async def check_call_worker(db):
         await store.close()
 
 
+async def check_forget_transaction(db):
+    [(owner,)] = db.admin("INSERT INTO marong.friends(name) VALUES ('forget fixture') RETURNING id")
+    [(other,)] = db.admin("INSERT INTO marong.friends(name) VALUES ('other forget fixture') RETURNING id")
+    room = "synthetic-forget-dm"
+    db.admin("INSERT INTO marong.rooms(room_key,is_channel) VALUES (%s,true)", (room,))
+    db.admin("INSERT INTO marong.people(user_key,friend_id) VALUES (%s,%s)", (room, owner))
+    [(message,)] = db.admin("""
+        INSERT INTO marong.messages(room_key,user_key,role,content)
+        VALUES (%s,%s,'user','가상 기록') RETURNING id
+    """, (room, room))
+    [(summary,)] = db.admin("""
+        INSERT INTO marong.summaries(room_key,first_id,last_id,content)
+        VALUES (%s,%s,%s,'가상 요약') RETURNING id
+    """, (room, message, message))
+    [(note,)] = db.admin("""
+        INSERT INTO marong.notes(room_key,user_key,summary_id,content)
+        VALUES (%s,%s,%s,'가상 메모') RETURNING id
+    """, (room, room, summary))
+    [(shared,)] = db.admin("INSERT INTO marong.shared_notes(friend_id,content) VALUES (%s,'가상 공유') RETURNING id",
+                         (owner,))
+    [(unrelated,)] = db.admin("INSERT INTO marong.shared_notes(friend_id,content) VALUES (%s,'다른 시험') RETURNING id",
+                            (other,))
+    [(item,), (second,)] = db.admin("""
+        INSERT INTO marong.memory_items(friend_id,kind,text,channel,message_id,heard_at,quote,source)
+        VALUES (%s,'fact','가상 사실','discord_dm',%s,now(),'가상 기록','text'),
+               (%s,'hard','가상 대화','discord_dm',%s,now(),'가상 기록','text') RETURNING id
+    """, (owner, message, owner, message))
+    [(loop,)] = db.admin("""
+        INSERT INTO marong.open_loops(friend_id,text,channel,message_id,quote,opened_at,expires_at)
+        VALUES (%s,'가상 일','discord_dm',%s,'가상 기록',now(),now()+interval '7 days') RETURNING id
+    """, (owner, message))
+    db.admin("""
+        INSERT INTO marong.embeddings(model,source_type,source_id,room_key,embedding)
+        VALUES ('fixture','message',%s,%s,'[1,2,3]'),('fixture','summary',%s,%s,'[3,2,1]')
+    """, (message, room, summary))
+    store = Store(db.app_url)
+    await store.open(wait=True)
+    try:
+        assert await forget_selected(store.pool, other, "item", item, "other", via="screen") is None
+        assert await forget_selected(store.pool, owner, "item", item, "group", via="tool",
+                                     group="different-group") is None
+        completed = await asyncio.gather(
+            forget_selected(store.pool, owner, "item", item, "same", via="screen"),
+            forget_selected(store.pool, owner, "item", item, "same", via="screen"))
+        assert completed == [{"forgot": 3, "messages": 1}] * 2
+        assert await forget_selected(store.pool, owner, "loop", loop, "new-key", via="screen") == {
+            "forgot": 0, "messages": 0,
+        }
+        assert db.admin("SELECT status,text,quote FROM marong.memory_items WHERE id IN (%s,%s) ORDER BY id",
+                        (item, second)) == [("forgotten", None, None)] * 2
+        assert db.admin("SELECT status,text,quote FROM marong.open_loops WHERE id=%s", (loop,)) == [
+            ("forgotten", None, None)
+        ]
+        assert set(db.admin(
+            "SELECT target_type,target_id,state FROM marong.forget_marks WHERE friend_id=%s", (owner,)
+        )) == {("message", message, "forgotten"), ("summary", summary, "hidden"), ("note", note, "hidden"),
+               ("shared_note", shared, "hidden")}
+        assert db.admin("SELECT id FROM marong.shared_notes WHERE id=%s", (unrelated,)) == [(unrelated,)]
+        assert db.admin("SELECT count(*) FROM marong.embeddings WHERE room_key=%s", (room,)) == [(0,)]
+        assert db.admin("SELECT content FROM marong.messages WHERE id=%s", (message,)) == [("가상 기록",)]
+        assert db.admin("SELECT count(*) FROM marong.memory_forgets WHERE friend_id=%s", (owner,)) == [(2,)]
+    finally:
+        await store.close()
+
+
 if __name__ == "__main__":
     db = TestDB()
     try:
@@ -370,6 +436,7 @@ if __name__ == "__main__":
         asyncio.run(check_queue(db))
         asyncio.run(check_worker(db))
         asyncio.run(check_call_worker(db))
+        asyncio.run(check_forget_transaction(db))
     finally:
         db.close()
     print("TC-330: debounced text, call eligibility, concurrent claims, lease recovery, fencing and ID-only checkpoints passed")
@@ -377,3 +444,5 @@ if __name__ == "__main__":
     print("TC-335: tool evidence, private list and room-scoped visibility passed")
     print("Text runtime: a retryable connection error retried once and stored the scheduled message")
     print("TC-341: the call organizer saved a sourced open loop after legacy organization failed")
+
+    print("TC-336 transaction: ownership, sibling text and loops, source marks, vector removal and concurrent receipts")
