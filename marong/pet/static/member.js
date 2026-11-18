@@ -2,6 +2,7 @@ import {action, AI_NOTICE, api, banner, button, CONSENT, dateLabel, el, errorTex
   page, picture, show, showTabs, text} from './pet.js';
 
 import {mediaId, reportControl} from './report.js';
+import {rechargeSheet} from './orders.js';
 
 const HOME = {label: '홈', url: '/'};
 const LEGAL = '/static/legal/';
@@ -26,7 +27,7 @@ export async function petScreen(id) {
         !archived ? link('옷 입히기', screen + '/closet', 'plain') : null, link('아이 설정', screen + '/settings', 'plain'),
         pet.shopEntry ? link('상점', '/shop', 'plain') : null)));
   const quotaLine = el('div', {class: 'banner row'}, el('strong', {class: 'grow'}, `오늘 한도 ${quota.percent}%`),
-    quota.percent === 0 && pet.rechargePrompt ? link('충전하기', '/me/plan#recharge', 'plain') : null);
+    !archived && !memorial ? button('충전하기', () => rechargeSheet(pet), 'plain') : null);
   const chat = el('section', {class: 'stack', 'aria-label': '대화'});
   const portrait = picture(pet.sheet.front, pet.name, 'portrait');
   const pictureId = mediaId(pet.sheet.front);

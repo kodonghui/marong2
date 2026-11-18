@@ -58,7 +58,7 @@ export async function orders() {
 const price = amount => `${currency.format(amount)}원`;
 const RECHARGE = {recharge_half: ['절반 채우기', 1500], recharge_full: ['가득 채우기', 2900]};
 
-function purchaseControl(product, label, amount, member, render) {
+function purchaseControl(product, label, amount, member, render, blocked) {
   const buy = button(label, () => modal.showModal(), 'primary');
   buy.disabled = !member.paymentsEnabled;
   if (buy.disabled) return buy;
@@ -77,6 +77,9 @@ function purchaseControl(product, label, amount, member, render) {
         await render();
       } else if (error.code === 'identity_required') {
         outcome.replaceChildren(notice('첫 결제 전에 본인인증을 한 번 해 주세요.', link('내 정보', '/me')));
+      } else if (blocked && ['quota_full', 'recharge_limit', 'payments_off'].includes(error.code)) {
+        modal.close();
+        blocked(error);
       } else {
         throw error;
       }
@@ -89,6 +92,45 @@ function purchaseControl(product, label, amount, member, render) {
       : '충전권은 사면 바로 채워져 철회할 수 없어요'),
     business(member), outcome, confirm, button('닫기', () => modal.close()));
   return el('div', {class: 'stack'}, buy, modal);
+}
+
+export async function rechargeSheet(pet, automatic = false) {
+  if (pet.mode !== 'living' || pet.status !== 'active') return;
+  const outlet = el('div', {class: 'stack'}, el('div', {class: 'skeleton', 'aria-hidden': 'true'}));
+  const close = button('괜찮아요', () => dialog.close(), 'plain');
+  const dialog = el('dialog', {class: 'sheet stack', 'aria-label': '충전권'}, outlet, close);
+  dialog.addEventListener('close', () => dialog.remove(), {once: true});
+  document.querySelector('#page').append(dialog);
+  dialog.showModal();
+  try {
+    const [member, quota, plan] = await Promise.all([
+      api('/api/me'), api('/api/me/quota'), api('/api/subscription'),
+    ]);
+    if (!dialog.open) return;
+    const status = el('div', {'aria-live': 'polite'});
+    const controls = el('div', {class: 'row'});
+    const charge = Object.entries(RECHARGE).map(([product, [label, amount]]) =>
+      purchaseControl(product, `${label} · ${price(amount)}`, amount, member, () => location.reload(), error => {
+        controls.querySelectorAll('button.primary').forEach(button => { button.disabled = true; });
+        errorText(error, status);
+      }));
+    controls.append(...charge);
+    const paid = plan.status === 'active' || plan.status === 'canceling';
+    outlet.replaceChildren(
+      el('h2', {}, automatic ? '오늘 한도를 다 썼어요. 새벽 4시에 다시 차요.'
+        : `오늘 한도 ${quota.percent}% · 새벽 4시에 다시 차요`),
+      el('progress', {max: 100, value: quota.percent, 'aria-label': '오늘 한도'}),
+      text('글로는 계속 이야기할 수 있어요'),
+      controls,
+      paid ? text('구독 중이에요 · 하루 한도 2배') : el('div', {class: 'stack'},
+        text(`구독하면 하루 한도가 2배예요 · 월 ${price(plan.priceKrw)}`),
+        link('구독 알아보기', '/me/plan', 'plain')),
+      status,
+    );
+    if (!member.paymentsEnabled) outlet.append(notice('결제는 곧 열려요.'));
+  } catch (error) {
+    errorText(error, outlet);
+  }
 }
 
 function planCard(plan, member, render) {

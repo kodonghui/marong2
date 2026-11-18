@@ -3,6 +3,8 @@ import {action, api, banner, button, dateLabel, el, Failure, header, link, notic
 
 import {mediaId, reportControl} from './report.js';
 import {decorateDiary, paintDiary} from './diary-decor.js';
+import {rechargeSheet} from './orders.js';
+import {petLayers} from './closet.js';
 
 const outcomes = {
   pending: '아직 쓰는 중이에요. 조금 뒤에 다시 와 주세요.',
@@ -62,7 +64,7 @@ async function share(path, outlet) {
   modal.showModal();
 }
 
-function observeDraw(pet, href, path) {
+function observeDraw(pet, href, path, pages) {
   const deadline = Date.now() + 120_000;
   window.setTimeout(async function poll() {
     if (Date.now() >= deadline) {
@@ -73,7 +75,7 @@ function observeDraw(pet, href, path) {
       try {
         const entry = await api(path);
         if (!entry.drawing) {
-          sheet(pet, href, path, entry, entry.lastRedraw === 'ok' ? '새 그림이에요'
+          sheet(pet, href, path, entry, pages, entry.lastRedraw === 'ok' ? '새 그림이에요'
             : entry.lastRedraw === 'failed' ? '그리지 못했어요. 한도는 돌려드렸어요.' : null);
           return;
         }
@@ -83,12 +85,19 @@ function observeDraw(pet, href, path) {
   }, 2_000);
 }
 
-async function redrawDialog(path, entry, onSuccess) {
+async function redrawDialog(pet, path, entry, onSuccess) {
   const quota = await api('/api/me/quota');
   const note = el('textarea', {maxlength: 100, rows: 3, placeholder: '눈 오는 공원으로'});
   const outcome = el('div', {'aria-live': 'polite'});
   const draw = button(`그리기 · ${entry.redrawsLeft}번 남음`, () => action(draw, outcome, async () => {
-    await api(path + '/redraw', {method: 'POST', body: {note: note.value.trim()}});
+    try {
+      await api(path + '/redraw', {method: 'POST', body: {note: note.value.trim()}});
+    } catch (error) {
+      if (error.code !== 'quota_exhausted' || error.prompt !== 'recharge' || pet.mode !== 'living') throw error;
+      modal.close();
+      await rechargeSheet(pet, true);
+      return;
+    }
     modal.close();
     onSuccess();
   }), 'primary');
@@ -100,24 +109,40 @@ async function redrawDialog(path, entry, onSuccess) {
   modal.showModal();
 }
 
-function sheet(pet, href, path, entry, status) {
+function dayNavigation(href, entry, pages) {
+  const index = pages.indexOf(entry.date);
+  const before = index > 0 ? pages[index - 1] : null;
+  const after = index >= 0 ? pages[index + 1] : null;
+  const direction = (date, arrow, title) => date ?
+    el('a', {class: 'button', href: href + '/diary/' + date, 'aria-label': title}, arrow) :
+    el('button', {disabled: true, 'aria-label': title}, arrow);
+  return el('nav', {class: 'diary-controls row', 'aria-label': '일기 날짜'},
+    direction(before, '‹', '앞 날'), direction(after, '›', '뒷 날'));
+}
+
+function sheet(pet, href, path, entry, pages, status) {
   header('일기 한 장', {label: '일기장', url: href + '/diary'});
-  if (entry.status !== 'ready') { show(notice(outcomes[entry.status])); return; }
+  const navigation = dayNavigation(href, entry, pages);
+  if (entry.status !== 'ready') { show(notice(outcomes[entry.status]), navigation); return; }
   const editable = entry.kind !== 'farewell' && pet.status !== 'archived';
   const outcome = el('div', {'aria-live': 'polite'});
   const redraw = button(`새 그림으로 다시 그리기 · ${entry.redrawsLeft}번 남음`,
-    () => action(redraw, outcome, () => redrawDialog(path, entry,
-      () => sheet(pet, href, path, {...entry, drawing: true}))));
+    () => action(redraw, outcome, () => redrawDialog(pet, path, entry,
+      () => sheet(pet, href, path, {...entry, drawing: true}, pages))));
   redraw.disabled = entry.drawing || !entry.redrawsLeft;
   const send = button('카드로 공유', () => action(send, outcome, () => share(path, outcome)), 'plain');
   const drawing = entry.drawing ? banner('새 그림을 그리는 중이에요') : null;
-  const artwork = entry.picture || pet.sheet?.front;
-  const artworkView = artwork ? picture(artwork, 'AI가 그린 그림', 'diary-art') : null;
+  const composition = entry.picture ? null : entry.composite;
+  const artwork = entry.picture || pet.sheet?.[composition?.expression] || pet.sheet?.front;
+  const artworkView = composition ? petLayers(pet, composition.outfit || {}, '그림을 불러오지 못했어요', {
+    background: composition.backgroundId, expression: composition.expression,
+  }) : artwork ? picture(artwork, 'AI가 그린 그림', 'diary-art') : null;
   const pictureId = mediaId(artwork);
   const reported = el('div', {role: 'status'});
   const report = pictureId ? reportControl({targetType: 'picture', targetId: pictureId, preview: artwork},
     '그림 신고', reported, artworkView) : null;
-  const frame = el('div', {class: 'diary-art-frame'}, artworkView, el('div', {class: 'diary-stickers'}));
+  const frame = el('div', {class: 'diary-art-frame' + (composition ? ' composite' : '')},
+    artworkView, el('div', {class: 'diary-stickers'}));
   const paper = el('article', {class: 'diary-paper stack'},
     el('small', {}, entry.kind === 'farewell' ? '❀ 마지막 장' : dateLabel(entry.date)),
     el('h2', {}, entry.title), entry.weather ? el('small', {}, entry.weather) : null, frame,
@@ -125,14 +150,14 @@ function sheet(pet, href, path, entry, status) {
   const editor = el('div');
   const decorate = button('꾸미기', () => action(decorate, outcome, async () => {
     await decorateDiary(pet, path, entry, paper, frame, editor,
-      (savedPet, savedEntry) => sheet(savedPet, href, path, savedEntry));
+      (savedPet, savedEntry) => sheet(savedPet, href, path, savedEntry, pages));
     actions.hidden = true;
   }));
   decorate.disabled = entry.drawing;
   const actions = el('div', {class: 'row diary-actions'}, editable ? [decorate, redraw] : null, send, report);
   if (entry.kind !== 'farewell') paintDiary(paper, frame, pet.diaryStyle || {}, entry.stickers || []);
-  show(drawing, status ? banner(status) : null, paper, actions, editor, outcome, reported);
-  if (entry.drawing) observeDraw(pet, href, path);
+  show(drawing, status ? banner(status) : null, paper, navigation, actions, editor, outcome, reported);
+  if (entry.drawing) observeDraw(pet, href, path, pages);
   if (editable && location.hash === '#redraw') {
     history.replaceState(null, '', location.pathname + location.search);
     if (!redraw.disabled) redraw.click();
@@ -147,6 +172,7 @@ export async function diary(route) {
   const pet = await api(apiRoot);
   if (!day) { await listing(pet, href, apiRoot + '/diary'); return; }
   const path = `${apiRoot}/diary/${day}`;
-  const entry = await api(path);
-  sheet(pet, href, path, entry);
+  const [entry, {items}] = await Promise.all([api(path), api(apiRoot + '/diary?month=' + monthFrom(day.slice(0, 7)))]);
+  const pages = [...new Set(items.filter(row => row.status !== 'skipped').map(row => row.date))].sort();
+  sheet(pet, href, path, entry, pages);
 }

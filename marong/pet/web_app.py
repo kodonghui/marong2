@@ -8,6 +8,7 @@ from aiohttp import web
 
 STATIC = Path(__file__).with_name("static")
 VOICE_STATIC = STATIC.parents[2] / "tools" / "vertex_live" / "static"
+BACKGROUNDS = STATIC.parents[2] / "design" / "pet" / "backgrounds"
 WORKLETS = {"call-capture.js": "capture.js", "call-playback.js": "playback.js"}
 SAFE_HOST = re.compile(r"^[a-zA-Z0-9.-]+(?::[0-9]{1,5})?$")
 ASSETS = {
@@ -49,7 +50,13 @@ def register(app, *, legal_dir=None, item_dir=None):
         return web.FileResponse(path, headers=HEADERS)
 
     async def background(request):
-        path = STATIC / "backgrounds" / (request.match_info["name"] + ".webp")
+        path = BACKGROUNDS / (request.match_info["name"] + ".webp")
+        if not path.is_file():
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers=HEADERS)
+
+    async def stages(_request):
+        path = BACKGROUNDS / "stages.json"
         if not path.is_file():
             raise web.HTTPNotFound()
         return web.FileResponse(path, headers=HEADERS)
@@ -66,6 +73,7 @@ def register(app, *, legal_dir=None, item_dir=None):
     app.router.add_get("/static/legal/{file}", legal)
     app.router.add_get(r"/static/items/{id:[0-9a-fA-F-]{36}}/thumb.webp", thumbnail)
     app.router.add_get(r"/static/backgrounds/{name:[a-z0-9_]{1,40}}.webp", background)
+    app.router.add_get("/static/backgrounds/stages.json", stages)
     app.router.add_get("/static/{file}", asset)
     app.router.add_get("/pet-worker.js", worker)
     app.router.add_get("/", page)

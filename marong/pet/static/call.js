@@ -1,5 +1,6 @@
 import {AI_NOTICE, api, banner, button, CONSENT, el, errorText, header, link, notice, picture,
   show, showTabs, text} from './pet.js';
+import {rechargeSheet} from './orders.js';
 
 const DISCLOSURE = 'AI로 만든 목소리예요';
 const PCM_MAGIC = 0x4d524732;
@@ -119,7 +120,7 @@ export async function callScreen(id) {
       render('quota', '오늘은 여기까지, 새벽 4시 뒤에 또 이야기해요.', back());
     } else if (error.code === 'quota_exhausted') {
       render('quota', '오늘 한도를 다 썼어요. 새벽 4시에 다시 차요.', back());
-      if (error.prompt === 'recharge' && me.paymentsEnabled) controls.prepend(link('충전하기', '/me/plan', 'button primary'));
+      if (error.prompt === 'recharge') rechargeSheet(pet, true);
     } else if (error.code === 'budget_paused') {
       render('budget', '', back());
       errorText(error, status);

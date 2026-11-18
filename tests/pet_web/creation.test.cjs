@@ -36,17 +36,20 @@ async function body(request) {
 
 async function fixture(t, {signedIn = true, consent = true, invite = false, reportLimited = false, payment = 'fulfilled',
   closetMode, paymentsEnabled = false, layerFailure = false, outfitFailure = false, orderRetry = false,
-  diaryDecor = false, subscription} = {}) {
+  diaryDecor = false, subscription, exhaustedRedraw = false, diaryDays = false} = {}) {
   let member = signedIn;
   let state;
   let selected = null;
   let memberPet = {...pet, intro: {personality: ['느긋함'], likes: '산책', dislikes: '', callMe: '누나'}};
+  if (diaryDays) memberPet = {...memberPet, template: 'dog_small',
+    sheet: {...memberPet.sheet, smile: '/static/pet-welcome.webp'}};
   if (closetMode) memberPet = {...memberPet, mode: closetMode === 'memorial' ? 'memorial' : 'living',
     status: closetMode === 'archived' ? 'archived' : 'active', shopEntry: closetMode === 'living',
     template: 'dog_small', outfit: {head: null, body: null, neck: null}};
   let needsConfirmation = true;
   let ownsGarment = false;
   let diaryStickers = [];
+  let redrawAttempts = 0;
   let plan = subscription || {status: 'none', priceKrw: 9900, periodEnd: null, nextChargeAt: null, newPrice: null};
   const writes = [];
   let callStarts = 0;
@@ -199,7 +202,13 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
       memberPet = {...memberPet, diaryStyle};
       return json(res, memberPet);
     }
-    if (pathname === `/api/pets/${petId}/diary` || pathname.startsWith(`/api/pets/${petId}/diary/2026-11-17`)) {
+    const diaryPath = `/api/pets/${petId}/diary`;
+    if (pathname === diaryPath || pathname.startsWith(diaryPath + '/2026-11-')) {
+      if (pathname.endsWith('/redraw') && req.method === 'POST' && exhaustedRedraw) {
+        redrawAttempts++;
+        return json(res, {code: 'quota_exhausted', detail: '오늘 한도를 다 썼어요.',
+          prompt: redrawAttempts === 1 ? 'recharge' : 'brief'}, 409);
+      }
       if (pathname.endsWith('/stickers') && req.method === 'PUT') {
         diaryStickers = JSON.parse(await body(req));
         writes.push(diaryStickers);
@@ -207,13 +216,23 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
       const entry = {date: '2026-11-17', title: '산책 간 날', weather: '맑음', status: 'ready', kind: 'day',
         body: '오늘은 공원에서 낙엽을 밟았어.', picture: '/static/pet-welcome.webp', redrawsLeft: 2, drawing: false,
         stickers: diaryStickers};
-      return json(res, pathname.endsWith('/diary') ? {items: [entry]} : entry);
+      if (diaryDays) {
+        entry.picture = null;
+        entry.composite = {backgroundId: 'park', expression: 'smile', outfit: {head: garmentId}};
+      }
+      const past = {...entry, date: '2026-11-16', title: '지난 일기'};
+      const skipped = {...entry, date: '2026-11-18', status: 'skipped'};
+      if (pathname === diaryPath) return json(res, {items: diaryDays ? [skipped, entry, past] : [entry]});
+      return json(res, pathname.endsWith('/2026-11-16') ? past : entry);
     }
     if (pathname.startsWith('/api/')) return json(res, {code: 'not_found'}, 404);
     if (/^\/static\/legal\/(terms|privacy|overseas)\.html$/.test(pathname)) {
       res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
       return res.end('<!doctype html><html lang="ko"><title>시험 문서</title><p>화면 시험용 문서</p>');
     }
+    if (pathname === '/static/backgrounds/stages.json') return json(res, {width: 1536, height: 1024,
+      stages: {home_livingroom: {centerX: 768, floorY: 876, height: 708},
+        park: {centerX: 768, floorY: 888, height: 681}, rainbow_meadow: {centerX: 766, floorY: 886, height: 680}}});
     if (pathname === `/static/items/${garmentId}/thumb.webp` || pathname.startsWith('/static/backgrounds/')
       || pathname === `/static/items/${themeId}/background.webp`
       || pathname === `/static/items/${stickerPackId}/stickers/star-small.webp`) {
@@ -398,6 +417,30 @@ if (require.main === module) {
     assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true);
   });
 
+  test('SCR-150 uses the saved composition and only navigates to visible dates', async t => {
+    const {origin} = await fixture(t, {diaryDays: true});
+    const page = await browser.newPage({viewport: {width: 430, height: 790}});
+    t.after(() => page.close());
+    await page.goto(`${origin}/pets/${petId}/diary/2026-11-17`);
+    await visible(page.getByRole('heading', {name: '산책 간 날'}));
+    const frame = page.locator('.diary-art-frame');
+    assert.equal(await frame.locator('.outfit-background').getAttribute('src'), '/static/backgrounds/park.webp');
+    assert.equal(await frame.locator('img[alt="콩이"]').getAttribute('src'), '/static/pet-welcome.webp');
+    assert.equal(await frame.locator('[data-slot="head"]').getAttribute('src'), `/api/items/${garmentId}/layer?template=dog_small`);
+    await frame.locator('.outfit-stage[data-aligned="true"]').waitFor();
+    const positions = await frame.locator('.outfit-layer').evaluateAll(layers => layers.map(layer => {
+      const {left, top, width, height} = layer.getBoundingClientRect();
+      return [left, top, width, height];
+    }));
+    assert.deepEqual(positions[0], positions[1]);
+    assert(await page.getByRole('button', {name: '뒷 날'}).isDisabled());
+    await page.getByRole('link', {name: '앞 날'}).click();
+    await visible(page.getByRole('heading', {name: '지난 일기'}));
+    assert(await page.getByRole('button', {name: '앞 날'}).isDisabled());
+    await page.getByRole('link', {name: '뒷 날'}).click();
+    await visible(page.getByRole('heading', {name: '산책 간 날'}));
+  });
+
   test('SCR-150 previews owned decor, asks before paid use and saves a moved sticker', async t => {
     const {origin, writes} = await fixture(t, {diaryDecor: true});
     const page = await browser.newPage({viewport: {width: 360, height: 790}});
@@ -466,6 +509,35 @@ if (require.main === module) {
     assert.equal(await page.getByRole('button', {name: '해지하기'}).count(), 0);
     assert.deepEqual(active.writes, ['price-consent', 'cancel']);
     assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true);
+  });
+
+  test('SCR-155 opens from the quota row and only the first exhausted redraw opens it automatically', async t => {
+    const {origin} = await fixture(t, {exhaustedRedraw: true});
+    const page = await browser.newPage({viewport: {width: 360, height: 790}});
+    t.after(() => page.close());
+    await page.goto(`${origin}/pets/${petId}#recharge`);
+    const recharge = page.getByRole('dialog', {name: '충전권'});
+    assert.equal(await recharge.count(), 0);
+    await page.getByRole('button', {name: '충전하기'}).click();
+    await visible(recharge.getByText('오늘 한도 60% · 새벽 4시에 다시 차요'));
+    assert(await recharge.getByRole('button', {name: '절반 채우기 · 1,500원'}).isDisabled());
+    await recharge.getByRole('button', {name: '괜찮아요'}).click();
+    await page.goto(`${origin}/pets/${petId}/diary/2026-11-17`);
+    const redraw = page.getByRole('button', {name: /새 그림으로 다시 그리기/});
+    await redraw.click();
+    await page.getByRole('dialog').getByRole('button', {name: '그리기 · 2번 남음'}).click();
+    await visible(recharge.getByText('오늘 한도를 다 썼어요. 새벽 4시에 다시 차요.'));
+    await recharge.getByRole('button', {name: '괜찮아요'}).click();
+    await redraw.click();
+    const paint = page.getByRole('dialog');
+    await paint.getByRole('button', {name: '그리기 · 2번 남음'}).click();
+    await visible(paint.getByText('오늘 한도를 다 썼어요.'));
+    assert.equal(await recharge.count(), 0);
+    const memorial = await fixture(t, {closetMode: 'memorial'});
+    await page.goto(`${memorial.origin}/pets/${petId}#recharge`);
+    await visible(page.getByRole('heading', {name: '콩이'}));
+    assert.equal(await page.getByRole('button', {name: '충전하기'}).count(), 0);
+    assert.equal(await recharge.count(), 0);
   });
 
   test('SCR-156 accepts a reason and retains input when the daily cap is reached', async t => {

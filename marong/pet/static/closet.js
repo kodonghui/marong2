@@ -3,6 +3,8 @@ import {action, api, button, el, header, link, notice, show, showTabs, text} fro
 const POSITIONS = [['head', '머리'], ['body', '몸'], ['neck', '목']];
 const WEAR = '/api/me/inventory?kind=wear';
 const part = encodeURIComponent;
+const spriteBounds = new Map();
+let manifest;
 
 export function itemThumb(id, name, style = '') {
   const image = el('img', {src: `/static/items/${part(id)}/thumb.webp`, alt: name});
@@ -14,13 +16,75 @@ export function outfitOf(pet) {
   return Object.fromEntries(POSITIONS.map(([slot]) => [slot, pet.outfit?.[slot] ?? null]));
 }
 
-export function petLayers(pet, outfit, errorMessage, {onLayerError} = {}) {
+function measures(image) {
+  if (spriteBounds.has(image.src)) return spriteBounds.get(image.src);
+  const width = image.naturalWidth, height = image.naturalHeight;
+  if (!width || !height || width > 2048 || height > 2048) return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d', {willReadFrequently: true});
+  if (!context) return null;
+  context.drawImage(image, 0, 0);
+  const {data} = context.getImageData(0, 0, width, height);
+  let left = width, top = height, right = 0, bottom = 0;
+  for (let pixel = 0; pixel < width * height; pixel++) {
+    if (data[pixel * 4 + 3] < 128) continue;
+    const x = pixel % width, y = Math.floor(pixel / width);
+    left = Math.min(left, x);
+    top = Math.min(top, y);
+    right = Math.max(right, x + 1);
+    bottom = Math.max(bottom, y + 1);
+  }
+  const box = bottom > top ? {width, height, left, top, right, bottom} : null;
+  spriteBounds.set(image.src, box);
+  return box;
+}
+
+async function positionSprite(stage, image, backdrop, fallback) {
+  try {
+    manifest ||= fetch('/static/backgrounds/stages.json').then(response => response.ok ? response.json() : null)
+      .catch(() => null);
+    const canvas = await manifest;
+    const position = canvas?.stages[backdrop] || canvas?.stages[fallback];
+    if (!position) return;
+    const box = measures(image);
+    if (!box) return;
+    const scale = position.height / (box.bottom - box.top);
+    const x = Math.round(position.centerX - (box.left + box.right) * scale / 2);
+    const y = Math.round(position.floorY - box.bottom * scale);
+    stage.style.setProperty('--sprite-left', x / canvas.width * 100 + '%');
+    stage.style.setProperty('--sprite-top', y / canvas.height * 100 + '%');
+    stage.style.setProperty('--sprite-width', Math.round(box.width * scale) / canvas.width * 100 + '%');
+    stage.style.setProperty('--sprite-height', Math.round(box.height * scale) / canvas.height * 100 + '%');
+    stage.dataset.aligned = 'true';
+  } catch {
+    // If the picture cannot be measured, keep the centered preview.
+  }
+}
+
+export function petLayers(pet, outfit, errorMessage, {onLayerError, background, expression = 'front'} = {}) {
   const label = el('p', {hidden: true, class: 'muted', role: 'status'}, errorMessage);
+  const fallback = pet.mode === 'memorial' ? 'rainbow_meadow' : 'home_livingroom';
+  let backdrop = /^[a-z0-9_]{1,40}$/.test(background || '') ? background : fallback;
   const stage = el('div', {class: 'outfit-stage'},
     el('img', {class: 'outfit-background', alt: '',
-      src: `/static/backgrounds/${pet.mode === 'memorial' ? 'rainbow_meadow' : 'home_livingroom'}.webp`}));
-  stage.firstElementChild.addEventListener('error', event => { event.target.hidden = true; });
-  if (pet.sheet?.front) stage.append(el('img', {class: 'outfit-layer', src: pet.sheet.front, alt: pet.name}));
+      src: `/static/backgrounds/${backdrop}.webp`}));
+  const backdropImage = stage.firstElementChild;
+  const face = pet.sheet?.[expression] || pet.sheet?.front;
+  const sprite = face ? el('img', {class: 'outfit-layer', src: face, alt: pet.name}) : null;
+  const align = () => { if (sprite?.naturalWidth) positionSprite(stage, sprite, backdrop, fallback); };
+  if (sprite) {
+    sprite.addEventListener('load', align, {once: true});
+    stage.append(sprite);
+    if (sprite.complete) align();
+  }
+  backdropImage.addEventListener('error', () => {
+    if (backdrop === fallback) { backdropImage.hidden = true; return; }
+    backdrop = fallback;
+    backdropImage.src = `/static/backgrounds/${backdrop}.webp`;
+    align();
+  });
   for (const slot of ['body', 'neck', 'head']) {
     if (!outfit[slot] || !pet.template) continue;
     const layer = el('img', {class: 'outfit-layer', alt: '', 'data-slot': slot,
