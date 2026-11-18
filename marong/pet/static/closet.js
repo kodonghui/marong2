@@ -18,7 +18,7 @@ export function petLayers(pet, outfit, errorMessage, {onLayerError} = {}) {
   const label = el('p', {hidden: true, class: 'muted', role: 'status'}, errorMessage);
   const stage = el('div', {class: 'outfit-stage'},
     el('img', {class: 'outfit-background', alt: '',
-      src: `/static/backgrounds/${pet.mode === 'memorial' ? 'memorial_meadow' : 'home_livingroom'}.webp`}));
+      src: `/static/backgrounds/${pet.mode === 'memorial' ? 'rainbow_meadow' : 'home_livingroom'}.webp`}));
   stage.firstElementChild.addEventListener('error', event => { event.target.hidden = true; });
   if (pet.sheet?.front) stage.append(el('img', {class: 'outfit-layer', src: pet.sheet.front, alt: pet.name}));
   for (const slot of ['body', 'neck', 'head']) {

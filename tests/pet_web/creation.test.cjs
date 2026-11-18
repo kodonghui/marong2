@@ -481,6 +481,7 @@ if (require.main === module) {
     await page.getByRole('dialog').getByRole('button', {name: '입히기', exact: true}).click();
     await visible(page.getByText('입힐 수 없어요', {exact: true}));
     assert.equal(await page.locator('[data-slot="head"]').count(), 0);
+    assert.match(await page.locator('.outfit-background').getAttribute('src'), /rainbow_meadow\.webp$/);
     assert.equal(await page.getByRole('link', {name: '상점에서 더 보기'}).count(), 0);
     assert.equal(writes.length, 1);
     await page.goto(origin + '/shop');
