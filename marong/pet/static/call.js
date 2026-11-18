@@ -135,7 +135,8 @@ export async function callScreen(id) {
     } else if (error.code === 'call_unavailable' || !error.status) {
       render('unavailable', '지금은 통화를 걸 수 없어요.', again());
     } else {
-      render('error', '', back());
+      const retryable = error.status === 429 || error.status >= 500;
+      render('error', '', retryable ? again() : back());
       errorText(error, status);
     }
   }

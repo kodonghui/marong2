@@ -836,6 +836,8 @@ if (require.main === module) {
     const cases = [
       {code: 'call_in_progress', status: 409, message: '이미 통화 중이에요.'},
       {code: 'call_unavailable', status: 503, message: '지금은 통화를 걸 수 없어요.', retry: true},
+      {code: 'server_error', status: 500, message: '잠시 뒤 다시 해 주세요.', retry: true, trace: 'synthetic-call-error'},
+      {code: 'rate_limited', status: 429, message: '잠시 뒤 다시 해 주세요.', retry: true},
       {code: 'quota_exhausted', status: 409, prompt: 'brief', message: '오늘 한도를 다 썼어요. 새벽 4시에 다시 차요.'},
       {code: 'quota_exhausted', status: 409, prompt: 'recharge', message: '오늘 한도를 다 썼어요. 새벽 4시에 다시 차요.', recharge: true},
       {code: 'quota_exhausted', status: 409, prompt: 'none', mode: 'memorial', message: '오늘은 여기까지, 새벽 4시 뒤에 또 이야기해요.'},
@@ -860,7 +862,7 @@ if (require.main === module) {
       const reject = route => {
         reservations += 1;
         return route.fulfill({status: example.status,
-          json: {code: example.code, detail: example.message, prompt: example.prompt}});
+          json: {code: example.code, detail: example.message, prompt: example.prompt, traceId: example.trace}});
       };
       await page.route('**/api/pets/*/calls', reject);
       await page.routeWebSocket('**/pet-call', () => { sockets += 1; });
@@ -874,7 +876,16 @@ if (require.main === module) {
       assert.equal(await page.evaluate(() => window.callTracks.every(track => track.readyState === 'ended')), true, example.code);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, example.code);
       assert.equal(await dialog.count(), Number(Boolean(example.recharge)), example.code);
-      if (example.retry) await visible(page.getByRole('button', {name: '다시 해 보기'}));
+      if (example.retry) {
+        const retry = page.getByRole('button', {name: '다시 해 보기'});
+        await visible(retry);
+        if (example.trace) await visible(status.getByText(example.trace, {exact: true}));
+        await retry.click();
+        await visible(status.getByText(example.message, {exact: true}));
+        assert.equal(reservations, 2, example.code);
+        assert.equal(sockets, 0, example.code);
+        assert.equal(await page.evaluate(() => window.callTracks.every(track => track.readyState === 'ended')), true, example.code);
+      }
       await page.unroute('**/api/pets/*/calls', reject);
     }
   });
