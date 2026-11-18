@@ -2555,15 +2555,19 @@ if (require.main === module) {
     t.after(() => page.close());
     const profile = Promise.withResolvers();
     const paused = Promise.withResolvers();
+    const pictureSeen = Promise.withResolvers();
     t.after(profile.resolve);
     t.after(paused.resolve);
     const api = `**/api/pets/${petId}`;
+    let pictures = 0;
     await page.route(api, async route => {
       await profile.promise;
       await route.fulfill({json: {...pet, mode: 'memorial'}});
     });
     await page.route(api + '/farewell', async route => {
       if (route.request().postDataJSON().kind === 'picture') {
+        pictures += 1;
+        pictureSeen.resolve();
         await paused.promise;
         await route.fulfill({status: 409, json: {code: 'budget_paused'}});
       } else await route.continue();
@@ -2576,9 +2580,13 @@ if (require.main === module) {
     const submit = page.getByRole('button', {name: '시작하기', exact: true});
     await drawing.check();
     await page.getByLabel('함께한 장면', {exact: true}).fill('시험 산책');
+    const requestForm = await page.locator('#page form').elementHandle();
     await submit.click();
     await visible(page.getByText('콩이가 쓰고 있어요', {exact: true}));
     assert.equal(await submit.count(), 0);
+    await pictureSeen.promise;
+    await requestForm.evaluate(form => form.dispatchEvent(new Event('submit', {cancelable: true})));
+    assert.equal(pictures, 1);
     paused.resolve();
     await visible(page.getByText('편지는 지금 받을 수 있어요'));
     assert.equal(await drawing.isDisabled(), true);
@@ -2587,6 +2595,7 @@ if (require.main === module) {
     await submit.click();
     await visible(page.getByText('같이 산책한 날이 정말 좋았어.'));
     assert.deepEqual(writes, [{kind: 'letter'}]);
+    assert.equal(pictures, 1);
   });
 
   test('SCR-154 applies a permission change and retries a failed farewell with the selected scene', async t => {
@@ -2711,6 +2720,51 @@ if (require.main === module) {
     await visible(start);
     assert.equal(await download.count(), 0);
     assert.equal(await page.evaluate(key => sessionStorage.getItem(key), saved), null);
+  });
+
+  test('SCR-153 retains a ready export when an earlier status request returns after page restore', async t => {
+    const {origin} = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 430, height: 844}});
+    t.after(() => page.close());
+    await page.clock.install();
+    const older = Promise.withResolvers();
+    const observed = Promise.withResolvers();
+    t.after(older.resolve);
+    let reads = 0, writes = 0;
+    const statusPath = '/api/exports/' + orderId;
+    await page.route('**/export', route => {
+      writes += 1;
+      return route.fulfill({status: 202, json: {id: orderId, status: 'queued', readyUntil: null}});
+    });
+    await page.route('**' + statusPath, async route => {
+      if (++reads === 1) {
+        observed.resolve();
+        await older.promise;
+        return route.fulfill({json: {id: orderId, status: 'failed', readyUntil: null}});
+      }
+      return route.fulfill({json: {id: orderId, status: 'done',
+        readyUntil: new Date(Date.now() + 1_800_000).toISOString()}});
+    });
+    await page.goto(`${origin}/pets/${petId}/settings`);
+    await page.getByRole('button', {name: '기록 내보내기'}).click();
+    await visible(page.getByText('만들고 있어요', {exact: true}));
+    await page.clock.fastForward(5_100);
+    await observed.promise;
+    await page.evaluate(() => {
+      window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted: true}));
+      window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
+    });
+    const download = page.getByRole('link', {name: /^받기 ·/});
+    await visible(download);
+    const received = page.waitForResponse(async response =>
+      new URL(response.url()).pathname === statusPath && (await response.json()).status === 'failed');
+    older.resolve();
+    await received;
+    await page.clock.fastForward(6_000);
+    assert.equal(await download.getAttribute('href'), statusPath + '/download');
+    assert.equal(await page.getByText('내보내지 못했어요. 횟수는 세지 않았어요.').count(), 0);
+    assert.equal(reads, 2);
+    assert.equal(writes, 1);
   });
 
   test('SCR-153 retries a failed export without counting it and disables the daily limit', async t => {

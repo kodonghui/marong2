@@ -63,6 +63,8 @@ function exportsPanel(id, url) {
   const outcome = el('div', {'aria-live': 'polite'});
   const saved = sessionStorage.getItem(key);
   let timer;
+  let inspection;
+  let suspended = document.hidden;
   function pending() {
     root.replaceChildren(activity('만들고 있어요', 'muted'));
   }
@@ -98,13 +100,18 @@ function exportsPanel(id, url) {
       retry();
     } else {
       pending();
-      timer = setTimeout(() => void poll(job.id), 5_000);
+      if (!suspended) timer = setTimeout(() => void poll(job.id), 5_000);
     }
   }
   async function poll(jobId) {
-    if (!root.isConnected) return;
-    try { display(await api(`/api/exports/${jobId}`)); }
+    if (!root.isConnected || suspended || inspection || sessionStorage.getItem(key) !== jobId) return;
+    const request = inspection = {};
+    try {
+      const job = await api(`/api/exports/${jobId}`);
+      if (inspection === request) display(job);
+    }
     catch (error) {
+      if (inspection !== request) return;
       if (error.status === 404) {
         reset();
       } else {
@@ -115,6 +122,8 @@ function exportsPanel(id, url) {
           void poll(jobId);
         }));
       }
+    } finally {
+      if (inspection === request) inspection = null;
     }
   }
   function startButton(label = '기록 내보내기') {
@@ -134,14 +143,25 @@ function exportsPanel(id, url) {
     pending();
     queueMicrotask(() => void poll(saved));
   } else root.replaceChildren(startButton(), outcome);
-  window.addEventListener('pagehide', () => clearTimeout(timer));
-  window.addEventListener('pageshow', event => {
+  function suspend() {
+    suspended = true;
+    inspection = null;
+    clearTimeout(timer);
+  }
+  function resume() {
+    suspended = false;
     const current = sessionStorage.getItem(key);
-    if (event.persisted && current) {
+    if (current && !inspection) {
       pending();
       void poll(current);
     }
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) suspend();
+    else resume();
   });
+  window.addEventListener('pagehide', suspend);
+  window.addEventListener('pageshow', event => { if (event.persisted && !document.hidden) resume(); });
   return root;
 }
 
@@ -233,7 +253,7 @@ export async function farewell(id) {
   const headline = text(`작별 의식은 한 번만 할 수 있어요. ${pet.name}가 남기는 마지막 장은 일기장에 남아요`);
   async function write() {
     const kind = form.elements.kind.value;
-    if (!kind) return;
+    if (!kind || !form.isConnected || !navigator.onLine) return;
     show(el('section', {class: 'card stack notice'}, activity(`${pet.name}가 쓰고 있어요`, 'farewell-writing')));
     try {
       const entry = await api(url + '/farewell', {method: 'POST', body: {
