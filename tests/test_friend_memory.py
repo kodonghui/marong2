@@ -840,6 +840,81 @@ async def check_voice_forget(db):
         await bot.close()
 
 
+async def check_checkpoint_forget(db):
+    from call_memory import MemoryStore
+    from marong.graphs.memory import job_config
+    from marong.graphs.memory_checkpoints import TextMemorySaver
+
+    [(friend,)] = db.admin("INSERT INTO marong.friends(name) VALUES ('checkpoint fixture') RETURNING id")
+    room = "fixture:checkpoint-forget"
+    db.admin("INSERT INTO marong.rooms(room_key,is_channel) VALUES (%s,true)", (room,))
+    db.admin("INSERT INTO marong.people(user_key,friend_id) VALUES (%s,%s)", (room, friend))
+    with patch.dict("os.environ", {"MARONG_FRIEND_MEMORY": "shadow"}):
+        store = Store(db.app_url)
+    call_store = MemoryStore(make_conninfo(db.admin_url, user="marong_call"))
+    await store.open(wait=True)
+    await call_store.open()
+    try:
+        queue = MemoryQueue(store.pool, clock=lambda: datetime.now(timezone.utc) + timedelta(minutes=2))
+        async with checkpoint_pool(db.app_url) as pool:
+            saver = TextMemorySaver(pool, store.pool)
+            await saver.setup()
+
+            async def stage(text):
+                ident = await store.add_message(room, "user", text, room)
+                [(item,)] = db.admin("""
+                    INSERT INTO marong.memory_items(friend_id,kind,text,channel,message_id,quote,heard_at,source)
+                    VALUES (%s,'fact',%s,'app',%s,%s,now(),'text') RETURNING id
+                """, (friend, text, ident, text))
+                db.admin("UPDATE marong.memory_jobs SET due_at=NULL WHERE friend_id<>%s", (friend,))
+                state = await queue.claim("text")
+                assert state["message_ids"] == [ident]
+                return item, state
+
+            async def no_result(_):
+                return {}
+
+            async def no_write(*_):
+                return None
+
+            async def run(state, prepare):
+                config = job_config(state)
+                graph = compile_graph(queue, prepare, no_write, checkpointer=saver)
+                async with saver.job(config, state):
+                    await graph.ainvoke(state, config, durability="sync")
+                return config
+
+            _, unrelated = await stage("보존할 합성 체크포인트")
+            keep_config = await run(unrelated, no_result)
+            assert await saver.aget(keep_config)
+
+            item, completed = await stage("지울 합성 체크포인트")
+            completed_config = await run(completed, no_result)
+            assert await saver.aget(completed_config)
+            assert await forget_selected(call_store.pool, friend, "item", item, "checkpoint-done", via="call")
+            assert await saver.aget(completed_config) is None
+            assert await saver.aget(keep_config)
+
+            item, pending = await stage("처리 중 지울 합성 체크포인트")
+
+            async def forget_during_processing(state):
+                config = job_config(state)
+                assert await saver.aget(config)
+                assert await forget_selected(store.pool, friend, "item", item, "checkpoint-live", via="screen")
+                return {}
+
+            pending_config = await run(pending, forget_during_processing)
+            assert await saver.aget(pending_config) is None
+            assert await saver.aget(keep_config)
+            removed = [conf["configurable"]["thread_id"] for conf in (completed_config, pending_config)]
+            for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
+                assert db.admin(f"SELECT count(*) FROM talk_graph.{table} WHERE thread_id=ANY(%s)", (removed,)) == [(0,)]
+            assert_sqlstate(db, "marong_call", "SELECT 1 FROM talk_graph.checkpoints WHERE false", "42501")
+    finally:
+        await call_store.close()
+        await store.close()
+
+
 if __name__ == "__main__":
     db = TestDB()
     try:
@@ -851,6 +926,7 @@ if __name__ == "__main__":
         asyncio.run(check_reply_context(db))
         asyncio.run(check_forget_dialogue(db))
         asyncio.run(check_voice_forget(db))
+        asyncio.run(check_checkpoint_forget(db))
     finally:
         db.close()
     print("TC-330: debounced text, call eligibility, concurrent claims, lease recovery, fencing and ID-only checkpoints passed")
@@ -869,3 +945,4 @@ if __name__ == "__main__":
 
     print("TC-336 report: excluded original and reply plus marked call without raw-table changes")
     print("TC-342: call-role consent, two-way recall hiding, transcript settlement, revision and segment fencing passed")
+    print("TC-336 checkpoints: only matching threads removed, including races with an active checkpoint")

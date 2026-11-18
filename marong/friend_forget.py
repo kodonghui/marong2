@@ -92,6 +92,8 @@ async def forget_source_locked(conn, friend, message, turn, heard_at, key, via):
             WHERE memory_item_id=ANY(%s::bigint[]) AND status='open'
         """, (ids["item"],))
     await conn.execute("SELECT marong.forget_embeddings(%s)", (forget_id,))
+    if message is not None:
+        await conn.execute("SELECT talk_graph.forget_message_checkpoints(%s)", (forget_id,))
     return {"forgot": count, "messages": messages}
 
 

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from typing import Literal, TypedDict
 from uuid import uuid4
@@ -155,7 +156,13 @@ def compile_graph(queue, prepare, persist, *, checkpointer):
     return graph.compile(checkpointer=checkpointer)
 
 
-async def run_queue(queue, graph, source):
+def job_config(state):
+    thread = f"memory:{state['source']}:{state['friend_id']}:{state['token']}"
+    metadata = {"source_message_ids": ",".join(map(str, state["message_ids"]))}
+    return {"configurable": {"thread_id": thread}, "metadata": metadata}
+
+
+async def run_queue(queue, graph, source, *, checkpoint_scope=None):
     """Run only when the approved extractor and result validator are wired in."""
     from ..friend_memory import expire_loops
     from ..memory_consent import maintain
@@ -167,9 +174,11 @@ async def run_queue(queue, graph, source):
                 await maintain(queue.pool, queue.clock())
             state = await queue.claim(source)
             if state is not None:
-                thread = f"memory:{source}:{state['friend_id']}:{state['token']}"
+                config = job_config(state)
+                scope = checkpoint_scope(config, state) if checkpoint_scope else nullcontext()
                 try:
-                    await graph.ainvoke(state, {"configurable": {"thread_id": thread}})
+                    async with scope:
+                        await graph.ainvoke(state, config, durability="sync")
                 except Exception:
                     log.warning("friend_memory_job_failed source=%s", source)
                     await queue.finish(state, "ai_error")
@@ -187,11 +196,11 @@ def checkpoint_pool(dsn):
 
 
 async def run_text_memory(store, dsn, llm, model):
-    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
     from langsmith import tracing_context
 
     from ..friend_card import FriendCards
     from ..friend_memory import MemoryExtraction, StructuredInference
+    from .memory_checkpoints import TextMemorySaver
 
     queue = MemoryQueue(store.pool)
     inference = StructuredInference(llm, os.getenv("MARONG_MEMORY_MODEL") or model, FriendCards(store))
@@ -199,7 +208,7 @@ async def run_text_memory(store, dsn, llm, model):
     while True:
         try:
             async with checkpoint_pool(dsn) as pool:
-                saver = AsyncPostgresSaver(pool)
+                saver = TextMemorySaver(pool, store.pool)
                 async with store.pool.connection() as conn, conn.transaction():
                     await conn.execute(
                         "SELECT pg_advisory_xact_lock(hashtextextended('talk_graph:setup',0))"
@@ -207,7 +216,7 @@ async def run_text_memory(store, dsn, llm, model):
                     await saver.setup()
                 graph = compile_graph(queue, extraction.prepare, extraction.persist, checkpointer=saver)
                 with tracing_context(enabled=False):
-                    await run_queue(queue, graph, "text")
+                    await run_queue(queue, graph, "text", checkpoint_scope=saver.job)
         except Exception:
             log.error("friend_memory_worker_setup_failed source=text")
             await asyncio.sleep(10)
