@@ -35,6 +35,13 @@ ERRORS = {
     "use_delete_account": (400, "필수 동의는 끌 수 없음", "필수 동의를 거두려면 계정을 지워 주세요."),
     "quota_exhausted": (409, "하루 한도 소진", "오늘 한도를 다 썼어요. 새벽 4시에 다시 차요."),
     "confirm_required": (400, "지우기 확인 문구가 다름", "입력을 확인해 주세요."),
+    "invalid_photo": (400, "열 수 없는 사진, 형식·8MB·4096px 넘음",
+                      "{photo}번째 사진을 열 수 없어요. JPEG나 PNG, 8MB 이하로 올려 주세요."),
+    "pet_limit": (409, "아이 5마리", "아이는 5마리까지 만들 수 있어요."),
+    "too_many_creations": (409, "진행 중 만들기 3개", "만들고 있는 아이가 있어요. 먼저 마치거나 지워 주세요."),
+    "too_large": (413, "본문이 25MB 넘음", "사진이 너무 커요. 다시 골라 주세요."),
+    "photo_check_unavailable": (503, "사람 얼굴 가리기 모델을 못 불러옴(사진을 밖으로 보내지 않음)",
+                                "사진을 확인하지 못했어요. 잠시 뒤 다시 해 주세요."),
     "server_error": (500, "예상하지 못한 오류", "잠시 뒤 다시 해 주세요."),
 }
 
@@ -48,6 +55,8 @@ class Problem(Exception):
 
 def problem_response(req, error):
     status, title, detail = ERRORS[error.code]
+    if error.code == "invalid_photo":
+        detail = detail.format(photo=error.extra["photo"])
     if error.code == "quota_exhausted" and error.extra.get("prompt") == "none":
         detail = "오늘은 여기까지, 새벽 4시 뒤에 또 이야기해요."
     type_url = req.app[CONFIG].origin + "/problems/" + error.code.replace("_", "-")

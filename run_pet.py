@@ -15,6 +15,7 @@ from marong.pet.auth import AuthConfig, register as register_auth
 from marong.pet.cost import Budget
 from marong.pet.delete import register as register_delete
 from marong.pet.http import CONFIG, POOL, guard, read_media
+from marong.pet.photos import load_detector, register as register_photos
 from marong.pet.quota import register as register_quota
 from marong.pet.push import VapidSender, register as register_push
 from marong.pet.settings import Settings, SettingsError
@@ -27,7 +28,8 @@ async def health(_request):
     return web.json_response({"ok": True}, headers={"Cache-Control": "no-store"})
 
 
-def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, push_sender=None) -> web.Application:
+def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, push_sender=None,
+             face_detector=None) -> web.Application:
     app = web.Application(middlewares=[guard])
     app[CONFIG] = settings
 
@@ -57,6 +59,7 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
     register_quota(app)
     register_push(app, sender=push_sender)
     register_delete(app, revoke=revoke_billing_key)
+    register_photos(app, face_detector)
     return app
 
 
@@ -69,7 +72,8 @@ def main() -> int:
         if bool(key) != bool(subject):
             raise SettingsError("pet push key and contact must be configured together")
         sender = VapidSender(key, subject) if key else None
-        web.run_app(make_app(settings, push_sender=sender), host="127.0.0.1", port=settings.port,
+        detector = load_detector(os.environ.get("PET_YUNET_MODEL_PATH"))
+        web.run_app(make_app(settings, push_sender=sender, face_detector=detector), host="127.0.0.1", port=settings.port,
                    access_log=None, print=None)
     except SettingsError as error:
         log.error("pet_start_failed %s", error)
