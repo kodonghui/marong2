@@ -67,6 +67,8 @@ async def scenario(admin, dsn):
         assert (await http.get(outgoing, headers=two)).status == 404
         assert (await http.get(outgoing + "?before=9223372036854775808", headers=one)).status == 400
         assert (await http.post(outgoing, json=first, headers={**one, "Origin": "https://other.test"})).status == 403
+        long = {"text": "가" * 1001, "clientId": str(uuid4())}
+        assert (await http.post(outgoing, json=long, headers=one)).status == 400
         assert (await http.post(outgoing, json=first, headers=one)).status == 201
         assert (await http.post(outgoing, json=first, headers=one)).status == 200
         assert (await http.post(f"/api/pets/{sibling}/messages", json=first, headers=one)).status == 400
@@ -124,14 +126,22 @@ async def scenario(admin, dsn):
             assert conn.execute("SELECT count(*) FROM pet.messages WHERE member_id=%s AND role='member'",
                                 (owner,)).fetchone() == (4,)
         at = datetime.combine(quota_day(at) + timedelta(days=1), time(4), KST)
+        with psycopg.connect(admin) as conn:
+            conn.execute("UPDATE pet.pets SET status='archived', archived_at=now() WHERE id=%s", (sibling,))
+        rejected = await http.post(f"/api/pets/{sibling}/messages",
+                                   json={"text": "안녕!", "clientId": str(uuid4())}, headers=one)
+        assert rejected.status == 409 and (await rejected.json())["code"] == "archived"
         assert (await http.post(outgoing, json=new_message, headers=one)).status == 201
         with psycopg.connect(admin) as conn:
             conn.execute("UPDATE pet.jobs SET run_after=now() WHERE pet_id=%s AND status='queued'", (pet,))
 
         async def unavailable(*_args, **_kwargs):
-            raise TimeoutError
+            await asyncio.sleep(41)
+            return "너무 늦은 가짜 답"
 
+        requested = asyncio.get_running_loop().time()
         assert await reply_job(app[POOL], unavailable)
+        assert 39.5 <= asyncio.get_running_loop().time() - requested < 41.5
         result = await (await http.get(outgoing, headers=one)).json()
         assert result["items"][0]["kind"] == "reply_failed"
 
