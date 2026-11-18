@@ -12,6 +12,7 @@ class FakeGateway:
         self.secret = secret
         self.payments = {}
         self.calls = []
+        self.refunds = {}
 
     def add(self, payment_key, order_no, amount, *, paid=True):
         self.payments[payment_key] = Payment(order_no, "fixture-" + payment_key, amount, paid)
@@ -19,6 +20,13 @@ class FakeGateway:
     async def approve(self, order_no, payment_key, amount):
         self.calls.append((order_no, payment_key, amount))
         return self.payments.get(payment_key)
+
+    async def cancel(self, transaction, amount, reason):
+        expected = next((row for row in self.payments.values() if row.transaction == transaction), None)
+        if not expected or not expected.paid or expected.amount != amount:
+            return False
+        self.refunds.setdefault(transaction, reason)
+        return True
 
     def sign(self, raw):
         return hmac.digest(self.secret, raw, "sha256").hex()

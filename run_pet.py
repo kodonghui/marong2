@@ -13,6 +13,7 @@ from psycopg_pool import AsyncConnectionPool
 from marong.pet.account import register as register_account
 from marong.pet.auth import AuthConfig, register as register_auth
 from marong.pet.billing import register as register_billing
+from marong.pet.candidates import register as register_candidates
 from marong.pet.cost import Budget
 from marong.pet.creations import register as register_creations
 from marong.pet.delete import register as register_delete
@@ -20,9 +21,11 @@ from marong.pet.http import CONFIG, POOL, guard, read_media
 from marong.pet.identity import register as register_identity
 from marong.pet.images import register as register_preview
 from marong.pet.photos import load_detector, register as register_photos
+from marong.pet.pets import register as register_pets
 from marong.pet.quota import register as register_quota
 from marong.pet.push import VapidSender, register as register_push
 from marong.pet.settings import Settings, SettingsError
+from marong.pet.sheet import register as register_sheet
 from marong.pet.traits import register as register_traits
 from marong.pet.vision import VisionExtractor
 
@@ -37,7 +40,8 @@ async def health(_request):
 
 def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, push_sender=None,
              face_detector=None, traits_api_key=None, preview_renderer=None, gateway=None, deliver_order=None,
-             identity_verify=None, identity_digest_key=None) -> web.Application:
+             identity_verify=None, identity_digest_key=None, candidate_renderer=None, template_mask=None,
+             expression_renderer=None, template_head=None, greeting_renderer=None) -> web.Application:
     app = web.Application(middlewares=[guard])
     app[CONFIG] = settings
 
@@ -76,6 +80,9 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
     register_creations(app)
     register_preview(app, BUDGET, preview_renderer)
     register_billing(app, gateway, deliver_order=deliver_order)
+    register_candidates(app, BUDGET, candidate_renderer, template_mask, gateway)
+    register_sheet(app, BUDGET, expression_renderer, template_head)
+    register_pets(app, greeting_renderer)
     register_identity(app, identity_verify, identity_digest_key)
     extract = (lambda photos, job: app[VISION](photos, job)) if traits_api_key else None
     register_traits(app, extract)

@@ -725,6 +725,140 @@ async def check_checkout(admin, dsn, directory):
                                 ).fetchone() == (1,)
 
 
+async def check_candidates(admin, dsn, directory):
+    settings = Settings.read({"PET_DATABASE_URL": dsn, "PET_MONTHLY_BUDGET_KRW": "50000",
+                              "PET_ORIGIN": ORIGIN, "PET_MEDIA_DIR": str(directory)})
+    gateway = FakeGateway(b"synthetic-candidates-key")
+    mask = Image.new("L", (1024, 1024), 0)
+    ImageDraw.Draw(mask).rectangle((200, 200, 399, 399), fill=255)
+    expression_attempts = {}
+    bad_head = False
+
+    def template_mask(ident):
+        assert ident == "dog_small"
+        return mask
+
+    async def render(*, model, template, traits, slot, note):
+        assert template == "dog_small" and traits["species"] == "dog"
+        result = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+        end_x = 359 if slot < 3 and note != "fixture fail" else 319
+        ImageDraw.Draw(result).rectangle((200, 200, end_x, 399), fill=(80, 100, 150, 255))
+        output = BytesIO()
+        result.save(output, "PNG")
+        return output.getvalue()
+
+    def template_head(ident):
+        assert ident == "dog_small"
+        return (0.5, 0.5, 0.6, 0.6) if bad_head else (0.2, 0.19, 0.35, 0.29)
+
+    async def expression(*, model, template, front, expression):
+        assert template == "dog_small"
+        expression_attempts[expression] = expression_attempts.get(expression, 0) + 1
+        if expression == "sad" and expression_attempts[expression] == 1:
+            return preview_fixture()
+        return front
+
+    async def fail_greeting(**_):
+        raise RuntimeError("synthetic greeting failure")
+
+    with psycopg.connect(admin) as conn:
+        conn.execute("DELETE FROM pet.jobs WHERE kind='candidates'")
+        member, token = add_member(conn)
+        failed_member, failed_token = add_member(conn)
+        other_member, other_token = add_member(conn)
+        creations = []
+        for owner, failure in ((member, None), (failed_member, "fixture fail"), (other_member, None)):
+            creation, = conn.execute("""
+                INSERT INTO pet.creations(member_id,kind,state,template,traits,regenerate_note)
+                VALUES (%s,'living','paid','dog_small',%s,%s) RETURNING id
+            """, (owner, Jsonb(TRAITS), failure)).fetchone()
+            number = "fixture-" + uuid4().hex
+            payment = "fixture-" + uuid4().hex
+            gateway.add(payment, number, 5900)
+            order, = conn.execute("""
+                INSERT INTO pet.orders(order_no,member_id,product,creation_id,amount_krw,vat_krw,status,
+                    withdrawal_rule,idempotency_key,pg_tx_id,paid_at,fulfilled_at)
+                VALUES (%s,%s,'character_creation',%s,5900,536,'fulfilled','fixture',%s,%s,now(),now()) RETURNING id
+            """, (number, owner, creation, uuid4(), gateway.payments[payment].transaction)).fetchone()
+            conn.execute("UPDATE pet.creations SET order_id=%s WHERE id=%s", (order, creation))
+            conn.execute("INSERT INTO pet.jobs(kind,member_id,creation_id) VALUES ('candidates',%s,%s)", (owner, creation))
+            creations.append((creation, order))
+
+    app = make_app(settings, gateway=gateway, candidate_renderer=render, template_mask=template_mask,
+                   expression_renderer=expression, template_head=template_head, greeting_renderer=fail_greeting)
+    async with TestClient(TestServer(app)) as client:
+        async def fetch(creation, token, state):
+            for _ in range(120):
+                reply = await client.get(f"/api/creations/{creation}", headers=headers(token))
+                data = await reply.json()
+                if data["state"] == state:
+                    return data
+                await asyncio.sleep(0.05)
+            raise AssertionError("candidate job did not settle")
+
+        ready, _ = creations[0]
+        failed, refunded = creations[1]
+        first = await fetch(ready, token, "candidates")
+        assert len(first["candidates"]) == 3
+        assert {row["round"] for row in first["candidates"]} == {0}
+        for number in (1, 2):
+            redraw = await client.post(f"/api/creations/{ready}/regenerate", headers=headers(token),
+                                       json={"note": "synthetic fixture note"})
+            assert redraw.status == 202
+            next_round = await fetch(ready, token, "candidates")
+            assert len(next_round["candidates"]) == 3 * (number + 1)
+            assert next_round["regenerationsLeft"] == 2 - number
+        over = await client.post(f"/api/creations/{ready}/regenerate", headers=headers(token), json={})
+        assert over.status == 409 and (await over.json())["code"] == "regenerate_limit"
+        assert (await fetch(failed, failed_token, "failed_candidates"))["candidates"] == []
+        assert len(gateway.refunds) == 1
+        with psycopg.connect(admin) as conn:
+            assert conn.execute("SELECT status,refund_reason FROM pet.orders WHERE id=%s", (refunded,)
+                                ).fetchone() == ("refunded", "auto_generation_failed")
+
+        good_candidates = await fetch(ready, token, "candidates")
+        candidate = good_candidates["candidates"][0]["id"]
+        choose = f"/api/creations/{ready}/choose"
+        bad_pick = await client.post(choose, headers=headers(token), json={"candidateId": str(uuid4())})
+        assert bad_pick.status == 404
+        picked = await client.post(choose, headers=headers(token), json={"candidateId": candidate})
+        assert picked.status == 202 and (await picked.json())["chosenId"] == candidate
+        await fetch(ready, token, "sheet_ready")
+        assert expression_attempts["sad"] == 2
+        assert len(expression_attempts) == 6
+        with psycopg.connect(admin) as conn:
+            assert conn.execute("SELECT count(*) FROM pet.media WHERE creation_id=%s AND kind='sheet_expression'",
+                                (ready,)).fetchone() == (6,)
+        bad_head = True
+        bad_creation = creations[2][0]
+        bad_candidates = await fetch(bad_creation, other_token, "candidates")
+        choose_other = await client.post(f"/api/creations/{bad_creation}/choose", headers=headers(other_token),
+                                         json={"candidateId": bad_candidates["candidates"][0]["id"]})
+        assert choose_other.status == 202
+        await fetch(bad_creation, other_token, "sheet_needs_operator")
+
+        finish = f"/api/creations/{ready}/finish"
+        details = {"name": "  테스트콩  ", "intro": {
+            "personality": ["활발함"], "likes": "산책", "dislikes": "목욕", "callMe": "누나",
+        }}
+        invalid = await client.post(finish, headers=headers(token), json={**details, "name": "x" * 13})
+        assert invalid.status == 400
+        named = await client.post(finish, headers=headers(token), json=details)
+        pet = await named.json()
+        assert named.status == 201 and pet["name"] == "테스트콩" and len(pet["sheet"]) == 7, pet
+        again = await client.post(finish, headers=headers(token), json=details)
+        assert again.status == 201 and (await again.json())["id"] == pet["id"]
+        with psycopg.connect(admin) as conn:
+            assert conn.execute("SELECT kind,content FROM pet.messages WHERE member_id=%s AND pet_id=%s",
+                                (member, pet["id"])).fetchall() == [("greeting", "누나, 나 왔어!")]
+        denied = await client.get(f"/api/pets/{pet['id']}", headers=headers(failed_token))
+        assert denied.status == 404
+        listed = await client.get("/api/pets", headers=headers(token))
+        assert [row["id"] for row in (await listed.json())["items"]] == [pet["id"]]
+        changed = await client.patch(f"/api/pets/{pet['id']}", headers=headers(token), json={"name": "새이름"})
+        assert changed.status == 200 and (await changed.json())["name"] == "새이름"
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model")
@@ -752,6 +886,8 @@ if __name__ == "__main__":
             asyncio.run(check_admin(admin, dsn, Path(path)))
         with tempfile.TemporaryDirectory() as path:
             asyncio.run(check_checkout(admin, dsn, Path(path)))
+        with tempfile.TemporaryDirectory() as path:
+            asyncio.run(check_candidates(admin, dsn, Path(path)))
     finally:
         db.close()
     print("TC-394–395: upload contract, metadata removal, local masking, limits, transaction and member isolation verified")
@@ -761,3 +897,5 @@ if __name__ == "__main__":
     print("TC-400: provider error, age boundary, identity HMAC and delayed account erasure verified")
     print("TC-401: operator settings, ticket grant and two-use invite verified")
     print("TC-402: free and paid creation checkout, idempotency and candidate queue verified")
+    print("TC-403: mask fit, two redraws and automatic refund verified with fixtures")
+    print("TC-404–405: expression fallback, head bounds, profile isolation and a single greeting verified")

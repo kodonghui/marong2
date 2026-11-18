@@ -85,7 +85,7 @@ async def cleanup(pool, media_dir):
         )
     async with pool.connection() as conn, conn.transaction():
         cur = await conn.execute(
-            """SELECT id,storage_key FROM pet.media WHERE delete_after<=now() AND kind IN ('photo','preview')
+            """SELECT id,storage_key FROM pet.media WHERE delete_after<=now() AND kind IN ('photo','preview','candidate')
             ORDER BY delete_after,id LIMIT 25 FOR UPDATE SKIP LOCKED"""
         )
         for row in await cur.fetchall():
