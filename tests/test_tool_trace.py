@@ -16,7 +16,7 @@ import httpx
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "tools" / "vertex_live")]
 
-from fakes import ScriptedLLM, message, text, tool_use
+from fakes import ScriptedLLM, message, text, thinking, tool_use
 from live_session import LiveSession
 from marong.agent import Agent, Incoming
 from tools.vertex_live import tool_trace as text_trace
@@ -151,6 +151,31 @@ class ToolTraceTest(unittest.IsolatedAsyncioTestCase):
             await agent.ask([], [], Incoming(PRIVATE_FIXTURE, PRIVATE_FIXTURE, "시험"), deadline)
         root, *_ = self.capture.traces[0]
         self.assertEqual(root["error"], "timeout")
+
+    async def test_tool_batch_preserves_signed_blocks_and_returns_every_result(self):
+        original = [thinking("fixture"), tool_use("set_name", {"name": "하나"}, "first"),
+                    tool_use("set_name", {"name": "둘"}, "second")]
+
+        def respond(body):
+            if len(body["messages"]) == 1:
+                return message(original, "tool_use")
+            assistant, tool_reply = body["messages"][-2:]
+            self.assertEqual(assistant["role"], "assistant")
+            self.assertEqual([vars(block) for block in assistant["content"]], original)
+            self.assertEqual(tool_reply["role"], "user")
+            self.assertEqual([block["tool_use_id"] for block in tool_reply["content"]], ["first", "second"])
+            return message([text("둘 다 받았어")])
+
+        answer, meta = await self.ask(self.text_agent(respond))
+        self.assertEqual((answer, meta["calls"]), ("둘 다 받았어", 2))
+        self.assertEqual(self.capture.traces[0][-1]["outputs"]["results_sent"], 2)
+
+    async def test_malformed_tool_stop_does_not_send_an_empty_tool_response(self):
+        agent = self.text_agent(lambda body: message([], "tool_use"))
+        _, meta = await self.ask(agent)
+        agent.store.set_name.assert_not_awaited()
+        self.assertEqual(meta["calls"], 1)
+        self.assertEqual(self.capture.traces[0][-1]["outputs"]["result"], "no_tool_blocks")
 
     async def test_provider_sdk_timeout_is_marked_at_model_request(self):
         url = "https://example.invalid/" + PRIVATE_FIXTURE
