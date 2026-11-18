@@ -69,7 +69,7 @@ async def scenario(admin, dsn):
         assert (await http.post(outgoing, json=first, headers={**one, "Origin": "https://other.test"})).status == 403
         assert (await http.post(outgoing, json=first, headers=one)).status == 201
         assert (await http.post(outgoing, json=first, headers=one)).status == 200
-        assert (await http.post(f"/api/pets/{sibling}/messages", json=first, headers=one)).status == 409
+        assert (await http.post(f"/api/pets/{sibling}/messages", json=first, headers=one)).status == 400
         assert (await http.post(f"/api/pets/{other_pet}/messages", json=first, headers=one)).status == 404
         second = {"text": "나뭇잎을 주웠어.", "clientId": str(uuid4())}
         assert (await http.post(outgoing, json=second, headers=one)).status == 201

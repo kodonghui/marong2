@@ -47,7 +47,7 @@ async def add_message(conn, member, pet, client, content, at):
     duplicate = await previous.fetchone()
     if duplicate:
         if duplicate["pet_id"] != pet:
-            raise Problem("wrong_state")
+            raise Problem("invalid_input")
         return duplicate, 200
     if info["status"] == "archived":
         raise Problem("archived")
