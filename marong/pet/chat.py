@@ -133,6 +133,8 @@ def register(app, *, clock=lambda: datetime.now(timezone.utc)):
             await response.write(f"event: {name}\ndata: {encoded}\n\n".encode())
 
         since, was_typing = 0, False
+        loop = asyncio.get_running_loop()
+        next_ping = loop.time() + 25
         try:
             while req.transport is not None and not req.transport.is_closing():
                 async with app[POOL].connection() as conn:
@@ -162,7 +164,9 @@ def register(app, *, clock=lambda: datetime.now(timezone.utc)):
                 if typing and not was_typing:
                     await emit("typing", {})
                 was_typing = typing
-                await emit("ping", {})
+                if loop.time() >= next_ping:
+                    await emit("ping", {})
+                    next_ping = loop.time() + 25
                 await asyncio.sleep(2)
         except ConnectionError:
             pass

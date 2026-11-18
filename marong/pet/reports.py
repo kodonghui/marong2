@@ -17,7 +17,8 @@ async def save(req):
     payload = await body_json(req)
     target_type, reason, note = payload.get("targetType"), payload.get("reason"), payload.get("note", "")
     if (target_type not in ("message", "picture") or not isinstance(reason, str) or reason not in REASONS
-            or not isinstance(note, str) or len(note) > 200 or "\x00" in note):
+            or not isinstance(note, str) or len(note) > 200 or "\x00" in note
+            or any(0xD800 <= ord(char) <= 0xDFFF for char in note)):
         raise Problem("invalid_input")
     target = uuid_param(payload.get("targetId"))
     at = req.app[CLOCK]().astimezone(KST)
