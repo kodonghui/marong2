@@ -18,7 +18,7 @@ from .http import POOL, Problem, body_json, require_member, uuid_param
 from .lifecycle import lock_pet
 from .log import logger
 from .quota import UNITS, _day, reserve, settle
-from .replies import GUIDE
+from .replies import GUIDE, bad_reply
 from .settings import SettingsError
 
 
@@ -266,6 +266,8 @@ async def finish(pool, budget, config, ident, at, reason, missed, transcript):
                                      [(call["member_id"], call["pet_id"], role, text, ident,
                                        max(call["connected_at"], min(at, spoken))) for spoken, role, text in transcript])
         await conn.execute("UPDATE pet.calls SET ended_at=%s,end_reason=%s WHERE id=%s", (at, reason, ident))
+    flagged = sum(bad_reply(text) for _, role, text in transcript if role == "pet")
+    logger.info("pet_call_transcript_guard flagged=%d", flagged)
     budget.warn(warning)
 
 

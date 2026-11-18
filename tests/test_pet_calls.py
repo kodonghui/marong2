@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import datetime, timedelta
+from unittest.mock import patch
 from uuid import UUID, uuid4
 
 import psycopg
@@ -84,15 +85,21 @@ async def scenario(admin, dsn):
         assert (await post(root + "/minute", 200, internal))["status"] == "exhausted"
         at += timedelta(seconds=7)
         data = {"reason": "quota", "unchargedMinutes": 1,
-                "transcript": [{"role": "member", "text": "합성 통화예요", "at": at.isoformat()}]}
-        await post(root + "/end", 204, internal, data)
-        await post(root + "/end", 204, internal, data)
+                "transcript": [
+                    {"role": "member", "text": "합성 금지어 충전", "at": at.isoformat()},
+                    {"role": "pet", "text": "합성 금지 응답 충전 해", "at": at.isoformat()},
+                    {"role": "pet", "text": "같이 산책 가자!", "at": at.isoformat()},
+                ]}
+        with patch("marong.pet.calls.logger.info") as audit:
+            await post(root + "/end", 204, internal, data)
+            await post(root + "/end", 204, internal, data)
+            audit.assert_called_once_with("pet_call_transcript_guard flagged=%d", 1)
         with psycopg.connect(admin) as conn:
             row = conn.execute("SELECT minutes,unbilled_minutes,end_reason FROM pet.calls WHERE id=%s",
                                (UUID(session["callId"]),)).fetchone()
             assert row == (1, 0, "quota")
             assert conn.execute("SELECT count(*) FROM pet.messages WHERE call_id=%s AND kind='call'",
-                                (UUID(session["callId"]),)).fetchone() == (1,)
+                                (UUID(session["callId"]),)).fetchone() == (3,)
             assert conn.execute("SELECT count(*) FROM pet.ai_runs WHERE pet_id=%s AND entry='AI-35'",
                                 (friend,)).fetchone() == (1,)
         set_used(40)

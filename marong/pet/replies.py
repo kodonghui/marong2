@@ -23,6 +23,7 @@ FALLBACK = "음… 그 얘기는 잘 모르겠어. 다른 얘기 하자!"
 FAILED = "잠깐 딴생각했어, 다시 말해 줄래?"
 PROMPT_VERSION = "pet-chat-v1"
 ENDPOINT = "https://api.anthropic.com/v1/messages"
+SENTENCE = re.compile(r"""\S.*?(?:[.!?。！？…]+["”')\]]*(?=\s|$|[가-힣])|$)""", re.M)
 GUIDE = (
     "너는 회원의 개 또는 고양이를 닮게 만든 AI 캐릭터야. 아이 소개에 맞춰 1인칭 반말로 짧게 말하고 "
     "부르는 말로 회원을 불러. 동물의 눈으로 보고 사람 일·돈·뉴스는 아는 척하지 마. "
@@ -47,7 +48,20 @@ def bad_reply(content):
     if not isinstance(content, str) or not content.strip() or len(content) > 1200:
         return True
     plain = normalized(content)
-    return any(word in plain for word in GUARD)
+    return not plain or any(word in plain for word in GUARD)
+
+
+def chat_reply(content):
+    # Apply the guard to the whole draft, even if an offending clause would be cut.
+    if bad_reply(content):
+        return None
+    text = content.strip()
+    ends = [match.end() for match in SENTENCE.finditer(text) if match.end() <= 300]
+    if len(ends) >= 4:
+        return text[:ends[3]].rstrip()
+    if len(text) <= 300:
+        return text
+    return text[:ends[-1]].rstrip() if ends else None
 
 
 class ChatModel:
@@ -65,11 +79,13 @@ class ChatModel:
             system += " 바로 전 초안은 글 검사에 걸렸어. 금지 표현과 관련 권유 없이 다시 써."
         payload = {
             "model": self.settings.chat_model,
-            "max_tokens": 1100,
+            "max_tokens": 1000,
             "system": system,
+            "output_config": {"effort": "low"},
             "messages": [{"role": "user", "content": json.dumps(data, ensure_ascii=False)}],
         }
-        return await self.request(job, payload, validate=lambda value: not bad_reply(value))
+        return await self.request(job, payload, validate=lambda value: chat_reply(value) is not None,
+                                  timeout=40, effort="low")
 
     async def request(self, job, payload, *, validate, entry="AI-32", kind="chat", purpose="reply",
                       version=PROMPT_VERSION, timeout=35, effort=None):
@@ -113,13 +129,15 @@ class ChatModel:
 
 async def formulate(model, job, context):
     try:
-        async with asyncio.timeout(40):
-            result = await model(job, context, rewrite=False)
+        async with asyncio.timeout(60):
+            result = await asyncio.wait_for(model(job, context, rewrite=False), timeout=40)
             if result is None:
                 return "chat", FALLBACK
-            if bad_reply(result):
-                result = await model(job, context, rewrite=True)
-            return "chat", FALLBACK if bad_reply(result) else result.strip()
+            answer = chat_reply(result)
+            if answer is None:
+                result = await asyncio.wait_for(model(job, context, rewrite=True), timeout=40)
+                answer = chat_reply(result)
+            return "chat", answer or FALLBACK
     except Exception:
         return "reply_failed", FAILED
 
