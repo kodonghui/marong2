@@ -199,7 +199,6 @@ def register(app, *, clock=lambda: datetime.now(timezone.utc)):
             await owned(conn, member, pet)
         response = web.StreamResponse(headers={"Content-Type": "text/event-stream", "Cache-Control": "no-store",
                                                "X-Accel-Buffering": "no", "X-Content-Type-Options": "nosniff"})
-        await response.prepare(req)
 
         async def emit(name, value):
             encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
@@ -209,6 +208,7 @@ def register(app, *, clock=lambda: datetime.now(timezone.utc)):
         loop = asyncio.get_running_loop()
         next_ping = loop.time() + 25
         try:
+            await response.prepare(req)
             while req.transport is not None and not req.transport.is_closing():
                 async with app[POOL].connection() as conn:
                     valid = await conn.execute("""

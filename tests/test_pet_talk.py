@@ -4,9 +4,11 @@ import asyncio
 from datetime import datetime, time, timedelta
 from hashlib import sha256
 from secrets import token_urlsafe
+from unittest.mock import patch
 from uuid import uuid4
 
 import psycopg
+from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from psycopg.types.json import Jsonb
 
@@ -111,6 +113,25 @@ async def scenario(admin, dsn):
         assert len(messages["items"]) == 4 and messages["items"][0]["text"] == FALLBACK
         stream = await http.get(path + "/events", headers=one)
         assert stream.status == 200 and stream.headers["Cache-Control"] == "no-store"
+        assert (await stream.content.readline()).strip() == b"event: message"
+        stream.close()
+
+        prepare = web.StreamResponse.prepare
+        disconnected = False
+
+        async def close_before_headers(response, request):
+            nonlocal disconnected
+            if request.path == path + "/events" and not disconnected:
+                disconnected = True
+                raise ConnectionResetError("fixture disconnected before SSE headers")
+            return await prepare(response, request)
+
+        with patch.object(web.StreamResponse, "prepare", close_before_headers):
+            reset = await http.get(path + "/events", headers=one)
+            assert disconnected and reset.status == 200
+            assert await reset.read() == b""
+
+        stream = await http.get(path + "/events", headers=one)
         assert (await stream.content.readline()).strip() == b"event: message"
         stream.close()
 
