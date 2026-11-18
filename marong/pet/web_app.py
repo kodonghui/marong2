@@ -47,19 +47,19 @@ def register(app, *, legal_dir=None, item_dir=None):
         path = (item_root / request.match_info["id"] / "thumb.webp").resolve()
         if not path.is_relative_to(item_root) or not path.is_file():
             raise web.HTTPNotFound()
-        return web.FileResponse(path, headers=HEADERS)
+        return web.FileResponse(path, headers={**HEADERS, "Content-Type": "image/webp"})
 
     async def background(request):
         path = BACKGROUNDS / (request.match_info["name"] + ".webp")
         if not path.is_file():
             raise web.HTTPNotFound()
-        return web.FileResponse(path, headers=HEADERS)
+        return web.FileResponse(path, headers={**HEADERS, "Content-Type": "image/webp"})
 
     async def stages(_request):
         path = BACKGROUNDS / "stages.json"
         if not path.is_file():
             raise web.HTTPNotFound()
-        return web.FileResponse(path, headers=HEADERS)
+        return web.FileResponse(path, headers={**HEADERS, "Content-Type": "application/json"})
 
     async def legal(request):
         name = request.match_info["file"]
