@@ -40,8 +40,10 @@ export async function petScreen(id) {
         !archived ? link('옷 입히기', screen + '/closet', 'plain') : null, link('아이 설정', screen + '/settings', 'plain'),
         pet.shopEntry ? link('상점', '/shop', 'plain') : null)),
   ]);
-  const quotaLine = el('div', {class: 'banner row'}, el('strong', {class: 'grow'}, `오늘 한도 ${quota.percent}%`),
-    !archived && !memorial ? button('충전하기', () => rechargeSheet(pet), 'plain') : null);
+  const quotaLabel = el('strong', {class: 'grow'}, `오늘 한도 ${quota.percent}%`);
+  const quotaLine = archived || memorial ? el('div', {class: 'banner row'}, quotaLabel)
+    : el('button', {type: 'button', class: 'banner row quota-trigger', onclick: () => rechargeSheet(pet)},
+      quotaLabel, el('span', {}, '충전하기'));
   const chat = el('section', {class: 'stack', 'aria-label': '대화'});
   const portrait = petLayers(pet, outfitOf(pet), '그림을 불러오지 못했어요');
   portrait.classList.add('portrait');

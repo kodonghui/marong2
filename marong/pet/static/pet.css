@@ -82,6 +82,9 @@ small, .muted { color: var(--muted) }
 .chat-loading .chat-loading-portrait { aspect-ratio: 3 / 2 }
 .chat-loading .bubble { width: 60%; background: var(--raised) }
 .chat-loading .chat-loading-composer { min-height: 48px }
+.recharge-loading .recharge-loading-gauge { min-height: 24px; padding-block: 0 }
+.recharge-loading-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px }
+.recharge-loading-options .skeleton { min-height: 48px }
 .label-placeholder { min-height: 32px }
 .shop-preview-placeholder { aspect-ratio: 3 / 2 }
 .card.pet.archived, .card.pet.diary-unwritten { opacity: .65 }
@@ -109,7 +112,9 @@ progress { width: 100%; accent-color: var(--accent) }
 .candidate-check { display: none; position: absolute; top: 8px; right: 8px; color: var(--accent) }
 .candidate-option:has(input:checked) .candidate-check { display: block }
 .slots { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px }
-.button, button:not(.plain) { display: inline-flex; justify-content: center; align-items: center; text-align: center; gap: 6px; min-height: 48px; background: var(--raised); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 8px 13px; text-decoration: none; cursor: pointer }
+.button, button:not(.plain,.quota-trigger) { display: inline-flex; justify-content: center; align-items: center; text-align: center; gap: 6px; min-height: 48px; background: var(--raised); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 8px 13px; text-decoration: none; cursor: pointer }
+.quota-trigger { border: 0; min-height: 48px; text-align: start; cursor: pointer }
+.quota-trigger > span { color: var(--accent) }
 .primary, button.primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 700 }
 .kakao { background: #fee500; color: #232000; border-color: transparent }
 .google { background: #fff; color: #202124; border-color: #dadce0 }

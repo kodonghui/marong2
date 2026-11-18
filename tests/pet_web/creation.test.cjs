@@ -1994,10 +1994,29 @@ if (require.main === module) {
     await page.goto(`${origin}/pets/${petId}#recharge`);
     const recharge = page.getByRole('dialog', {name: '충전권'});
     assert.equal(await recharge.count(), 0);
-    await page.getByRole('button', {name: '충전하기'}).click();
+    const quotaLine = page.getByRole('button', {name: '오늘 한도 60% 충전하기'});
+    assert.ok(await quotaLine.evaluate(node => node.offsetHeight) >= 44);
+    const subscription = Promise.withResolvers();
+    t.after(subscription.resolve);
+    await page.route('**/api/subscription', async route => {
+      await subscription.promise;
+      await route.continue();
+    }, {times: 1});
+    await quotaLine.getByText('오늘 한도 60%').click();
+    const loading = recharge.locator('.recharge-loading');
+    await visible(loading);
+    assert.equal(await loading.getAttribute('aria-hidden'), 'true');
+    assert.equal(await loading.locator('.skeleton').count(), 4);
+    assert.equal(await recharge.getByRole('button', {name: /절반 채우기/}).count(), 0);
+    subscription.resolve();
     await visible(recharge.getByText('오늘 한도 60% · 새벽 4시에 다시 차요'));
+    assert.equal(await loading.count(), 0);
     assert(await recharge.getByRole('button', {name: '절반 채우기 · 1,500원'}).isDisabled());
     await recharge.getByRole('button', {name: '괜찮아요'}).click();
+    await quotaLine.press('Enter');
+    await visible(recharge.getByText('오늘 한도 60% · 새벽 4시에 다시 차요'));
+    await page.keyboard.press('Escape');
+    await recharge.waitFor({state: 'detached'});
     await page.goto(`${origin}/pets/${petId}/diary/2026-11-17`);
     const redraw = page.getByRole('button', {name: /새 그림으로 다시 그리기/});
     await redraw.click();
@@ -2012,6 +2031,7 @@ if (require.main === module) {
     const memorial = await fixture(t, {closetMode: 'memorial'});
     await page.goto(`${memorial.origin}/pets/${petId}#recharge`);
     await visible(page.getByRole('heading', {name: '콩이'}));
+    await page.getByText('오늘 한도 60%', {exact: true}).click();
     assert.equal(await page.getByRole('button', {name: '충전하기'}).count(), 0);
     assert.equal(await recharge.count(), 0);
   });

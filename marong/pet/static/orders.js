@@ -100,7 +100,11 @@ function purchaseControl(product, label, amount, member, render, blocked) {
 
 export async function rechargeSheet(pet, automatic = false) {
   if (pet.mode !== 'living' || pet.status !== 'active') return;
-  const outlet = el('div', {class: 'stack'}, el('div', {class: 'skeleton', 'aria-hidden': 'true'}));
+  const outlet = el('div', {class: 'stack', 'aria-busy': 'true'},
+    el('div', {class: 'stack recharge-loading', 'aria-hidden': 'true'},
+      el('div', {class: 'skeleton recharge-loading-gauge'}),
+      el('div', {class: 'recharge-loading-options'},
+        Array.from({length: 3}, () => el('div', {class: 'skeleton'})))));
   const close = button('괜찮아요', () => dialog.close(), 'plain');
   const dialog = el('dialog', {class: 'sheet stack', 'aria-label': '충전권'}, outlet, close);
   dialog.addEventListener('close', () => dialog.remove(), {once: true});
@@ -134,6 +138,8 @@ export async function rechargeSheet(pet, automatic = false) {
     if (!member.paymentsEnabled) outlet.append(notice('결제는 곧 열려요.'));
   } catch (error) {
     errorText(error, outlet);
+  } finally {
+    outlet.removeAttribute('aria-busy');
   }
 }
 
