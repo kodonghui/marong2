@@ -111,7 +111,8 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
     register_billing(app, gateway, deliver_order=deliver_order)
     register_candidates(app, BUDGET, candidate_renderer, template_mask, gateway)
     register_sheet(app, BUDGET, expression_renderer, template_head)
-    register_pets(app, greeting_renderer)
+    greeting_model = (lambda *args: app[CHAT].greet(*args)) if chat_api_key else None
+    register_pets(app, greeting_renderer, model=greeting_model)
     register_lifecycle(app, clock=lifecycle_clock)
     register_calls(app, BUDGET, config=call_config, available=call_available, clock=call_clock)
     register_exports(app, assets=export_assets, font=watermark_font, clock=export_clock)

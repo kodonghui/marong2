@@ -10,6 +10,7 @@ from psycopg.types.json import Jsonb
 from .account import require_overseas
 from .creations import media_url, owned
 from .http import POOL, Problem, body_json, require_member, uuid_param
+from .replies import greeting_reply
 from .sheet import EXPRESSIONS
 
 NAME = re.compile(r"[가-힣A-Za-z0-9 -]{1,12}\Z")
@@ -84,19 +85,21 @@ async def pet_rows(conn, member, pet_id=None):
 
 async def greeting(renderer, profile, mode, species):
     named = profile["intro"]["callMe"]
-    fallback = f"{named}, 나 왔어!" if mode == "living" else f"{named}, 나 놀러 왔어"
+    suffix = "나 왔어!" if mode == "living" else "나 놀러 왔어"
+    fallback = greeting_reply(f"{named}, {suffix}", named) or suffix
     if renderer:
         try:
             text = await asyncio.wait_for(renderer(name=profile["name"], intro=profile["intro"],
                                                   mode=mode, species=species), timeout=8)
-            if isinstance(text, str) and named in text and 1 <= len(text) <= 120 and text.isprintable():
+            text = greeting_reply(text, named)
+            if text:
                 return text
         except Exception:
             pass
     return fallback
 
 
-async def finish(conn, member, creation_id, profile, renderer):
+async def finish(conn, member, creation_id, profile, renderer, *, model=None):
     cur = await conn.execute("SELECT 1 FROM pet.members WHERE id=%s AND status='active' FOR UPDATE", (member,))
     if not await cur.fetchone():
         raise Problem("unauthenticated")
@@ -117,6 +120,10 @@ async def finish(conn, member, creation_id, profile, renderer):
         raise Problem("wrong_state")
     mode = creation["kind"]
     species = "dog" if creation["template"].startswith("dog_") else "cat"
+    if model is not None and renderer is None:
+        async def renderer(**_):
+            return await model(conn, member, creation_id, profile)
+
     # A fallback greeting is permitted even if transfer permissions changed after the sheet was drawn.
     if renderer:
         try:
@@ -140,13 +147,13 @@ async def finish(conn, member, creation_id, profile, renderer):
     return (await pet_rows(conn, member, new_id))[0]
 
 
-def register(app, renderer):
+def register(app, renderer, *, model=None):
     async def finish_route(req):
         member = await require_member(req)
         ident = uuid_param(req.match_info["id"])
         profile = changes(await body_json(req), complete=True)
         async with app[POOL].connection() as conn, conn.transaction():
-            row = await finish(conn, member["id"], ident, profile, renderer)
+            row = await finish(conn, member["id"], ident, profile, renderer, model=model)
         return web.json_response(serialize(row), status=201)
 
     async def listing(req):

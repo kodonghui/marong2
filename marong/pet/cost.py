@@ -1,5 +1,6 @@
 """Private cost records and the public service's monthly limit (SPEC-363, SPEC-369)."""
 
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -95,9 +96,10 @@ class Budget:
         )
         return await cur.fetchone() is not None
 
-    async def record(self, run: Run):
-        async with self.pool.connection() as conn, conn.transaction():
-            booked, warning = await self.record_on(conn, run, self.clock())
+    async def record(self, run: Run, *, conn=None):
+        connection = self.pool.connection() if conn is None else nullcontext(conn)
+        async with connection as target, target.transaction():
+            booked, warning = await self.record_on(target, run, self.clock())
         self.warn(warning)
         return booked
 

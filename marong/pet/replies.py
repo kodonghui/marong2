@@ -64,6 +64,15 @@ def chat_reply(content):
     return text[:ends[-1]].rstrip() if ends else None
 
 
+def greeting_reply(content, address):
+    if bad_reply(content):
+        return None
+    text = content.strip()
+    if len(text) <= 120 and text.isprintable() and address in text and len(SENTENCE.findall(text)) == 1:
+        return text
+    return None
+
+
 class ChatModel:
     def __init__(self, session, key, settings, budget):
         self.session, self.key, self.settings, self.budget = session, key, settings, budget
@@ -87,8 +96,22 @@ class ChatModel:
         return await self.request(job, payload, validate=lambda value: chat_reply(value) is not None,
                                   timeout=40, effort="low")
 
+    async def greet(self, conn, member, creation, profile):
+        data = {"name": profile["name"], "intro": profile["intro"]}
+        payload = {
+            "model": self.settings.chat_model,
+            "max_tokens": 200,
+            "system": GUIDE + " 처음 만난 친구에게 한국어로 짧은 인사 한 문장만 써.",
+            "output_config": {"effort": "low"},
+            "messages": [{"role": "user", "content": json.dumps(data, ensure_ascii=False)}],
+        }
+        job = {"id": creation, "member_id": member, "pet_id": None}
+        return await self.request(job, payload,
+                                  validate=lambda value: greeting_reply(value, profile["intro"]["callMe"]) is not None,
+                                  purpose="greeting", timeout=6, effort="low", cost_conn=conn)
+
     async def request(self, job, payload, *, validate, entry="AI-32", kind="chat", purpose="reply",
-                      version=PROMPT_VERSION, timeout=35, effort=None):
+                      version=PROMPT_VERSION, timeout=35, effort=None, cost_conn=None):
         usage, result, stop = {}, "error", None
         began = monotonic()
         try:
@@ -116,13 +139,15 @@ class ChatModel:
             numbers = {key: usage[key] for key in ("input_tokens", "output_tokens")
                        if type(usage.get(key)) is int and usage[key] >= 0}
             try:
-                await asyncio.wait_for(self.budget.record(Run(
+                run = Run(
                     trace=job["id"], member_id=job["member_id"], pet_id=job["pet_id"],
                     entry=entry, kind=kind, purpose=purpose, model=self.settings.chat_model,
                     prompt_version=version, effort=effort, result=result,
                     stop=stop if stop in {"end_turn", "refusal", "max_tokens"} else None,
                     total_ms=int((monotonic() - began) * 1000), **numbers,
-                )), timeout=1)
+                )
+                booked = self.budget.record(run) if cost_conn is None else self.budget.record(run, conn=cost_conn)
+                await asyncio.wait_for(booked, timeout=1)
             except Exception:
                 logger.error("pet_chat_cost_record_failed")
 
