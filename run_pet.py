@@ -13,6 +13,7 @@ from psycopg_pool import AsyncConnectionPool
 from marong.pet.account import register as register_account
 from marong.pet.auth import AuthConfig, register as register_auth
 from marong.pet.cost import Budget
+from marong.pet.decor import register as register_decor
 from marong.pet.delete import register as register_delete
 from marong.pet.http import CONFIG, POOL, guard, read_media
 from marong.pet.inventory import register as register_inventory
@@ -56,6 +57,7 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
     register_auth(app, auth_config if auth_config is not None else AuthConfig.read(os.environ))
     register_account(app)
     register_inventory(app)
+    register_decor(app)
     register_quota(app)
     register_push(app, sender=push_sender)
     register_delete(app, revoke=revoke_billing_key)

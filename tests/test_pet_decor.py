@@ -16,7 +16,8 @@ from PIL import Image, ImageDraw
 from psycopg.types.json import Jsonb
 
 from marong.pet.auth import AuthConfig
-from marong.pet.http import COOKIE, cookie_hash
+from marong.pet.decor import apply_outfit, outfit_input
+from marong.pet.http import COOKIE, POOL, Problem, cookie_hash
 from marong.pet.settings import Settings
 from marong.pet.inventory import TEMPLATES
 from pg import TestDB
@@ -54,7 +55,7 @@ async def check_inventory(admin, app_dsn, directory):
                               "PET_MONTHLY_BUDGET_KRW": "50000", "PET_MEDIA_DIR": str(directory)})
     with psycopg.connect(admin, autocommit=True) as conn:
         member, pet, own = add_member(conn, "FIXTURE1", "living")
-        memorial, _, memorial_cookie = add_member(conn, "FIXTURE2", "memorial")
+        memorial, memorial_pet, memorial_cookie = add_member(conn, "FIXTURE2", "memorial")
         free, sale, ended, future = (uuid4() for _ in range(4))
         conn.execute("""
             INSERT INTO pet.items(id,kind,name,slot,is_default,sellable,limited,price_krw,license_key,assets,sale_starts_at,sale_ends_at)
@@ -112,9 +113,33 @@ async def check_inventory(admin, app_dsn, directory):
             [former_sale] = await items(inventory, memorial_cookie)
             assert former_sale["itemId"] == str(ended) and former_sale["withdrawableUntil"]
             assert (await client.get(layer(ended), headers=memorial_cookie)).status == 200
-            conn.execute("UPDATE pet.orders SET used_at=now() WHERE id=%s", (purchase,))
+            pool = client.server.app[POOL]
+
+            async def equip(actor, child, *, head=None, body=None, neck=None, required_error=None):
+                payload = outfit_input({"head": head, "body": body, "neck": neck})
+                try:
+                    async with pool.connection() as session, session.transaction():
+                        await apply_outfit(session, actor, child, payload)
+                    assert required_error is None
+                except Problem as error:
+                    assert error.code == required_error
+
+            await equip(member, pet, head=str(ended), required_error="not_found")
+            await equip(member, memorial_pet, required_error="not_found")
+            await equip(memorial, memorial_pet, neck=str(ended), required_error="wrong_slot")
+            assert conn.execute("SELECT used_at FROM pet.orders WHERE id=%s", (purchase,)).fetchone() == (None,)
+            await equip(memorial, memorial_pet, head=str(ended))
+            (first_use,) = conn.execute("SELECT used_at FROM pet.orders WHERE id=%s", (purchase,)).fetchone()
+            assert first_use is not None
+            await equip(memorial, memorial_pet, head=str(ended))
+            assert conn.execute("SELECT used_at FROM pet.orders WHERE id=%s", (purchase,)).fetchone() == (first_use,)
             [used] = await items(inventory, memorial_cookie)
-            assert used["withdrawableUntil"] is None
+            assert used["withdrawableUntil"] is None and used["wornBy"] == [str(memorial_pet)]
+            await equip(memorial, memorial_pet)
+            [removed] = await items(inventory, memorial_cookie)
+            assert removed["wornBy"] == []
+            conn.execute("UPDATE pet.pets SET status='archived' WHERE id=%s", (memorial_pet,))
+            await equip(memorial, memorial_pet, head=str(ended), required_error="archived")
 
 
 def check_item_cli(admin, app_dsn, directory):
@@ -184,3 +209,4 @@ if __name__ == "__main__":
         db.close()
     print("TC-421: inventory scope, current sales, read-only previews, and owned ended layers passed")
     print("TC-422: missing layer, license, dimensions and pixel limits, atomic upload, and limited sale ending passed")
+    print("TC-423 outfit transaction: ownership, slot mismatch, wear, remove, archive and first use passed")
