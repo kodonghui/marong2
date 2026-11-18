@@ -1,6 +1,8 @@
 import {action, AI_NOTICE, api, banner, button, CONSENT, dateLabel, el, errorText, header, link, notice,
   page, picture, show, showTabs, text} from './pet.js';
 
+import {mediaId, reportControl} from './report.js';
+
 const HOME = {label: '홈', url: '/'};
 const LEGAL = '/static/legal/';
 
@@ -26,8 +28,13 @@ export async function petScreen(id) {
   const quotaLine = el('div', {class: 'banner row'}, el('strong', {class: 'grow'}, `오늘 한도 ${quota.percent}%`),
     quota.percent === 0 && pet.rechargePrompt ? link('충전하기', '#recharge', 'plain') : null);
   const chat = el('section', {class: 'stack', 'aria-label': '대화'});
-  show(banner(AI_NOTICE), memberBanner(me), title, picture(pet.sheet.front, pet.name, 'portrait'),
-    el('small', {}, 'AI가 그린 그림'), quotaLine, chat);
+  const portrait = picture(pet.sheet.front, pet.name, 'portrait');
+  const pictureId = mediaId(pet.sheet.front);
+  const reported = el('div', {role: 'status'});
+  show(banner(AI_NOTICE), memberBanner(me), title, portrait,
+    el('div', {class: 'row'}, el('small', {class: 'grow'}, 'AI가 그린 그림'), pictureId ? reportControl({
+      targetType: 'picture', targetId: pictureId, preview: pet.sheet.front,
+    }, '그림 신고', reported, portrait) : null), quotaLine, reported, chat);
   const {items, before} = await api(path + '/messages');
   const timeline = el('div', {class: 'chat-log', role: 'log', tabindex: '0', 'aria-label': '메시지'});
   const typing = el('small', {class: 'muted', hidden: true}, '···');
@@ -41,7 +48,10 @@ export async function petScreen(id) {
     if (row.id) seen.add(row.id);
     if (row.kind === 'call') return el('details', {class: 'bubble system'},
       el('summary', {}, `통화했어요 · ${dateLabel(row.createdAt)}`), text(row.text));
-    return el('p', {class: `bubble ${row.role}`}, row.text);
+    if (row.role !== 'pet' || !row.id) return el('p', {class: `bubble ${row.role}`}, row.text);
+    const message = text(row.text);
+    const report = reportControl({targetType: 'message', targetId: row.id, preview: row.text}, '신고', reported, message);
+    return el('div', {class: 'bubble'}, message, el('small', {class: 'muted'}, 'AI'), report);
   }
   function append(rows) {
     for (const row of [...rows].reverse()) {

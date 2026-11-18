@@ -30,7 +30,7 @@ async function body(request) {
   return Buffer.concat(chunks);
 }
 
-async function fixture(t, {signedIn = true, consent = true, invite = false} = {}) {
+async function fixture(t, {signedIn = true, consent = true, invite = false, reportLimited = false} = {}) {
   let member = signedIn;
   let state;
   let selected = null;
@@ -85,6 +85,11 @@ async function fixture(t, {signedIn = true, consent = true, invite = false} = {}
     if (pathname === `/api/media/${candidateId}`) {
       res.writeHead(200, {'Content-Type': 'image/png'});
       return res.end(await readFile(path.join(assets, 'pet-icon.png')));
+    }
+    if (pathname === '/api/reports' && req.method === 'POST') {
+      writes.push(JSON.parse(await body(req)));
+      if (reportLimited) return json(res, {code: 'rate_limited', detail: '오늘은 더 신고할 수 없어요. 내일 다시 해 주세요.'}, 429);
+      return json(res, {jobId: candidateId}, 201);
     }
     if (pathname === `/api/pets/${petId}/messages`) return json(res, {items: [{
       id: candidateId, role: 'pet', kind: 'greeting', text: '누나, 나 왔어!',
@@ -206,5 +211,30 @@ if (require.main === module) {
     await page.getByRole('button', {name: /새 그림으로 다시 그리기/}).click();
     await visible(page.getByRole('dialog').getByText('어떤 그림이면 좋을까요?'));
     assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true);
+  });
+
+  test('SCR-156 accepts a reason and retains input when the daily cap is reached', async t => {
+    for (const reportLimited of [false, true]) {
+      const {origin, writes} = await fixture(t, {reportLimited});
+      const page = await browser.newPage({viewport: {width: 360, height: 760}});
+      try {
+        await page.goto(origin + '/pets/' + petId);
+        await page.getByRole('button', {name: '신고', exact: true}).click();
+        const modal = page.getByRole('dialog');
+        const send = modal.getByRole('button', {name: '신고하기'});
+        assert.equal(await modal.getByRole('radio').count(), 6);
+        assert.equal(await send.isDisabled(), true);
+        await modal.getByLabel('상처 주는 말').check();
+        await modal.getByLabel('메모').fill('합성 시험');
+        await send.click();
+        assert.deepEqual(writes.at(-1), {targetType: 'message', targetId: candidateId,
+          reason: 'hurtful', note: '합성 시험'});
+        if (reportLimited) {
+          await visible(modal.getByText('오늘은 더 신고할 수 없어요. 내일 다시 해 주세요.'));
+          assert.equal(await modal.getByLabel('메모').inputValue(), '합성 시험');
+          assert.equal(await modal.getByLabel('상처 주는 말').isChecked(), true);
+        } else await visible(page.getByText('신고했어요. 확인해 볼게요.'));
+      } finally { await page.close(); }
+    }
   });
 }

@@ -99,3 +99,8 @@ input:not([type="checkbox"],[type="radio"],[type="file"]), select, textarea {
 .busy[aria-busy="true"]::after { content: ""; display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite }
 @keyframes spin { to { transform: rotate(1turn) } }
 @media (prefers-reduced-motion: reduce) { .busy[aria-busy="true"]::after { animation: none } }
+
+.report-choices { border: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px }
+.report-choices > legend { margin-bottom: 10px; font-weight: 700 }
+.report-choices > label { display: flex; flex-direction: row; align-items: center; gap: 6px }
+.report-source { overflow-wrap: anywhere }

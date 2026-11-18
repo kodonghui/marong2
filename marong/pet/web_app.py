@@ -8,7 +8,7 @@ from aiohttp import web
 STATIC = Path(__file__).with_name("static")
 ASSETS = {
     "pet.css", "pet.js", "home.js", "creation.js", "member.js", "diary.js", "pet.webmanifest", "pet-icon.png",
-    "pet-welcome.webp",
+    "pet-welcome.webp", "report.js",
 }
 LEGAL = {"terms.html", "privacy.html", "overseas.html"}
 HEADERS = {

@@ -1,6 +1,8 @@
 import {action, api, banner, button, dateLabel, el, Failure, header, link, notice,
   picture, show, text, today} from './pet.js';
 
+import {mediaId, reportControl} from './report.js';
+
 const outcomes = {
   pending: '아직 쓰는 중이에요. 조금 뒤에 다시 와 주세요.',
   skipped: '이날은 이야기가 짧아 일기를 쉬었어요.',
@@ -108,14 +110,20 @@ function sheet(pet, href, path, entry, status) {
   redraw.disabled = entry.drawing || !entry.redrawsLeft;
   const send = button('카드로 공유', () => action(send, outcome, () => share(path, outcome)), 'plain');
   const drawing = entry.drawing ? banner('새 그림을 그리는 중이에요') : null;
+  const artwork = entry.picture || pet.sheet?.front;
+  const artworkView = artwork ? picture(artwork, 'AI가 그린 그림', 'diary-art') : null;
+  const pictureId = mediaId(artwork);
+  const reported = el('div', {role: 'status'});
+  const report = pictureId ? reportControl({targetType: 'picture', targetId: pictureId, preview: artwork},
+    '그림 신고', reported, artworkView) : null;
   show(drawing, status ? banner(status) : null,
     el('article', {class: 'diary-paper stack'},
       el('small', {}, entry.kind === 'farewell' ? '❀ 마지막 장' : dateLabel(entry.date)),
       el('h2', {}, entry.title), entry.weather ? el('small', {}, entry.weather) : null,
-      entry.picture || pet.sheet?.front ? picture(entry.picture || pet.sheet.front, 'AI가 그린 그림', 'diary-art') : null,
+      artworkView,
       entry.picture ? el('small', {}, 'AI가 그린 그림') : null,
       text(entry.body || '', 'diary-body')),
-    el('div', {class: 'row'}, editable ? redraw : null, send), outcome);
+    el('div', {class: 'row'}, editable ? redraw : null, send, report), outcome, reported);
   if (entry.drawing) observeDraw(pet, href, path);
   if (editable && location.hash === '#redraw') {
     history.replaceState(null, '', location.pathname + location.search);
