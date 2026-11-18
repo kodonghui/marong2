@@ -146,7 +146,7 @@ function sheet(pet, href, path, entry, pages, status) {
   const paper = el('article', {class: 'diary-paper stack'},
     el('small', {}, entry.kind === 'farewell' ? '❀ 마지막 장' : dateLabel(entry.date)),
     el('h2', {}, entry.title), entry.weather ? el('small', {}, entry.weather) : null, frame,
-    entry.picture ? el('small', {}, 'AI가 그린 그림') : null, text(entry.body || '', 'diary-body'));
+    artworkView ? el('small', {}, 'AI가 그린 그림') : null, text(entry.body || '', 'diary-body'));
   const editor = el('div');
   const decorate = button('꾸미기', () => action(decorate, outcome, async () => {
     await decorateDiary(pet, path, entry, paper, frame, editor,

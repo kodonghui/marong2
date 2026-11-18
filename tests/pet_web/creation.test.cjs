@@ -423,6 +423,7 @@ if (require.main === module) {
     t.after(() => page.close());
     await page.goto(`${origin}/pets/${petId}/diary/2026-11-17`);
     await visible(page.getByRole('heading', {name: '산책 간 날'}));
+    await visible(page.getByText('AI가 그린 그림'));
     const frame = page.locator('.diary-art-frame');
     assert.equal(await frame.locator('.outfit-background').getAttribute('src'), '/static/backgrounds/park.webp');
     assert.equal(await frame.locator('img[alt="콩이"]').getAttribute('src'), '/static/pet-welcome.webp');
