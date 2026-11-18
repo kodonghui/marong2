@@ -539,6 +539,21 @@ if (require.main === module) {
     assert.equal(sends, 1);
   });
 
+  test('SCR-147 shows the Korean call date and hour and keeps the transcript folded', async t => {
+    const call = {id: 'synthetic-call-turn', role: 'member', kind: 'call',
+      createdAt: '2026-11-17T15:10:00Z', text: '시험 통화 기록'};
+    const {origin} = await fixture(t, {chatNotices: [call]});
+    const page = await browser.newPage({timezoneId: 'America/Los_Angeles'});
+    t.after(() => page.close());
+    await page.goto(`${origin}/pets/${petId}`);
+    const summary = page.getByText('통화했어요 · 11월 18일 오전 12시', {exact: true});
+    const transcript = page.getByText(call.text, {exact: true});
+    await visible(summary);
+    assert.equal(await transcript.isVisible(), false);
+    await summary.click();
+    await visible(transcript);
+  });
+
   test('SCR-148 at 390px: mic denial, disclosure, PCM, quota ending and return', async t => {
     const app = await fixture(t);
     const page = await browser.newPage({viewport: {width: 390, height: 844}});
@@ -606,6 +621,121 @@ if (require.main === module) {
     await page.getByRole('link', {name: '대화로 돌아가기'}).click();
     await visible(page.getByText('누나, 나 왔어!', {exact: true}));
     assert.deepEqual(errors, []);
+  });
+
+  test('SCR-148 displays the contracted HTTP failures and frees the microphone', async t => {
+    const cases = [
+      {code: 'call_in_progress', status: 409, message: '이미 통화 중이에요.'},
+      {code: 'call_unavailable', status: 503, message: '지금은 통화를 걸 수 없어요.', retry: true},
+      {code: 'quota_exhausted', status: 409, prompt: 'brief', message: '오늘 한도를 다 썼어요. 새벽 4시에 다시 차요.'},
+      {code: 'quota_exhausted', status: 409, prompt: 'recharge', message: '오늘 한도를 다 썼어요. 새벽 4시에 다시 차요.', recharge: true},
+      {code: 'quota_exhausted', status: 409, prompt: 'none', mode: 'memorial', message: '오늘은 여기까지, 새벽 4시 뒤에 또 이야기해요.'},
+      {code: 'budget_paused', status: 409, message: '오늘은 새 그림과 통화가 쉬어요. 글로는 계속 이야기할 수 있어요.'},
+      {code: 'archived', status: 409, message: '보관한 아이예요. 꺼내면 다시 이야기할 수 있어요.'},
+      {code: 'consent_required', status: 409, message: '사진과 대화를 해외 AI 회사로 보내는 데 동의해야 쓸 수 있어요. 설정에서 바꿀 수 있어요.'},
+    ];
+    const page = await browser.newPage({viewport: {width: 360, height: 800}});
+    t.after(() => page.close());
+    await page.addInitScript(() => {
+      const getMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      navigator.mediaDevices.getUserMedia = async options => {
+        const stream = await getMedia(options);
+        window.callTracks = stream.getTracks();
+        return stream;
+      };
+    });
+    for (const example of cases) {
+      const app = await fixture(t, {closetMode: example.mode || 'living'});
+      let reservations = 0;
+      let sockets = 0;
+      const reject = route => {
+        reservations += 1;
+        return route.fulfill({status: example.status,
+          json: {code: example.code, detail: example.message, prompt: example.prompt}});
+      };
+      await page.route('**/api/pets/*/calls', reject);
+      await page.routeWebSocket('**/pet-call', () => { sockets += 1; });
+      await page.goto(`${app.origin}/pets/${petId}/call`);
+      await page.getByRole('button', {name: '전화 걸기'}).click();
+      const dialog = page.getByRole('dialog', {name: '충전권'});
+      const status = example.recharge ? dialog : page.locator('.call-card');
+      await visible(status.getByText(example.message, {exact: true}));
+      assert.equal(reservations, 1, example.code);
+      assert.equal(sockets, 0, example.code);
+      assert.equal(await page.evaluate(() => window.callTracks.every(track => track.readyState === 'ended')), true, example.code);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, example.code);
+      assert.equal(await dialog.count(), Number(Boolean(example.recharge)), example.code);
+      if (example.retry) await visible(page.getByRole('button', {name: '다시 해 보기'}));
+      await page.unroute('**/api/pets/*/calls', reject);
+    }
+  });
+
+  test('SCR-148 blocks direct call entry for archived pets and missing consent', async t => {
+    const page = await browser.newPage({viewport: {width: 430, height: 850}});
+    t.after(() => page.close());
+    await page.addInitScript(() => {
+      window.micRequests = 0;
+      navigator.mediaDevices.getUserMedia = () => {
+        window.micRequests += 1;
+        return Promise.reject(new Error('permission should never be requested'));
+      };
+    });
+    const archived = await fixture(t, {closetMode: 'archived'});
+    await page.goto(`${archived.origin}/pets/${petId}/call`);
+    await visible(page.getByText('보관한 아이예요. 꺼내면 다시 이야기할 수 있어요.'));
+    assert.equal(await page.getByRole('link', {name: '돌아가기', exact: true}).getAttribute('href'), '/pets/' + petId);
+    assert.equal(await page.getByRole('button', {name: '전화 걸기'}).count(), 0);
+    assert.equal(await page.evaluate(() => window.micRequests), 0);
+    assert.equal(archived.callStarts, 0);
+
+    const consentMissing = await fixture(t, {consent: false});
+    await page.goto(`${consentMissing.origin}/pets/${petId}/call`);
+    assert.equal(await page.getByRole('link', {name: '설정에서 바꾸기'}).getAttribute('href'), '/me#consents');
+    assert.equal(await page.getByRole('button', {name: '전화 걸기'}).count(), 0);
+    assert.equal(await page.evaluate(() => window.micRequests), 0);
+    assert.equal(consentMissing.callStarts, 0);
+  });
+
+  test('SCR-148 releases the interrupted call and reconnects on an explicit retry', {timeout: 15_000}, async t => {
+    const app = await fixture(t);
+    const page = await browser.newPage({viewport: {width: 430, height: 850}});
+    t.after(() => page.close());
+    await page.addInitScript(() => {
+      const getMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      window.callTracks = [];
+      navigator.mediaDevices.getUserMedia = async options => {
+        const stream = await getMedia(options);
+        window.callTracks.push(...stream.getTracks());
+        return stream;
+      };
+    });
+    let connections = 0;
+    const receivedStop = Promise.withResolvers();
+    await page.routeWebSocket('**/pet-call', gateway => {
+      const call = ++connections;
+      gateway.onMessage(data => {
+        if (typeof data !== 'string') return;
+        const control = JSON.parse(data);
+        if (control.type === 'auth') {
+          if (call === 1) gateway.close({code: 1011});
+          else gateway.send(JSON.stringify({type: 'ready'}));
+        }
+        if (control.type === 'stop') receivedStop.resolve();
+      });
+    });
+    await page.goto(`${app.origin}/pets/${petId}/call`);
+    await page.getByRole('button', {name: '전화 걸기'}).click();
+    await visible(page.getByText('연결이 끊겼어요'));
+    assert.deepEqual(await page.evaluate(() => window.callTracks.map(track => track.readyState)), ['ended']);
+    await page.getByRole('button', {name: '다시 걸기'}).click();
+    await page.waitForFunction(() => window.callTracks.length === 2 && window.callTracks.at(-1).readyState === 'live');
+    await page.locator('.call-card [role=status]').getByText('연결하고 있어요').waitFor({state: 'detached'});
+    await page.getByRole('button', {name: '끊기'}).click();
+    await visible(page.getByText('통화했어요', {exact: true}));
+    await receivedStop.promise;
+    assert.equal(app.callStarts, 2);
+    assert.equal(connections, 2);
+    assert.deepEqual(await page.evaluate(() => window.callTracks.map(track => track.readyState)), ['ended', 'ended']);
   });
 
   test('SCR-140–141: login failure, mandatory consents and retained invite form', async t => {

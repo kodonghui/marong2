@@ -1,4 +1,4 @@
-import {action, AI_NOTICE, api, banner, button, CONSENT, dateLabel, el, errorText, header, link, notice,
+import {action, AI_NOTICE, api, banner, button, CONSENT, el, errorText, header, link, notice,
   page, show, showTabs, text} from './pet.js';
 
 import {outfitOf, petLayers} from './closet.js';
@@ -8,6 +8,9 @@ import {pushControl} from './push-control.js';
 
 const HOME = {label: '홈', url: '/'};
 const LEGAL = '/static/legal/';
+const callTime = new Intl.DateTimeFormat('ko-KR', {
+  timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', hour: 'numeric', hour12: true,
+});
 
 function memberBanner(me) {
   return me.overseasTransfer ? null : banner(CONSENT, link('설정에서 바꾸기', '/me#consents', 'plain'));
@@ -53,7 +56,7 @@ export async function petScreen(id) {
   let streamAnchor = items[0]?.id;
   function bubble(row) {
     if (row.kind === 'call') return el('details', {class: 'bubble system'},
-      el('summary', {}, `통화했어요 · ${dateLabel(row.createdAt)}`), text(row.text));
+      el('summary', {}, `통화했어요 · ${callTime.format(new Date(row.createdAt))}`), text(row.text));
     if (row.role === 'system' && row.kind === 'crisis_notice') {
       const number = row.text.match(/\b(?:109|119)\b/)?.[0];
       return el('p', {class: 'bubble system'}, number ? el('a', {href: `tel:${number}`}, row.text) : row.text);
