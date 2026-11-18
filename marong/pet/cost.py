@@ -96,29 +96,37 @@ class Budget:
         return await cur.fetchone() is not None
 
     async def record(self, run: Run):
-        booked = microusd(self.settings.prices, run)
-        now = self.clock()
-        start, end = month_bounds(now)
         async with self.pool.connection() as conn, conn.transaction():
-            await conn.execute(
-                """INSERT INTO pet.ai_runs(
-                    trace_id,member_id,pet_id,entry,cost_kind,purpose,model,prompt_version,price_version,effort,
-                    input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,images,first_token_ms,total_ms,
-                    result,stop_reason,fallback_reason,est_cost_microusd,created_at
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (run.trace, run.member_id, run.pet_id, run.entry, run.kind, run.purpose, run.model,
-                 run.prompt_version, self.settings.prices.version, run.effort, run.input_tokens, run.output_tokens,
-                 run.cache_read, run.cache_write, run.images, run.first_ms, run.total_ms,
-                 run.result, run.stop, run.fallback, booked, now),
-            )
-            # Serialise threshold calculation after insertion so two smaller concurrent runs can cross it together.
-            await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
-                               ("pet:budget:" + start.strftime("%Y-%m"),))
-            cost = await self._total(conn, start, end)
-            alert = self._at(80, cost) and await self._flag(conn, start, "warn", cost)
-        if alert:
-            logger.warning("pet_budget_warn month=%s cost_microusd=%s", start.strftime("%Y-%m"), cost)
+            booked, warning = await self.record_on(conn, run, self.clock())
+        self.warn(warning)
         return booked
+
+    async def record_on(self, conn, run: Run, now):
+        """Write cost inside a caller's transaction when usage and a counter must commit together."""
+        booked = microusd(self.settings.prices, run)
+        start, end = month_bounds(now)
+        await conn.execute(
+            """INSERT INTO pet.ai_runs(
+                trace_id,member_id,pet_id,entry,cost_kind,purpose,model,prompt_version,price_version,effort,
+                input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,images,first_token_ms,total_ms,
+                result,stop_reason,fallback_reason,est_cost_microusd,created_at
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (run.trace, run.member_id, run.pet_id, run.entry, run.kind, run.purpose, run.model,
+             run.prompt_version, self.settings.prices.version, run.effort, run.input_tokens, run.output_tokens,
+             run.cache_read, run.cache_write, run.images, run.first_ms, run.total_ms,
+             run.result, run.stop, run.fallback, booked, now),
+        )
+        # Serialise threshold calculation after insertion so two smaller concurrent runs can cross it together.
+        await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
+                           ("pet:budget:" + start.strftime("%Y-%m"),))
+        cost = await self._total(conn, start, end)
+        alert = self._at(80, cost) and await self._flag(conn, start, "warn", cost)
+        return booked, (start.strftime("%Y-%m"), cost) if alert else None
+
+    @staticmethod
+    def warn(warning):
+        if warning:
+            logger.warning("pet_budget_warn month=%s cost_microusd=%s", *warning)
 
     async def allow(self, action, *, paid=False):
         if action not in COST_GATE:

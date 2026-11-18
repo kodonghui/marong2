@@ -14,6 +14,7 @@ from marong.pet.account import register as register_account
 from marong.pet.artwork import ImageEditor, Templates
 from marong.pet.auth import AuthConfig, register as register_auth
 from marong.pet.billing import register as register_billing
+from marong.pet.calls import CallConfig, register as register_calls
 from marong.pet.candidates import register as register_candidates
 from marong.pet.chat import register as register_chat
 from marong.pet.cost import Budget
@@ -52,7 +53,8 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
              identity_verify=None, identity_digest_key=None, candidate_renderer=None, template_mask=None,
              expression_renderer=None, template_head=None, greeting_renderer=None, chat_api_key=None, reply_model=None, chat_clock=None,
              report_clock=None, lifecycle_clock=None, export_clock=None, export_assets=None,
-             watermark_font=None, farewell_letter=None, farewell_picture=None) -> web.Application:
+             watermark_font=None, farewell_letter=None, farewell_picture=None, call_config=None,
+             call_available=None, call_clock=None) -> web.Application:
     app = web.Application(middlewares=[guard])
     app[CONFIG] = settings
     if image_api_key:
@@ -111,6 +113,7 @@ def make_app(settings: Settings, *, auth_config=None, revoke_billing_key=None, p
     register_sheet(app, BUDGET, expression_renderer, template_head)
     register_pets(app, greeting_renderer)
     register_lifecycle(app, clock=lifecycle_clock)
+    register_calls(app, BUDGET, config=call_config, available=call_available, clock=call_clock)
     register_exports(app, assets=export_assets, font=watermark_font, clock=export_clock)
     register_identity(app, identity_verify, identity_digest_key)
     extract = (lambda photos, job: app[VISION](photos, job)) if traits_api_key else None
@@ -138,7 +141,8 @@ def main() -> int:
         traits_key = os.environ.get("PET_ANTHROPIC_API_KEY")
         web.run_app(make_app(settings, push_sender=sender, face_detector=detector, traits_api_key=traits_key,
                              image_api_key=os.environ.get("PET_OPENAI_API_KEY"), chat_api_key=traits_key,
-                             watermark_font=os.environ.get("PET_WATERMARK_FONT")),
+                             watermark_font=os.environ.get("PET_WATERMARK_FONT"),
+                             call_config=CallConfig.read(os.environ, settings)),
                    host="127.0.0.1", port=settings.port,
                    access_log=None, print=None)
     except SettingsError as error:
