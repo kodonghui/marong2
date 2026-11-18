@@ -14,6 +14,7 @@ from aiohttp import ClientSession,ClientTimeout,WSMsgType
 from memory_tools import TranscriptRecorder,execute_tool
 from hangup import Consent
 from call_search import queries as search_queries
+from tool_trace import step as trace_step
 
 BUILD='20261117-hello'
 FRAME=struct.Struct('!4sIIIII')
@@ -327,11 +328,21 @@ class LiveSession:
                         if mode:options['search']=mode
                         if self.ring_info:options['ring']=self.ring_info
                         if friend_instruction:options['friend_instruction']=friend_instruction
-                        await upstream.send_json(self.setup(self.handle,seed,bool(self.p and self.segment),**options))
-                        first=await upstream.receive(timeout=20)
-                        if first.type not in (WSMsgType.TEXT,WSMsgType.BINARY) or 'setupComplete' not in json.loads(first.data):
-                            if self.handle:self.handle=None;self.pending.clear()
-                            raise ConnectionError('setup_rejected')
+                        surface = 'discord_voice' if self.entry_transport == 'discord' else 'web_voice'
+                        with trace_step('voice_setup', surface=surface) as trace:
+                            setup = self.setup(self.handle, seed, bool(self.p and self.segment), **options)
+                            if trace:
+                                tools = setup.get('setup', {}).get('tools', [])
+                                trace.record(offered=sum(len(tool.get('functionDeclarations', [])) for tool in tools))
+                            await upstream.send_json(setup)
+                            first=await upstream.receive(timeout=20)
+                            if first.type not in (WSMsgType.TEXT,WSMsgType.BINARY) or 'setupComplete' not in json.loads(first.data):
+                                if trace:
+                                    trace.record(result='rejected')
+                                if self.handle:self.handle=None;self.pending.clear()
+                                raise ConnectionError('setup_rejected')
+                            if trace:
+                                trace.record(result='ok')
                         self.ready=True;delay=1
                         ready={'type':'ready','resumed':bool(self.handle) or self.logical_resumed,'callId':self.call_id,
                             'build':BUILD,'audioFormat':2,'epoch':self.epoch,'audioTransport':self.entry_transport or ('webrtc' if self.rtc else 'pcm'),'memoryConnected':bool(self.p and self.segment),
@@ -401,6 +412,7 @@ class LiveSession:
 
     async def provider(self,upstream):
         sequence=0;last_audio=None;tool_tasks={};speaking=False;go_away=False;audio_finished=False;turn_queries=set()
+        surface = 'discord_voice' if self.entry_transport == 'discord' else 'web_voice'
         async def send(payload,remember=True):
             nonlocal sequence
             sequence+=1
@@ -428,16 +440,33 @@ class LiveSession:
 
         async def tool(call):
             name=call.get('name','');identifier=str(call.get('id',''))[:200]
-            if name=='end_call':
-                result=await self.end_call_requested()
-                await send({'toolResponse':{'functionResponses':[{'id':identifier,'name':name,'response':result}]}})
-                if result['result']=='ending' and self.hangup_answered is None:self.hangup_answered=time.monotonic()
-                return
-            try:
-                result=await asyncio.wait_for(execute_tool(self.store,self.p,self.call_id,self.segment,name,call.get('args',{}),self.segment+':'+identifier if self.segment else identifier,self.recorder),6)
-            except asyncio.CancelledError:raise
-            except Exception:result={'result':'not_saved','reason':'temporary_error'}
-            await send({'toolResponse':{'functionResponses':[{'id':identifier,'name':name,'response':result}]}})
+            with trace_step('voice_tool', surface=surface, tool=name) as trace:
+                try:
+                    with trace_step('tool_dispatch', trace) as dispatch:
+                        if name == 'end_call':
+                            result = await self.end_call_requested()
+                        else:
+                            result = await asyncio.wait_for(execute_tool(
+                                self.store, self.p, self.call_id, self.segment, name, call.get('args', {}),
+                                self.segment + ':' + identifier if self.segment else identifier, self.recorder), 6)
+                        if dispatch:
+                            if isinstance(result, dict):
+                                outcome = result.get('result')
+                                dispatch.record(result=result.get('reason', outcome) if outcome == 'not_saved' else outcome)
+                            else:
+                                dispatch.record(result='invalid_result')
+                except Exception:
+                    if name == 'end_call':
+                        raise
+                    result = {'result': 'not_saved', 'reason': 'temporary_error'}
+                    if trace:
+                        trace.record(result='temporary_error')
+                with trace_step('provider_send', trace) as delivery:
+                    await send({'toolResponse':{'functionResponses':[{'id':identifier,'name':name,'response':result}]}})
+                    if delivery:
+                        delivery.record(results_sent=1)
+                if name == 'end_call' and result['result'] == 'ending' and self.hangup_answered is None:
+                    self.hangup_answered = time.monotonic()
 
         async def receiver():
             nonlocal last_audio,speaking,go_away,audio_finished
@@ -480,7 +509,10 @@ class LiveSession:
                 if content.get('modelTurn') or data.get('toolCall') or content.get('turnComplete'):
                     self.recorder.boundary('user')
                 fresh=[q for q in search_queries(content) if q not in turn_queries]
-                if fresh:turn_queries.update(fresh);self.searched(len(fresh))
+                if fresh:
+                    turn_queries.update(fresh);self.searched(len(fresh))
+                    with trace_step('voice_search', surface=surface, web_searches=len(fresh)):
+                        pass
                 if content.get('generationComplete') and self.in_turn and not audio_finished:
                     audio_finished=True;await self.emit({'type':'audio_end','epoch':self.epoch,'turn':self.turn})
                 if content.get('turnComplete'):
