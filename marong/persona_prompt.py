@@ -58,7 +58,11 @@ def append_prefix(system, prefix):
     if not prefix:
         return system
     blocks = [dict(block) for block in system]
-    cache = blocks[0].pop("cache_control", None)
+    cache = None
+    for block in reversed(blocks[:-1]):
+        if "cache_control" in block:
+            cache = block.pop("cache_control")
+            break
     extra = {"type": "text", "text": prefix}
     if cache:
         extra["cache_control"] = cache

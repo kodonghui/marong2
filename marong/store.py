@@ -79,6 +79,10 @@ def scope(room: str) -> str:
             f"(SELECT coalesce(s0.memory_room, s0.room_key) FROM marong.rooms s0 WHERE s0.room_key = {room}))")
 
 
+def exact_room(room: str) -> str:
+    return f"(SELECT {room}::text)"
+
+
 def root(room: str) -> str:
     """room 의 묶음 뿌리(묶인 단체방이면 그 1:1 방, 아니면 그 방). 새 요약·메모는 뿌리 쪽에 쌓는다."""
     return f"(SELECT coalesce(s1.memory_room, s1.room_key) FROM marong.rooms s1 WHERE s1.room_key = {room})"
@@ -282,23 +286,25 @@ class Store:
             {"room": room_key, "within": within, "limit": limit})
 
     async def recent_turns(self, room_key: str, turns: int, max_rows: int, since_id: int | None = None,
-                           unanswered: int = 3) -> list[dict]:
+                           unanswered: int = 3, *, exact: bool = False) -> list[dict]:
         """답할 때 넣는 최근 대화(오래된 것부터). 고르는 법은 pick_recent. 친구에게 전달되지 못한 마롱이 답은 뺀다."""
+        room_scope = exact_room if exact else self._reply_rooms
         rows = await self._all(
             "SELECT m.id, m.role, m.user_key, p.name, m.content, m.created_at, "
             "  coalesce(m.meta->>'proactive' = 'true', false) AS proactive FROM marong.messages m "
             "LEFT JOIN marong.people p ON p.user_key = m.user_key "
-            "WHERE m.room_key IN " + self._reply_rooms("%(room)s") + " AND m.meta->>'delivered' IS DISTINCT FROM 'false' "
+            "WHERE m.room_key IN " + room_scope("%(room)s") + " AND m.meta->>'delivered' IS DISTINCT FROM 'false' "
             + self._call_guard('message','m.id','m.room_key') +
             "ORDER BY m.id DESC LIMIT greatest(%(scan)s, "
-            "(SELECT count(*) FROM marong.messages WHERE room_key IN " + self._reply_rooms("%(room)s") + " AND id >= %(since)s))",
+            "(SELECT count(*) FROM marong.messages WHERE room_key IN " + room_scope("%(room)s") + " AND id >= %(since)s))",
             {"room": room_key, "scan": SCAN_ROWS, "since": since_id})
         return pick_recent(rows[::-1], turns, max_rows, since_id, unanswered)
 
     async def keyword_hits(self, room_key: str, terms: list[str], before_id: int, skip_summary_ids: list[int],
-                           limit: int = KEYWORD_ROWS) -> tuple[list[dict], int]:
+                           limit: int = KEYWORD_ROWS, *, exact: bool = False) -> tuple[list[dict], int]:
         """같은 방(묶인 방들 함께)에서 terms 중 하나라도 든 예전 메시지·요약(최근 것부터)과, 찾은 범위의 전체 수(점수의
         IDF 에 씀). 최근 원문 구간(before_id 부터)과 이미 넣은 요약은 뺀다. 점수는 agent 가 매긴다."""
+        room_scope = exact_room if exact else self._reply_rooms
         if not terms:
             return [], 0
         params = {"room": room_key, "before": before_id, "skip": list(skip_summary_ids),
@@ -308,28 +314,29 @@ class Store:
             "SELECT * FROM ("
             "  SELECT 'message' AS source_type, m.id AS source_id, m.role, m.user_key, p.name, m.content, m.created_at "
             "  FROM marong.messages m LEFT JOIN marong.people p ON p.user_key = m.user_key "
-            "  WHERE m.room_key IN " + self._reply_rooms("%(room)s") + " AND m.id < %(before)s "
+            "  WHERE m.room_key IN " + room_scope("%(room)s") + " AND m.id < %(before)s "
             "  AND m.meta->>'delivered' IS DISTINCT FROM 'false' AND m.content ILIKE ANY(%(pats)s) "
             + self._call_guard('message','m.id','m.room_key') +
             "  UNION ALL "
             f"  SELECT 'summary', s.id, NULL, NULL, NULL, {summary_text}, s.created_at FROM marong.summaries s "
-            "  WHERE s.room_key IN " + self._reply_rooms("%(room)s") + f" AND {summary_text} <> '' "
+            "  WHERE s.room_key IN " + room_scope("%(room)s") + f" AND {summary_text} <> '' "
             "  AND NOT (s.id = ANY(%(skip)s::bigint[])) " + f" AND {summary_text} ILIKE ANY(%(pats)s) "
             + self._summary_keyword_filter()
             + self._call_guard('summary','s.id','s.room_key',rewritten=True) +
             ") k ORDER BY created_at DESC LIMIT %(limit)s", params)
         total = await self._one(
-            "SELECT (SELECT count(*) FROM marong.messages m WHERE m.room_key IN " + self._reply_rooms("%(room)s")
+            "SELECT (SELECT count(*) FROM marong.messages m WHERE m.room_key IN " + room_scope("%(room)s")
             + " AND m.id < %(before)s) + (SELECT count(*) FROM marong.summaries s WHERE s.room_key IN "
-            + self._reply_rooms("%(room)s") + ") AS n", params)
+            + room_scope("%(room)s") + ") AS n", params)
         return rows, int(total["n"] if total else len(rows))
 
     def _summary_keyword_filter(self) -> str:
         return ""
 
-    async def neighbors(self, room_key: str, ids: list[int]) -> dict[int, dict]:
+    async def neighbors(self, room_key: str, ids: list[int], *, exact: bool = False) -> dict[int, dict]:
         """메시지마다 짝이 되는 말(문답 한 쌍으로 기억하기): 친구 말이면 바로 뒤 마롱이 답, 마롱이 말이면 바로 앞 친구 말.
         같은 방 안에서만, 짝이 없으면 뺀다. {메시지 id: 짝 줄}(LangGraph 실측: 뽑은 사실보다 원문 문답 검색이 나음)."""
+        room_scope = exact_room if exact else self._reply_rooms
         if not ids:
             return {}
         rows = await self._all(
@@ -341,7 +348,7 @@ class Store:
             "  (SELECT x.* FROM marong.messages x WHERE h.role = 'assistant' AND x.room_key = h.room_key AND x.id < h.id "
             "   ORDER BY x.id DESC LIMIT 1)"
             ") n LEFT JOIN marong.people p ON p.user_key = n.user_key "
-            "WHERE h.id = ANY(%(ids)s::bigint[]) AND h.room_key IN " + self._reply_rooms("%(room)s") + " "
+            "WHERE h.id = ANY(%(ids)s::bigint[]) AND h.room_key IN " + room_scope("%(room)s") + " "
             "AND n.role <> h.role " + self._forget_guard("'message'", "h.id")
             + self._call_guard('message','n.id','n.room_key'),
             {"room": room_key, "ids": list(ids)})
@@ -505,12 +512,13 @@ class Store:
                 return "ok", me["name"]
 
     async def similar(self, model: str, room_key: str, vector, before_id: int, skip_summary_ids: list[int],
-                      limit: int) -> list[dict]:
+                      limit: int, *, exact: bool = False) -> list[dict]:
         """같은 방(묶인 방들 함께)에서 지금 말과 비슷한 예전 메시지·요약(비슷한 순). 최근 원문 구간과 이미 넣은 요약은 뺀다."""
+        room_scope = exact_room if exact else self._reply_rooms
         return await self._all(
             "WITH q AS (SELECT %s::vector AS v), hits AS ("
             "  SELECT e.source_type, e.source_id, 1 - (e.embedding <=> q.v) AS similarity "
-            "  FROM marong.embeddings e, q WHERE e.model = %s AND e.room_key IN " + self._reply_rooms("%s") + " "
+            "  FROM marong.embeddings e, q WHERE e.model = %s AND e.room_key IN " + room_scope("%s") + " "
             + self._reply_embedding_filter() + self._forget_guard("e.source_type", "e.source_id") +
             "  AND NOT (e.source_type = 'message' AND e.source_id >= %s) "
             "  AND NOT (e.source_type = 'summary' AND e.source_id = ANY(%s::bigint[])) "

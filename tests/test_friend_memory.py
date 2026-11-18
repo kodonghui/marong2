@@ -475,6 +475,94 @@ async def check_forget_transaction(db):
         await store.close()
 
 
+async def check_reply_context(db):
+    from marong.agent import Agent, Incoming
+    from marong.config import load_settings
+
+    [(friend,)] = db.admin("INSERT INTO marong.friends(name) VALUES ('reply fixture') RETURNING id")
+    [(other,)] = db.admin("INSERT INTO marong.friends(name) VALUES ('other reply fixture') RETURNING id")
+    direct, group = "fixture-context-direct", "fixture-context-group"
+    db.admin("INSERT INTO marong.rooms(room_key,is_channel) VALUES (%s,true)", (direct,))
+    db.admin("INSERT INTO marong.rooms(room_key,is_channel,memory_room) VALUES (%s,false,%s)", (group, direct))
+    db.admin("INSERT INTO marong.people(user_key,friend_id) VALUES ('context-author',%s),('context-other',%s)",
+             (friend, other))
+
+    store = Store(db.app_url, call_bridge=False)
+    await store.open(wait=True)
+    try:
+        async def add_memory(owner, room, phrase, *, kind="fact", share="self", sensitivity=None):
+            user = "context-author" if owner == friend else "context-other"
+            source = await store.add_message(room, "user", f"출처 합성 문장 {phrase}", user)
+            [(ident,)] = db.admin("""
+                INSERT INTO marong.memory_items(friend_id,kind,text,status,heard_at,channel,message_id,quote,
+                    room_key,share,sensitive,source)
+                VALUES (%s,%s,%s,'current',now(),%s,%s,'출처 합성 문장',%s,%s,%s,'text')
+                RETURNING id
+            """, (owner, kind, phrase, "app" if room == direct else "kakao_group", source,
+                  None if room == direct else room, share, sensitivity))
+            return ident
+
+        await add_memory(friend, direct, "개인 고정 항목")
+        await add_memory(friend, direct, "개인 민감 항목", sensitivity="health")
+        recalled = await add_memory(friend, direct, "서점 취향 검색", kind="hard")
+        await add_memory(friend, group, "공개 운동회 일정", share="known")
+        await add_memory(other, direct, "다른 친구 비공개")
+        with patch.dict("os.environ", {"BOT_TOKEN": "fixture", "ANTHROPIC_API_KEY": "fixture",
+                                      "DATABASE_URL": db.app_url, "PROMPT_PATH": str(ROOT / "prompt.md")}):
+            settings = load_settings()
+        embedding = SimpleNamespace(ready=False)
+        agent = Agent(settings, store, embedding, None)
+        agent.friend_memory_mode = "on"
+        person = {"friend_id": friend, "name": "fixture"}
+        msg = Incoming(direct, "context-author", "서점 얘기 들려줘")
+
+        async def context(message, owner):
+            current = await store.add_message(message.room_key, "user", message.text, message.user_key)
+            return await agent._context(message, owner, current, message.text)
+
+        first, messages, meta = await context(msg, person)
+        [stable] = [part for part in first if part["text"].startswith("# 고정 요약")]
+        assert "개인 고정 항목" in stable["text"] and "개인 민감 항목" in stable["text"]
+        assert "다른 친구 비공개" not in stable["text"] and "공개 운동회" not in stable["text"]
+        assert stable["cache_control"]["type"] == "ephemeral"
+        assert first[-1]["text"].startswith("# 지금 상황")
+        assert [block["text"] for block in messages[-1]["content"]][-1].startswith("# 찾은 기억")
+        assert "서점 취향 검색" in messages[-1]["content"][-1]["text"]
+        assert "서점 취향 검색" not in repr(meta)
+
+        await add_memory(friend, direct, "나중에 들어온 고정 항목")
+        for prompt in ("서점 이야기 한 번 더", "서점 궁금해"):
+            system, _, _ = await context(Incoming(direct, "context-author", prompt), person)
+            assert [part for part in system if part["text"].startswith("# 고정 요약")] == [stable]
+        reset_target = await add_memory(friend, direct, "회수할 시험 항목")
+        await forget_selected(store.pool, friend, "item", reset_target, "fixture-reset", via="screen")
+        system, _, _ = await context(msg, person)
+        assert "나중에 들어온 고정 항목" in str(system)
+        assert "회수할 시험 항목" not in str(system)
+
+        group_msg = Incoming(group, "context-author", "운동회 일정 알려줘", is_channel=False)
+        group_system, group_messages, _ = await context(group_msg, {**person, "memory_room": direct})
+        group_dump = repr((group_system, group_messages))
+        assert "공개 운동회 일정" in group_dump
+        assert not any(clue in group_dump for clue in ("개인 고정 항목", "개인 민감 항목", "다른 친구 비공개"))
+        assert "1:1 얘기도 이어서" not in group_dump
+
+        agent.friend_memory_mode = "shadow"
+        shadow_system, shadow_messages, _ = await context(msg, person)
+        assert "# 고정 요약" not in repr(shadow_system) and "# 찾은 기억" not in repr(shadow_messages)
+        agent.friend_memory_mode = "on"
+
+        async def during_reply(_system, _messages, _msg, _end):
+            await forget_selected(store.pool, friend, "item", recalled, "fixture-concurrent", via="screen")
+            return "회수 이전의 내용이 든 응답", {}
+
+        agent.ask = during_reply
+        reply, _ = await agent._reply(msg, person, None, msg.text, 3)
+        assert reply == "방금 기억이 바뀌어서 다시 확인하고 있어. 지금 이야기부터 이어 가자."
+    finally:
+        await store.close()
+
+
 if __name__ == "__main__":
     db = TestDB()
     try:
@@ -483,6 +571,7 @@ if __name__ == "__main__":
         asyncio.run(check_worker(db))
         asyncio.run(check_call_worker(db))
         asyncio.run(check_forget_transaction(db))
+        asyncio.run(check_reply_context(db))
     finally:
         db.close()
     print("TC-330: debounced text, call eligibility, concurrent claims, lease recovery, fencing and ID-only checkpoints passed")
@@ -494,3 +583,5 @@ if __name__ == "__main__":
     print("TC-336 transaction: ownership, sibling text and loops, source marks, vector removal and concurrent receipts")
 
     print("TC-337: validated rewrites, 10-minute retries, clean keyword reads and blank fallback")
+
+    print("TC-339/340: scoped group input, cached prefix, transient recall, shadow parity and concurrent forget fencing")
