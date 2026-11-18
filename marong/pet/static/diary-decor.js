@@ -1,4 +1,4 @@
-import {action, api, button, el, text} from './pet.js';
+import {action, api, button, el, errorText, text} from './pet.js';
 
 const UUID = /^[a-f0-9-]{36}$/;
 const STICKER = /^[a-z0-9_-]{1,40}$/;
@@ -136,17 +136,18 @@ function approveUse(item, outlet) {
   });
 }
 
-export async function decorateDiary(pet, path, entry, paper, artwork, outlet, done) {
+export async function decorateDiary(pet, path, entry, paper, artwork, outlet, {done, missing}) {
   const {items} = await api('/api/me/inventory');
   const inventory = items.filter(item => Object.hasOwn(TABS, item.kind));
-  const originalStyle = pet.diaryStyle || {themeId: null, fontId: null};
+  const defaultStyle = {themeId: null, fontId: null};
   const originalStickers = entry.stickers || [];
-  const style = {...originalStyle};
+  const style = {...(pet.diaryStyle || defaultStyle)};
   const stickers = originalStickers.map(sticker => ({...sticker}));
   const approved = new Set();
   const notice = el('div', {'aria-live': 'polite'});
   const choices = el('div', {class: 'diary-choices'});
   let tab = 'theme', selected = -1, overlay;
+  let savedPet = pet;
   const edit = el('div', {class: 'stack diary-editor'});
 
   function preview() {
@@ -215,11 +216,11 @@ export async function decorateDiary(pet, path, entry, paper, artwork, outlet, do
     control.setAttribute('aria-pressed', key === tab);
     return control;
   }));
-  const cancel = button('취소', () => done(pet, entry));
+  const cancel = button('취소', () => done(savedPet, entry));
   const save = button('저장', () => action(save, notice, async () => {
-    const changedStyle = style.themeId !== originalStyle.themeId || style.fontId !== originalStyle.fontId;
+    const savedStyle = savedPet.diaryStyle || defaultStyle;
+    const changedStyle = style.themeId !== savedStyle.themeId || style.fontId !== savedStyle.fontId;
     const changedStickers = JSON.stringify(stickers) !== JSON.stringify(originalStickers);
-    let savedPet = pet;
     let savedEntry = entry;
     cancel.disabled = true;
     choices.inert = menu.inert = artwork.inert = true;
@@ -227,12 +228,20 @@ export async function decorateDiary(pet, path, entry, paper, artwork, outlet, do
       if (changedStyle) savedPet = await api('/api/pets/' + pet.id + '/diary-style', {method: 'PUT', body: style});
       if (changedStickers) savedEntry = await api(path + '/stickers', {method: 'PUT', body: stickers});
     } catch (error) {
-      if (error.status === 409 || error.status === 404 || savedPet !== pet) {
-        const [freshPet, freshEntry] = await Promise.all([api('/api/pets/' + pet.id), api(path)]);
-        done(freshPet, freshEntry);
+      if (error.status === 0 || error.status === 429 || error.status >= 500) {
+        errorText(error, notice);
+        notice.append(button('다시 해 보기', () => save.click()));
         return;
       }
-      throw error;
+      if (error.status !== 409 && error.status !== 404) throw error;
+      try {
+        const [freshPet, freshEntry] = await Promise.all([api('/api/pets/' + pet.id), api(path)]);
+        done(freshPet, freshEntry, error.status);
+      } catch (reloadError) {
+        if (reloadError.status !== 404) throw reloadError;
+        missing();
+      }
+      return;
     } finally {
       cancel.disabled = false;
       choices.inert = menu.inert = artwork.inert = false;

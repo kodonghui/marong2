@@ -1838,6 +1838,73 @@ if (require.main === module) {
     assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true);
   });
 
+  test('SCR-150 keeps unconfirmed stickers to retry after the theme has been saved', async t => {
+    const {origin, writes} = await fixture(t, {diaryDecor: true});
+    const page = await browser.newPage({viewport: {width: 360, height: 790}});
+    t.after(() => page.close());
+    await page.route('**/diary/2026-11-17/stickers', route =>
+      route.fulfill({status: 500, json: {code: 'server_error'}}), {times: 1});
+    await page.goto(`${origin}/pets/${petId}/diary/2026-11-17`);
+    const decorate = page.getByRole('button', {name: '꾸미기'});
+    const save = page.getByRole('button', {name: '저장', exact: true});
+    await decorate.click();
+    await page.getByRole('button', {name: '군밤 테마'}).click();
+    await page.getByRole('dialog').getByRole('button', {name: '쓸게요'}).click();
+    await page.getByRole('button', {name: '스티커', exact: true}).click();
+    await page.getByRole('button', {name: '별 스티커'}).click();
+    await save.click();
+    await visible(page.getByText('잠시 뒤 다시 해 주세요.', {exact: true}));
+    await visible(page.getByRole('button', {name: '스티커 1'}));
+    assert.deepEqual(writes, [{themeId, fontId: null}]);
+    await page.getByRole('button', {name: '다시 해 보기', exact: true}).click();
+    await visible(decorate);
+    assert.deepEqual(writes, [{themeId, fontId: null}, [
+      {packId: stickerPackId, sticker: 'star-small', x: .5, y: .5, scale: 1, rotate: 0},
+    ]]);
+    assert.equal(await page.locator('.diary-stickers img').count(), 1);
+  });
+
+  for (const dayMissing of [false, true]) {
+    test(`SCR-150 refreshes the ${dayMissing ? 'missing day' : 'inventory'} after a save returns 404`, async t => {
+      const {origin, writes} = await fixture(t, {diaryDecor: true});
+      const page = await browser.newPage({viewport: {width: 430, height: 790}});
+      t.after(() => page.close());
+      let recalled = false;
+      let inventoryReads = 0;
+      await page.route('**/api/me/inventory', async route => {
+        inventoryReads += 1;
+        if (!recalled) { await route.continue(); return; }
+        const response = await route.fetch();
+        const {items} = await response.json();
+        await route.fulfill({json: {items: items.filter(item => item.itemId !== stickerPackId)}});
+      });
+      await page.route('**/api/pets/*/diary/2026-11-17', route => dayMissing && recalled
+        ? route.fulfill({status: 404, json: {code: 'not_found'}}) : route.continue());
+      await page.route('**/diary/2026-11-17/stickers', async route => {
+        recalled = true;
+        await route.fulfill({status: 404, json: {code: 'not_found'}});
+      });
+      await page.goto(`${origin}/pets/${petId}/diary/2026-11-17`);
+      await page.getByRole('button', {name: '꾸미기'}).click();
+      const tab = page.getByRole('button', {name: '스티커', exact: true});
+      await tab.click();
+      const pack = page.getByRole('button', {name: '별 스티커'});
+      await pack.click();
+      await page.getByRole('button', {name: '저장', exact: true}).click();
+      await visible(page.getByText('찾을 수 없어요.', {exact: true}));
+      if (dayMissing) {
+        assert.equal(await page.getByRole('link', {name: '일기장으로'}).getAttribute('href'), `/pets/${petId}/diary`);
+        assert.equal(await inventoryReads, 1);
+      } else {
+        await tab.click();
+        assert.equal(await pack.count(), 0);
+        assert.equal(await page.locator('.diary-stickers img').count(), 0);
+        assert.equal(await inventoryReads, 2);
+      }
+      assert.deepEqual(writes, []);
+    });
+  }
+
   test('SCR-159 shows Korean consent dates and confirms only the overseas change', async t => {
     const {origin} = await fixture(t);
     const page = await browser.newPage({viewport:{width:360,height:790},timezoneId:'America/Los_Angeles'});

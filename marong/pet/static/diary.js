@@ -208,11 +208,15 @@ function dayNavigation(href, entry, pages) {
     direction(before, '‹', '앞 날'), direction(after, '›', '뒷 날'));
 }
 
-function sheet(pet, href, path, entry, pages, status) {
+function missingDiary(href) {
+  show(notice('찾을 수 없어요.', link('일기장으로', href + '/diary')));
+}
+
+function sheet(pet, href, path, entry, pages, status, reopenEditor = false) {
   header('일기 한 장', {label: '일기장', url: href + '/diary'});
   const navigation = dayNavigation(href, entry, pages);
   if (entry.status !== 'ready') {
-    show(notice(entry.status === 'pending' ? `${pet.name}가 아직 쓰는 중이에요. 조금 뒤에 다시 와 주세요.`
+    show(status ? banner(status) : null, notice(entry.status === 'pending' ? `${pet.name}가 아직 쓰는 중이에요. 조금 뒤에 다시 와 주세요.`
       : outcomes[entry.status]), navigation);
     return;
   }
@@ -247,8 +251,14 @@ function sheet(pet, href, path, entry, pages, status) {
     artworkView ? el('small', {}, 'AI가 그린 그림') : null, manuscript(entry.body || ''));
   const editor = el('div');
   const decorate = button('꾸미기', () => action(decorate, outcome, async () => {
-    await decorateDiary(pet, path, entry, paper, frame, editor,
-      (savedPet, savedEntry) => sheet(savedPet, href, path, savedEntry, pages));
+    await decorateDiary(pet, path, entry, paper, frame, editor, {
+      done: (savedPet, savedEntry, saveStatus) => {
+        const itemMissing = saveStatus === 404;
+        const message = itemMissing ? '찾을 수 없어요.' : saveStatus === 409 ? '화면을 새로 고쳤어요.' : undefined;
+        sheet(savedPet, href, path, savedEntry, pages, message, itemMissing);
+      },
+      missing: () => missingDiary(href),
+    });
     actions.hidden = true;
   }));
   decorate.disabled = entry.drawing;
@@ -256,6 +266,7 @@ function sheet(pet, href, path, entry, pages, status) {
   if (entry.kind !== 'farewell') paintDiary(paper, frame, pet.diaryStyle || {}, entry.stickers || []);
   show(drawing, status ? banner(status) : null, paper, navigation, actions, editor, outcome, reported);
   if (drawing) observeDraw(pet, href, path, pages, drawing);
+  if (editable && reopenEditor && !decorate.disabled) decorate.click();
   if (editable && location.hash === '#redraw') {
     history.replaceState(null, '', location.pathname + location.search);
     if (!redraw.disabled) redraw.click();
@@ -282,7 +293,6 @@ export async function diary(route) {
     sheet(pet, href, path, entry, pages);
   } catch (error) {
     if (error.status !== 404) throw error;
-    header('일기 한 장', {label: '일기장', url: href + '/diary'});
-    show(notice('찾을 수 없어요.', link('일기장으로', href + '/diary')));
+    missingDiary(href);
   }
 }
