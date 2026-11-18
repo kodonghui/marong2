@@ -142,9 +142,10 @@ async def check_inventory(admin, app_dsn, directory):
             conn.execute("UPDATE pet.pets SET status='archived' WHERE id=%s", (memorial_pet,))
             await equip(memorial, memorial_pet, head=str(ended), required_error="archived")
             await check_diary_decoration(conn, pool, member, pet, memorial, free, sale)
+            await check_diary_assets(conn, client, settings, member, own, memorial_cookie)
 
 
-async def check_diary_decoration(conn, pool, member, pet, other_member, outfit, unowned):
+async def check_diary_decoration(conn, pool, member, pet, other_member, outfit, first_hat):
     theme, font, pack, second_hat = (uuid4() for _ in range(4))
     conn.execute("""
         INSERT INTO pet.items(id,kind,name,slot,license_key,assets)
@@ -162,7 +163,7 @@ async def check_diary_decoration(conn, pool, member, pet, other_member, outfit, 
         """, (f"fixture-{item}", member, item, uuid4())).fetchone()
         conn.execute("INSERT INTO pet.inventory(member_id,item_id,source,order_id) VALUES (%s,%s,'order',%s)",
                      (member, item, orders[item]))
-    for item in (font, unowned, second_hat):
+    for item in (font, first_hat, second_hat):
         conn.execute("INSERT INTO pet.inventory(member_id,item_id,source) VALUES (%s,%s,'free_default')", (member, item))
     day = date(2026, 11, 17)
     (diary,) = conn.execute("""
@@ -179,7 +180,7 @@ async def check_diary_decoration(conn, pool, member, pet, other_member, outfit, 
         except Problem as error:
             assert error.code == expected
 
-    for head in (unowned, second_hat):
+    for head in (first_hat, second_hat):
         await change(apply_outfit, member, outfit_input({"head": str(head), "body": None, "neck": str(outfit)}))
         assert conn.execute("SELECT head_item FROM pet.decor WHERE pet_id=%s", (pet,)).fetchone() == (head,)
 
@@ -217,6 +218,30 @@ async def check_diary_decoration(conn, pool, member, pet, other_member, outfit, 
     assert conn.execute("SELECT stickers FROM pet.diary_entries WHERE id=%s", (diary,)).fetchone() == (placed,)
     assert (await change(apply_stickers, member, day, []))["stickers"] == []
     assert order_used(pack) == first_use
+
+
+async def check_diary_assets(conn, client, settings, member, own, other):
+    rows = conn.execute("""
+        SELECT i.id,i.kind FROM pet.items i JOIN pet.inventory h ON h.item_id=i.id
+        WHERE h.member_id=%s AND i.kind IN ('theme','font','sticker_pack')
+    """, (member,)).fetchall()
+    test_assets = {"theme": ("background.webp", "image/webp"),
+                   "font": ("font.woff2", "font/woff2"),
+                   "sticker_pack": ("stickers/star-small.webp", "image/webp")}
+    assert len(rows) == len(test_assets)
+    for item, kind in rows:
+        name, mime = test_assets[kind]
+        file = settings.media_dir / "items" / str(item) / name
+        file.parent.mkdir(parents=True)
+        file.write_bytes(b"synthetic")
+        path = f"/static/items/{item}/{name}"
+        assert (await client.get(path)).status == 401
+        assert (await client.get(path, headers=other)).status == 404
+        response = await client.get(path, headers=own)
+        assert response.status == 200 and response.content_type == mime
+        assert response.headers["Cache-Control"] == "no-store"
+    sticker, = (item for item, kind in rows if kind == "sticker_pack")
+    assert (await client.get(f"/static/items/{sticker}/stickers/no-such.webp", headers=own)).status == 404
 
 
 def check_item_cli(admin, app_dsn, directory):

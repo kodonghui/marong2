@@ -11,6 +11,7 @@ SHOP_KINDS = {"wear", "sticker_pack", "theme", "theme_package"}
 INVENTORY_KINDS = SHOP_KINDS | {"font"}
 TEMPLATES = {"dog_small", "dog_large", "dog_long", "cat", "cat_round"}
 ASSET_NAME = re.compile(r"[a-z0-9_-]{1,40}")
+DIARY_ASSETS = {"theme": ("background.webp", "image/webp"), "font": ("font.woff2", "font/woff2")}
 ON_SALE = """i.sellable AND i.ended_at IS NULL AND i.sale_starts_at<=now()
               AND (i.sale_ends_at IS NULL OR i.sale_ends_at>now())"""
 
@@ -111,14 +112,46 @@ async def layer(req):
         """, {"item": item, "member": member["id"]})
         if not await result.fetchone():
             raise Problem("not_found")
+    return item_file(req, item, f"layers/{template}.png", "image/png")
+
+
+def item_file(req, item, name, mime):
     root = (req.app[CONFIG].media_dir / "items").resolve()
-    image = (root / str(item) / "layers" / (template + ".png")).resolve()
-    if not image.is_relative_to(root) or not image.is_file():
+    directory = root / str(item)
+    path = (directory / name).resolve()
+    if not path.is_relative_to(directory) or not path.is_file():
         raise Problem("not_found")
-    return web.FileResponse(image, headers={"Content-Type": "image/png"})
+    return web.FileResponse(path, headers={"Content-Type": mime})
+
+
+async def diary_asset(req):
+    member = await require_member(req)
+    item = uuid_param(req.match_info["id"])
+    async with req.app[POOL].connection() as conn:
+        cursor = await conn.execute("""
+            SELECT i.kind,i.assets FROM pet.items i JOIN pet.inventory h ON h.item_id=i.id
+            WHERE i.id=%s AND h.member_id=%s AND h.withdrawn_at IS NULL
+        """, (item, member["id"]))
+        row = await cursor.fetchone()
+    if not row:
+        raise Problem("not_found")
+    name = req.match_info["asset"]
+    expected = DIARY_ASSETS.get(row["kind"])
+    if expected and name == expected[0]:
+        return item_file(req, item, *expected)
+    if row["kind"] == "sticker_pack" and name.startswith("stickers/") and name.endswith(".webp"):
+        sticker = name.removeprefix("stickers/").removesuffix(".webp")
+        if sticker in contents(row):
+            return item_file(req, item, name, "image/webp")
+    raise Problem("not_found")
 
 
 def register(app):
     app.router.add_get("/api/me/inventory", list_inventory, allow_head=False)
     app.router.add_get("/api/shop", list_shop, allow_head=False)
     app.router.add_get("/api/items/{id}/layer", layer, allow_head=False)
+    app.router.add_get(
+        r"/static/items/{id:[0-9a-fA-F-]{36}}/{asset:background\.webp|font\.woff2|stickers/[a-z0-9_-]{1,40}\.webp}",
+        diary_asset,
+        allow_head=False,
+    )
