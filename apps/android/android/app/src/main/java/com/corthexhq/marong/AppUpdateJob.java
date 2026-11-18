@@ -348,8 +348,6 @@ public final class AppUpdateJob extends JobService {
                     if (transfer(input, output, release.size, cancel) != release.size) throw new IOException("APK changed");
                     session.fsync(output);
                 }
-                cancel.throwIfCanceled();
-                if (!quiet()) return true;
                 Intent result = new Intent(this, AppUpdateReceiver.class)
                     .setAction(AppUpdateReceiver.RESULT)
                     .putExtra(AppUpdateReceiver.VERSION, release.code)
@@ -359,6 +357,11 @@ public final class AppUpdateJob extends JobService {
                 PendingIntent callback = PendingIntent.getBroadcast(this, sessionId, result, flags);
                 synchronized (STATE_LOCK) {
                     cancel.throwIfCanceled();
+                    // The app may have become visible while the installer session was staged.
+                    if (!quiet()) {
+                        callback.cancel();
+                        return true;
+                    }
                     save(prefs, new Candidate(release, sessionId, false, false));
                     session.commit(callback.getIntentSender());
                     committed = true;
