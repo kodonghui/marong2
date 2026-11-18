@@ -21,6 +21,7 @@ FEATURES = (
     Feature("앱으로 지금 전화·약속 전화 걸기", ("direct",)),
     Feature("지금 바람과 친구 규칙 적기", TEXT, ("card_update",)),
     Feature("나에 관해 기억하는 것 보기", TEXT, ("memory_list",)),
+    Feature("내 기억을 잊게 하기", TEXT, ("memory_forget",)),
     Feature("통화 중 기억 찾기", ("call",), ("recall",)),
     Feature("지금 시각", ("call",), ("current_time",)),
     Feature("친구가 요청한 통화 끊기", ("call",), ("end_call",)),

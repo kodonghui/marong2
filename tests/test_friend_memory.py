@@ -591,6 +591,92 @@ async def check_reply_context(db):
         await store.close()
 
 
+async def check_forget_dialogue(db):
+    from fakes import ScriptedLLM, message, tool_use
+    from marong.agent import Agent, Incoming
+    from marong.config import load_settings
+    from marong.friend_card import FriendCards
+    from marong.friend_forget import request_tool
+
+    [(owner,), (other,)] = db.admin("""INSERT INTO marong.friends(name) VALUES
+        ('forget-tool fixture'),('other-forget-tool fixture') RETURNING id""")
+    private, group = "fixture-forget-tool-dm", "fixture-forget-tool-group"
+    db.admin("INSERT INTO marong.rooms(room_key,is_channel) VALUES (%s,true),(%s,false)", (private, group))
+    db.admin("""INSERT INTO marong.people(user_key,friend_id) VALUES
+        ('forget-tool-user',%s),('forget-tool-other',%s)""", (owner, other))
+    store = Store(db.app_url, call_bridge=False)
+    await store.open(wait=True)
+    try:
+        async def seed(text, friend=owner):
+            user = "forget-tool-user" if friend == owner else "forget-tool-other"
+            original = await store.add_message(private, "user", text, user)
+            [(ident,)] = db.admin("""
+                INSERT INTO marong.memory_items(friend_id,kind,text,channel,message_id,quote,heard_at,source)
+                VALUES (%s,'fact',%s,'app',%s,%s,now(),'text') RETURNING id""", (friend, text, original, text))
+            return ident, original
+
+        red, _ = await seed("가상 붉은 운동화")
+        blue, source = await seed("가상 파란 운동화")
+        outsider, _ = await seed("외부 운동화", other)
+
+        async def ask(text, key, args, room=private):
+            current = await store.add_message(room, "user", text, "forget-tool-user")
+            return await request_tool(store.pool, owner, room, current, key, args), current
+
+        result, _ = await ask("운동화 잊어 줘", "ambiguous",
+                              {"quote": "운동화 잊어 줘", "fragment": "운동화", "item_id": red})
+        assert result["status"] == "ask_which" and {row["id"] for row in result["candidates"]} == {red, blue}
+        result, _ = await ask("운동화 잊어 줘", "foreign",
+                              {"quote": "운동화 잊어 줘", "item_id": outsider})
+        assert result["status"] == "none_matched"
+        result, _ = await ask("운동화 잊지 마", "negative", {"quote": "잊어 줘", "item_id": red})
+        assert result["status"] == "refused"
+        result, _ = await ask("가상 붉은 운동화 잊어 줘", "group",
+                              {"quote": "가상 붉은 운동화 잊어 줘", "item_id": red}, room=group)
+        assert result["status"] == "none_matched"
+        assert db.admin("SELECT count(*) FROM marong.memory_forgets WHERE friend_id=%s", (owner,)) == [(0,)]
+
+        args = {"quote": "파란 운동화 잊어 줘", "fragment": "파란 운동화"}
+        success, current = await ask(args["quote"], "accepted", args)
+        assert success == {"status": "ok", "forgot": 1, "messages": 1}
+        assert await request_tool(store.pool, owner, private, current, "accepted", args) == success
+        assert db.admin("SELECT target_id FROM marong.forget_marks WHERE friend_id=%s AND target_type='message'",
+                        (owner,)) == [(source,)]
+
+        raw = await store.add_message(private, "user", "겨울나무표식 이야기", "forget-tool-user")
+        raw_args = {"quote": "겨울나무표식 원문을 잊어 줘", "fragment": "겨울나무표식", "source_only": True}
+        result, _ = await ask(raw_args["quote"], "source-only", raw_args)
+        assert result == {"status": "ok", "forgot": 0, "messages": 1}
+        assert db.admin("SELECT content FROM marong.messages WHERE id=%s", (raw,)) == [("겨울나무표식 이야기",)]
+        assert all(row["id"] != raw for row in await store.recent(private, 100))
+
+        with patch.dict("os.environ", {"BOT_TOKEN": "fixture", "ANTHROPIC_API_KEY": "fixture",
+                                      "DATABASE_URL": db.app_url, "PROMPT_PATH": str(ROOT / "prompt.md")}):
+            settings = load_settings()
+        payload = {"quote": "붉은 운동화 잊어 줘", "fragment": "붉은 운동화"}
+        llm = ScriptedLLM(lambda _: message([tool_use("memory_forget", payload)], "tool_use"))
+        agent = Agent(settings, store, SimpleNamespace(ready=False), llm)
+        agent.friend_cards = FriendCards(store)
+        agent.friend_memory_mode = "on"
+
+        async def send(text):
+            assert text == "응, 잊었어"
+            assert db.admin("SELECT status FROM marong.memory_items WHERE id=%s", (red,)) == [("forgotten",)]
+            return True
+
+        assert await agent.handle(Incoming(private, "forget-tool-user", payload["quote"]), send) == "응, 잊었어"
+        assert len(llm.bodies) == 1
+        assert any(definition["name"] == "memory_forget" for definition in llm.bodies[0]["tools"])
+        assert db.admin("SELECT status FROM marong.memory_items WHERE id=%s", (outsider,)) == [("current",)]
+
+        agent.ask = AsyncMock(return_value=("응, 잊었어", {}))
+        actual, _ = await agent._reply(Incoming(private,"forget-tool-user","그거 잊어 줘"), None, None,
+                                       "그거 잊어 줘", 2)
+        assert actual == "지금은 못 지웠어"
+    finally:
+        await store.close()
+
+
 if __name__ == "__main__":
     db = TestDB()
     try:
@@ -600,6 +686,7 @@ if __name__ == "__main__":
         asyncio.run(check_call_worker(db))
         asyncio.run(check_forget_transaction(db))
         asyncio.run(check_reply_context(db))
+        asyncio.run(check_forget_dialogue(db))
     finally:
         db.close()
     print("TC-330: debounced text, call eligibility, concurrent claims, lease recovery, fencing and ID-only checkpoints passed")
@@ -613,3 +700,5 @@ if __name__ == "__main__":
     print("TC-337: validated rewrites, 10-minute retries, clean keyword reads and blank fallback")
 
     print("TC-339/340: scoped group input, cached prefix, transient recall, shadow parity and concurrent forget fencing")
+
+    print("TC-336 dialogue: owner intent, ambiguity, original-only marking, idempotency and commit-before-ack")

@@ -28,6 +28,7 @@ from .capabilities import TEXT_FEATURE_NAMES, availability, description as featu
 from .config import PER_DAY_MAX, Settings, proactive_schedule
 from . import friend_context, memory_consent
 from .friend_card import CARD_UPDATE, KST, QUESTIONS, CardError, FriendCards, ModelRun, proposal_text, question_choices, text_choice
+from .friend_forget import FORGET_TOOL, forget_intent, request_tool
 from .friend_memory import MEMORY_LIST_TOOL, list_for_turn
 from .persona_prompt import FriendPrompt, append_prefix
 from .persona_instructions import InterpretationError, REFUSAL, interpret, refusal_lines
@@ -334,14 +335,15 @@ class Agent:
         if fixes:
             meta = {**meta, "tidy": fixes}
             log.info("tidy %s", ",".join(fixes))
-        if db_ok and self.friend_cards and msg.card_actor:
+        if db_ok and self.friend_cards and msg.card_actor and not getattr(msg, "memory_forget_committed", False):
             try:
                 reply, review_meta = await self._review_reply(msg, person, reply, text, deadline)
                 meta = {**meta, **review_meta}
             except Exception as error:
                 log.warning("reply_check_error %s", type(error).__name__)
         if (db_ok and self.friend_cards and msg.card_actor and msg.is_channel and msg.photo is None
-                and not msg.safety_decision and not memory_answer):
+                and not msg.safety_decision and not memory_answer
+                and not getattr(msg, "memory_forget_committed", False)):
             try:
                 reply = await asyncio.wait_for(self._with_question(msg, reply, text), .7)
             except Exception as error:
@@ -569,6 +571,8 @@ class Agent:
 
     async def _reply(self, msg: Incoming, person: dict | None, user_id: int | None, text: str,
                      timeout: float, use_memory: bool = True, held: int | None = None) -> tuple[str, dict]:
+        msg.memory_forget_committed = False
+        msg.memory_forget_outcome = None
         system = messages = memory = None
         revision=None
         if use_memory:  # 방금 저장소가 고장 났으면 기억 모으기를 건너뜀(연결을 또 기다리지 않게)
@@ -598,7 +602,7 @@ class Agent:
                     if await self.store.private_revision(msg.room_key)!=revision:
                         reply='방금 기억이 바뀌어서 다시 확인하고 있어. 지금 이야기부터 이어 가자.'
                 except Exception:reply=FALLBACK_TEXT
-            if memory.get("friend_revision") is not None:
+            if memory.get("friend_revision") is not None and not getattr(msg, "memory_forget_committed", False):
                 try:
                     latest = await asyncio.wait_for(friend_context.forget_revision(self.store.pool, memory["friend_actor"]), .5)
                     if latest != memory["friend_revision"]:
@@ -606,6 +610,11 @@ class Agent:
                 except Exception:
                     reply = FALLBACK_TEXT
             meta["memory"] = memory
+        if getattr(msg, "memory_forget_committed", False):
+            return "응, 잊었어", {**meta, "memory_forget": "ok"}
+        if forget_intent(text) and re.search(r"잊었|잊어뒀|지웠|지워뒀|삭제했|기억에(?:서)?\s*뺐", reply):
+            reply = ("그건 따로 기억해 둔 게 없어"
+                     if getattr(msg, "memory_forget_outcome", None) == "none_matched" else "지금은 못 지웠어")
         return reply, meta
 
     def _llm_for(self, room_key: str | None):
@@ -1091,7 +1100,7 @@ class Agent:
             return []
         tools = [CARD_UPDATE]
         if getattr(self, "friend_memory_mode", "off") == "on":
-            tools.append(MEMORY_LIST_TOOL)
+            tools.extend((MEMORY_LIST_TOOL, FORGET_TOOL))
         return tools
 
     async def _card_update(self, block, msg):
@@ -1198,7 +1207,17 @@ class Agent:
             if resp.stop_reason == "tool_use":
                 if text:
                     said.append((text, server))
-                results = [await self._run_tool(b, msg) for b in resp.content if b.type == "tool_use"]
+                results = []
+                for block in resp.content:
+                    if block.type != "tool_use":
+                        continue
+                    if block.name == "memory_forget" and block.name not in {tool["name"] for tool in tools}:
+                        results.append({"type": "tool_result", "tool_use_id": block.id, "is_error": True,
+                                        "content": "그 도구는 없어."})
+                        continue
+                    results.append(await self._run_tool(block, msg))
+                    if getattr(msg, "memory_forget_committed", False):
+                        return "응, 잊었어", meta
                 # 생각 블록까지 응답 그대로 돌려줘야 함(손대면 400)
                 convo = [*convo, {"role": "assistant", "content": resp.content}, {"role": "user", "content": results}]
                 continue
@@ -1220,6 +1239,8 @@ class Agent:
             return await self._card_update(block, msg)
         if block.name == "memory_list":
             return await self._list_memory(block, msg, result)
+        if block.name == "memory_forget":
+            return await self._forget_memory(block, msg, result)
         if block.name == "ask_owner":
             return await self._ask_owner(block, msg, result)
         if block.name != "set_name":
@@ -1248,6 +1269,21 @@ class Agent:
         if found is None:
             return {**result, "content": "지금 말한 친구의 기억만 볼 수 있어.", "is_error": True}
         return {**result, "content": json.dumps(found, ensure_ascii=False)}
+
+    async def _forget_memory(self, block, msg, result):
+        actor, source = getattr(msg, "card_actor", None), getattr(msg, "card_message", None)
+        if getattr(self, "friend_memory_mode", "off") != "on" or not actor or not source:
+            return {**result, "content": "지금은 못 지웠어.", "is_error": True}
+        try:
+            outcome = await asyncio.wait_for(request_tool(
+                self.store.pool, actor, msg.room_key, source, block.id, block.input), 2)
+        except Exception as error:
+            log.warning("memory_forget_failed %s", type(error).__name__)
+            return {**result, "content": "지금은 못 지웠어.", "is_error": True}
+        msg.memory_forget_outcome = outcome["status"]
+        msg.memory_forget_committed = outcome["status"] == "ok"
+        return {**result, "content": json.dumps(outcome, ensure_ascii=False),
+                **({"is_error": True} if outcome["status"] in ("refused", "invalid") else {})}
 
     async def _ask_owner(self, block, msg: Incoming, result: dict) -> dict:
         if any(owner_private(value) for value in (block.input or {}).values() if isinstance(value, str)):
