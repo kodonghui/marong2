@@ -2,7 +2,7 @@
 
 import asyncio
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from aiohttp import web
 from psycopg.types.json import Jsonb
@@ -49,11 +49,13 @@ def changes(data, *, complete=False):
     return result
 
 
-def serialize(row):
+def serialize(row, *, now=None):
     def ident(column):
         return str(row[column]) if row[column] is not None else None
 
     since = row["memorial_since"]
+    revert = since + timedelta(days=7) if since else None
+    now = now or datetime.now(timezone.utc)
     living = row["mode"] == "living" and row["status"] == "active"
     return {
         "id": str(row["id"]), "name": row["name"], "species": row["species"], "template": row["template"],
@@ -63,7 +65,7 @@ def serialize(row):
         "diaryStyle": {"themeId": ident("theme_item"), "fontId": ident("font_item")},
         "memorialSince": since.isoformat() if since else None,
         "passedOn": row["passed_on"].isoformat() if row["passed_on"] else None,
-        "revertUntil": (since + timedelta(days=7)).isoformat() if since and row["status"] == "active" else None,
+        "revertUntil": revert.isoformat() if revert and revert > now and row["status"] == "active" else None,
         "shopEntry": living, "rechargePrompt": living, "farewellDone": False,
     }
 
