@@ -37,7 +37,8 @@ async function body(request) {
 async function fixture(t, {signedIn = true, consent = true, invite = false, reportLimited = false, payment = 'fulfilled',
   closetMode, paymentsEnabled = false, layerFailure = false, outfitFailure = false, orderRetry = false,
   diaryDecor = false, subscription, exhaustedRedraw = false, diaryDays = false, chatNotices = [],
-  creationState, pushKey = null, holdTraits, holdFinish, chooseBusy = false} = {}) {
+  creationState, pushKey = null, holdTraits, holdFinish, chooseBusy = false,
+  wearingFixture = false, quotaPercent = 60} = {}) {
   let member = signedIn;
   let state = creationState;
   let selected = creationState === 'sheet_ready' ? candidateId : null;
@@ -48,6 +49,7 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
   if (closetMode) memberPet = {...memberPet, mode: closetMode === 'memorial' ? 'memorial' : 'living',
     status: closetMode === 'archived' ? 'archived' : 'active', shopEntry: closetMode === 'living',
     template: 'dog_small', outfit: {head: null, body: null, neck: null}};
+  if (wearingFixture) memberPet.outfit = {...memberPet.outfit, head: garmentId};
   let needsConfirmation = true;
   let ownsGarment = false;
   let diaryStickers = [];
@@ -89,7 +91,7 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
       member = true;
       return json(res, {}, 201);
     }
-    if (pathname === '/api/me/quota') return json(res, {percent: 60});
+    if (pathname === '/api/me/quota') return json(res, {percent: quotaPercent});
     if (pathname === '/api/me/consents') return json(res, {items: [{kind: 'overseas_transfer', value: consent}]});
     if (pathname === '/api/subscription') return json(res, plan);
     if (pathname === '/api/subscription/cancel' && req.method === 'POST') {
@@ -343,6 +345,37 @@ if (require.main === module) {
     await visible(messages.getByRole('link', {name: '이미 다쳤으면 119'}));
     assert.deepEqual(await links.evaluateAll(items => items.map(item => item.getAttribute('href'))), ['tel:109', 'tel:119']);
     assert.equal(await messages.getByText('109번 이야기를 들었어.').evaluate(item => item.tagName), 'P');
+  });
+
+  test('SCR-147 shows the current outfit and draws a proactive picture from its saved composition', async t => {
+    const {origin} = await fixture(t, {closetMode: 'living', diaryDays: true, wearingFixture: true,
+      chatNotices: [{id: 'synthetic-proactive', role: 'pet', kind: 'proactive', text: '산책 가고 싶었어.',
+        composite: {backgroundId: 'park', expression: 'smile', outfit: {head: null, neck: null, body: null}}}]});
+    const page = await browser.newPage({viewport: {width: 360, height: 820}});
+    t.after(() => page.close());
+    await page.goto(`${origin}/pets/${petId}`);
+    const portrait = page.locator('.portrait .outfit-stage[data-aligned="true"]');
+    await visible(portrait);
+    assert.equal(await portrait.locator('.outfit-background').getAttribute('src'), '/static/backgrounds/home_livingroom.webp');
+    assert.equal(await portrait.locator('[data-slot=head]').getAttribute('src'),
+      `/api/items/${garmentId}/layer?template=dog_small`);
+    const picture = page.locator('.chat-log .outfit-stage[data-aligned="true"]');
+    await visible(picture);
+    assert.equal(await picture.locator('.outfit-background').getAttribute('src'), '/static/backgrounds/park.webp');
+    assert.equal(await picture.locator('img[alt="콩이"]').getAttribute('src'), '/static/pet-welcome.webp');
+    assert.equal(await picture.locator('[data-slot]').count(), 0);
+    assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true);
+  });
+
+  test('SCR-147 uses the memorial scene and keeps text chat available after quota exhaustion', async t => {
+    const {origin} = await fixture(t, {closetMode: 'memorial', quotaPercent: 0});
+    const page = await browser.newPage({viewport: {width: 430, height: 820}});
+    t.after(() => page.close());
+    await page.goto(`${origin}/pets/${petId}`);
+    await visible(page.getByText('오늘은 여기까지, 새벽 4시 뒤에 또 이야기해요.'));
+    assert.equal(await page.locator('.portrait .outfit-background').getAttribute('src'), '/static/backgrounds/rainbow_meadow.webp');
+    assert.equal(await page.getByRole('button', {name: '충전하기'}).count(), 0);
+    assert.equal(await page.getByLabel('콩이에게 할 말').isEnabled(), true);
   });
 
   test('SCR-147 reconnects across two history pages without duplicating or reordering replies', {timeout: 15000}, async t => {
@@ -602,6 +635,29 @@ if (require.main === module) {
     await stale.waitForURL('**/preview');
     await visible(stale.getByText('화면을 새로 고쳤어요.'));
     assert.equal((await (await stale.request.get(apiUrl)).json()).traits.breedGuess, '믹스');
+  });
+
+  test('SCR-144 uses the approved limit and consent states and disables drawing', async t => {
+    const {origin} = await fixture(t, {creationState: 'traits_confirmed'});
+    const cases = [
+      [429, 'preview_limit', '오늘 미리 보기를 다 봤어요. 새벽 4시 뒤에 다시 볼 수 있어요.'],
+      [409, 'budget_paused', '오늘은 새 그림과 통화가 쉬어요. 글로는 계속 이야기할 수 있어요.'],
+      [409, 'consent_required', '사진과 대화를 해외 AI 회사로 보내는 데 동의해야 쓸 수 있어요. 설정에서 바꿀 수 있어요.'],
+    ];
+    for (const [status, code, detail] of cases) {
+      const page = await browser.newPage();
+      try {
+        await page.route('**/api/creations/*/preview', route => route.fulfill({status, json: {code, detail}}));
+        await page.goto(`${origin}/create/${creationId}/preview`);
+        const draw = page.getByRole('button', {name: '미리 보기 그리기'});
+        await draw.click();
+        await visible(page.getByText(detail, {exact: true}));
+        assert.equal(await draw.isDisabled(), true);
+        if (code === 'consent_required') await visible(page.getByRole('link', {name: '설정에서 바꾸기'}));
+      } finally {
+        await page.close();
+      }
+    }
   });
 
   test('SCR-145 refreshes the chosen picture when another tab has already picked it', async t => {

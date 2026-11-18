@@ -1,6 +1,7 @@
 import {action, AI_NOTICE, api, banner, button, CONSENT, dateLabel, el, errorText, header, link, notice,
-  page, picture, show, showTabs, text} from './pet.js';
+  page, show, showTabs, text} from './pet.js';
 
+import {outfitOf, petLayers} from './closet.js';
 import {mediaId, reportControl} from './report.js';
 import {rechargeSheet} from './orders.js';
 import {pushControl} from './push-control.js';
@@ -30,13 +31,16 @@ export async function petScreen(id) {
   const quotaLine = el('div', {class: 'banner row'}, el('strong', {class: 'grow'}, `오늘 한도 ${quota.percent}%`),
     !archived && !memorial ? button('충전하기', () => rechargeSheet(pet), 'plain') : null);
   const chat = el('section', {class: 'stack', 'aria-label': '대화'});
-  const portrait = picture(pet.sheet.front, pet.name, 'portrait');
+  const portrait = petLayers(pet, outfitOf(pet), '그림을 불러오지 못했어요');
+  portrait.classList.add('portrait');
   const pictureId = mediaId(pet.sheet.front);
   const reported = el('div', {role: 'status'});
   show(banner(AI_NOTICE), memberBanner(me), title, portrait,
     el('div', {class: 'row'}, el('small', {class: 'grow'}, 'AI가 그린 그림'), pictureId ? reportControl({
       targetType: 'picture', targetId: pictureId, preview: pet.sheet.front,
-    }, '그림 신고', reported, portrait) : null), quotaLine, reported, chat);
+    }, '그림 신고', reported, portrait) : null), quotaLine,
+    memorial && quota.percent === 0 ? banner('오늘은 여기까지, 새벽 4시 뒤에 또 이야기해요.') : null,
+    reported, chat);
   const {items, before} = await api(path + '/messages');
   const timeline = el('div', {class: 'chat-log', role: 'log', tabindex: '0', 'aria-label': '메시지'});
   const typing = el('small', {class: 'muted', hidden: true}, '···');
@@ -56,7 +60,11 @@ export async function petScreen(id) {
     if (row.role !== 'pet' || !row.id) return el('p', {class: `bubble ${row.role}`}, row.text);
     const message = text(row.text);
     const report = reportControl({targetType: 'message', targetId: row.id, preview: row.text}, '신고', reported, message);
-    return el('div', {class: 'bubble'}, message, el('small', {class: 'muted'}, 'AI'), report);
+    const snapshot = row.composite;
+    const scene = snapshot && ['proactive', 'item_reaction'].includes(row.kind)
+      ? petLayers(pet, snapshot.outfit || {}, '그림을 불러오지 못했어요',
+        {background: snapshot.backgroundId, expression: snapshot.expression}) : null;
+    return el('div', {class: 'bubble'}, scene, message, el('small', {class: 'muted'}, 'AI'), report);
   }
   function renderBubble(row, {move = false} = {}) {
     const known = row.id && bubbles.get(row.id);

@@ -73,9 +73,21 @@ export function petLayers(pet, outfit, errorMessage, {onLayerError, background, 
   const backdropImage = stage.firstElementChild;
   const face = pet.sheet?.[expression] || pet.sheet?.front;
   const sprite = face ? el('img', {class: 'outfit-layer', src: face, alt: pet.name}) : null;
+  const spriteError = el('div', {class: 'stack', hidden: true}, text('그림을 불러오지 못했어요'),
+    button('다시 보기', () => {
+      if (!sprite) return;
+      spriteError.hidden = true;
+      sprite.hidden = false;
+      sprite.removeAttribute('src');
+      sprite.src = face;
+    }, 'plain'));
   const align = () => { if (sprite?.naturalWidth) positionSprite(stage, sprite, backdrop, fallback); };
   if (sprite) {
     sprite.addEventListener('load', align, {once: true});
+    sprite.addEventListener('error', () => {
+      sprite.hidden = true;
+      spriteError.hidden = false;
+    });
     stage.append(sprite);
     if (sprite.complete) align();
   }
@@ -96,7 +108,7 @@ export function petLayers(pet, outfit, errorMessage, {onLayerError, background, 
     });
     stage.append(layer);
   }
-  return el('div', {class: 'stack'}, stage, label);
+  return el('div', {class: 'stack'}, stage, spriteError, label);
 }
 
 export async function closet(id) {

@@ -313,19 +313,29 @@ async function preview(job, me) {
   if (job.state === 'expired') { show(again('30일이 지나 미리 보기와 사진을 지웠어요.', '새로 만들기')); return; }
   const outlet = output();
   if (!job.preview) {
-    const draw = button(job.failure === 'preview_failed' ? '다시 그리기' : '미리 보기 그리기', () => action(draw, outlet, async () => {
-      try {
-        if (await changeCreation(job, 'preview', {method: 'POST', body: {}}) === null) return;
-      }
-      catch (error) { if (error.code !== 'busy') throw error; }
-      show(notice('그리고 있어요', text('1분쯤 걸려요.', 'muted')));
-      waitForUpdate(job.id, next => {
-        if (!next.preview && !next.failure && next.state === 'traits_confirmed') return false;
-        if (stages[next.state]?.[0] === 'preview') preview(next, me);
-        else location.replace(creationPath(next));
-        return true;
+    let paused = false;
+    const draw = button(job.failure === 'preview_failed' ? '다시 그리기' : '미리 보기 그리기', async () => {
+      await action(draw, outlet, async () => {
+        try {
+          if (await changeCreation(job, 'preview', {method: 'POST', body: {}}) === null) return;
+        } catch (error) {
+          if (['preview_limit', 'budget_paused', 'consent_required'].includes(error.code)) {
+            paused = true;
+            outlet.replaceChildren(error.code === 'consent_required' ? consentNotice() : banner(error.message));
+            return;
+          }
+          if (error.code !== 'busy') throw error;
+        }
+        show(notice('그리고 있어요', text('1분쯤 걸려요.', 'muted')));
+        waitForUpdate(job.id, next => {
+          if (!next.preview && !next.failure && next.state === 'traits_confirmed') return false;
+          if (stages[next.state]?.[0] === 'preview') preview(next, me);
+          else location.replace(creationPath(next));
+          return true;
+        });
       });
-    }), 'primary');
+      if (paused) draw.disabled = true;
+    }, 'primary');
     show(picture(null, ''), text(job.failure === 'preview_failed' ? '미리 보기를 그리지 못했어요. 횟수는 세지 않았어요.'
       : '미리 보기는 무료예요. 하루 3장까지 그려요'), outlet, draw);
     return;
