@@ -74,9 +74,9 @@ function field(label, name, max) {
   return el('label', {}, label, el('input', {name, inputmode: 'numeric', maxlength: max, required: true}));
 }
 
-function consentField(name, label, detail, href) {
+function consentField(name, label, detail, href, required = true) {
   return el('div', {class: 'row'},
-    el('label', {class: 'check grow'}, el('input', {name, type: 'checkbox'}), label),
+    el('label', {class: 'check grow'}, el('input', {name, type: 'checkbox', required}), label),
     href ? link('보기', href, 'plain') : el('details', {}, el('summary', {}, '보기'), text(detail, 'muted')));
 }
 
@@ -103,7 +103,7 @@ export async function signup() {
       consentField('agreePrivacy', '개인정보 처리방침', '', LEGAL + 'privacy.html'),
       consentField('aiNoticeConfirmed', 'AI 고지', 'AI가 만든 캐릭터이고 진짜 그 아이가 아니에요')),
     el('fieldset', {}, el('legend', {}, '선택 동의'),
-      consentField('overseasTransfer', '국외 이전', '', LEGAL + 'overseas.html'),
+      consentField('overseasTransfer', '국외 이전', '', LEGAL + 'overseas.html', false),
       text('동의하지 않으면 캐릭터 만들기와 대화를 할 수 없어요. 나중에 설정에서 바꿀 수 있어요', 'muted')),
     invite, outcome, submit);
   const required = ['agreeTerms', 'agreePrivacy', 'aiNoticeConfirmed'];

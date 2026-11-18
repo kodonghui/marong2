@@ -133,7 +133,8 @@ async function photos(me) {
         update();
       }
     });
-    const pick = button(label + ' 고르기', () => input.click(), 'plain');
+    const pick = button('고르기', () => input.click(), 'plain');
+    pick.setAttribute('aria-label', label + ' 고르기');
     chosen.append(el('div', {class: 'stack'}, preview, input, pick, clear, warning));
   }
   form.addEventListener('input', update);

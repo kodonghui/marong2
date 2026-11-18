@@ -100,6 +100,10 @@ async function fixture(t, {signedIn = true, consent = true, invite = false} = {}
       return json(res, pathname.endsWith('/diary') ? {items: [entry]} : entry);
     }
     if (pathname.startsWith('/api/')) return json(res, {code: 'not_found'}, 404);
+    if (/^\/static\/legal\/(terms|privacy|overseas)\.html$/.test(pathname)) {
+      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
+      return res.end('<!doctype html><html lang="ko"><title>시험 문서</title><p>화면 시험용 문서</p>');
+    }
     const file = pathname.startsWith('/static/') || pathname === '/pet-worker.js' ? basename(pathname) : 'index.html';
     try {
       const bytes = await readFile(path.join(assets, file));
@@ -172,6 +176,7 @@ if (require.main === module) {
     const submit = page.getByRole('button', {name: '가입하기'});
     assert.equal(await submit.isDisabled(), true);
     for (const label of ['이용약관', '개인정보 처리방침', 'AI 고지']) await page.getByRole('checkbox', {name: label}).check();
+    assert.equal(await page.locator('input[type=checkbox][required]').count(), 3);
     await submit.click();
     await visible(page.getByLabel('초대 코드'));
     assert.equal(await page.getByLabel('년', {exact: true}).inputValue(), '2000');
