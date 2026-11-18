@@ -138,19 +138,32 @@ def speaker_label(user_key: str | None, name: str | None) -> str:
 class Store:
     def __init__(self, conninfo: str, timeout: float = 5, call_bridge: bool | None = None):
         # timeout: DB 가 죽어 있을 때 연결을 기다리는 시간. 넘으면 오류 → 기억 없이 답함(답이 너무 늦지 않게)
+        self._has_forget_marks = True
         self.pool = AsyncConnectionPool(conninfo, min_size=1, max_size=4, open=False, timeout=timeout,
-                                        kwargs={"autocommit": True, "row_factory": dict_row})
+                                        configure=self._discover_forget_marks, kwargs={"autocommit": True, "row_factory": dict_row})
         self.call_bridge = os.getenv('MARONG_CALL_MEMORY') == '1' if call_bridge is None else call_bridge
         # Keep privacy filters on when injection is disabled during a rollback.
         self.call_context_enabled = os.getenv('MARONG_CALL_CONTEXT', '1') == '1'
         self.discord_context_enabled = os.getenv("MARONG_DISCORD_CONTEXT") == "1"
         self.friend_memory_enabled = os.getenv("MARONG_FRIEND_MEMORY") in {"shadow", "on"}
 
+    async def _discover_forget_marks(self, conn):
+        # Once the migration exists, turning the feature off must not expose old marks.
+        result = await conn.execute("SELECT to_regclass('marong.forget_marks') IS NOT NULL AS ready")
+        self._has_forget_marks = (await result.fetchone())["ready"]
+
+    def _forget_guard(self, kind_sql: str, source_id: str) -> str:
+        if not self._has_forget_marks:
+            return ""
+        return (f" AND NOT EXISTS (SELECT 1 FROM marong.forget_marks fm "
+                f"WHERE fm.target_type={kind_sql} AND fm.target_id={source_id}) ")
+
     def _call_guard(self, kind: str, source_id: str, room: str, requested: str = '%(room)s', expression=False) -> str:
-        if not self.call_bridge:
-            return ''
         k = kind if expression else "'" + kind + "'"
-        return (f" AND NOT call.kakao_hidden({k},{source_id},{room}) "
+        forget = self._forget_guard(k, source_id)
+        if not self.call_bridge:
+            return forget
+        return (forget + f" AND NOT call.kakao_hidden({k},{source_id},{room}) "
                 f"AND ((SELECT is_channel FROM marong.rooms WHERE room_key={requested}) "
                 f"OR NOT call.kakao_private({k},{source_id},{room})) ")
 
@@ -486,7 +499,7 @@ class Store:
             "WITH q AS (SELECT %s::vector AS v), hits AS ("
             "  SELECT e.source_type, e.source_id, 1 - (e.embedding <=> q.v) AS similarity "
             "  FROM marong.embeddings e, q WHERE e.model = %s AND e.room_key IN " + self._reply_rooms("%s") + " "
-            + self._reply_embedding_filter() +
+            + self._reply_embedding_filter() + self._forget_guard('e.source_type','e.source_id') +
             "  AND NOT (e.source_type = 'message' AND e.source_id >= %s) "
             "  AND NOT (e.source_type = 'summary' AND e.source_id = ANY(%s::bigint[])) "
             "  ORDER BY e.embedding <=> q.v LIMIT %s) "
@@ -538,21 +551,28 @@ class Store:
         return await self._all(
             "(SELECT 'message' AS source_type, m.id AS source_id, m.room_key, m.content FROM marong.messages m "
             " WHERE m.content ~ %s AND NOT EXISTS (SELECT 1 FROM marong.embeddings e "
-            "   WHERE e.model = %s AND e.source_type = 'message' AND e.source_id = m.id) ORDER BY m.id LIMIT %s) "
+            "   WHERE e.model = %s AND e.source_type = 'message' AND e.source_id = m.id)"
+            + self._forget_guard("'message'", "m.id") + " ORDER BY m.id LIMIT %s) "
             "UNION ALL "
             "(SELECT 'summary', s.id, s.room_key, s.content FROM marong.summaries s "
             " WHERE s.content ~ %s AND NOT EXISTS (SELECT 1 FROM marong.embeddings e "
-            "   WHERE e.model = %s AND e.source_type = 'summary' AND e.source_id = s.id) ORDER BY s.id LIMIT %s)",
+            "   WHERE e.model = %s AND e.source_type = 'summary' AND e.source_id = s.id)"
+            + self._forget_guard("'summary'", "s.id") + " ORDER BY s.id LIMIT %s)",
             (MEANINGFUL, model, limit, MEANINGFUL, model, limit))
 
     async def add_embeddings(self, model: str, rows: list[tuple[str, int, str, list[float]]]) -> None:
         """rows: (source_type, source_id, room_key, 벡터)."""
-        async with self.pool.connection() as c:
+        async with self.pool.connection() as c, c.transaction():
+            if self._has_forget_marks:
+                for kind, ident in sorted({(t, i) for t, i, _, _ in rows}):
+                    await c.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
+                                    (f"forget:{kind}:{ident}",))
             async with c.cursor() as cur:
                 await cur.executemany(
                     "INSERT INTO marong.embeddings (model, source_type, source_id, room_key, embedding) "
-                    "VALUES (%s, %s, %s, %s, %s::vector) ON CONFLICT DO NOTHING",
-                    [(model, t, i, r, vec(v)) for t, i, r, v in rows])
+                    "SELECT %s, item.kind, item.id, %s, %s::vector FROM (VALUES (%s::text,%s::bigint)) item(kind,id) "
+                    "WHERE true" + self._forget_guard("item.kind", "item.id") + " ON CONFLICT DO NOTHING",
+                    [(model, r, vec(v), t, i) for t, i, r, v in rows])
 
     async def rooms_due(self, min_messages: int) -> list[str]:
         """마지막 요약 뒤로 메시지가 min_messages 개 이상 쌓인 방(묶인 방들은 묶음 뿌리 하나로 셈)."""
@@ -632,6 +652,7 @@ class Store:
             "  n.content, r.is_channel FROM marong.notes n JOIN marong.people p ON p.user_key = n.user_key "
             "  JOIN marong.friends f ON f.id = p.friend_id JOIN marong.rooms r ON r.room_key = n.room_key "
             "  WHERE f.share " + ("AND NOT call.kakao_private('note',n.id,n.room_key) AND NOT call.kakao_hidden('note',n.id,n.room_key) " if self.call_bridge else '') +
+            self._forget_guard("'note'", "n.id") +
             "ORDER BY n.room_key, n.user_key, n.id DESC) x ORDER BY friend_id, note_id")
 
     async def call_context(self, room_key: str, user_key: str, user_id: int | None = None) -> dict:
@@ -702,10 +723,10 @@ class Store:
             if not link:
                 return []
             cur = await c.execute(
-                """SELECT id,role,left(content,260) AS text FROM marong.messages
-                    WHERE room_key=%s AND meta->>'delivered' IS DISTINCT FROM 'false'
-                      AND NOT call.kakao_hidden('message',id,room_key)
-                    ORDER BY id DESC LIMIT 8""", (link["room_key"],),
+                """SELECT m.id,m.role,left(m.content,260) AS text FROM marong.messages m
+                    WHERE m.room_key=%s AND meta->>'delivered' IS DISTINCT FROM 'false'
+                      AND NOT call.kakao_hidden('message',id,room_key)"""
+                + self._forget_guard("'message'", "m.id") + " ORDER BY m.id DESC LIMIT 8", (link["room_key"],),
             )
             rows = await cur.fetchall()
             if not rows:
@@ -728,7 +749,7 @@ class Store:
         rows = await self._all(
             "SELECT DISTINCT ON (s.friend_id) s.friend_id, s.meta->'note_ids' AS note_ids, s.meta->>'rules' AS rules "
             "FROM marong.shared_notes s JOIN marong.friends f ON f.id = s.friend_id WHERE f.share "
-            "ORDER BY s.friend_id, s.id DESC")
+            + self._forget_guard("'shared_note'", "s.id") + "ORDER BY s.friend_id, s.id DESC")
         return {r["friend_id"]: (list(r["note_ids"] or []), r["rules"]) for r in rows}
 
     async def add_shared_note(self, friend_id: int, content: str, close_content: str, meta: dict) -> int:

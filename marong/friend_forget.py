@@ -52,17 +52,22 @@ async def forget_locked(conn, friend, kind, ident, key, *, via, group=None):
 
     if message is not None:
         await add_source_mark(conn, forget_id, friend, "message", message)
-        await conn.execute("""
+        marks = await conn.execute("""
             INSERT INTO marong.forget_marks AS mark(forget_id,friend_id,target_type,target_id,state)
             SELECT %s,%s,'summary',s.id,'hidden'
             FROM marong.summaries s JOIN marong.messages m
               ON m.id=%s AND m.id BETWEEN s.first_id AND s.last_id
               AND (s.room_key=m.room_key OR s.meta->'rooms' ? m.room_key)
+            ORDER BY s.id
             ON CONFLICT(target_type,target_id) DO UPDATE
               SET forget_id=excluded.forget_id,state='hidden',replacement=NULL,attempts=0,
                   updated_at=now()
-              WHERE mark.state='rewritten'
+              WHERE mark.state IN ('hidden','rewritten')
+            RETURNING target_id
         """, (forget_id, friend, message))
+        for mark in sorted(await marks.fetchall(), key=lambda row: row["target_id"]):
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
+                               (f"forget:summary:{mark['target_id']}",))
     else:
         await add_source_mark(conn, forget_id, friend, "call_turn", turn)
 

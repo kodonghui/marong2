@@ -392,8 +392,8 @@ async def check_forget_transaction(db):
                (%s,'hard','가상 대화','discord_dm',%s,now(),'가상 기록','text') RETURNING id
     """, (owner, message, owner, message))
     [(loop,)] = db.admin("""
-        INSERT INTO marong.open_loops(friend_id,text,channel,message_id,quote,opened_at,expires_at)
-        VALUES (%s,'가상 일','discord_dm',%s,'가상 기록',now(),now()+interval '7 days') RETURNING id
+        INSERT INTO marong.open_loops(friend_id,text,channel,message_id,quote,opened_at,expires_at,sensitivity)
+        VALUES (%s,'가상 일','discord_dm',%s,'가상 기록',now(),now()+interval '7 days','mid') RETURNING id
     """, (owner, message))
     db.admin("""
         INSERT INTO marong.embeddings(model,source_type,source_id,room_key,embedding)
@@ -422,6 +422,17 @@ async def check_forget_transaction(db):
         )) == {("message", message, "forgotten"), ("summary", summary, "hidden"), ("note", note, "hidden"),
                ("shared_note", shared, "hidden")}
         assert db.admin("SELECT id FROM marong.shared_notes WHERE id=%s", (unrelated,)) == [(unrelated,)]
+        assert db.admin("SELECT count(*) FROM marong.embeddings WHERE room_key=%s", (room,)) == [(0,)]
+        assert not await store.recent(room, 10)
+        assert not await store.recent_turns(room, 2, 20)
+        assert not await store.notes(room)
+        assert not await store.summaries(room, 10)
+        assert not (await store.keyword_hits(room, ["가상"], message + 1, []))[0]
+        assert not [entry for entry in await store.pending_embeddings("fixture", 1000)
+                    if entry["room_key"] == room]
+        await store.add_embeddings("new-fixture", [
+            ("message", message, room, [1, 2, 3]), ("summary", summary, room, [3, 2, 1]),
+        ])
         assert db.admin("SELECT count(*) FROM marong.embeddings WHERE room_key=%s", (room,)) == [(0,)]
         assert db.admin("SELECT content FROM marong.messages WHERE id=%s", (message,)) == [("가상 기록",)]
         assert db.admin("SELECT count(*) FROM marong.memory_forgets WHERE friend_id=%s", (owner,)) == [(2,)]
