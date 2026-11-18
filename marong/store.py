@@ -334,7 +334,8 @@ class Store:
             "   ORDER BY x.id DESC LIMIT 1)"
             ") n LEFT JOIN marong.people p ON p.user_key = n.user_key "
             "WHERE h.id = ANY(%(ids)s::bigint[]) AND h.room_key IN " + self._reply_rooms("%(room)s") + " "
-            "AND n.role <> h.role " + self._call_guard('message','n.id','n.room_key'),
+            "AND n.role <> h.role " + self._forget_guard("'message'", "h.id")
+            + self._call_guard('message','n.id','n.room_key'),
             {"room": room_key, "ids": list(ids)})
         return {r["hit"]: r for r in rows}
 
@@ -438,7 +439,7 @@ class Store:
             "  (SELECT max(p.last_seen) FROM marong.people p WHERE p.friend_id = f.id) AS last_seen "
             "FROM marong.friends f LEFT JOIN told t ON t.id = f.id LEFT JOIN mates g ON g.id = f.id "
             "LEFT JOIN LATERAL (SELECT x.content, x.close_content FROM marong.shared_notes x WHERE x.friend_id = f.id "
-            "  ORDER BY x.id DESC LIMIT 1) s ON true "
+            + self._forget_guard("'shared_note'", "x.id") + "  ORDER BY x.id DESC LIMIT 1) s ON true "
             "WHERE f.share AND f.id IS DISTINCT FROM (SELECT friend_id FROM me) "
             "  AND EXISTS (SELECT 1 FROM marong.people p WHERE p.friend_id = f.id) "
             "ORDER BY (t.id IS NOT NULL OR g.id IS NOT NULL) DESC, last_seen DESC NULLS LAST LIMIT %(n)s",
@@ -499,7 +500,7 @@ class Store:
             "WITH q AS (SELECT %s::vector AS v), hits AS ("
             "  SELECT e.source_type, e.source_id, 1 - (e.embedding <=> q.v) AS similarity "
             "  FROM marong.embeddings e, q WHERE e.model = %s AND e.room_key IN " + self._reply_rooms("%s") + " "
-            + self._reply_embedding_filter() + self._forget_guard('e.source_type','e.source_id') +
+            + self._reply_embedding_filter() + self._forget_guard("e.source_type", "e.source_id") +
             "  AND NOT (e.source_type = 'message' AND e.source_id >= %s) "
             "  AND NOT (e.source_type = 'summary' AND e.source_id = ANY(%s::bigint[])) "
             "  ORDER BY e.embedding <=> q.v LIMIT %s) "

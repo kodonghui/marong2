@@ -370,9 +370,9 @@ async def check_forget_transaction(db):
     room = "synthetic-forget-dm"
     db.admin("INSERT INTO marong.rooms(room_key,is_channel) VALUES (%s,true)", (room,))
     db.admin("INSERT INTO marong.people(user_key,friend_id) VALUES (%s,%s)", (room, owner))
-    [(message,)] = db.admin("""
+    [(message, said_at)] = db.admin("""
         INSERT INTO marong.messages(room_key,user_key,role,content)
-        VALUES (%s,%s,'user','가상 기록') RETURNING id
+        VALUES (%s,%s,'user','가상 기록') RETURNING id,created_at
     """, (room, room))
     [(summary,)] = db.admin("""
         INSERT INTO marong.summaries(room_key,first_id,last_id,content)
@@ -388,9 +388,9 @@ async def check_forget_transaction(db):
                             (other,))
     [(item,), (second,)] = db.admin("""
         INSERT INTO marong.memory_items(friend_id,kind,text,channel,message_id,heard_at,quote,source)
-        VALUES (%s,'fact','가상 사실','discord_dm',%s,now(),'가상 기록','text'),
-               (%s,'hard','가상 대화','discord_dm',%s,now(),'가상 기록','text') RETURNING id
-    """, (owner, message, owner, message))
+        VALUES (%s,'fact','가상 사실','discord_dm',%s,%s,'가상 기록','text'),
+               (%s,'hard','가상 대화','discord_dm',%s,%s,'가상 기록','text') RETURNING id
+    """, (owner, message, said_at, owner, message, said_at))
     [(loop,)] = db.admin("""
         INSERT INTO marong.open_loops(friend_id,text,channel,message_id,quote,opened_at,expires_at,sensitivity)
         VALUES (%s,'가상 일','discord_dm',%s,'가상 기록',now(),now()+interval '7 days','mid') RETURNING id
@@ -398,7 +398,7 @@ async def check_forget_transaction(db):
     db.admin("""
         INSERT INTO marong.embeddings(model,source_type,source_id,room_key,embedding)
         VALUES ('fixture','message',%s,%s,'[1,2,3]'),('fixture','summary',%s,%s,'[3,2,1]')
-    """, (message, room, summary))
+    """, (message, room, summary, room))
     store = Store(db.app_url)
     await store.open(wait=True)
     try:
