@@ -29,6 +29,7 @@ from marong.pet.http import COOKIE, POOL, Problem, cookie_hash
 from marong.pet.identity import IdentityResult
 from marong.pet.photos import MASK, load_detector, sanitize
 from marong.pet.pg_fake import FakeGateway
+from marong.pet.push import notify_creation
 from marong.pet.quota import quota_day
 from marong.pet.settings import Settings
 from marong.pet.traits import next_traits
@@ -734,6 +735,16 @@ async def check_candidates(admin, dsn, directory):
     expression_attempts = {}
     bad_head = False
     release_candidates = asyncio.Event()
+    notifications = []
+
+    async def push(target, payload):
+        notifications.append((target["member_id"], payload))
+        return 201
+
+    async def wait_notifications(count):
+        async with asyncio.timeout(4):
+            while len(notifications) < count:
+                await asyncio.sleep(0.01)
 
     def template_mask(ident):
         assert ident == "dog_small"
@@ -773,8 +784,12 @@ async def check_candidates(admin, dsn, directory):
         for owner, note in ((member, "hold fixture"), (failed_member, "fixture fail"), (other_member, None)):
             creation, = conn.execute("""
                 INSERT INTO pet.creations(member_id,kind,state,template,traits,regenerate_note)
-                VALUES (%s,'living','paid','dog_small',%s,%s) RETURNING id
-            """, (owner, Jsonb(TRAITS), note)).fetchone()
+                VALUES (%s,%s,'paid','dog_small',%s,%s) RETURNING id
+            """, (owner, "memorial" if owner == other_member else "living", Jsonb(TRAITS), note)).fetchone()
+            conn.execute("""
+                INSERT INTO pet.push_subscriptions(member_id,endpoint,p256dh,auth)
+                VALUES (%s,%s,'fixture-key','fixture-auth')
+            """, (owner, f"https://fcm.googleapis.com/fcm/send/{uuid4()}"))
             number = "fixture-" + uuid4().hex
             payment = "fixture-" + uuid4().hex
             gateway.add(payment, number, 5900)
@@ -788,7 +803,8 @@ async def check_candidates(admin, dsn, directory):
             creations.append((creation, order))
 
     app = make_app(settings, gateway=gateway, candidate_renderer=render, template_mask=template_mask,
-                   expression_renderer=expression, template_head=template_head, greeting_renderer=fail_greeting)
+                   expression_renderer=expression, template_head=template_head, greeting_renderer=fail_greeting,
+                   push_sender=push)
     async with TestClient(TestServer(app)) as client:
         async def fetch(creation, token, state):
             for _ in range(120):
@@ -841,6 +857,9 @@ async def check_candidates(admin, dsn, directory):
                         break
                 await asyncio.sleep(0.05)
         assert (await fetch(failed, failed_token, "failed_candidates"))["candidates"] == []
+        await wait_notifications(1)
+        assert notifications == [(failed_member, {"title": "마롱이(AI)", "body": "결제가 자동으로 취소됐어요.",
+                                                  "url": f"/create/{failed}/candidates"})]
         assert len(gateway.refunds) == 1
         with psycopg.connect(admin) as conn:
             assert conn.execute("SELECT status,refund_reason FROM pet.orders WHERE id=%s", (refunded,)
@@ -854,6 +873,9 @@ async def check_candidates(admin, dsn, directory):
         picked = await client.post(choose, headers=headers(token), json={"candidateId": candidate})
         assert picked.status == 202 and (await picked.json())["chosenId"] == candidate
         await fetch(ready, token, "sheet_ready")
+        await wait_notifications(2)
+        assert notifications[1:] == [(member, {"title": "마롱이(AI)", "body": "캐릭터 시트가 완성됐어요.",
+                                              "url": f"/create/{ready}/name"})]
         assert expression_attempts["sad"] == 2
         assert len(expression_attempts) == 6
         with psycopg.connect(admin) as conn:
@@ -866,6 +888,9 @@ async def check_candidates(admin, dsn, directory):
                                          json={"candidateId": bad_candidates["candidates"][0]["id"]})
         assert choose_other.status == 202
         await fetch(bad_creation, other_token, "sheet_needs_operator")
+        await notify_creation(app[POOL], other_member, bad_creation, "sheet", send=push)
+        await notify_creation(app[POOL], failed_member, ready, "sheet", send=push)
+        assert len(notifications) == 2
 
         finish = f"/api/creations/{ready}/finish"
         details = {"name": "  테스트콩  ", "intro": {

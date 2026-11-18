@@ -127,22 +127,44 @@ async def notify(pool, member, pet, kind, *, send):
     delivered = 0
     for target in targets:
         payload = {"title": f'{target["name"]}(AI)', "body": line}
-        for _ in range(2):
-            try:
-                status = await send(target, payload)
-            except (OSError, TimeoutError):
-                status = 503
-            if status in (404, 410) or 200 <= status < 300:
-                async with pool.connection() as conn:
-                    if status in (404, 410):
-                        await conn.execute("DELETE FROM pet.push_subscriptions WHERE id=%s AND p256dh=%s AND auth=%s",
-                                           (target["id"], target["p256dh"], target["auth"]))
-                    else:
-                        await conn.execute("UPDATE pet.push_subscriptions SET last_ok_at=now() WHERE id=%s",
-                                           (target["id"],))
-                        delivered += 1
-                break
+        delivered += await deliver_one(pool, target, payload, send)
     return delivered
+
+
+async def deliver_one(pool, target, payload, send):
+    for _ in range(2):
+        try:
+            status = await send(target, payload)
+        except (OSError, TimeoutError):
+            continue
+        if status in (404, 410):
+            async with pool.connection() as conn:
+                await conn.execute("DELETE FROM pet.push_subscriptions WHERE id=%s AND p256dh=%s AND auth=%s",
+                                   (target["id"], target["p256dh"], target["auth"]))
+            return False
+        if 200 <= status < 300:
+            async with pool.connection() as conn:
+                await conn.execute("UPDATE pet.push_subscriptions SET last_ok_at=now() WHERE id=%s", (target["id"],))
+            return True
+    return False
+
+
+async def notify_creation(pool, member, creation, kind, *, send):
+    async with pool.connection() as conn:
+        cursor = await conn.execute("""
+            SELECT s.*,p.name FROM pet.push_subscriptions s
+            JOIN pet.members m ON m.id=s.member_id AND m.status='active'
+            JOIN pet.creations c ON c.member_id=m.id AND c.id=%s AND c.kind='living'
+            LEFT JOIN pet.pets p ON p.creation_id=c.id AND p.member_id=m.id
+            WHERE s.member_id=%s AND (p.id IS NULL OR (p.mode='living' AND p.status='active'))
+            ORDER BY s.id
+        """, (creation, member))
+        targets = await cursor.fetchall()
+    stage = "name" if kind == "sheet" else "candidates"
+    for target in targets:
+        payload = {"title": f'{target["name"] or "마롱이"}(AI)', "body": _LINES[kind],
+                   "url": f"/create/{creation}/{stage}"}
+        await deliver_one(pool, target, payload, send)
 
 
 def register(app, *, sender=None):

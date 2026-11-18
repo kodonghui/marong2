@@ -20,6 +20,7 @@ from .http import CONFIG, POOL, Problem, body_json, require_member, uuid_param
 from .images import preview_png
 from .jobs import JobQueue
 from .log import logger
+from .push import SENDER, notify_creation
 
 EXPRESSIONS = ("smile", "excited", "sleepy", "surprised", "sad", "pout")
 LEASE = timedelta(minutes=5)
@@ -116,9 +117,10 @@ async def save_sheet(pool, directory, job, pictures):
             except OSError:
                 logger.error("pet_sheet_rollback_unlink_failed")
         raise
+    return ready
 
 
-async def next_sheet(pool, settings, budget, render, head_for):
+async def next_sheet(pool, settings, budget, render, head_for, *, send=None):
     job = await JobQueue(pool).claim(("sheet",), lease=LEASE, attempts=2_147_483_647)
     if not job:
         return False
@@ -148,7 +150,9 @@ async def next_sheet(pool, settings, budget, render, head_for):
                                                            box, label, job) for label in EXPRESSIONS))
     except (Problem, ValueError, OSError):
         pass
-    await save_sheet(pool, settings.media_dir, job, pictures)
+    ready = await save_sheet(pool, settings.media_dir, job, pictures)
+    if ready and send is not None:
+        await notify_creation(pool, job["member_id"], job["creation_id"], "sheet", send=send)
     return True
 
 
@@ -187,7 +191,7 @@ def register(app, budget_key, render, head_for):
         async def run():
             while True:
                 try:
-                    if await next_sheet(app[POOL], app[CONFIG], app[budget_key], render, head_for):
+                    if await next_sheet(app[POOL], app[CONFIG], app[budget_key], render, head_for, send=app.get(SENDER)):
                         continue
                 except Exception:
                     logger.error("pet_sheet_worker_failed")

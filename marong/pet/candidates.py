@@ -17,6 +17,7 @@ from .http import CONFIG, POOL, Problem, body_json, require_member, uuid_param
 from .images import preview_png
 from .jobs import JobQueue
 from .log import logger
+from .push import SENDER, notify_creation
 
 CANDIDATE_WINDOW = timedelta(minutes=30)
 LEASE = CANDIDATE_WINDOW + timedelta(minutes=1)
@@ -64,7 +65,7 @@ async def cancel_order(conn, gateway, row):
     """, (row["order_id"], row["member_id"]))
     order = await cur.fetchone()
     if not order or order["status"] not in {"paid", "fulfilled", "refund_pending"}:
-        return
+        return False
     ok = False
     if order["free_ticket"]:
         await conn.execute("UPDATE pet.members SET free_tickets=least(20,free_tickets+1) WHERE id=%s", (row["member_id"],))
@@ -79,6 +80,7 @@ async def cancel_order(conn, gateway, row):
         UPDATE pet.orders SET status=%s,refund_reason='auto_generation_failed',
             refunded_at=CASE WHEN %s THEN now() ELSE refunded_at END WHERE id=%s
     """, ("refunded" if ok else "refund_pending", ok, order["id"]))
+    return ok and not order["free_ticket"]
 
 
 async def save_candidate(pool, directory, job, index, picture):
@@ -141,6 +143,7 @@ async def locked_creation(conn, job):
 
 
 async def finish_round(pool, job, gateway):
+    refunded = False
     async with pool.connection() as conn, conn.transaction():
         row = await locked_creation(conn, job)
         if row is not None:
@@ -156,7 +159,7 @@ async def finish_round(pool, job, gateway):
                         UPDATE pet.jobs SET status='queued',run_after=%s,lease_until=NULL WHERE id=%s
                     """, (deadline, job["id"]))
                     return
-                await cancel_order(conn, gateway, row)
+                refunded = await cancel_order(conn, gateway, row)
                 await conn.execute("""
                     UPDATE pet.media SET delete_after=now() WHERE member_id=%s AND creation_id=%s AND kind IN ('photo','preview')
                 """, (row["member_id"], row["id"]))
@@ -167,9 +170,10 @@ async def finish_round(pool, job, gateway):
             await conn.execute("""
                 UPDATE pet.jobs SET status=%s,error_code=%s,finished_at=now(),lease_until=NULL WHERE id=%s
             """, ("done" if any_candidates else "failed", None if any_candidates else "candidates_failed", job["id"]))
+    return refunded
 
 
-async def next_candidates(pool, settings, budget, draw, mask_for, gateway):
+async def next_candidates(pool, settings, budget, draw, mask_for, gateway, *, send=None):
     job = await JobQueue(pool).claim(("candidates",), lease=LEASE, attempts=2_147_483_647)
     if not job:
         return False
@@ -199,7 +203,9 @@ async def next_candidates(pool, settings, budget, draw, mask_for, gateway):
                         workers.create_task(draw_and_save(slot))
     except (Problem, TimeoutError, ValueError, OSError):
         pass
-    await finish_round(pool, job, gateway)
+    refunded = await finish_round(pool, job, gateway)
+    if refunded and send is not None:
+        await notify_creation(pool, job["member_id"], job["creation_id"], "refund", send=send)
     return True
 
 
@@ -237,7 +243,8 @@ def register(app, budget_key, draw, mask_for, gateway):
         async def run():
             while True:
                 try:
-                    if await next_candidates(app[POOL], app[CONFIG], app[budget_key], draw, mask_for, gateway):
+                    if await next_candidates(app[POOL], app[CONFIG], app[budget_key], draw, mask_for, gateway,
+                                             send=app.get(SENDER)):
                         continue
                 except Exception:
                     logger.error("pet_candidate_worker_failed")
