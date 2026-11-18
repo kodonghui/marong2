@@ -3,6 +3,7 @@
 import asyncio
 import json
 from datetime import datetime, timedelta
+from itertools import product
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 import sys
@@ -15,7 +16,7 @@ from call_safety import CallSafety
 from marong.agent import Agent, Incoming
 from marong.discord_dm import DiscordAgent, DiscordIncoming
 from marong.topics import Today, Topics
-from marong.friend_card import CardError, FriendCards, KST, ModelRun, card_sentence, question_choices, text_choice
+from marong.friend_card import OPTIONS, CardError, FriendCards, KST, ModelRun, card_sentence, question_choices, text_choice
 from marong.persona_prompt import FriendPrompt, append_prefix
 from marong.store import Store
 from pg import TestDB
@@ -33,6 +34,24 @@ async def scenario(db, store):
     mid = await store.add_message("fixture-room-a", "user", TEXT, user_key="fixture-person-a")
     mid2 = await store.add_message("fixture-room-b", "user", TEXT, user_key="fixture-person-b")
     cards = FriendCards(store)
+
+    choices = product(*(OPTIONS[field] for field in ("support", "advice", "honesty")))
+    sentences = {card_sentence({"state": "set", "support": support, "advice": advice, "honesty": honesty})
+                 for support, advice, honesty in choices}
+    assert len(sentences) == 54 and None not in sentences
+
+    agent = Agent.__new__(Agent)
+    agent.store, agent.friend_cards = store, cards
+    request = Incoming("fixture-room-a", "fixture-person-a", "쇼핑 가격 읽기 기능 켜 달라고 해 줘")
+    payload = {"kind": "feature", "feature": "쇼핑 페이지 가격 읽기", "quote": "기능 켜 달라고 해 줘"}
+    assert (await agent._ask_owner(SimpleNamespace(input={**payload, "quote": "다른 인용"}), request, {}))["is_error"]
+    assert (await agent._ask_owner(SimpleNamespace(input={**payload, "feature": "친구 자기 이름"}), request, {}))["is_error"]
+    for _ in range(2):
+        assert "is_error" not in await agent._ask_owner(SimpleNamespace(input=payload), request, {})
+    assert request.owner_asked
+    assert db.admin("SELECT detail FROM marong.requests WHERE kind='feature'") == [
+        ({"feature": "쇼핑 페이지 가격 읽기"},),
+    ]
 
     await asyncio.gather(cards.set(1, {"support": "listen"}, source="questions"),
                          cards.set(1, {"advice": "asked", "honesty": "gentle"}, source="screen"))

@@ -419,7 +419,8 @@ class Store:
             {"k": user_key, "n": limit})
 
     async def add_request(self, user_key: str, room_key: str, kind: str, name: str | None = None,
-                          label: str | None = None, per_day: int | None = None) -> tuple[str, str | None]:
+                          label: str | None = None, per_day: int | None = None, *,
+                          feature: str | None = None) -> tuple[str, str | None]:
         """친구가 대화로 한 요청을 남긴다. 바꾸지는 않는다(관리자가 정함). kind: share_off 자기 얘기를 다른 친구에게 하지
         마라 · share_on 다시 해도 된다 · friendship name 친구와 label 사이다 · proactive_off/on/less/more 이 방 선톡을
         그만·다시·덜·더(per_day 는 친구가 말한 하루 횟수). 돌려주는 것: (결과, 말하는 친구 이름).
@@ -430,6 +431,14 @@ class Store:
                 cur = await c.execute("SELECT f.id, f.name, f.share FROM marong.people p "
                                       "JOIN marong.friends f ON f.id = p.friend_id WHERE p.user_key = %s", (user_key,))
                 me = await cur.fetchone()
+                if kind == "feature":
+                    from .capabilities import TEXT_FEATURE_NAMES
+
+                    if feature not in TEXT_FEATURE_NAMES:
+                        raise ValueError("unknown feature")
+                    await c.execute("SELECT pg_advisory_xact_lock(hashtextextended('feature:'||%s,0))", (user_key,))
+                    await self._request(c, user_key, me and me["id"], room_key, kind, {"feature": feature})
+                    return "ok", me and me["name"]
                 if kind.startswith("proactive_"):
                     cur = await c.execute("SELECT CASE WHEN is_channel THEN proactive ELSE group_proactive END AS proactive "
                                           "FROM marong.rooms WHERE room_key = %s", (room_key,))

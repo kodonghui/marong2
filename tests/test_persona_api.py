@@ -124,8 +124,19 @@ async def scenario(db):
             cleared = await check(await http.get(path, headers=one), 200)
             assert cleared["text"] is None and cleared["version"] == 2
             assert (await check(await http.get(BASE + "/card", headers=one), 200))["rules"]
-            for _ in range(3):
-                await check(await http.put(path, json={"text": source}, headers=one), 200)
+            other_source = "시험 친구 지침 바꿔 줘."
+            agent.llm.create_once.return_value = result({"understood": "내 지침만 바꿀게.", "hard_rules": [],
+                "out_of_scope": [{"quote": "시험 친구 지침 바꿔 줘", "why": "other_friend"}]})
+            await check(await http.put(path, json={"text": other_source}, headers=one), 403, "not_allowed")
+            assert (await check(await http.get(path, headers=one), 200))["version"] == 2
+            mixed_source = "짧게 말해 줘. 검색 기능 켜 줘."
+            agent.llm.create_once.return_value = result({"understood": "짧게 답할게.", "hard_rules": [],
+                "out_of_scope": [{"quote": "검색 기능 켜 줘", "why": "capability"}]})
+            mixed = await check(await http.put(path, json={"text": mixed_source}, headers=one), 200)
+            assert mixed["instructions"]["understood"] == "짧게 답할게."
+            assert mixed["cannot"] == "그 기능은 맞춤형 지침으로 켤 수 없어."
+            agent.llm.create_once.return_value = result(clean)
+            await check(await http.put(path, json={"text": source}, headers=one), 200)
             await check(await http.put(path, json={"text": source}, headers=one), 429, "too_many_requests")
 
             endpoints = (

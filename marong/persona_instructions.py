@@ -11,8 +11,18 @@ LIMIT = 500
 HARD = {"banned_vocative": "no_vocative", "banned_topic": "avoid_topic",
         "proactive_lower": None, "call_first_off": None}
 REASONS = ("safety", "fact", "other_friend", "capability", "raise")
+REFUSAL = {
+    "safety": "위험할 때 하는 말은 바꿀 수 없어.",
+    "fact": "사실과 다른 맞장구는 못 해.",
+    "capability": "그 기능은 맞춤형 지침으로 켤 수 없어.",
+    "other_friend": "다른 친구의 지침은 여기서 바꿀 수 없어.",
+}
 COUNSEL = re.compile(r"109|119|1577[\s-]*0199|상담전화|상담사|자살|자해|위기\s*절차|병원")
 POLITE = re.compile(r"존댓말|존대")
+
+
+def refusal_lines(reasons):
+    return [sentence for reason, sentence in REFUSAL.items() if reason in reasons]
 
 
 def _schema_object(properties):

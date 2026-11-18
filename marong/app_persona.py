@@ -11,7 +11,7 @@ from aiohttp import web
 
 from .app_chat import Problem, bad
 from .friend_card import CardError, ModelRun, card_sentence, choices
-from .persona_instructions import LIMIT, InterpretationError, interpret
+from .persona_instructions import LIMIT, InterpretationError, interpret, refusal_lines
 from .style import check as check_style
 
 BASE = "/chat/persona/api"
@@ -148,8 +148,11 @@ class AppPersona:
         model = agent.s.anthropic_model
         try:
             parsed = await interpret(agent.llm, model, text)
-            if parsed["reasons"] & {"capability", "other_friend"}:
-                raise InterpretationError("copy_requires_design")
+            if "other_friend" in parsed["reasons"]:
+                await self.cards.record_run(ModelRun("instruction", uuid4().hex, model, "instruction-v1", now,
+                                                    "refused", friend_id=friend,
+                                                    total_ms=round((clock()-began)*1000)))
+                raise Problem("not_allowed")
             reviewed = check_style(parsed["understood"], code_only=True)
             parsed["understood"] = reviewed.text
             if re.search(r"[ㅋㅎ]+|(?<![가-힣])야[!,.?\s]", parsed["understood"]):
@@ -167,11 +170,7 @@ class AppPersona:
         if "raise" in reasons:
             outcome, _ = await self.cards.store.add_request(who["user_key"], who["room_key"], "proactive_more", "", "")
             asked = outcome == "ok"
-        cannot = []
-        if "safety" in reasons:
-            cannot.append("위험할 때 하는 말은 바꿀 수 없어.")
-        if "fact" in reasons:
-            cannot.append("사실과 다른 맞장구는 못 해.")
+        cannot = refusal_lines(reasons)
         return self.chat._json(200, {"instructions": await self._instruction_view(friend), "moved": moved,
                                      "ownerAsked": asked, "cannot": " ".join(cannot) or None})
 

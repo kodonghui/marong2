@@ -273,6 +273,8 @@ def request_text(q: dict, f: dict | None, friend_name: dict[int, str], pairs: di
     where = "1:1" if q["is_channel"] else "단체방" if q["is_channel"] is not None else "방 모름"
     head = f"{q['created_at'].astimezone(tz).strftime('%m/%d %H:%M')} {where}: "
     who = f["name"] if f else key(q["user_key"])
+    if q["kind"] == "feature":
+        return head + f"{q['detail']['feature']} 기능을 켜 달라고 함"
     if q["kind"].startswith("proactive_"):
         if q["kind"] == "proactive_off":
             return head + "선톡 그만 보내 달라고 함 → " + (

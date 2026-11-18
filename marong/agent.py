@@ -24,11 +24,11 @@ from pathlib import Path
 from uuid import uuid4
 
 from .cache_warm import hour_writes
-from .capabilities import description as feature_description, text_matrix
+from .capabilities import TEXT_FEATURE_NAMES, availability, description as feature_description, text_matrix
 from .config import PER_DAY_MAX, Settings, proactive_schedule
 from .friend_card import CARD_UPDATE, KST, QUESTIONS, CardError, FriendCards, ModelRun, proposal_text, question_choices, text_choice
 from .persona_prompt import FriendPrompt, append_prefix
-from .persona_instructions import InterpretationError, interpret
+from .persona_instructions import InterpretationError, REFUSAL, interpret, refusal_lines
 from .safety import Safety, difficult, owner_private
 from .embed import Embeddings
 from .fmt import now_line, short_key, short_time
@@ -124,6 +124,22 @@ ASK_OWNER_TOOL = {
         },
         "required": ["kind"],
         "additionalProperties": False,
+    },
+}
+FEATURE_REQUEST_TOOL = {
+    **ASK_OWNER_TOOL,
+    "description": ASK_OWNER_TOOL["description"] + (
+        " feature: 친구가 꺼진 기능을 켜 달라고 하면 현재 요청을 남긴다. "
+        "feature에 기능 목록 이름, quote에 이번 말에서 켜 달라고 한 부분을 그대로 넣어."
+    ),
+    "input_schema": {
+        **ASK_OWNER_TOOL["input_schema"],
+        "properties": {
+            **ASK_OWNER_TOOL["input_schema"]["properties"],
+            "kind": {"type": "string", "enum": [*ASK_OWNER_TOOL["input_schema"]["properties"]["kind"]["enum"], "feature"]},
+            "feature": {"type": "string", "enum": list(TEXT_FEATURE_NAMES)},
+            "quote": {"type": "string", "minLength": 1, "maxLength": 500},
+        },
     },
 }
 # 선톡: 친구가 아무 말도 안 했는데 마롱이가 먼저 보낼 말을 만들 때 '지금 상황' 끝에 붙이는 안내
@@ -353,18 +369,16 @@ class Agent:
         outcome, error_code = "ok", None
         try:
             parsed = await interpret(self.llm, self.s.anthropic_model, source)
-            if parsed["reasons"] & {"capability", "other_friend"}:
-                raise InterpretationError("copy_requires_design")
+            if "other_friend" in parsed["reasons"]:
+                outcome = "refused"
+                return REFUSAL["other_friend"], {"custom_instruction": "refused"}
             moved = await self.friend_cards.save_interpretation(msg.card_actor, source, parsed, via="chat")
             lines = ["이렇게 이해했어: " + parsed["understood"]]
             if moved["rules"]:
                 lines.append("꼭 지킬 것에 넣었어: " + ", ".join(row["text"] for row in moved["rules"]))
             if moved["proactive"]:
                 lines.append("선톡을 껐어" if moved["proactive"] == "off" else "선톡을 적게로 바꿨어")
-            if "safety" in parsed["reasons"]:
-                lines.append("위험할 때 하는 말은 바꿀 수 없어.")
-            if "fact" in parsed["reasons"]:
-                lines.append("사실과 다른 맞장구는 못 해.")
+            lines.extend(refusal_lines(parsed["reasons"]))
             if "raise" in parsed["reasons"]:
                 asked, _ = await self.store.add_request(msg.user_key, msg.room_key, "proactive_more", "", "")
                 if asked == "ok":
@@ -986,7 +1000,8 @@ class Agent:
 
     def _tools(self, msg: Incoming) -> list[dict]:
         """설정을 바꾸는 도구는 없다(set_name 은 친구 자신의 이름, ask_owner 는 관리자에게 남기기만 함)."""
-        return [SET_NAME_TOOL, ASK_OWNER_TOOL, *self._card_tools(msg)]
+        owner = FEATURE_REQUEST_TOOL if self.friend_cards else ASK_OWNER_TOOL
+        return [SET_NAME_TOOL, owner, *self._card_tools(msg)]
 
     def _card_tools(self, msg):
         return [CARD_UPDATE] if self.friend_cards and getattr(msg, "card_actor", None) else []
@@ -1136,6 +1151,8 @@ class Agent:
             return {**result, "content": "이건 동희에게 남기지 않아", "is_error": True}
         inp = block.input or {}
         kind, per_day = inp.get("kind"), inp.get("per_day")
+        if kind == "feature":
+            return await self._request_feature(inp, msg, result)
         name, label = clean_name(inp.get("name")), " ".join(str(inp.get("label") or "").split())[:NAME_MAX].strip()
         if kind not in ASK_OWNER_TOOL["input_schema"]["properties"]["kind"]["enum"]:
             return {**result, "content": "kind 는 " + "·".join(ASK_OWNER_TOOL["input_schema"]["properties"]["kind"]["enum"])
@@ -1192,6 +1209,29 @@ class Agent:
                 "self": "자기 자신이라 남기지 않았어.",
             }
         return {**result, "content": texts[outcome]}
+
+    async def _request_feature(self, inp, msg, result):
+        feature, quote = inp.get("feature"), inp.get("quote")
+        if not self.friend_cards or feature not in TEXT_FEATURE_NAMES or not isinstance(quote, str) or len(quote) > 500:
+            return {**result, "content": "등록할 수 있는 기능 요청이 아니야.", "is_error": True}
+        quoted = " ".join(quote.split())
+        if not quoted or quoted not in " ".join(msg.text.split()):
+            return {**result, "content": "친구가 이번 말에서 직접 한 요청만 남겨 줘.", "is_error": True}
+        tools = {tool["name"] for tool in self._tools(msg)}
+        _, disabled = availability(
+            "direct" if msg.is_channel else "group", tools,
+            calendar=bool(getattr(msg, "google_link", None) and "schedule_list" in tools),
+            phone=bool(getattr(self, "ring", False) and "schedule_add" in tools),
+        )
+        if feature not in disabled:
+            return {**result, "content": "이 방에서 꺼져 있는 기능만 켜 달라고 남길 수 있어.", "is_error": True}
+        try:
+            await self.store.add_request(msg.user_key, msg.room_key, "feature", feature=feature)
+        except Exception as error:
+            log.error("feature_request_storage_error %s", type(error).__name__)
+            return {**result, "content": "저장소 오류로 남기지 못했어.", "is_error": True}
+        msg.owner_asked = True
+        return {**result, "content": "동희에게 켜 달라고 남겼어. 지금 기능 설정은 그대로야."}
 
     # ── 선톡(먼저 말 걸기) ──────────────────────────────────────
 

@@ -26,6 +26,7 @@ FEATURES = (
     Feature("통화 중 웹 검색", ("call",), ("googleSearch",)),
 )
 TOOLS = frozenset(tool for feature in FEATURES for tool in feature.tools)
+TEXT_FEATURE_NAMES = tuple(feature.name for feature in FEATURES if "direct" in feature.areas)
 WATCH = "지켜보다 알려 주기(월세, 택배, 남의 답장)는 못 해. 대신 날짜 알림을 제안해."
 CLOSED = "꺼진 일은 꺼져 있다고 말하고 동희한테 켜 달라고 할지 물어봐."
 ALTERNATIVE = "못 하는 일은 '못 해'로 끝내지 말고 대신 할 수 있는 걸 같이 말해."
@@ -35,7 +36,7 @@ def text_matrix(tools):
     return [tool for tool in tools if tool.get("name") in TOOLS]
 
 
-def description(area, available, *, calendar=False, phone=False):
+def availability(area, available, *, calendar=False, phone=False):
     extra = {"연결한 친구의 캘린더 일정": calendar, "앱으로 지금 전화·약속 전화 걸기": phone}
     enabled, disabled = [], []
     for feature in FEATURES:
@@ -43,6 +44,11 @@ def description(area, available, *, calendar=False, phone=False):
             continue
         on = any(name in available for name in feature.tools) if feature.tools else extra[feature.name]
         (enabled if on else disabled).append(feature.name)
+    return enabled, disabled
+
+
+def description(area, available, *, calendar=False, phone=False):
+    enabled, disabled = availability(area, available, calendar=calendar, phone=phone)
     lines = []
     if enabled:
         lines.append("마롱이가 할 수 있는 일: " + " · ".join(enabled))

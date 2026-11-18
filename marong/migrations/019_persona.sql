@@ -1,6 +1,6 @@
 -- 019 Persona, proactive gate, favors and friend memory, stages 1 to 4
 -- (docs/04-functional-spec/persona.md SPEC-192~242, CTX-008~013).
--- Eighteen new tables (TBL-115~124, TBL-127~134) and one schema for graph checkpoints. Nothing existing changes.
+-- Eighteen new tables (TBL-115~124, TBL-127~134), a checkpoint schema and the SPEC-204 request kind.
 -- Rules kept here:
 --   * Logs and result rows hold ids, labels and counts only. Text a friend wrote lives only where the spec needs it
 --     (card values, rules, the custom instruction, memory items, a relay or call text until it is sent) and is
@@ -22,6 +22,12 @@ SET LOCAL lock_timeout = '2s';
 CREATE SCHEMA IF NOT EXISTS talk_graph AUTHORIZATION marong;
 
 SET LOCAL ROLE marong_owner;
+
+ALTER TABLE marong.requests DROP CONSTRAINT IF EXISTS requests_kind_check;
+ALTER TABLE marong.requests ADD CONSTRAINT requests_kind_check CHECK (kind IN (
+    'share_off', 'share_on', 'friendship', 'link', 'proactive_off', 'proactive_on',
+    'proactive_less', 'proactive_more', 'feature'
+));
 
 -- TBL-115 friend_cards (CTX-008) ← SPEC-192, SPEC-193, SPEC-194, SPEC-195, SPEC-196, SPEC-197, SPEC-202, SPEC-220 | terms: TERM-040, TERM-041, TERM-042, TERM-047
 -- One row per friend, made the first time any of these is needed. state 'none' holds only per-friend values that
