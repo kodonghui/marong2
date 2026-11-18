@@ -85,8 +85,10 @@ public final class AppUpdateJob extends JobService {
         JobScheduler scheduler = context.getSystemService(JobScheduler.class);
         if (scheduler == null || (!replace && scheduler.getPendingJob(job) != null)) return;
         JobInfo.Builder builder = new JobInfo.Builder(job, new ComponentName(context, AppUpdateJob.class));
-        if (job == INSTALL_JOB) builder.setMinimumLatency(DEFER_MS);
-        else builder.setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY);
+        if (job == INSTALL_JOB) {
+            builder.setMinimumLatency(DEFER_MS);
+            builder.setBackoffCriteria(DEFER_MS, JobInfo.BACKOFF_POLICY_LINEAR);
+        } else builder.setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY);
         if (job == DAILY_JOB) builder.setPeriodic(DAY_MS);
         if (scheduler.schedule(builder.build()) != JobScheduler.RESULT_SUCCESS) {
             Log.i(TAG, "update_check scheduling_failed");
@@ -104,7 +106,7 @@ public final class AppUpdateJob extends JobService {
             try {
                 defer = update(job, cancel);
             } catch (OperationCanceledException ignored) {
-                // JobScheduler stopped this attempt. The next trigger can try again.
+                // onStopJob decides whether JobScheduler should retry.
             } catch (Exception error) {
                 Log.i(TAG, "update_check unavailable");
             } finally {
@@ -122,9 +124,19 @@ public final class AppUpdateJob extends JobService {
 
     @Override
     public boolean onStopJob(JobParameters params) {
-        CancellationSignal cancel = active.remove(params.getJobId());
-        if (cancel != null) cancel.cancel();
-        return false;
+        int job = params.getJobId();
+        CancellationSignal cancel = active.remove(job);
+        if (cancel == null) return false;
+        cancel.cancel();
+        if (job != INSTALL_JOB) return false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            int reason = params.getStopReason();
+            if (reason == JobParameters.STOP_REASON_USER || reason == JobParameters.STOP_REASON_CANCELLED_BY_APP) {
+                return false;
+            }
+        }
+        Log.i(TAG, "update_install interrupted retry");
+        return true;
     }
 
     @Override
@@ -177,7 +189,7 @@ public final class AppUpdateJob extends JobService {
         cancel.throwIfCanceled();
         int check;
         try {
-            check = verify(manager, own, release, apk);
+            check = verify(manager, own, release, apk, cancel);
         } catch (IOException error) {
             check = 1;
         }
@@ -368,15 +380,19 @@ public final class AppUpdateJob extends JobService {
         return false;
     }
 
-    private static int verify(PackageManager manager, PackageInfo own, AppUpdate.Release release, File apk)
-            throws IOException {
+    private static int verify(PackageManager manager, PackageInfo own, AppUpdate.Release release, File apk,
+                              CancellationSignal cancel) throws IOException {
         long size = apk.length();
         if (size != release.size) return 1;
         MessageDigest hash = sha256();
         try (InputStream input = new FileInputStream(apk)) {
             byte[] buffer = new byte[BUFFER_SIZE];
-            for (int read; (read = input.read(buffer)) != -1;) hash.update(buffer, 0, read);
+            for (int read; (read = input.read(buffer)) != -1;) {
+                cancel.throwIfCanceled();
+                hash.update(buffer, 0, read);
+            }
         }
+        cancel.throwIfCanceled();
         String digest = hex(hash.digest());
         if (!release.sha256.equals(digest)) return 2;
         PackageInfo archive = manager.getPackageArchiveInfo(apk.getPath(), signatureFlags());
