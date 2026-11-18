@@ -2,6 +2,7 @@ import {action, AI_NOTICE, api, banner, button, CONSENT, currency, dateLabel, el
   link, notice, picture, show, showTabs, signIn, text} from './pet.js';
 import {pendingCard} from './home.js';
 import {pushControl} from './push-control.js';
+import {business} from './shop.js';
 
 const stages = {
   photos: ['traits', '사진을 살펴보고 있어요'], traits: ['traits', '특징표 고치기'],
@@ -402,27 +403,60 @@ async function preview(job, me) {
       : '미리 보기는 무료예요. 하루 3장까지 그려요'), outlet, draw);
     return;
   }
-  const ticket = button(`만들기권으로 만들기(${me.freeTickets}장 있어요)`, () => action(ticket, outlet, async () => {
-    const key = `pet:free-checkout:${job.id}`;
-    const idempotencyKey = sessionStorage.getItem(key) || crypto.randomUUID();
-    sessionStorage.setItem(key, idempotencyKey);
-    const result = await changeCreation(job, 'checkout', {method: 'POST', body: {useFreeTicket: true, idempotencyKey}});
-    if (result === null) return;
-    sessionStorage.removeItem(key);
-    location.assign(`/create/${job.id}/candidates`);
-  }));
-  const price = `${currency.format(job.priceKrw)}원(부가세 포함)`;
+  const destination = `/create/${job.id}/candidates`;
+  const price = `${currency.format(job.priceKrw)}원`;
+  const paymentState = output();
   const paid = button('결제하고 만들기', () => dialog.showModal(), 'primary');
   paid.disabled = !me.paymentsEnabled;
-  const business = me.business ? el('details', {}, el('summary', {}, '사업자 정보'),
-    ...Object.entries(me.business).map(([name, value]) => text(`${name} ${value}`))) : null;
-  const dialog = el('dialog', {class: 'sheet stack'}, el('h2', {}, '캐릭터 만들기'), text(price),
-    text('후보를 그리기 시작하면 철회할 수 없어요'), business,
-    notice('잠시 뒤 다시 해 주세요.'), button('닫기', () => dialog.close()));
+  const paymentOff = () => paymentState.replaceChildren(text('결제는 곧 열려요.', 'muted'));
+  if (paid.disabled) paymentOff();
+  let checkingOut = false;
+  async function checkout(useFreeTicket, resultOutlet) {
+    if (checkingOut) return;
+    checkingOut = true;
+    const key = `pet:${useFreeTicket ? 'free' : 'paid'}-checkout:${job.id}`;
+    const idempotencyKey = sessionStorage.getItem(key) || crypto.randomUUID();
+    sessionStorage.setItem(key, idempotencyKey);
+    try {
+      const result = await changeCreation(job, 'checkout', {method: 'POST', body: {useFreeTicket, idempotencyKey}});
+      if (result === null) return;
+      if (result.order.status === 'fulfilled') {
+        sessionStorage.removeItem(key);
+        location.assign(destination);
+        return;
+      }
+      if (!useFreeTicket && result.pg) sessionStorage.setItem('pet_pay_return', destination);
+      if (result.order.status === 'paid') {
+        resultOutlet.replaceChildren(notice('결제는 됐어요. 받은 것을 넣고 있어요', link('주문 내역', '/me/orders')));
+        return;
+      }
+      // The payment provider's checkout window is connected when its SDK is selected.
+      throw new Failure(503);
+    } catch (error) {
+      if (error.code === 'payments_off') {
+        paid.disabled = true;
+        dialog.close();
+        paymentOff();
+      } else if (error.code === 'identity_required') {
+        resultOutlet.replaceChildren(notice('첫 결제 전에 본인인증을 한 번 해 주세요.', link('내 정보', '/me')));
+      } else if (error.code === 'consent_required') {
+        resultOutlet.replaceChildren(consentNotice());
+      } else throw error;
+    } finally {
+      checkingOut = false;
+    }
+  }
+  const orderOutlet = output();
+  const confirm = button('결제하기', () => action(confirm, orderOutlet, () => checkout(false, orderOutlet)), 'primary');
+  const ticket = button(`만들기권으로 만들기(${me.freeTickets}장 있어요)`, () =>
+    action(ticket, outlet, () => checkout(true, outlet)));
+  const dialog = el('dialog', {class: 'sheet stack'}, el('h2', {}, '캐릭터 만들기'), text(`${price}, 부가세 포함`),
+    text('후보를 그리기 시작하면 철회할 수 없어요'), business(me), orderOutlet, confirm,
+    button('닫기', () => dialog.close()));
   show(picture(job.preview, 'AI가 그린 미리 보기'), el('small', {}, 'AI가 그린 미리 보기'),
-    text('결제하면 이 모습을 바탕으로 그림 후보 4장을 그려요'), el('strong', {}, price),
+    text('결제하면 이 모습을 바탕으로 그림 후보 4장을 그려요'), el('strong', {}, `${price}(부가세 포함)`),
     text('후보를 그리기 시작하면 철회할 수 없어요', 'muted'),
-    me.paymentsEnabled ? null : text('결제는 곧 열려요.', 'muted'), paid,
+    paymentState, paid,
     me.freeTickets > 0 ? ticket : null, outlet, text(`${dateLabel(job.expiresAt)}까지 결제하지 않으면 지워요`, 'muted'), dialog);
 }
 

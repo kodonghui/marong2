@@ -160,7 +160,7 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
           return json(res, {code: 'invalid_input'}, 400);
         }
         state = 'candidates';
-        return json(res, {pg: null});
+        return json(res, {order: {...order, product: 'character_creation', amountKrw: 0}, pg: null});
       }
       if (stage === 'choose') {
         selected = data.candidateId;
@@ -1169,6 +1169,75 @@ if (require.main === module) {
         await page.close();
       }
     }
+  });
+
+  test('SCR-144 confirms the price and reuses a paid order key across retries', async t => {
+    const {origin} = await fixture(t, {creationState: 'previewed', paymentsEnabled: true});
+    const page = await browser.newPage({viewport: {width: 360, height: 780}});
+    t.after(() => page.close());
+    const submissions = [];
+    const requests = Promise.withResolvers();
+    await page.route('**/api/creations/*/checkout', async route => {
+      submissions.push(route.request().postDataJSON());
+      if (submissions.length === 1) return route.fulfill({status: 503, json: {code: 'server_error'}});
+      await route.fulfill({json: {order: {id: orderId, status: 'created'},
+        pg: {clientKey: 'fixture-pg', orderName: '캐릭터 만들기', amount: 5900, billing: false}}});
+      requests.resolve();
+    });
+    const path = '/create/' + creationId;
+    await page.goto(origin + path + '/preview');
+    await page.getByRole('button', {name: '결제하고 만들기', exact: true}).click();
+    const sheet = page.getByRole('dialog');
+    await visible(sheet.getByText('5,900원, 부가세 포함', {exact: true}));
+    await visible(sheet.getByText('후보를 그리기 시작하면 철회할 수 없어요', {exact: true}));
+    await sheet.getByText('사업자 정보', {exact: true}).click();
+    await visible(sheet.getByText('시험 상점', {exact: true}));
+    assert.deepEqual(submissions, []);
+    const confirm = sheet.getByRole('button', {name: '결제하기', exact: true});
+    await confirm.click();
+    await visible(sheet.getByText('잠시 뒤 다시 해 주세요.', {exact: true}));
+    await confirm.click();
+    await requests.promise;
+    await page.waitForFunction(dest => sessionStorage.getItem('pet_pay_return') === dest, path + '/candidates');
+    assert.equal(submissions.length, 2);
+    assert.equal(submissions[0].useFreeTicket, false);
+    assert.match(submissions[0].idempotencyKey, /^[a-f0-9-]{36}$/);
+    assert.deepEqual(submissions[0], submissions[1]);
+    assert.equal(new URL(page.url()).pathname, path + '/preview');
+  });
+
+  test('SCR-144 shows identity guidance and disables a newly closed payment while keeping the free ticket', async t => {
+    const {origin} = await fixture(t, {creationState: 'previewed', paymentsEnabled: true});
+    const page = await browser.newPage({viewport: {width: 430, height: 780}});
+    t.after(() => page.close());
+    const submissions = [];
+    await page.route('**/api/creations/*/checkout', route => {
+      const body = route.request().postDataJSON();
+      submissions.push(body);
+      if (body.useFreeTicket) return route.continue();
+      const code = submissions.length === 1 ? 'identity_required' : 'payments_off';
+      return route.fulfill({status: 409, json: {code}});
+    });
+    const path = '/create/' + creationId;
+    await page.goto(origin + path + '/preview');
+    const pay = page.getByRole('button', {name: '결제하고 만들기', exact: true});
+    await pay.click();
+    const sheet = page.getByRole('dialog');
+    const confirm = sheet.getByRole('button', {name: '결제하기', exact: true});
+    await confirm.click();
+    await visible(sheet.getByText('첫 결제 전에 본인인증을 한 번 해 주세요.', {exact: true}));
+    assert.equal(await sheet.getByRole('link', {name: '내 정보', exact: true}).getAttribute('href'), '/me');
+    await confirm.click();
+    await visible(page.getByText('결제는 곧 열려요.', {exact: true}));
+    assert.equal(await sheet.isVisible(), false);
+    assert.equal(await pay.isDisabled(), true);
+    const ticket = page.getByRole('button', {name: /만들기권으로 만들기/});
+    assert.equal(await ticket.isEnabled(), true);
+    await ticket.click();
+    await page.waitForURL('**' + path + '/candidates');
+    assert.deepEqual(submissions[0], submissions[1]);
+    assert.equal(submissions[2].useFreeTicket, true);
+    assert.notEqual(submissions[2].idempotencyKey, submissions[0].idempotencyKey);
   });
 
   test('SCR-145 refreshes the chosen picture when another tab has already picked it', async t => {
