@@ -12,7 +12,7 @@ WORKLETS = {"call-capture.js": "capture.js", "call-playback.js": "playback.js"}
 SAFE_HOST = re.compile(r"^[a-zA-Z0-9.-]+(?::[0-9]{1,5})?$")
 ASSETS = {
     "pet.css", "pet.js", "home.js", "creation.js", "member.js", "diary.js", "pet.webmanifest", "pet-icon.png",
-    "pet-welcome.webp", "report.js", "orders.js", "settings.js", "call.js",
+    "pet-welcome.webp", "report.js", "orders.js", "settings.js", "call.js", "closet.js", "shop.js",
 }
 LEGAL = {"terms.html", "privacy.html", "overseas.html"}
 HEADERS = {
@@ -41,6 +41,18 @@ def register(app, *, legal_dir=None):
     async def worker(_request):
         return web.FileResponse(STATIC / "pet-worker.js", headers=HEADERS)
 
+    async def thumbnail(request):
+        path = STATIC / "items" / request.match_info["id"] / "thumb.webp"
+        if not path.is_file():
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers=HEADERS)
+
+    async def background(request):
+        path = STATIC / "backgrounds" / (request.match_info["name"] + ".webp")
+        if not path.is_file():
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers=HEADERS)
+
     async def legal(request):
         name = request.match_info["file"]
         if legal_dir is None or name not in LEGAL:
@@ -51,6 +63,8 @@ def register(app, *, legal_dir=None):
         return web.FileResponse(path, headers={**HEADERS, "Content-Type": "text/html; charset=utf-8"})
 
     app.router.add_get("/static/legal/{file}", legal)
+    app.router.add_get(r"/static/items/{id:[0-9a-fA-F-]{36}}/thumb.webp", thumbnail)
+    app.router.add_get(r"/static/backgrounds/{name:[a-z0-9_]{1,40}}.webp", background)
     app.router.add_get("/static/{file}", asset)
     app.router.add_get("/pet-worker.js", worker)
     app.router.add_get("/", page)

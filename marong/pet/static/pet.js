@@ -5,6 +5,8 @@ import {diary} from './diary.js';
 import {orders, paymentReturn} from './orders.js';
 import {callScreen} from './call.js';
 import {settings, farewell} from './settings.js';
+import {closet} from './closet.js';
+import {shop, shopItem} from './shop.js';
 
 export const page = document.querySelector('#page');
 const tabs = document.querySelector('#tabs');
@@ -192,10 +194,13 @@ async function start() {
     else if (/^\/pets\/[^/]+$/.test(path)) await petScreen(path.split('/')[2]);
     else if (/^\/pets\/[^/]+\/diary(?:\/[^/]+)?$/.test(path)) await diary(path);
     else if (/^\/pets\/[^/]+\/call$/.test(path)) await callScreen(path.split('/')[2]);
+    else if (/^\/pets\/[^/]+\/closet$/.test(path)) await closet(path.split('/')[2]);
     else if (/^\/pets\/[^/]+\/settings$/.test(path)) await settings(path.split('/')[2]);
     else if (/^\/pets\/[^/]+\/farewell$/.test(path)) await farewell(path.split('/')[2]);
     else if (path === '/me') await account();
     else if (path === '/me/orders') await orders();
+    else if (path === '/shop') await shop();
+    else if (/^\/shop\/[^/]+$/.test(path)) await shopItem(path.split('/')[2]);
     else if (path === '/pay/return') await paymentReturn();
     else failurePage(new Failure(404));
   } catch (error) {

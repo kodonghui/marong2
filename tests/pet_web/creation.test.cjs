@@ -12,6 +12,7 @@ const creationId = '00000000-0000-4000-8000-000000000900';
 const candidateId = '00000000-0000-4000-8000-000000000901';
 const orderId = '00000000-0000-4000-8000-000000000920';
 const petId = '00000000-0000-4000-8000-000000000902';
+const garmentId = '00000000-0000-4000-8000-000000000942';
 const traits = {species: 'dog', breedGuess: '푸들', coatColors: ['갈색'], pattern: '단색',
   patternNotes: '', earShape: '늘어진 귀', eyeColor: '갈색', build: '작음', furLength: '곱슬', distinctive: ''};
 const pet = {id: petId, name: '콩이', status: 'active', mode: 'living', shopEntry: true,
@@ -31,11 +32,17 @@ async function body(request) {
   return Buffer.concat(chunks);
 }
 
-async function fixture(t, {signedIn = true, consent = true, invite = false, reportLimited = false, payment = 'fulfilled'} = {}) {
+async function fixture(t, {signedIn = true, consent = true, invite = false, reportLimited = false, payment = 'fulfilled',
+  closetMode, paymentsEnabled = false, layerFailure = false, outfitFailure = false, orderRetry = false} = {}) {
   let member = signedIn;
   let state;
   let selected = null;
   let memberPet = {...pet, intro: {personality: ['느긋함'], likes: '산책', dislikes: '', callMe: '누나'}};
+  if (closetMode) memberPet = {...memberPet, mode: closetMode === 'memorial' ? 'memorial' : 'living',
+    status: closetMode === 'archived' ? 'archived' : 'active', shopEntry: closetMode === 'living',
+    template: 'dog_small', outfit: {head: null, body: null, neck: null}};
+  let needsConfirmation = true;
+  let ownsGarment = false;
   const writes = [];
   let callStarts = 0;
   const order = {id: orderId, orderNo: 'P20261117-ABC123', product: 'item', itemName: '털모자',
@@ -49,10 +56,11 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
       chosenId: selected, petId: state === 'done' ? petId : null, priceKrw: 5900, expiresAt: '2026-12-17T00:00:00Z'};
   }
   const server = http.createServer(async (req, res) => {
-    const {pathname} = new URL(req.url, 'http://localhost');
+    const {pathname, searchParams} = new URL(req.url, 'http://localhost');
     if (pathname === '/api/me') return json(res, member ? {
-      overseasTransfer: consent, paymentsEnabled: false, freeTickets: 1,
+      overseasTransfer: consent, paymentsEnabled, freeTickets: 1,
       memberNo: 'AB12CD34', identityVerified: false, status: 'active',
+      business: paymentsEnabled ? {'상호': '시험 상점'} : null,
     } : {code: 'unauthenticated'}, member ? 200 : 401);
     if (pathname === '/api/signup' && req.method === 'POST') {
       const data = JSON.parse(await body(req));
@@ -62,7 +70,28 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
       return json(res, {}, 201);
     }
     if (pathname === '/api/me/quota') return json(res, {percent: 60});
-    if (pathname === '/api/pets') return json(res, {items: state === 'done' ? [pet] : []});
+    if (pathname === '/api/pets') return json(res, {items: state === 'done' ? [pet] : closetMode ? [memberPet] : []});
+    if (pathname === '/api/me/inventory') return json(res, {items: [{itemId: garmentId, kind: 'wear', name: '털모자',
+      slot: 'head', source: 'order', wornBy: [], contents: [],
+      withdrawableUntil: needsConfirmation ? '2026-12-17T00:00:00Z' : null}]});
+    if (pathname === '/api/shop') return json(res, {items: [null, 'wear'].includes(searchParams.get('kind')) ? [{
+      id: garmentId, kind: 'wear', name: '털모자', priceKrw: 1200, slot: 'head',
+      limited: true, saleEndsAt: '2026-11-30T00:00:00Z', owned: ownsGarment, purchasable: paymentsEnabled, contents: [],
+    }] : []});
+    if (pathname === `/api/items/${garmentId}/layer`) {
+      assert.equal(searchParams.get('template'), 'dog_small');
+      if (layerFailure) return json(res, {code: 'server_error'}, 500);
+      res.writeHead(200, {'Content-Type': 'image/png'});
+      return res.end(await readFile(path.join(assets, 'pet-icon.png')));
+    }
+    if (pathname === `/api/pets/${petId}/outfit` && req.method === 'PUT') {
+      const outfit = JSON.parse(await body(req));
+      writes.push(outfit);
+      if (outfitFailure) return json(res, {code: 'wrong_slot'}, 400);
+      needsConfirmation = false;
+      memberPet = {...memberPet, outfit};
+      return json(res, memberPet);
+    }
     if (pathname === '/api/creations' && req.method === 'GET') return json(res, {items: state ? [job()] : []});
     if (pathname === '/api/creations' && req.method === 'POST') {
       assert.match(req.headers['content-type'], /^multipart\/form-data/);
@@ -97,6 +126,12 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
     if (pathname === `/api/media/${candidateId}`) {
       res.writeHead(200, {'Content-Type': 'image/png'});
       return res.end(await readFile(path.join(assets, 'pet-icon.png')));
+    }
+    if (pathname === '/api/orders' && req.method === 'POST') {
+      writes.push(JSON.parse(await body(req)));
+      if (orderRetry && writes.length === 1) return json(res, {code: 'server_error'}, 500);
+      ownsGarment = true;
+      return json(res, {pg: null, order}, 201);
     }
     if (pathname === '/api/orders') return json(res, {items: payment === 'empty' ? [] : [order]});
     if (pathname === `/api/orders/${orderId}/confirm`) {
@@ -145,6 +180,10 @@ async function fixture(t, {signedIn = true, consent = true, invite = false, repo
     if (/^\/static\/legal\/(terms|privacy|overseas)\.html$/.test(pathname)) {
       res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
       return res.end('<!doctype html><html lang="ko"><title>시험 문서</title><p>화면 시험용 문서</p>');
+    }
+    if (pathname === `/static/items/${garmentId}/thumb.webp` || pathname.startsWith('/static/backgrounds/')) {
+      res.writeHead(200, {'Content-Type': 'image/webp'});
+      return res.end(await readFile(path.join(assets, 'pet-welcome.webp')));
     }
     const file = pathname.startsWith('/static/') || pathname === '/pet-worker.js' ? basename(pathname) : 'index.html';
     try {
@@ -408,5 +447,79 @@ if (require.main === module) {
     const download = page.getByRole('link', {name: /^받기 · /});
     await visible(download);
     assert.equal(await download.getAttribute('href'), '/api/exports/' + orderId + '/download');
+  });
+
+  test('SCR-152 at 360px: withdrawal notice, equip, take off and slots', async t => {
+    const {origin, writes} = await fixture(t, {closetMode: 'living'});
+    const page = await browser.newPage({viewport: {width: 360, height: 780}});
+    t.after(() => page.close());
+    await page.goto(origin + '/pets/' + petId + '/closet');
+    await page.getByRole('button', {name: '털모자', exact: true}).click();
+    const dialog = page.getByRole('dialog');
+    await visible(dialog.getByText(/철회할 수 없어요/));
+    await dialog.getByRole('button', {name: '아니요'}).click();
+    assert.deepEqual(writes, []);
+    await page.getByRole('button', {name: '털모자', exact: true}).click();
+    await dialog.getByRole('button', {name: '입히기', exact: true}).click();
+    const worn = page.getByRole('button', {name: '✓ 털모자', exact: true});
+    await visible(worn);
+    assert.match(await page.locator('[data-slot="head"]').getAttribute('src'), /layer\?template=dog_small$/);
+    await worn.click();
+    await visible(page.getByRole('button', {name: '털모자', exact: true}));
+    assert.deepEqual(writes, [{head: garmentId, body: null, neck: null}, {head: null, body: null, neck: null}]);
+    await page.getByRole('button', {name: '몸', exact: true}).click();
+    await visible(page.getByText('이 자리에 입힐 아이템이 없어요.'));
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 360);
+  });
+
+  test('SCR-152 restores the outfit on a wrong-slot response and hides shopping for a memorial pet', async t => {
+    const {origin, writes} = await fixture(t, {closetMode: 'memorial', outfitFailure: true});
+    const page = await browser.newPage({viewport: {width: 430, height: 780}});
+    t.after(() => page.close());
+    await page.goto(origin + '/pets/' + petId + '/closet');
+    await page.getByRole('button', {name: '털모자', exact: true}).click();
+    await page.getByRole('dialog').getByRole('button', {name: '입히기', exact: true}).click();
+    await visible(page.getByText('입힐 수 없어요', {exact: true}));
+    assert.equal(await page.locator('[data-slot="head"]').count(), 0);
+    assert.equal(await page.getByRole('link', {name: '상점에서 더 보기'}).count(), 0);
+    assert.equal(writes.length, 1);
+    await page.goto(origin + '/shop');
+    await visible(page.getByText('함께 사는 아이가 있을 때 열려요.'));
+  });
+
+  test('SCR-157/158 at 430px: catalog, read-only try-on failure and payment-off state', async t => {
+    const {origin, writes} = await fixture(t, {closetMode: 'living', layerFailure: true});
+    const page = await browser.newPage({viewport: {width: 430, height: 800}});
+    t.after(() => page.close());
+    await page.goto(origin + '/shop');
+    await visible(page.getByText('결제는 곧 열려요.'));
+    await page.getByRole('button', {name: '스티커', exact: true}).click();
+    await visible(page.getByText('지금은 팔고 있는 것이 없어요.'));
+    await page.getByRole('button', {name: '착용', exact: true}).click();
+    await page.getByRole('link', {name: /털모자/}).click();
+    await visible(page.getByText('입혀 보기를 불러오지 못했어요'));
+    await visible(page.getByText('1,200원(부가세 포함)', {exact: true}));
+    assert.equal(await page.getByRole('button', {name: '사기'}).isDisabled(), true);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 430);
+    assert.deepEqual(writes, []);
+  });
+
+  test('SCR-158 keeps its order key on retry and updates ownership only after fulfillment', async t => {
+    const {origin, writes} = await fixture(t, {closetMode: 'living', paymentsEnabled: true, orderRetry: true});
+    const page = await browser.newPage({viewport: {width: 360, height: 780}});
+    t.after(() => page.close());
+    await page.goto(origin + '/shop/' + garmentId);
+    await page.getByRole('button', {name: '사기'}).click();
+    const dialog = page.getByRole('dialog');
+    await visible(dialog.getByText('1,200원, 부가세 포함', {exact: true}));
+    await visible(dialog.getByText(/산 지 7일 안이고/));
+    await dialog.getByRole('button', {name: '결제하기'}).click();
+    await visible(dialog.getByText('잠시 뒤 다시 해 주세요.'));
+    await dialog.getByRole('button', {name: '결제하기'}).click();
+    await visible(page.getByText('가지고 있어요', {exact: true}));
+    assert.equal(writes.length, 2);
+    assert.deepEqual(writes[0], writes[1]);
+    assert.equal(writes[1].itemId, garmentId);
+    assert.match(writes[1].idempotencyKey, /^[\da-f-]{36}$/i);
   });
 }
