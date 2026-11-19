@@ -136,7 +136,7 @@ class Turn:
 
     def rejection(self, block):
         if self.quota is None:
-            return None
+            return "unknown_tool" if block.name == "memory_forget" and block.name not in self.offered else None
         if self.quota["tools"] >= TOOL_LIMIT:
             return "turn_limit"
         if block.name not in self.offered:
@@ -177,10 +177,14 @@ class Turn:
                             offered=int(block.name in self.offered),
                         )
                     results.append(outcome)
+                    if getattr(self.msg, "memory_forget_committed", False):
+                        self.answer = "응, 잊었어"
+                        return {"next": "finish"}
             # Keep every original assistant block, including provider-signed thinking.
             self.messages = [*self.messages, {"role": "assistant", "content": self.assistant_blocks},
                              {"role": "user", "content": results}]
             self.results_waiting = len(results)
+        return {"next": "model"}
 
 
 async def model_node(state: Route, runtime: Runtime[Turn]) -> Route:
@@ -188,8 +192,7 @@ async def model_node(state: Route, runtime: Runtime[Turn]) -> Route:
 
 
 async def tools_node(state: Route, runtime: Runtime[Turn]) -> Route:
-    await runtime.context.tools_node()
-    return {"next": "model"}
+    return await runtime.context.tools_node()
 
 
 @lru_cache(maxsize=1)
@@ -200,7 +203,7 @@ def graph():
             .add_edge(START, "model")
             .add_conditional_edges("model", lambda state: state["next"],
                                    {"model": "model", "tools": "tools", "finish": END})
-            .add_edge("tools", "model")
+            .add_conditional_edges("tools", lambda state: state["next"], {"model": "model", "finish": END})
             .compile())
 
 

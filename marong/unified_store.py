@@ -6,6 +6,7 @@ from psycopg.types.json import Jsonb
 
 from .discord_store import DiscordStore
 from .friend_scope import ACCEPTED_CIRCLE
+from .graphs.memory import lock_message_writer, schedule_text
 from .room_scope import writing_room, writing_room_key, writing_user_key
 from .store import PROACTIVE_MESSAGE
 
@@ -71,11 +72,11 @@ class UnifiedStore(DiscordStore):
         return await self._one("SELECT * FROM marong.contact_settings WHERE friend_id=%s", (friend_id,))
 
     async def app_incoming(self, who, key, text, preference):
-        row = await self._one("""
+        insert = """
             WITH saved AS (
                 INSERT INTO marong.messages(room_key,user_key,role,content,kakao_id,meta)
                 VALUES (%(room)s,%(user)s,'user',%(text)s,%(key)s,%(meta)s)
-                ON CONFLICT (room_key,kakao_id) DO NOTHING RETURNING id
+                ON CONFLICT (room_key,kakao_id) DO NOTHING RETURNING id,created_at
             ), touched AS (
               UPDATE marong.contact_settings SET last_incoming_at=clock_timestamp(),failures=0,
               opted_in_at=CASE WHEN %(preference)s::boolean IS TRUE THEN coalesce(opted_in_at,clock_timestamp())
@@ -84,9 +85,19 @@ class UnifiedStore(DiscordStore):
                                      THEN coalesce(proactive_moved_at,clock_timestamp()) ELSE proactive_moved_at END
               WHERE friend_id=%(friend)s AND EXISTS (SELECT 1 FROM saved)
             )
-            SELECT id FROM saved
-        """, {"friend": who["friend_id"], "preference": preference, "room": who["room_key"],
-              "user": who["user_key"], "text": text, "key": key, "meta": Jsonb({"transport": "app"})})
+            SELECT id,created_at FROM saved
+        """
+        values = {"friend": who["friend_id"], "preference": preference, "room": who["room_key"],
+              "user": who["user_key"], "text": text, "key": key, "meta": Jsonb({"transport": "app"})}
+        if self.friend_memory_enabled:
+            async with self.pool.connection() as conn, conn.transaction():
+                friend_id = await lock_message_writer(conn, who["user_key"])
+                cursor = await conn.execute(insert, values)
+                row = await cursor.fetchone()
+                if row and friend_id == who["friend_id"]:
+                    await schedule_text(conn, friend_id, row["created_at"])
+        else:
+            row = await self._one(insert, values)
         return row["id"] if row else None
 
     async def proactive_rooms(self, room_key=None):

@@ -346,6 +346,13 @@ async def claim_checks(db, reminders, sender):
                      "WHERE id = %s", (edge, ring))
             got, noted = await asyncio.gather(calls.claim_ring(p, call_e, ring), reminders.sweep_rings())
             status = db.admin("SELECT status FROM marong.app_rings WHERE id = %s", (ring,))[0][0]
+            if status == "ringing":
+                # A sweep before expiry and an answer after expiry may both
+                # leave the ring alone until the next sweep.
+                ok(not got and not noted and len(sender.sent) == before, "no premature missed notice")
+                await asyncio.sleep(.02)
+                noted = await reminders.sweep_rings()
+                status = db.admin("SELECT status FROM marong.app_rings WHERE id = %s", (ring,))[0][0]
             ok((status, bool(got), noted, len(sender.sent) - before) in {("answered", True, 0, 0),
                                                                           ("missed", False, 1, 1)},
                (status, got, noted))

@@ -121,8 +121,8 @@ def schedule_tools(ring: bool = False, *, surface="discord") -> tuple:
         return (SCHEDULE_ADD_CALL_TOOL, SCHEDULE_CANCEL_TOOL, SCHEDULE_LIST_TOOL) if ring else SCHEDULE_TOOLS
     base = SCHEDULE_ADD_CALL_TOOL if ring else SCHEDULE_ADD_TOOL
     schema = base["input_schema"]
-    properties = {key: {**value, "description": value["description"].replace("DM으로", "앱 글 대화로")
-                        .replace("앱이 없으면 디스코드 DM으로 통화하자고 보내", "웹에서는 받기 버튼을 보여 줘")}
+    properties = {key: {**value, "description": value["description"].replace("앱이 없으면 디스코드 DM으로 통화하자고 보내", "웹에서는 받기 버튼을 보여 줘")
+                        .replace("DM으로", "앱 글 대화로")}
                   if "description" in value else value for key,value in schema["properties"].items()}
     return ({**base, "input_schema": {**schema, "properties": properties}}, SCHEDULE_CANCEL_TOOL, SCHEDULE_LIST_TOOL)
 

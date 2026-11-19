@@ -557,4 +557,36 @@ GRANT SELECT, INSERT, UPDATE ON marong.safety_states, marong.memory_items, maron
 GRANT SELECT, INSERT ON marong.preference_signals, marong.memory_forgets, marong.call_texts, marong.persona_ai_runs
   TO marong_call;
 GRANT EXECUTE ON FUNCTION marong.forget_embeddings(bigint) TO marong_call;
+
+-- A call can forget a chat message, but it can only invoke this receipt-scoped
+-- operation over the text graph. It gets no read or write grant on checkpoints.
+RESET ROLE;
+SET LOCAL ROLE marong;
+CREATE OR REPLACE FUNCTION talk_graph.forget_message_checkpoints(p_forget bigint)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+BEGIN
+  -- AsyncPostgresSaver.setup() runs at the first launch of the worker.
+  IF to_regclass('talk_graph.checkpoints') IS NULL
+     OR to_regclass('talk_graph.checkpoint_writes') IS NULL
+     OR to_regclass('talk_graph.checkpoint_blobs') IS NULL THEN
+    RETURN;
+  END IF;
+  WITH threads AS MATERIALIZED (
+    SELECT DISTINCT c.thread_id
+    FROM marong.forget_marks m JOIN talk_graph.checkpoints c
+      ON (c.thread_id LIKE 'memory:text:'||m.friend_id::text||':%'
+          OR c.thread_id LIKE 'talk:'||m.friend_id::text||':%')
+     AND m.target_id::text = ANY(string_to_array(c.metadata->>'source_message_ids', ','))
+    WHERE m.forget_id = p_forget AND m.target_type = 'message'
+  ), writes AS (
+    DELETE FROM talk_graph.checkpoint_writes WHERE thread_id IN (SELECT thread_id FROM threads)
+  ), blobs AS (
+    DELETE FROM talk_graph.checkpoint_blobs WHERE thread_id IN (SELECT thread_id FROM threads)
+  )
+  DELETE FROM talk_graph.checkpoints WHERE thread_id IN (SELECT thread_id FROM threads);
+END;
+$$;
+REVOKE ALL ON FUNCTION talk_graph.forget_message_checkpoints(bigint) FROM PUBLIC;
+GRANT USAGE ON SCHEMA talk_graph TO marong_call;
+GRANT EXECUTE ON FUNCTION talk_graph.forget_message_checkpoints(bigint) TO marong_call;
 COMMIT;

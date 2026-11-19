@@ -34,6 +34,7 @@ from marong.diary_worker import DiaryWorker
 from marong.discord_dm import PrivateChatAgent
 from marong.embed import Embeddings
 from marong.google_calendar import GoogleCalendar, serve as serve_google
+from marong.graphs.memory import run_text_memory
 from marong.internal_shop import InternalShop
 from marong.llm import LLM
 from marong.memory import MemoryWorker
@@ -216,6 +217,10 @@ async def serve(settings, credentials, options, secret, authentication, home, st
                 jobs["call_text"] = call_text
             if worker:
                 jobs["memory"] = worker.run
+            if store.friend_memory_enabled:
+                async def text_memory():
+                    await run_text_memory(store, settings.database_url, llm, settings.anthropic_model)
+                jobs["friend_memory"] = text_memory
             if agent.warmer:
                 jobs["cache"] = agent.warmer.run
             if google:

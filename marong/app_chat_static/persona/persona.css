@@ -30,3 +30,15 @@
 .persona-rules form {display: flex; gap: 6px; align-items: center}
 .persona-rules input {min-width: 0}
 .persona-rules .text-button {white-space: nowrap}
+
+.memory-page .bar {grid-template-columns: auto minmax(0, 1fr)}
+.memory-page .bar h1 {text-align: center; overflow-wrap: anywhere}
+.memory-empty {text-align: center}
+.memory-row {margin-block: 8px}
+.memory-line {display: flex; gap: 8px; align-items: start}
+.memory-line > div {min-width: 0; flex: 1}
+.memory-line > button {white-space: nowrap}
+.memory-row blockquote {margin: 6px 0; padding-inline-start: 10px; border-inline-start: 2px solid var(--line); overflow-wrap: anywhere}
+.memory-page .memory-confirm {margin-block: 6px 0; border-top: 1px solid var(--line); padding-top: 8px}
+.memory-confirm button + button {margin-inline-start: 8px}
+#memory-skeleton span {display: block; height: 18px; margin: 14px 0; border-radius: 10px; background: var(--line)}

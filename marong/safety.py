@@ -10,6 +10,8 @@ from uuid import uuid4
 from .friend_card import KST, FriendCards, ModelRun, friend_lock
 
 log = logging.getLogger("marong.safety")
+SHARE_BLOCK = re.compile(r"비밀|병원|섹스|성관계|19금|야동|이별|헤어[지졌짐]|결혼|다이어트|체중|몸무게|감량|살\s*빼|\d\s*(kg|키로)"
+                         r"|월급|연봉|빚|대출|자살|자해|죽고\s*싶")
 WEAK = re.compile(r"죽고\s*싶|사라지고\s*싶|다\s*그만하고\s*싶|없어지고\s*싶|살기\s*싫")
 DISTRESS = re.compile(r"힘들|우울|짜증|속상|서럽|억울|울었|울고|지쳤|지쳐|스트레스|망했|불안|외로|잘렸")
 PLAN = re.compile(r"약\s*모아\s*놨|오늘\s*밤에\s*(?:죽을|끝낼)\s*거야|유서\s*(?:썼|적었|써\s*놨)")

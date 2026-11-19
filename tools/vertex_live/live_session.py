@@ -85,6 +85,7 @@ class LiveSession:
         self.goodbye_done=asyncio.Event();self.last_model_audio=0.;self.close_reason=None
         # Google Search: call_search.SearchBudget shared by this process, or None (no search, no guide).
         self.search=search;self.searches=0;self.search_live=False;self.planned_reconnect=False
+        self.forget_ack = None
         self.activity_at=0.;self.turn_done_at=None;self.turn_started_at=0.;self.playback_end=0.
         # ring: the ring id the page was opened with (/?ring=), or None. ring_info: the promise this call answers.
         # ring_topic: the picture card of a hello call, sent once with the first 'ready' (SPEC-268, SPEC-269).
@@ -275,6 +276,8 @@ class LiveSession:
             self.call_id,self.logical_resumed=await self.store.start_call(
                 self.p,self.client_id,self.voice,BUILD,
                 entrypoint='discord' if self.entry_transport=='discord' else 'web')
+            if getattr(self.store, "friend_marks", False):
+                self.revision = await self.store.revision(self.p)
             await self.claim_ring()
             if os.getenv('MARONG_SAFETY')=='on':
                 from call_safety import CallSafety
@@ -341,7 +344,16 @@ class LiveSession:
             except Exception:self.d['transportLogFailed']=True
             try:
                 revision=await self.store.revision(self.p)
-                if revision!=self.revision:self.revision=revision;self.reset.set()
+                if revision != self.revision or self.forget_ack:
+                    if self.forget_ack:
+                        expected, started = self.forget_ack
+                        now = time.monotonic()
+                        if expected == revision and now - started < 5 and (
+                            self.turn_done_at is None or self.turn_done_at < started or now < self.playback_end
+                        ):
+                            continue
+                    self.revision = revision
+                    self.reset.set()
             except Exception:pass
 
     def search_mode(self):
@@ -369,6 +381,8 @@ class LiveSession:
         if ring:options['ring']=ring
         if tuning:options['tuning']=tuning
         if handoff:options['handoff']=True
+        if self.store and hasattr(self.store, "friend_memory_enabled"):
+            options["friend_memory"] = self.store.friend_memory_enabled()
         if self.p and hasattr(self.store,'friend_instruction'):
             try:
                 friend_instruction=await asyncio.wait_for(self.store.friend_instruction(self.p),.5)
@@ -438,6 +452,8 @@ class LiveSession:
                 if self.prepared:
                     await self.prepared.stack.aclose();self.prepared=None
                 self.handle=None;self.pending.clear();self.resume.clear();self.recorder.parts.clear();self.reset.clear()
+                self.forget_ack = None
+                self.available.set()
                 if self.store and self.p:self.revision=await self.store.revision(self.p)
             ledger=getattr(self.store,'live_usage',None)
             usage_mode=self.prepared.usage_mode if self.prepared else await ledger.mode() if ledger else None
@@ -595,6 +611,9 @@ class LiveSession:
         async def sender():
             while True:
                 await self.available.wait();self.available.clear()
+                if self.forget_ack:
+                    self.audio.clear()
+                    continue
                 while not self.controls.empty():await send(await self.controls.get())
                 while self.audio:
                     at,pcm=self.audio.popleft()
@@ -636,6 +655,11 @@ class LiveSession:
                     result = SHOP_FAILED if name == 'shop_read' else {'result': 'not_saved', 'reason': 'temporary_error'}
                     if trace:
                         trace.record(result='temporary_error')
+                if name == "memory_forget" and result.get("ok"):
+                    try:
+                        self.forget_ack = (await self.store.revision(self.p), time.monotonic())
+                    except Exception:
+                        self.reset.set()
                 another_tool = any(not task.done() and task is not asyncio.current_task()
                                    for task in tool_tasks.values())
                 if not another_tool and (time.monotonic() - started < 0.8 or
@@ -757,6 +781,8 @@ class LiveSession:
             done,_=await asyncio.wait(tasks,return_when=asyncio.FIRST_COMPLETED)
             for task in done:task.result()
         finally:
+            if self.forget_ack and not self.stop.is_set():
+                self.reset.set()
             for task in tasks:task.cancel()
             for task in tool_tasks.values():task.cancel()
             await asyncio.gather(*tasks,*tool_tasks.values(),return_exceptions=True)

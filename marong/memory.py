@@ -14,8 +14,10 @@ import re
 
 from .config import Settings
 from .embed import Embeddings
+from .forget_rewrite import infer, rewrite_one
 from .fmt import day_line, short_key, short_time
 from .llm import LLM, brief, text_of
+from .safety import SHARE_BLOCK
 from .store import Store
 
 log = logging.getLogger("memory")
@@ -90,9 +92,7 @@ SHARE_SCHEMA = {
     "additionalProperties": False,
 }
 # 모델이 넣어도 공유 메모에서 한 번 더 빼는 낱말(빼는 것의 대표 낱말. 같이 빠지는 얘기가 있어도 빼는 쪽이 안전).
-# SHARE_BLOCK 은 가벼운 얘기·근황 둘 다, LIGHT_BLOCK 은 가벼운 얘기에서만(근황에는 넣어도 되는 고민·시험 같은 것)
-SHARE_BLOCK = re.compile(r"비밀|병원|섹스|성관계|19금|야동|이별|헤어[지졌짐]|결혼|다이어트|체중|몸무게|감량|살\s*빼|\d\s*(kg|키로)"
-                         r"|월급|연봉|빚|대출|자살|자해|죽고\s*싶")
+# LIGHT_BLOCK 은 가벼운 얘기에서만 뺀다(근황에는 넣어도 되는 고민·시험 같은 것).
 LIGHT_BLOCK = re.compile(r"시험|토익|면접|취업|이직|퇴사|우울|힘들|스트레스|지쳐|팀장|야근")
 # 거르는 규칙(지시문·낱말)이 바뀌면 메모가 그대로여도 모든 친구를 다시 거른다
 SHARE_RULES = hashlib.sha1((SHARE_SYSTEM + SHARE_BLOCK.pattern + LIGHT_BLOCK.pattern).encode()).hexdigest()[:8]
@@ -186,11 +186,16 @@ class MemoryWorker:
     async def step(self) -> bool:
         """한 번 돌고, 할 일이 더 남았으면 True."""
         await self.store.link_unlinked()
+        rewrote = False
+        if getattr(self.store, "friend_memory_enabled", False):
+            async def rewrite(original, forgotten):
+                return await infer(self.llm, self.s.anthropic_model, original, forgotten)
+            rewrote = await rewrite_one(self.store.pool, rewrite)
         more = await self.summarize_due()
         more = await self.note_due() or more
         shared = await self.share_due()
         await self.embed_pending()
-        return more or shared
+        return more or shared or rewrote
 
     async def embed_pending(self, max_batches: int = 20) -> int:
         if not self.emb.ready:
