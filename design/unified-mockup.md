@@ -34,6 +34,8 @@
 | C026-169-normal-day | SCR-169#normal 관리자 | 군밤 크림 | 940px |
 | C026-169-created-day | SCR-169#creating·#created 초대 링크 만듦 | 군밤 크림 | 780px |
 
+대지 17장을 한 페이지에 모은 파일: [unified-mockup.html](unified-mockup.html)(저장소에서 바로 열려요. 캔버스는 비공개라 못 여는 사람은 이 파일을 봐요). 부품 클래스는 `unified-mockup.css`, 반려동물 얼굴은 자리 표시 그림 `unified-mockup-pet.svg`, 기본 얼굴은 `marong/call/static/face/v1/01-neutral.webp`예요. 대지 사이의 링크는 뺐어요.
+
 그리지 않은 것: 불러오는 중·오류·한도·빈 상태 같은 나머지 상태, 430px 폭, 밤하늘의 나머지 화면이에요. 이 상태들은 공통 부품(띠, 안내 화면, 확인 줄)을 그대로 써요.
 
 ## 그린 방법
