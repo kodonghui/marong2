@@ -75,8 +75,9 @@ async def main():
                 assert 'thinkingConfig' not in setup['generationConfig']
                 # No function tools for a page without memory or hang-up; Google Search is on by default (call_search.py).
                 assert setup.get('tools')==[{'googleSearch':{}}],setup.get('tools')
-                try:await c.ws_connect('/live?client=00000000-0000-4000-8000-000000000001',headers=headers);raise AssertionError('concurrent call')
-                except aiohttp.WSServerHandshakeError as e:assert e.status==409
+                second=await c.ws_connect('/live?client=00000000-0000-4000-8000-000000000001',headers=headers)
+                assert (await event(second,'call_busy'))['type']=='call_busy'
+                await second.close()
                 for i in range(100):
                     await ws.send_json({'type':'text','id':str(i),'text':'테스트'});await turn(ws)
                 async def slow_tool(*args):await asyncio.sleep(2);return {'result':'time'}
