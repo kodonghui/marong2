@@ -54,15 +54,51 @@ async def verify_wait_during_tool_turn():
             await asyncio.gather(task, return_exceptions=True)
 
 
+PRODUCT = '{"ok":true,"title":"Fixture product","price":"100","points":["fixture"],"note":""}'
+FETCH_USAGE = {"input_tokens": 1, "output_tokens": 1, "server_tool_use": {"web_fetch_requests": 1}}
+PAGE = {"type": "web_fetch_tool_result", "tool_use_id": "fixture_fetch", "content": {
+    "type": "web_fetch_result", "url": "https://www.musinsa.com/products/test",
+    "content": {"type": "document", "title": "Fixture product"},
+}}
+FETCH_ERROR = {"type": "web_fetch_tool_result", "tool_use_id": "fixture_fetch", "content": {
+    "type": "web_fetch_tool_result_error", "error_code": "url_not_accessible",
+}}
+
+
+async def verify_completed_shopping_turn():
+    outputs = iter((
+        message([PAGE], "pause_turn", usage=FETCH_USAGE),
+        message([text("```json\n" + PRODUCT + "\n```")]),
+    ))
+    llm = ScriptedLLM(lambda _: next(outputs))
+    shop = ShopFetch(daily=3)
+    internal = InternalShop(llm, None, shop, "fixture", "fixture-secret")
+    assert (await internal.product("Fixture product"))["ok"]
+    assert len(llm.bodies) == 2 and shop.used == 1
+    assert llm.bodies[1]["messages"][0] == llm.bodies[0]["messages"][0]
+    assistant = llm.bodies[1]["messages"][1]
+    assert assistant["role"] == "assistant" and assistant["content"][0].content == PAGE["content"]
+    assert llm.bodies[0]["tools"] == llm.bodies[1]["tools"]
+
+    for blocks, stop in (
+        ([FETCH_ERROR, text(PRODUCT)], "end_turn"),
+        ([PAGE, text(PRODUCT)], "max_tokens"),
+        ([PAGE, text(PRODUCT.replace('"price":"100"', '"price":""'))], "end_turn"),
+        ([PAGE, text(PRODUCT)], "pause_turn"),
+    ):
+        llm = ScriptedLLM(lambda _: message(blocks, stop, usage=FETCH_USAGE))
+        shop = ShopFetch(daily=3)
+        internal = InternalShop(llm, None, shop, "fixture", "fixture-secret")
+        assert await internal.product("Fixture product") == FAILED
+        assert shop.used == len(llm.bodies) == (2 if stop == "pause_turn" else 1)
+
+
 async def main():
     with TemporaryDirectory() as temp, patch.object(Path, "home", return_value=Path(temp)):
         import server
 
     secret = "fixture-internal"
-    product = '{"ok":true,"title":"Fixture product","price":"100","points":["fixture"],"note":""}'
-    llm = ScriptedLLM(lambda _: message([text(product)], usage={
-        "input_tokens": 1, "output_tokens": 1, "server_tool_use": {"web_fetch_requests": 1},
-    }))
+    llm = ScriptedLLM(lambda _: message([PAGE, text(PRODUCT)], usage=FETCH_USAGE))
     shop = ShopFetch(daily=3)
     internal = InternalShop(llm, None, shop, "fixture", secret)
     app = web.Application()
@@ -100,6 +136,7 @@ async def main():
     await live.wait_signal()
     assert (await live.output.get())[1] == {"type": "wait", "on": False}
     await verify_wait_during_tool_turn()
+    await verify_completed_shopping_turn()
     print("PASS TC-477 and TC-479 local route, secret, quota, result and audio control")
 
 
