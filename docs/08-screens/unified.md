@@ -3,7 +3,7 @@
 상태: 초안(2026-11-19 11시대 KST, Claude). 아직 만들지 않았어요. 설계 승인은 2026-11-19 10:15 KST 설계 스레드의 동희님 "승인"(D104)이에요.
 입력: [사이트맵](../07-sitemap/sitemap.yaml) SCR-163\~174, [설계 제안](../unified-app.md) 5\~13절과 14절(REQ-430\~483, FL-169\~178, SPEC-370\~396), API 계약 `api/unified.openapi.yaml` API-211\~242, 도메인 CTX-026\~029와 용어 TERM-173\~198. 캐릭터 만들기 화면(SCR-170\~174)은 [반려동물 화면](pet.md) SCR-142\~146에서 결제를 빼고 주인을 로그인한 사람으로 바꿔 새 번호로 적었어요. SCR-140\~162는 고치지 않아요.
 기준: 토큰과 부품은 [`design/README.md`](../../design/README.md)를 따라요. 얼려 둔 토큰 103개(`design/base.tokens.json`, D67)만 쓰고 새 토큰은 더하지 않아요.
-와이어프레임: 아직 그리지 않았어요. 이 문서의 상태 표가 그릴 목록이에요. 목업(09단계)도 아직이에요.
+와이어프레임: 아직 그리지 않았어요. 이 문서의 상태 표가 그릴 목록이에요. 목업(09단계)은 대지 17장을 그렸어요: [목업 기록](../../design/unified-mockup.md), 캔버스 [마롱이 통합 앱 목업](https://claude.ai/artifact/GXVep4QepAUdFhH6gDmLb3).
 
 범위는 동희님 주변 사람이 쓰는 MVP예요(D103). 안내문, 동의, 나이 확인, 결제, 사람별 기능 제한 화면은 없어요.
 
@@ -35,7 +35,7 @@
 - 얼굴: 쓰는 캐릭터가 있으면 그 캐릭터의 정면 그림(API-242 `front`), 없으면 기본 마롱이 얼굴(01)이에요. 그림은 꾸밈이라 `alt=""`이고 이름은 글로 따로 읽혀요.
 - 폭: 세로 휴대폰 360\~430px. 넓은 화면은 글 대화처럼 가운데 폰 틀(`backdrop`, `panel-shadow`)이에요.
 - 머리: 왼쪽 돌아가는 버튼(`size.touch-min` 48px, 글 '글 대화' 또는 '내 마롱이'), 가운데 제목(굵게), 아래 `line` 1px(`border-width.thin`). 앱 창의 뒤로 가기는 창을 닫으니까 머리 버튼이 돌아가는 경로예요.
-- 토큰: 버튼 테두리·띠·확인 줄은 `radius.sm`, 카드는 `radius.md`, 칩은 `radius.full`, 누르는 칸은 `size.touch-min` 이상, 얼굴 원은 `size.avatar`·`size.face-home`·`size.face-call`, 고른 것의 테두리는 `accent`, 오류 메시지는 `danger`, 작은 글은 `font-size.caption`·`text-muted`예요. 테마는 한국 시각 08:00\~20:00 직전 군밤 크림(`color.a`), 그 밖 밤하늘(`color.b`)이에요.
+- 토큰: 버튼 테두리·띠·확인 줄은 `radius.sm`, 카드는 `radius.md`, 칩은 `radius.full`, 누르는 칸은 `size.touch-min` 이상, 얼굴 원은 `size.avatar`·`size.face-home`·`size.face-call`, 고른 것의 테두리는 `accent`, 오류 메시지는 `danger`, 작은 글은 `font-size.caption`·`text-muted`예요. 테마는 한국 시각 08:00\~20:00 직전 군밤 크림(`color.b`), 그 밖 밤하늘(`color.a`)이에요.
 - 400 `invalid_input`: 그 칸 아래 '다시 한번 확인해 줄래?'와 그 칸의 규칙 한 줄. 쓴 값은 남겨요.
 - 403 `cross_site`: 그 동작 옆 '이 화면에서 다시 해 줘'. 저절로 다시 보내지 않아요.
 - 404 `not_found`(남의 것, 없는 것, 지운 것): 안내 화면 '찾지 못했어'와 '내 마롱이로'(SCR-165).
@@ -532,7 +532,7 @@ SCR-002의 표정 표(캐릭터를 쓸 때, 새 제안): 거는 중·말하는 �
 
 ## 17. 열린 것과 정한 것
 
-- 와이어프레임과 09 목업은 그리지 않았어요. 새 토큰 없이 지금 글 대화 화면과 반려동물 A안의 부품만 쓰므로, 이 정의대로 만들고 동희님은 구현된 화면(TC-449, TC-463)에서 봐요. 그림을 먼저 보고 싶으시면 구현 전에 그려요.
+- 09 목업은 2026-11-19에 대지 17장을 그렸어요([목업 기록](../../design/unified-mockup.md)). 새 토큰 없이 지금 글 대화 화면과 반려동물 A안의 부품만 써요. 와이어프레임은 그리지 않았고, 목업에 없는 상태는 이 정의대로 만들어 구현된 화면(TC-449, TC-463)에서 봐요.
 - 통화 시작의 새 오류(`call_busy`, `calls_full`, `daily_limit`)는 지금 통화의 시작 API-107에 붙어요. 계약 [unified.openapi.yaml](../../api/unified.openapi.yaml)의 머리말이 그렇게 적었고, 통화 계약 파일의 고침은 구현 PR(TASK-395, TASK-406)에서 해요.
 - SCR-002#waiting은 통화 서버가 지금 상태를 보내는 연결로 주는 `{type: "wait", on: true|false}`를 따라요(기능 명세 3.10). SCR-107#ring-pending은 통화 서버의 상태 응답에 지금도 실리는 약속(`ring`) 값을 따르고, 유효 시간은 지금 벨의 값 그대로예요(기능 명세 3.8).
 - 캐릭터 그룹과 친구 줄을 숨길 값은 프로필 응답(API-216)의 `features.character`·`features.friends`예요. `features.character`가 꺼져 있어도 쓰는 캐릭터의 얼굴과 이름은 그대로 그려요.

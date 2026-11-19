@@ -148,17 +148,22 @@
       "updated": "2026-11-19T03:57:28+00:00"
     },
     "09-mockup": {
-      "state": "skipped",
+      "state": "in_progress",
       "checkpoints": [],
-      "next": "없음. 새 토큰이 없고 방향은 지금 글 대화 화면과 반려동물 A안(D72)을 그대로 씀. 그림이 필요하면 구현 전에 그림",
+      "next": "동희님이 캔버스를 보고 방향을 확인(09-unified-1). 어긋난 곳은 알려 주시면 고침",
       "checks": [
         {
           "level": "info",
-          "message": "통합 앱(MVP)은 목업을 따로 그리지 않음: design/base.tokens.json의 얼려 둔 토큰 103개만 쓰고 새 토큰 없음(Claude 선택, 동희님이 바꿀 수 있음)",
+          "message": "2026-11-19 13시대 KST 설계 스레드 동희님 \"목업 보여조\"에 따라 대지 17장을 그림(SCR-163~174, SCR-107, SCR-002). 캔버스 https://claude.ai/artifact/GXVep4QepAUdFhH6gDmLb3, 기록 design/unified-mockup.md",
+          "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "새 토큰 없음(얼려 둔 103개). 대지를 띄워서 재지는 않음: 줄바꿈·넘침·높이·대비는 화면에서 확인하지 않음",
           "at": "2026-11-19"
         }
       ],
-      "updated": "2026-11-19T03:57:28+00:00"
+      "updated": "2026-11-19T05:10:36+00:00"
     },
     "10-wbs": {
       "state": "in_progress",
