@@ -48,7 +48,7 @@ let generation=0,epoch=0,callId=null,memoryConnected=false;
 let rtcClient=null,rtcEnabled=false;
 // A call Marong placed at a time the friend set (docs/app-ring.md SPEC-135): the app opens /?ring=<id>.
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-let ringId=null,ringShown=false,botName='마롱이';
+let ringId=null,ringShown=false,botName='마롱이',characterId=null,lastCharacterFace=null;
 {
   // Take the ring out of the address at once, so a reload or a shared link never answers it again.
   const search=location.search||'',found=/[?&]ring=([^&#]*)/.exec(search);
@@ -138,6 +138,7 @@ async function refreshProfile(state){
     const brand=document.querySelector('.brand');
     if(brand?.firstChild?.nodeType===Node.TEXT_NODE)brand.firstChild.textContent=botName;
     document.title=botName+' · 너의 이야기 곁에';
+    characterId=profile.character?.id||null;
     const pending=profile.pendingRing;
     if(!ringId&&pending&&UUID_RE.test(pending.ringId)&&Date.parse(pending.until)>Date.now())ringId=pending.ringId;
     if(!intended)ringOffer(Boolean(ringId&&!state.active));
@@ -383,7 +384,12 @@ setInterval(()=>{
       else{blinkStarted=0;blinkAt=now+3000+Math.random()*3000;}
     }
   }
-  if(frame!==lastFace){lastFace=frame;$('face').src=faceURL(frame);$('face').alt=speaking?'말하고 있는 마롱이':'곁에서 기다리는 마롱이';}
+  if(frame!==lastFace||characterId!==lastCharacterFace){
+    lastFace=frame;lastCharacterFace=characterId;
+    const expression=({15:'smile',16:'excited',18:'sleepy',19:'sleepy',20:'smile',21:'smile',22:'excited',23:'excited'})[frame]||'front';
+    $('face').src=characterId?'/chat/api/characters/'+characterId+'/images/'+expression:faceURL(frame);
+    $('face').alt=speaking?'말하고 있는 '+botName:'곁에서 기다리는 '+botName;
+  }
 },50);
 setInterval(()=>{if(!intended)refresh();},15000);
 setInterval(sendPlaybackStats,2000);

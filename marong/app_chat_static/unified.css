@@ -59,6 +59,16 @@
 .unified #face {margin-inline: auto}
 .unified #profile-groups {gap: 16px}
 .unified .progress {width: 100%; accent-color: var(--accent)}
+.unified .character-pictures {display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px}
+.unified .character-picture {
+  display: block; width: 100%; aspect-ratio: 1; object-fit: contain; background: var(--face-base);
+  border-radius: 16px;
+}
+.unified .picture-choice {padding: 4px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface)}
+.unified .picture-choice[aria-pressed="true"] {border: 2px solid var(--accent)}
+.unified .body-template {text-align: left}
+.unified input[type="checkbox"] {width: 24px; min-height: 0; aspect-ratio: 1; accent-color: var(--accent)}
+.unified .wardrobe-image {width: 64px; height: 64px; border-radius: 50%; object-fit: contain; background: var(--face-base)}
 @media (min-width: 500px) {
   body:has(.unified) {background: var(--backdrop)}
   .unified {box-shadow: 0 0 32px var(--panel-shadow)}

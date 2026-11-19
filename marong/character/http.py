@@ -273,7 +273,20 @@ class CharacterAPI:
             await batch.remove(conn, ident)
         return web.Response(status=204)
 
+    async def page(self, req):
+        from ..app_chat import Problem
+        from ..app_session import SessionError
+        try:
+            await self.member(req)
+        except (Problem, SessionError) as error:
+            if error.code not in {"login_required", "unauthenticated"}:
+                raise
+            raise web.HTTPFound("/chat/login") from None
+        return self.chat.unified_page("character")
+
     def register(self, router):
+        router.add_get("/chat/character/new", self.page)
+        router.add_get("/chat/character/{id}/{stage:photos|traits|preview|candidates|name|try}", self.page)
         router.add_get(BASE, self.list)
         router.add_post(BASE, self.create)
         router.add_get(BASE + "/{id}", self.get)
