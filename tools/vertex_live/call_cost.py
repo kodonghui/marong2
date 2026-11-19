@@ -54,6 +54,38 @@ def bounds(day):
     return start, end
 
 
+async def personal_budget_blocked(store, caller, limit, *, at=None):
+    if store is None or caller is None or limit is None:
+        return False
+    start, end = bounds(at or datetime.now(timezone.utc))
+    try:
+        row = await asyncio.wait_for(store.one("""
+            WITH totals AS (
+                SELECT u.usd FROM call.live_usage u JOIN call.calls c ON c.id=u.call_id
+                WHERE c.caller_id=%(caller)s AND u.received_at>=%(start)s AND u.received_at<%(end)s
+                  AND (u.kind='estimate' OR (
+                    NOT EXISTS (SELECT 1 FROM call.segment_costs s WHERE s.segment_id=u.segment_ref AND s.estimated)
+                    AND NOT EXISTS (SELECT 1 FROM call.live_usage x WHERE x.segment_ref=u.segment_ref AND x.kind='estimate')
+                  ))
+                UNION ALL
+                SELECT s.usd FROM call.segment_costs s JOIN call.calls c ON c.id=s.call_id
+                WHERE c.caller_id=%(caller)s AND s.opened_at>=%(start)s AND s.opened_at<%(end)s AND s.estimated
+                UNION ALL
+                SELECT (coalesce(r.input_tokens,0)::bigint*p.text_in+
+                       (coalesce(r.output_tokens,0)::bigint+coalesce(r.thoughts_tokens,0))*p.text_out)/1000000
+                FROM call.ai_runs r JOIN call.calls c ON c.id=r.call_id
+                JOIN LATERAL (SELECT text_in,text_out FROM call.live_prices
+                    WHERE model=r.model AND starts_at<=r.sent_at ORDER BY starts_at DESC,id DESC LIMIT 1) p ON true
+                WHERE c.caller_id=%(caller)s AND r.kind='organize' AND r.sent_at>=%(start)s AND r.sent_at<%(end)s
+            )
+            SELECT coalesce(sum(usd),0) AS amount FROM totals
+        """, {"caller":caller,"start":start,"end":end}), 1)
+        return row["amount"] >= limit
+    except Exception:
+        log.warning("personal_call_budget_unknown")
+        return False
+
+
 async def budget_status(store, entrypoint):
     ledger = getattr(store, "live_usage", None)
     if ledger is None or await ledger.mode() is None:

@@ -53,7 +53,7 @@ def main():
             import server
         text = (HERE / 'call_instruction.md').read_text(encoding='utf-8').strip()
         parts = server.setup()['setup']['systemInstruction']['parts']
-        assert len(parts) == 1 and parts[0]['text'] == text, 'setup sends the file as the instruction'
+        assert len(parts) == 1 and parts[0]['text'].startswith(text+'\n'), 'setup sends the file as the instruction'
         assert len(server.setup(seed='{"friend":"테스트"}')['setup']['systemInstruction']['parts']) == 2, 'memory seed stays a second part'
         with patch.dict('os.environ', {'MARONG_FRIEND_CARD': 'on'}):
             active = server.setup(memory=True, hangup=True, search='on')['setup']
@@ -75,7 +75,7 @@ def main():
         edited = Path(tmp) / 'call_instruction.md'
         edited.write_text('바뀐 지시문\n', encoding='utf-8')
         with patch.object(server, 'INSTRUCTION_FILE', edited):
-            assert server.setup()['setup']['systemInstruction']['parts'][0]['text'] == '바뀐 지시문', 'edit reaches the next connection'
+            assert server.setup()['setup']['systemInstruction']['parts'][0]['text'].startswith('바뀐 지시문\n'), 'edit reaches the next connection'
             edited.write_text('  \n', encoding='utf-8')
             assert server.instruction() == '바뀐 지시문', 'empty file keeps the last good text'
             edited.unlink()

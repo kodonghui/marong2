@@ -13,6 +13,7 @@ from uuid import uuid4
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
 from pg import ROOT, TestDB
 
+from call_cost import personal_budget_blocked
 from call_memory import MemoryStore, Principal
 from call_usage import QUEUE_SIZE, Ledger, Meter, decode
 from call_tuning import parse_tuning
@@ -64,6 +65,14 @@ async def scenario(db, store):
                      WHERE segment_ref=%s ORDER BY seq""", (segment,)) == [
         (1, 10_000, 1, True, Decimal("0.030000")), (2, 1000, 0, True, Decimal("0.006000")),
     ]
+    other_friend, = db.admin("INSERT INTO marong.friends(name) VALUES ('fixture-usage-other') RETURNING id")[0]
+    other_caller, = db.admin("INSERT INTO call.callers(friend_id) VALUES (%s) RETURNING id", (other_friend,))[0]
+    assert await personal_budget_blocked(store, caller, Decimal("0.036"), at=AT)
+    assert not await personal_budget_blocked(store, caller, Decimal("0.037"), at=AT)
+    assert not await personal_budget_blocked(store, caller, None, at=AT)
+    assert not await personal_budget_blocked(store, other_caller, Decimal("0.036"), at=AT)
+    assert not await personal_budget_blocked(store, caller, Decimal("0.036"), at=AT.replace(month=12))
+
     parsed, missing, fixed = decode({
         "promptTokenCount": 13,
         "promptTokensDetails": [{"modality": "TEXT", "tokenCount": 5}, None,

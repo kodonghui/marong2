@@ -34,6 +34,7 @@ from marong.diary_worker import DiaryWorker
 from marong.discord_dm import PrivateChatAgent
 from marong.embed import Embeddings
 from marong.google_calendar import GoogleCalendar, serve as serve_google
+from marong.internal_shop import InternalShop
 from marong.llm import LLM
 from marong.memory import MemoryWorker
 from marong.pet.settings import PriceBook
@@ -146,6 +147,9 @@ async def serve(settings, credentials, options, secret, authentication, home, st
         agent.on_saved = on_saved
         delivery = UnifiedDelivery(store, push, authentication, on_saved, origin=options["origin"])
         chat.delivery = delivery
+        if os.getenv("MARONG_CALL_SHOP") == "1":
+            chat.internal_shop = InternalShop(llm, web, shop, settings.anthropic_model,
+                                              os.getenv("MARONG_INTERNAL_SECRET", ""))
         if os.getenv("MARONG_CHARACTER_DIR"):
             try:
                 budget = Decimal(os.getenv("MARONG_IMAGE_MONTHLY_USD", "20"))

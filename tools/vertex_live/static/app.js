@@ -32,9 +32,9 @@
 })();
 
 const $=id=>document.getElementById(id);
-const CLIENT_VERSION='20261117-topic1';
+const CLIENT_VERSION='20261119-call-wait1';
 const clientId=crypto.randomUUID();
-const faceNames={1:'01-neutral',15:'15-mouth-slightly-open',16:'16-mouth-wide-open',18:'18-eyes-half-closed',19:'19-eyes-closed',20:'20-mouth-slightly-open-eyes-half-closed',21:'21-mouth-slightly-open-eyes-closed',22:'22-mouth-wide-open-eyes-half-closed',23:'23-mouth-wide-open-eyes-closed',6:'06-sad'};
+const faceNames={1:'01-neutral',4:'04-thinking',15:'15-mouth-slightly-open',16:'16-mouth-wide-open',18:'18-eyes-half-closed',19:'19-eyes-closed',20:'20-mouth-slightly-open-eyes-half-closed',21:'21-mouth-slightly-open-eyes-closed',22:'22-mouth-wide-open-eyes-half-closed',23:'23-mouth-wide-open-eyes-closed',6:'06-sad'};
 const faceURL=n=>`/face/v1/${faceNames[n]}.webp`;
 for(const n of Object.keys(faceNames)){const image=new Image();image.src=faceURL(n);}
 const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
@@ -108,6 +108,31 @@ function fallbackToPCM(reason='rtc_disconnected'){
 }
 const captionNodes=new Map();
 function status(text){$('status').textContent=text;}
+const WAIT_TEXT='찾아보는 중…';
+let waitTimer=null,waitCutoff=null,waitSource=null,waitBuffer=null,waiting=false,statusBeforeWait='';
+function stopWaiting(){
+  clearTimeout(waitTimer);waitTimer=null;
+  clearTimeout(waitCutoff);waitCutoff=null;
+  if(waitSource){waitSource.stop();waitSource.disconnect();waitSource=null;}
+  if(waiting&&$('status').textContent===WAIT_TEXT)status(statusBeforeWait);
+  waiting=false;
+}
+function startWaiting(){
+  if(waiting||waitTimer!==null||!ready||hangingUp)return;
+  waitTimer=setTimeout(()=>{
+    waitTimer=null;
+    if(!intended||!ready||hangingUp||speaking||outputTurnOpen||playbackStats.queuedMs>0)return;
+    waiting=true;statusBeforeWait=$('status').textContent;status(WAIT_TEXT);
+    if(waitBuffer&&audioContext?.state==='running'){
+      waitSource=audioContext.createBufferSource();
+      waitSource.buffer=waitBuffer;waitSource.loop=true;
+      const gain=audioContext.createGain();gain.gain.value=0.25;
+      waitSource.connect(gain);gain.connect(audioContext.destination);
+      waitSource.onended=()=>gain.disconnect();waitSource.start();
+    }
+    waitCutoff=setTimeout(stopWaiting,19200);
+  },800);
+}
 function connection(text){$('connection').textContent=text;}
 function callView(active){
   document.body.classList.toggle('in-call',active);
@@ -179,6 +204,7 @@ function audioOut(buffer){
   const packetEpoch=header.getUint32(4),turn=header.getUint32(8),count=header.getUint32(20);
   if(packetEpoch<epoch||buffer.byteLength!==24+count*2)return;
   if(packetEpoch>epoch)clearAudio(packetEpoch);
+  stopWaiting();
   const now=performance.now();if(outputTurnOpen)maxArrivalGapMs=Math.max(maxArrivalGapMs,Math.round(now-lastAudioAt));
   lastAudioAt=now;outputTurnOpen=true;
   const pcm=buffer.slice(24);player.port.postMessage({type:'pcm',pcm,turn,epoch:packetEpoch},[pcm]);
@@ -211,6 +237,7 @@ function hangUpAfterPlayback(pendingMs=0){
   check();
 }
 async function end(message='또 이야기하자. 여기 있을게.'){
+  stopWaiting();waitBuffer=null;
   sendPlaybackStats();ringId=null;if(ringShown)ringOffer(false);closeTopic();
   if(memoryConnected&&callId)fetch(`/api/calls/${encodeURIComponent(callId)}/end`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',keepalive:true}).catch(()=>{});
   generation++;
@@ -259,7 +286,8 @@ function connect(){
     }else if(message.type==='budget_exhausted'){budgetBlocked=true;void end(BUDGET_MESSAGE);}
     else if(message.type==='call_busy'){void end('다른 기기에서 '+botParticle('이랑','랑')+' 통화 중이야. 그 통화를 끝내고 다시 걸어 줘');}
     else if(message.type==='calls_full'){void end('지금은 전화가 꽉 찼어. 조금 있다가 다시 걸어 줘');}
-    else if(message.type==='hangup'){hangUpAfterPlayback(message.pendingMs);}
+    else if(message.type==='wait'){if(message.on)startWaiting();else stopWaiting();}
+    else if(message.type==='hangup'){stopWaiting();hangUpAfterPlayback(message.pendingMs);}
     else if(message.type==='transcript'){transcript(message.who,message.text,message.key,message.replace);}
     else if(message.type==='audio_transport'&&message.mode==='pcm'){
       pcmFallback=true;fallbackPending=false;clearTimeout(fallbackTimer);fallbackTimer=null;
@@ -267,14 +295,15 @@ function connect(){
       if(ready){connection('함께 이야기 중');status(micMode?'듣고 있어. 편하게 말해 줘.':'글로 말해도 괜찮아. 목소리로 답할게.');}
       sendPlaybackStats();
     }
-    else if(message.type==='audio_reset'||message.type==='interrupted'){epoch=message.epoch;speaking=false;lastSpeaker=null;}
+    else if(message.type==='audio_reset'||message.type==='interrupted'){stopWaiting();epoch=message.epoch;speaking=false;lastSpeaker=null;}
     else if(message.type==='audio_end'){outputTurnOpen=false;}
     else if(message.type==='turn'){lastSpeaker=null;}
-    else if(message.type==='reconnecting'&&!hangingUp){ready=false;$('send').disabled=true;document.body.classList.add('reconnecting');connection('다시 잇는 중');status('연결을 다시 잇고 있어. 잠깐만 기다려 줘.');}
+    else if(message.type==='reconnecting'&&!hangingUp){stopWaiting();ready=false;$('send').disabled=true;document.body.classList.add('reconnecting');connection('다시 잇는 중');status('연결을 다시 잇고 있어. 잠깐만 기다려 줘.');}
   };
   current.onerror=()=>{if(intended&&current===socket)status('연결을 다시 잇고 있어. 곁에 있을게.');};
   current.onclose=()=>{
     if(!intended||current!==socket)return;
+    stopWaiting();
     if(hangingUp){void end(HANGUP_MESSAGE);return;}
     if(rtcClient)fallbackToPCM('control_reconnect');
     ready=false;$('send').disabled=true;document.body.classList.add('reconnecting');connection('다시 잇는 중');status('연결을 다시 잇고 있어. 통화는 계속 유지할게.');
@@ -296,6 +325,10 @@ async function begin(microphone){
     audioContext=new Context({latencyHint:'interactive'});await audioContext.resume();
     if(run!==generation)return false;
     const context=audioContext;
+    fetch('/wait-tone.wav?v='+CLIENT_VERSION)
+      .then(response=>response.ok?response.arrayBuffer():null)
+      .then(data=>data?context.decodeAudioData(data):null)
+      .then(buffer=>{if(context===audioContext)waitBuffer=buffer;}).catch(()=>{});
     context.onstatechange=()=>{if(context.state==='interrupted'||context.state==='suspended'){contextInterruptions++;sendPlaybackStats();}};
     await context.audioWorklet.addModule(`/playback.js?v=${CLIENT_VERSION}`);
     if(run!==generation)return false;
@@ -304,6 +337,7 @@ async function begin(microphone){
     player.port.onmessage=({data})=>{
       if(data.bufferMs!==playbackStats.bufferMs)try{localStorage.setItem('marong.playbackReserve',String(data.bufferMs/1000));}catch{}
       playbackStats=data;if(!rtcClient)speaking=data.speaking;
+      if(speaking||data.queuedMs>0)stopWaiting();
     };
     player.onprocessorerror=()=>{status('소리 재생에 문제가 생겼어. 화면을 새로고침해 줘.');};
     player.connect(context.destination);
@@ -323,7 +357,7 @@ async function begin(microphone){
     }
     if(run!==generation)return false;
     if(rtcEnabled){
-      const rtc=new MarongRTC(context,value=>{speaking=value;},reason=>{if(rtcClient===rtc)fallbackToPCM(reason);});
+      const rtc=new MarongRTC(context,value=>{speaking=value;if(value)stopWaiting();},reason=>{if(rtcClient===rtc)fallbackToPCM(reason);});
       try{await rtc.connect(clientId);if(run!==generation){await rtc.close();return false;}rtcClient=rtc;}
       catch{await rtc.close();status('실시간 소리 연결을 다시 확인하고 있어.');}
     }
@@ -375,7 +409,7 @@ window.addEventListener('online',()=>{if(intended){if(rtcClient)fallbackToPCM('n
 navigator.connection?.addEventListener('change',()=>{if(intended&&rtcClient)fallbackToPCM('network_change');});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&intended){audioContext?.resume().catch(()=>{});keepAwake();}});
 document.addEventListener('pointerdown',()=>{if(intended&&audioContext?.state!=='running')audioContext?.resume().catch(()=>{});},{passive:true});
-window.addEventListener('pagehide',()=>{intended=false;clearTimeout(retryTimer);if(socket)socket.close();if(stream)stream.getTracks().forEach(track=>track.stop());});
+window.addEventListener('pagehide',()=>{stopWaiting();intended=false;clearTimeout(retryTimer);if(socket)socket.close();if(stream)stream.getTracks().forEach(track=>track.stop());});
 setInterval(()=>{
   const now=performance.now();
   document.body.classList.toggle('speaking',intended&&speaking);
@@ -394,10 +428,11 @@ setInterval(()=>{
       else{blinkStarted=0;blinkAt=now+3000+Math.random()*3000;}
     }
   }
+  if(waiting&&!speaking)frame=4;
   if(budgetBlocked&&!intended)frame=6;
   if(frame!==lastFace||characterId!==lastCharacterFace){
     lastFace=frame;lastCharacterFace=characterId;
-    const expression=({6:'sad',15:'smile',16:'excited',18:'sleepy',19:'sleepy',20:'smile',21:'smile',22:'excited',23:'excited'})[frame]||'front';
+    const expression=({4:'surprised',6:'sad',15:'smile',16:'excited',18:'sleepy',19:'sleepy',20:'smile',21:'smile',22:'excited',23:'excited'})[frame]||'front';
     $('face').src=characterId?'/chat/api/characters/'+characterId+'/images/'+expression:faceURL(frame);
     $('face').alt=speaking?'말하고 있는 '+botName:'곁에서 기다리는 '+botName;
   }

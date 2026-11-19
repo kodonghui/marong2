@@ -17,6 +17,7 @@ from aiohttp import ClientSession,ClientTimeout,WSMsgType
 from memory_tools import TranscriptRecorder,execute_tool
 from hangup import Consent
 from call_search import queries as search_queries
+from call_shop import FAILED as SHOP_FAILED, LIMIT as SHOP_LIMIT, READS as SHOP_READS
 from quiet_mic import QuietMic, level
 from tool_trace import step as trace_step
 
@@ -61,6 +62,8 @@ class LiveSession:
     def __init__(self,ws,owner,store,principal,setup,headers,resume,diagnostics,location,model,voice,client_id,*,entry_transport=None,hangup=False,search=None,ring=None):
         self.ws=ws;self.owner=owner;self.store=store;self.p=principal;self.setup=setup;self.headers=headers
         self.resume=resume;self.d=diagnostics;self.location=location;self.model=model;self.voice=voice;self.client_id=client_id
+        self.shop=None;self.shop_reads=int(resume.get('shop_reads',0))
+        self.wait_enabled=False;self.waiting=False
         self.call_id=str(uuid.uuid4());self.segment=None;self.logical_resumed=False
         self.stop=asyncio.Event();self.reset=asyncio.Event();self.available=asyncio.Event()
         self.controls=asyncio.Queue(maxsize=64);self.audio=deque();self.pending=deque()
@@ -151,6 +154,28 @@ class LiveSession:
         if not self.output.full():self.output.put_nowait(('json',{'type':'transcript','who':'user' if role=='user' else 'marong','text':text,'key':key,'replace':True}))
 
     async def emit(self,data):await self.output.put(('json',data))
+
+    async def wait_signal(self, reason=None):
+        if not self.wait_enabled:
+            return
+        before, self.waiting = self.waiting, bool(reason)
+        if reason is not None:
+            await self.emit({'type':'wait','on':True,'reason':reason})
+        elif before:
+            await self.emit({'type':'wait','on':False})
+
+    async def shop_read(self, arguments):
+        if self.shop is None:
+            return SHOP_FAILED
+        if self.shop_reads >= SHOP_READS:
+            return SHOP_LIMIT
+        query = arguments.get('query') if isinstance(arguments,dict) else None
+        if not isinstance(query,str) or not 1 <= len(query.strip()) <= 600:
+            return SHOP_FAILED
+        self.shop_reads += 1
+        self.resume.update(shop_reads=self.shop_reads,owner=self.owner,call_id=self.call_id,updated=time.time(),
+                           revision=self.revision)
+        return await self.shop(query.strip())
 
     def background(self,coro):
         task=asyncio.create_task(coro);self.tasks.add(task)
@@ -584,11 +609,14 @@ class LiveSession:
 
         async def tool(call):
             name=call.get('name','');identifier=str(call.get('id',''))[:200]
+            started = time.monotonic()
             with trace_step('voice_tool', surface=surface, tool=name) as trace:
                 try:
                     with trace_step('tool_dispatch', trace) as dispatch:
                         if name == 'end_call':
                             result = await self.end_call_requested()
+                        elif name == 'shop_read':
+                            result = await asyncio.wait_for(self.shop_read(call.get('args')),20)
                         else:
                             result = await asyncio.wait_for(execute_tool(
                                 self.store, self.p, self.call_id, self.segment, name, call.get('args', {}),
@@ -602,9 +630,14 @@ class LiveSession:
                 except Exception:
                     if name == 'end_call':
                         raise
-                    result = {'result': 'not_saved', 'reason': 'temporary_error'}
+                    result = SHOP_FAILED if name == 'shop_read' else {'result': 'not_saved', 'reason': 'temporary_error'}
                     if trace:
                         trace.record(result='temporary_error')
+                another_tool = any(not task.done() and task is not asyncio.current_task()
+                                   for task in tool_tasks.values())
+                if not another_tool and (time.monotonic() - started < 0.8 or
+                                         (name == 'shop_read' and not result.get('ok'))):
+                    await self.wait_signal()
                 with trace_step('provider_send', trace) as delivery:
                     await send({'toolResponse':{'functionResponses':[{'id':identifier,'name':name,'response':result}]}})
                     if delivery:
@@ -628,9 +661,12 @@ class LiveSession:
                 content=data.get('serverContent',{});now=time.monotonic()
                 if content.get('speechState')=='SPEECH' or content.get('inputTranscription') or content.get('modelTurn') or data.get('toolCall'):
                     self.activity_at=now
-                if content.get('speechState')=='SPEECH':self.recorder.speech_start()
-                elif content.get('speechState')=='NON_SPEECH':self.recorder.boundary('user')
+                if content.get('speechState')=='SPEECH':
+                    self.recorder.speech_start();await self.wait_signal()
+                elif content.get('speechState')=='NON_SPEECH':
+                    self.recorder.boundary('user');await self.wait_signal('think')
                 if content.get('interrupted'):
+                    await self.wait_signal()
                     self.d['providerInterruptions']=self.d.get('providerInterruptions',0)+1
                     self.recorder.feed('assistant',finished=True,interrupted=True)
                     self.epoch+=1;self.in_turn=False;speaking=False;audio_finished=False;last_audio=None;turn_queries.clear()
@@ -638,6 +674,7 @@ class LiveSession:
                 for part in content.get('modelTurn',{}).get('parts',[]):
                     inline=part.get('inlineData',{})
                     if inline.get('mimeType','').startswith('audio/pcm') and inline.get('data'):
+                        await self.wait_signal()
                         now=time.monotonic()
                         if audio_finished:self.in_turn=False
                         if not self.in_turn:
@@ -666,6 +703,7 @@ class LiveSession:
                 if content.get('generationComplete') and self.in_turn and not audio_finished:
                     audio_finished=True;await self.emit({'type':'audio_end','epoch':self.epoch,'turn':self.turn})
                 if content.get('turnComplete'):
+                    await self.wait_signal()
                     self.recorder.feed('assistant',finished=True)
                     turn_queries.clear();self.turn_done_at=now
                     self.playback_end=max(now,self.turn_started_at+self.offset/OUTPUT_RATE)+SEARCH_CUT_SLACK_S
@@ -675,7 +713,9 @@ class LiveSession:
                     if go_away and self.handle:return
                 for call in data.get('toolCall',{}).get('functionCalls',[]):
                     identifier=str(call.get('id',''))
-                    if identifier not in tool_tasks:tool_tasks[identifier]=self.background(tool(call))
+                    if identifier not in tool_tasks:
+                        await self.wait_signal('tool')
+                        tool_tasks[identifier]=self.background(tool(call))
                 for identifier in data.get('toolCallCancellation',{}).get('ids',[]):
                     if identifier in tool_tasks:tool_tasks[identifier].cancel()
                 if data.get('goAway'):

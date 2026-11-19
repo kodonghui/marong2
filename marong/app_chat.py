@@ -143,6 +143,7 @@ class AppChat:
         self.sessions = sessions
         self.authentication = auth_mode(authentication)
         self.delivery = None
+        self.internal_shop = None
         self.tick = asyncio.Event()          # set and replaced whenever a message is saved in this process
         self.reply_traces = OrderedDict()
         self.waiters = defaultdict(list)     # friend id -> events of their waits, oldest first
@@ -700,6 +701,9 @@ class AppChat:
         AppDiary(self).register(app)
         AppListen(self).register(app)
         app.router.add_get("/chat/healthz", self.health)
+        if self.internal_shop is not None:
+            from .internal_shop import LOOKUP_PATH
+            app.router.add_post(LOOKUP_PATH, self.internal_shop.read)
         if self.sessions is not None:
             app.router.add_get("/chat/join/{token}", self.account_page)
             app.router.add_get("/chat/login", self.account_page)
