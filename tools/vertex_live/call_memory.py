@@ -19,7 +19,7 @@ from call_usage import Ledger
 from call_cost import MonthlyCost
 from call_tuning import BASE
 from marong.room_scope import writing_room
-from marong.friend_scope import ACCEPTED_CIRCLE
+from marong.friend_scope import accepted_circle
 from marong.usage import Usage, configured_limit
 
 
@@ -246,10 +246,11 @@ class MemoryStore:
             row['content'] = (row['content'] or '') + '\n' + (row.pop('close_content') or '')
         if p.unified and os.getenv("MARONG_FRIENDS") == "1":
             try:
-                circle = await asyncio.wait_for(self.all(ACCEPTED_CIRCLE, {"friend": p.friend_id, "limit": 20}), .7)
+                query = accepted_circle(self.keep_source("shared_note", "x.id"))
+                circle = await asyncio.wait_for(self.all(query, {"friend": p.friend_id, "limit": 20}), .7)
             except (Error, TimeoutError):
                 circle = []
-            friends = [{"name": row["name"], "label": row["label"],
+            friends = [{"name": row["name"], "label": row["label"], "close": row["close"],
                         "content": "\n".join(filter(None, (row["shared"], row["shared_close"])))} for row in circle]
         memories = await self.all("""SELECT m.id,m.content,m.created_at,'call_memory' AS source FROM call.memories m
           JOIN call.calls c ON c.id=m.call_id WHERE m.caller_id=%s AND m.status='active' AND c.deleted_at IS NULL

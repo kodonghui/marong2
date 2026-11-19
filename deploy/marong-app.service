@@ -9,6 +9,11 @@ User=marong
 Group=marong
 WorkingDirectory=/opt/marong
 EnvironmentFile=/etc/marong-app/config
+LoadCredential=fcm-service-account.json:/etc/marong-discord/fcm-service-account.json
+LoadCredential=google-client.json:/etc/marong-discord/google-client.json
+StateDirectory=marong-app
+StateDirectoryMode=0700
+Environment=MARONG_CHARACTER_DIR=/var/lib/marong-app
 Environment=MARONG_CALL_MEMORY=1
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1

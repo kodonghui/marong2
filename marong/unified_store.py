@@ -5,7 +5,7 @@ import os
 from psycopg.types.json import Jsonb
 
 from .discord_store import DiscordStore
-from .friend_scope import ACCEPTED_CIRCLE
+from .friend_scope import accepted_circle
 from .graphs.memory import lock_message_writer, schedule_text
 from .room_scope import writing_room, writing_room_key, writing_user_key
 from .store import PROACTIVE_MESSAGE
@@ -43,7 +43,8 @@ class UnifiedStore(DiscordStore):
             person = await self._one("SELECT friend_id FROM marong.people WHERE user_key=%s", (user_key,))
             if not person or person["friend_id"] is None:
                 return []
-            return await self._all(ACCEPTED_CIRCLE, {"friend": person["friend_id"], "limit": min(20, limit)})
+            query = accepted_circle(self._forget_guard("'shared_note'", "x.id"))
+            return await self._all(query, {"friend": person["friend_id"], "limit": min(20, limit)})
 
     async def character_prompt(self, friend_id, friends_enabled):
         return await self._one("""
