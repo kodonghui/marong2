@@ -48,7 +48,7 @@ let generation=0,epoch=0,callId=null,memoryConnected=false;
 let rtcClient=null,rtcEnabled=false;
 // A call Marong placed at a time the friend set (docs/app-ring.md SPEC-135): the app opens /?ring=<id>.
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-let ringId=null,ringShown=false;
+let ringId=null,ringShown=false,botName='마롱이';
 {
   // Take the ring out of the address at once, so a reload or a shared link never answers it again.
   const search=location.search||'',found=/[?&]ring=([^&#]*)/.exec(search);
@@ -124,6 +124,25 @@ function transcript(who,text,key=null,replace=false){
   while($('transcript').children.length>200){const box=$('transcript').firstChild;for(const [id,node] of captionNodes)if(box.contains(node))captionNodes.delete(id);box.remove();}
   $('transcript').scrollTop=$('transcript').scrollHeight;
 }
+function botParticle(withBatchim,withoutBatchim){
+  const last=botName.charCodeAt(botName.length-1);
+  return botName+(last>=0xac00&&last<=0xd7a3&&(last-0xac00)%28?withBatchim:withoutBatchim);
+}
+async function refreshProfile(state){
+  try{
+    const response=await fetch('/chat/api/profile',{cache:'no-store'});
+    if(!response.ok)return;
+    const profile=await response.json();
+    if(!profile.botName)return;
+    botName=profile.botName;
+    const brand=document.querySelector('.brand');
+    if(brand?.firstChild?.nodeType===Node.TEXT_NODE)brand.firstChild.textContent=botName;
+    document.title=botName+' · 너의 이야기 곁에';
+    const pending=profile.pendingRing;
+    if(!ringId&&pending&&UUID_RE.test(pending.ringId)&&Date.parse(pending.until)>Date.now())ringId=pending.ringId;
+    if(!intended)ringOffer(Boolean(ringId&&!state.active));
+  }catch{/* older chat servers may not have a profile API */}
+}
 async function refresh(){
   try{
     const response=await fetch('/status',{headers:{'X-Requested-With':'XMLHttpRequest'}});
@@ -135,6 +154,7 @@ async function refresh(){
     const state=await response.json();
     rtcEnabled=Boolean(state.webRTC);
     memoryConnected=Boolean(state.memoryConnected);
+    if(!intended)await refreshProfile(state);
     $('login').hidden=true;$('start').disabled=!state.ready||intended||state.active;
     $('send').disabled=!state.ready||starting||(!intended&&state.active);
     if(!intended){connection(state.active?'통화 중':'곁에 있어요');if(state.active)status('다른 창에서 통화 중이야. 그 통화를 마치면 여기서 걸 수 있어.');}
@@ -306,10 +326,11 @@ async function begin(microphone){
 function ringOffer(show){
   // In a browser (or an app without autoAnswer) Marong's call waits for the friend's tap on 받기.
   ringShown=show;
-  $('headline').textContent=show?'마롱이가 건 전화예요':'마롱이한테 전화할래?';
-  $('start').setAttribute('aria-label',show?'마롱이 전화 받기':'마롱이한테 전화하기');
-  const label=$('start').querySelector?.('.button-label');if(label)label.textContent=show?'받기':'마롱이한테 전화하기';
-  $('control-caption').textContent=show?'받으면 마롱이가 먼저 말할게':'편하게 전화해';
+  const subject=botParticle('이가','가');
+  $('headline').textContent=show?subject+' 건 전화예요':botName+'한테 전화할래?';
+  $('start').setAttribute('aria-label',show?botName+' 전화 받기':botName+'한테 전화하기');
+  const label=$('start').querySelector?.('.button-label');if(label)label.textContent=show?'받기':botName+'한테 전화하기';
+  $('control-caption').textContent=show?'받으면 '+subject+' 먼저 말할게':'편하게 전화해';
 }
 function answerRing(state){
   if(!ringId||!state?.ready||state.active||intended)return;
@@ -318,7 +339,7 @@ function answerRing(state){
     const run=generation+1;
     setTimeout(()=>{if(intended&&generation===run&&starting&&audioContext?.state!=='running')status('화면을 한 번 눌러 줘. 바로 이어질게.');},2000);
     void begin(true);
-  }else{ringOffer(true);status('마롱이가 전화를 걸었어. 받기를 누르면 바로 이어져.');}
+  }else{ringOffer(true);status(botParticle('이가','가')+' 전화를 걸었어. 받기를 누르면 바로 이어져.');}
 }
 $('start').onclick=()=>begin(true);
 $('stop').onclick=()=>end();

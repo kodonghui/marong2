@@ -30,6 +30,21 @@ CROSS JOIN LATERAL (
 
 
 class UnifiedStore(DiscordStore):
+    async def character_prompt(self, friend_id, friends_enabled):
+        return await self._one("""
+            SELECT p.bot_name,c.kind,c.traits,c.tone, %s AND EXISTS (
+                SELECT 1 FROM marong.friendships fs WHERE p.friend_id IN (fs.friend_a,fs.friend_b)
+                AND fs.state='accepted'
+            ) AS has_friends
+            FROM marong.friend_profiles p LEFT JOIN marong.characters c
+                ON c.id=p.character_id AND c.friend_id=p.friend_id AND c.status='ready'
+            WHERE p.friend_id=%s
+        """, (friends_enabled, friend_id))
+
+    async def app_bot_name(self, friend_id):
+        row = await self._one("SELECT bot_name FROM marong.friend_profiles WHERE friend_id=%s", (friend_id,))
+        return row["bot_name"] if row else None
+
     async def writing_target(self, friend_id):
         return await self._one(f"""
             SELECT {writing_room_key('f.id')} AS room_key,

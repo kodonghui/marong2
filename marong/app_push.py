@@ -47,10 +47,11 @@ def can_ring(device: dict) -> bool:
 
 
 class AppPush:
-    def __init__(self, store, sender=None, *, ring_enabled: bool = False):
+    def __init__(self, store, sender=None, *, ring_enabled: bool = False, title_for=None):
         self.store = store
         self.fcm = sender                  # fcm.FCM, None until the key is on the server (SPEC-127)
         self.ring_enabled = ring_enabled   # MARONG_APP_RING=1 (docs/app-ring.md)
+        self.title_for = title_for
 
     @property
     def enabled(self) -> bool:
@@ -108,8 +109,9 @@ class AppPush:
         if not self.enabled:
             return 0, 0
         devices = [d for d in await self.store.app_devices(friend_id) if can_notify(d)]
+        title = await self.title_for(friend_id) if devices and self.title_for else None
         ok = await self._fan_out(kind, devices, lambda fid: fcm_messages.notice(
-            fid, kind, text, channel=channel, ttl_s=ttl_s, open_path=open_path))
+            fid, kind, text, channel=channel, ttl_s=ttl_s, open_path=open_path, title=title or fcm_messages.TITLE))
         return ok, len(devices)
 
     async def ring_devices(self, friend_id: int) -> list[dict]:
