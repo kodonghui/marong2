@@ -57,11 +57,11 @@ ID 번호: REQ는 260부터 써요(연구 스레드는 PR #25 다음 번호인 2
 
 | ID | Requirement | Type | Priority | Context | Source | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| REQ-283 | 화두를 글로 보낼 때, 시스템은 D18 경로(앱 알림이 되는 폰이 있으면 앱, 아니면 디스코드 DM)로 보내야 한다. | functional | Must | CTX-001 | 기존(D18) | active |
+| REQ-283 | 화두를 글로 보낼 때, 시스템은 D18 경로(앱 알림이 되는 폰이 있으면 앱, 아니면 디스코드 DM)로 보내야 한다. | functional | Must | CTX-001 | 기존(D18) | changed(→ REQ-462, D92) |
 | REQ-284 | 그림 화두 글은 마롱이가 그 장면을 자기 일상처럼 짧게 나누고 되묻는 질문 하나로 끝나야 한다. | functional | Must | CTX-020 | D23("나는 닭꼬치먹고 있어 넌 뭐 먹었어?"), 연구 | active |
 | REQ-285 | 그림 화두 글을 모델로 만들지 못하면, 시스템은 그 그림의 첫마디 예시와 되묻는 질문을 그대로 보내야 한다. | functional | Must | CTX-020 | 새 제안(모델 장애에도 화두를 보냄) | active |
 | REQ-286 | 앱 글 대화는 그림 화두 글을 그 그림과 함께 보여야 한다. | functional | Must | CTX-001 | D23 | active |
-| REQ-287 | 디스코드 DM으로 보낼 때, 시스템은 그림 화두 글에 그 그림 파일을 붙여야 한다. | functional | Must | CTX-001 | D23 | active |
+| REQ-287 | 디스코드 DM으로 보낼 때, 시스템은 그림 화두 글에 그 그림 파일을 붙여야 한다. | functional | Must | CTX-001 | D23 | changed(→ REQ-462, D92) |
 | REQ-288 | 그림 화두의 앱 알림 글은 그 그림의 알림 미리보기 한 줄이어야 한다. | non-functional | Must | CTX-020 | 기존(DM 지시문의 잠금 화면 규칙), 합의 | active |
 | REQ-289 | 시스템은 그림 화두와 선 전화를 각각 선톡 한 번으로 세어 선톡 하루 최대에 넣어야 한다. | functional | Must | CTX-001 | 합의 | active |
 

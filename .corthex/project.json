@@ -10,7 +10,8 @@
     "diary",
     "call-cost",
     "persona",
-    "pet"
+    "pet",
+    "unified"
   ],
   "records": {
     "kind": "notion",
