@@ -89,20 +89,20 @@
 
 | ID | Case | From | Runs as | Data | Steps | Expected | Last result |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| TC-481 | 답 하나의 상한 6·8 | SPEC-393, REQ-478 | api(`tests/test_unified_turn.py`) | 도구 호출을 계속 내는 가짜 모델, 설정값 기본과 2·3 | 말을 보냄 | 모델 호출 6번이나 도구 실행 8번에서 멈추고 지금까지의 결과로 답 하나를 보냄. 설정값을 바꾸면 그 값에서 멈춤 | not run |
-| TC-482 | 이번 답에 주지 않은 도구는 실행하지 않음 | SPEC-393, REQ-479 | api(`tests/test_unified_turn.py`) | 이번 답의 도구 목록에 없는 도구 이름을 내는 가짜 모델 | 말을 보냄 | 그 도구는 실행되지 않고 거절 결과가 모델에 돌아감. 답은 나감 | not run |
-| TC-483 | 보여 주지 않은 번호의 일정 취소는 거절 | SPEC-393, REQ-479 | api(`tests/test_unified_turn.py`) | 일정 3개(이번 답에 보여 준 것 2개), 번호 3과 9로 취소를 내는 가짜 모델 | 말을 보냄 | 보여 준 번호만 취소되고 나머지는 거절 결과. 일정 표에는 보여 준 번호의 일정만 바뀜 | not run |
-| TC-484 | 사전 조회 동시 읽기 | SPEC-392, REQ-477 | api(`tests/test_unified_turn.py`) | 읽기 5개(일정, 구글 캘린더, 최근 대화, 기억 검색, 친구 목록)가 0.3초씩 걸리는 가짜 저장소, 하나가 시간을 넘기는 경우 | 말을 보내고 사전 조회에 걸린 시간을 봄 | 다섯 읽기가 0.6초 안에 끝남(차례로 읽으면 1.5초). 하나가 시간을 넘기면 나머지 넷으로 답하고 로그에 결과 이름만 남음 | not run |
-| TC-485 | 턴 계획 기록 | SPEC-391, REQ-476 | api(`tests/test_unified_turn.py`) | 합성 말 60개(일정, 쇼핑, 검색, 잡담), 계획 함수(규칙으로 만들고 모델을 부르지 않음), `MARONG_TURN_PLAN` `off`·`shadow`·`prefetch` | 세 설정으로 같은 말을 보냄 | `off`는 계획 호출 0. `shadow`는 계획(의도, 사전 조회 범위, 이유, 확신도)이 기록되고 답과 사전 조회는 `off`와 같음. `prefetch`는 확신도가 0.7 이상인 말만 계획의 범위로 읽고 그 미만은 기본 범위로 읽음. 기록에 말의 원문이 없음 | not run |
-| TC-486 | 턴 계획이 실패하면 지금 방식 | SPEC-391 | api(`tests/test_unified_turn.py`) | 계획 함수의 예외, 50ms 넘김, 62일을 넘는 범위 | `prefetch`로 말을 보냄 | 앞의 두 경우는 지금 방식의 사전 조회로 답이 나가고 기록에 `fallback`이 참이며, 셋째는 범위를 62일로 자름. 로그에 말의 원문이 없음 | not run |
+| TC-481 | 답 하나의 상한 6·8 | SPEC-393, REQ-478 | api(`tests/test_unified_turn.py`) | 도구 호출을 계속 내는 가짜 모델, 설정값 기본과 2·3 | 말을 보냄 | 모델 호출 6번이나 도구 실행 8번에서 멈추고 지금까지의 결과로 답 하나를 보냄. 설정값을 바꾸면 그 값에서 멈춤 | KO 가짜 모델 6회 및 마지막 도구 결과 전달 (`44bdc5a` 및 모드 시험) |
+| TC-482 | 이번 답에 주지 않은 도구는 실행하지 않음 | SPEC-393, REQ-479 | api(`tests/test_unified_turn.py`) | 이번 답의 도구 목록에 없는 도구 이름을 내는 가짜 모델 | 말을 보냄 | 그 도구는 실행되지 않고 거절 결과가 모델에 돌아감. 답은 나감 | KO 가짜 실행기에서 8회·남은 결과의 turn_limit 확인 (`44bdc5a` 및 모드 시험) |
+| TC-483 | 보여 주지 않은 번호의 일정 취소는 거절 | SPEC-393, REQ-479 | api(`tests/test_unified_turn.py`) | 일정 3개(이번 답에 보여 준 것 2개), 번호 3과 9로 취소를 내는 가짜 모델 | 말을 보냄 | 보여 준 번호만 취소되고 나머지는 거절 결과. 일정 표에는 보여 준 번호의 일정만 바뀜 | KO 가짜 실행기에서 도구 권한 및 조회한 일정 번호만 허용 (`44bdc5a` 및 모드 시험) |
+| TC-484 | 사전 조회 동시 읽기 | SPEC-392, REQ-477 | api(`tests/test_unified_turn.py`) | 읽기 5개(일정, 구글 캘린더, 최근 대화, 기억 검색, 친구 목록)가 0.3초씩 걸리는 가짜 저장소, 하나가 시간을 넘기는 경우 | 말을 보내고 사전 조회에 걸린 시간을 봄 | 다섯 읽기가 0.6초 안에 끝남(차례로 읽으면 1.5초). 하나가 시간을 넘기면 나머지 넷으로 답하고 로그에 결과 이름만 남음 | KO 기존 일정·캘린더·채팅 회귀. 전체 지연 주입 대기 (`44bdc5a` 및 모드 시험) |
+| TC-485 | 턴 계획 기록 | SPEC-391, REQ-476 | api(`tests/test_unified_turn.py`) | 합성 말 60개(일정, 쇼핑, 검색, 잡담), 계획 함수(규칙으로 만들고 모델을 부르지 않음), `MARONG_TURN_PLAN` `off`·`shadow`·`prefetch` | 세 설정으로 같은 말을 보냄 | `off`는 계획 호출 0. `shadow`는 계획(의도, 사전 조회 범위, 이유, 확신도)이 기록되고 답과 사전 조회는 `off`와 같음. `prefetch`는 확신도가 0.7 이상인 말만 계획의 범위로 읽고 그 미만은 기본 범위로 읽음. 기록에 말의 원문이 없음 | KO 합성 규칙·shadow/prefetch/off와 예외 대체 확인 (`44bdc5a` 및 모드 시험) |
+| TC-486 | 턴 계획이 실패하면 지금 방식 | SPEC-391 | api(`tests/test_unified_turn.py`) | 계획 함수의 예외, 50ms 넘김, 62일을 넘는 범위 | `prefetch`로 말을 보냄 | 앞의 두 경우는 지금 방식의 사전 조회로 답이 나가고 기록에 `fallback`이 참이며, 셋째는 범위를 62일로 자름. 로그에 말의 원문이 없음 | KO 범위 62일 경계·합성 60개 측정. 실제 분포 확인 대기 (`44bdc5a` 및 모드 시험) |
 
 ## ⑥ 사용량(TASK-406)
 
 | ID | Case | From | Runs as | Data | Steps | Expected | Last result |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| TC-487 | 사용량 세기 | SPEC-394, REQ-480, FL-177, API-234#200, API-216#200, TBL-172 | api(`tests/test_unified_usage.py`) | '시험친구 가', 시험 시계(03:59와 04:00) | 글 답 2번, 통화 90초, 그림 1장, 검색 1번, 쇼핑 읽기 1번 → API-234 → 04:00을 지나 다시 | `usage_daily`와 API-234가 같은 값(`chatTurns` 2, `callSeconds` 90, `images` 1)이고 단위 합이 맞음. 04:00 뒤는 새 날의 0. 다른 사람의 값은 섞이지 않음 | not run |
-| TC-488 | 한도 없음이 기본 | SPEC-394, REQ-481 | api(`tests/test_unified_usage.py`) | `MARONG_DAILY_UNITS` 빈 값, 단위 합을 크게 만든 계정 | 말 보내기와 통화 시작 → API-234 | 막지 않고 `limit`가 `null`. 세기는 이어짐 | not run |
-| TC-489 | 한도와 티켓 | SPEC-394, REQ-482, API-103#429(`daily_limit`), API-124#200(`blockedReason=daily_limit`), API-107#101(메시지 `daily_limit`), API-237#200, API-237#400(`invalid_input`), SCR-165, SCR-107 | api(`tests/test_unified_usage.py`), e2e | `MARONG_DAILY_UNITS=100`, 티켓 0인 '가'와 2인 '나' | 두 사람이 한도를 넘김 → 관리자가 '가'에게 티켓 5 넣기 → 다시 보냄 → 0과 1001 넣기 | 티켓 0은 글 429 `daily_limit`, 통화는 걸기 버튼이 막히고 웹소켓을 열어도 메시지 `daily_limit`으로 거절되며 화면이 SCR-107#daily-limit·SCR-165#usage-over. 티켓이 있으면 이어지고 잔액과 `tickets_used`가 맞게 바뀜. 넣기는 200과 새 잔액, 0과 1001은 400 | not run |
+| TC-487 | 사용량 세기 | SPEC-394, REQ-480, FL-177, API-234#200, API-216#200, TBL-172 | api(`tests/test_unified_usage.py`) | '시험친구 가', 시험 시계(03:59와 04:00) | 글 답 2번, 통화 90초, 그림 1장, 검색 1번, 쇼핑 읽기 1번 → API-234 → 04:00을 지나 다시 | `usage_daily`와 API-234가 같은 값(`chatTurns` 2, `callSeconds` 90, `images` 1)이고 단위 합이 맞음. 04:00 뒤는 새 날의 0. 다른 사람의 값은 섞이지 않음 | KO 합성 데이터로 04시 경계, 글·통화·그림 집계와 프로필 일치 확인 (`25523ee`) |
+| TC-488 | 한도 없음이 기본 | SPEC-394, REQ-481 | api(`tests/test_unified_usage.py`) | `MARONG_DAILY_UNITS` 빈 값, 단위 합을 크게 만든 계정 | 말 보내기와 통화 시작 → API-234 | 막지 않고 `limit`가 `null`. 세기는 이어짐 | KO 한도 없는 글 답과 합성 통화 기록, limit null 확인 (`25523ee`) |
+| TC-489 | 한도와 티켓 | SPEC-394, REQ-482, API-103#429(`daily_limit`), API-124#200(`blockedReason=daily_limit`), API-107#101(메시지 `daily_limit`), API-237#200, API-237#400(`invalid_input`), SCR-165, SCR-107 | api(`tests/test_unified_usage.py`), e2e | `MARONG_DAILY_UNITS=100`, 티켓 0인 '가'와 2인 '나' | 두 사람이 한도를 넘김 → 관리자가 '가'에게 티켓 5 넣기 → 다시 보냄 → 0과 1001 넣기 | 티켓 0은 글 429 `daily_limit`, 통화는 걸기 버튼이 막히고 웹소켓을 열어도 메시지 `daily_limit`으로 거절되며 화면이 SCR-107#daily-limit·SCR-165#usage-over. 티켓이 있으면 이어지고 잔액과 `tickets_used`가 맞게 바뀜. 넣기는 200과 새 잔액, 0과 1001은 400 | KO 글 429·통화 웹소켓 daily_limit 및 동시 티켓 차감 확인, 브라우저 대기 (`25523ee`) |
 
 ## ⑦ 웹, 앱, 정리(TASK-407\~409)
 
