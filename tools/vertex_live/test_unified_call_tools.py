@@ -1,6 +1,7 @@
 """Verify the internal shopping contract and its call quota with local fakes."""
 
 import asyncio
+from dataclasses import replace
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,9 +12,11 @@ from aiohttp import WSMsgType, web
 from aiohttp.test_utils import TestClient, TestServer
 from call_shop import FAILED, LIMIT, configured_reader, fetch_product
 from live_session import LiveSession
+from marong.config import load_settings
+from marong.llm import LLM
 from marong.internal_shop import InternalShop, LOOKUP_PATH
 from marong.shopping import ShopFetch
-from fakes import ScriptedLLM, message, text
+from fakes import FakeAnthropic, ScriptedLLM, message, text
 
 
 async def verify_wait_during_tool_turn():
@@ -58,7 +61,8 @@ PRODUCT = '{"ok":true,"title":"Fixture product","price":"100","points":["fixture
 FETCH_USAGE = {"input_tokens": 1, "output_tokens": 1, "server_tool_use": {"web_fetch_requests": 1}}
 PAGE = {"type": "web_fetch_tool_result", "tool_use_id": "fixture_fetch", "content": {
     "type": "web_fetch_result", "url": "https://www.musinsa.com/products/test",
-    "content": {"type": "document", "title": "Fixture product"},
+    "content": {"type": "document", "title": "Fixture product",
+                "source": {"type": "text", "media_type": "text/plain", "data": "Fixture product price 100"}},
 }}
 FETCH_ERROR = {"type": "web_fetch_tool_result", "tool_use_id": "fixture_fetch", "content": {
     "type": "web_fetch_tool_result_error", "error_code": "url_not_accessible",
@@ -91,6 +95,32 @@ async def verify_completed_shopping_turn():
         internal = InternalShop(llm, None, shop, "fixture", "fixture-secret")
         assert await internal.product("Fixture product") == FAILED
         assert shop.used == len(llm.bodies) == (2 if stop == "pause_turn" else 1)
+
+
+async def verify_sdk_pause_continuation():
+    start = {"type": "server_tool_use", "id": "fixture_fetch", "name": "web_fetch",
+             "input": {"url": PAGE["content"]["url"]}}
+    outputs = iter((
+        message([start, PAGE], "pause_turn", usage=FETCH_USAGE),
+        message([text(PRODUCT)]),
+    ))
+    fake = FakeAnthropic(lambda _key, _body: (200, next(outputs)))
+    settings = replace(load_settings(), anthropic_api_key="fixture", anthropic_api_key_backup="",
+                       anthropic_base_url=fake.url)
+    llm = LLM(settings)
+    try:
+        internal = InternalShop(llm, None, ShopFetch(daily=3), "fixture", "fixture-secret")
+        assert (await internal.product("Fixture product"))["title"] == "Fixture product"
+        assert len(fake.calls) == 2
+        assistant = fake.calls[1]["body"]["messages"][-1]
+        assert assistant["role"] == "assistant"
+        assert assistant["content"][0] == start
+        result = assistant["content"][1]
+        assert result["type"] == PAGE["type"]
+        assert result["content"]["url"] == PAGE["content"]["url"]
+    finally:
+        await llm.close()
+        await asyncio.to_thread(fake.close)
 
 
 async def main():
@@ -137,6 +167,7 @@ async def main():
     assert (await live.output.get())[1] == {"type": "wait", "on": False}
     await verify_wait_during_tool_turn()
     await verify_completed_shopping_turn()
+    await verify_sdk_pause_continuation()
     print("PASS TC-477 and TC-479 local route, secret, quota, result and audio control")
 
 
