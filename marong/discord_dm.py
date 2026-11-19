@@ -63,9 +63,8 @@ FOLLOW_UP_KEPT = 4      # 모든 방을 합친 상한(사진 한 장이 메모�
 REACT_S = 4             # 친구 메시지에 반응을 다는 시간 상한(초). 넘으면 반응 없이 답만 보냄
 SOURCES_FIT = 1800      # 답과 출처 줄을 합쳐 이 길이까지는 한 메시지로, 넘으면 출처를 따로 보냄(링크가 잘리지 않게)
 PROACTIVE_APP_TTL_S = 7200  # 앱으로 보낸 선톡 알림을 FCM 이 들고 있는 시간(docs/app-chat.md SPEC-118)
-APP_LINE = ("- 이 말은 마롱이 앱의 글 대화 화면에서 왔어. 디스코드 DM과 같은 대화라 앞의 이야기를 그대로 이어 가. "
-            "사진은 앱 글 대화로는 아직 못 보내.")
-APP_GOOGLE_TEXT = "구글 캘린더 연결은 디스코드 DM에서 ‘구글 캘린더 연결’이라고 보내 줘. 일회용 링크라 거기서만 줄 수 있어."
+APP_LINE = "- 이 말은 마롱이 앱의 글 대화 화면에서 왔어. 같은 사람과 앞서 나눈 이야기를 이어 가."
+APP_GOOGLE_TEXT = "내 마롱이에서 ‘구글 캘린더’를 열면 연결하거나 끊을 수 있어."
 DEFAULT_ORIGIN = "https://marong.corthex-hq.com"  # 통화·글 대화 주소(MARONG_APP_ORIGIN 으로 바꿈)
 
 # ── 비공개 서버 채널 ──
@@ -100,7 +99,7 @@ HEARD_TITLE = ("# 방금 이 채널에서 오간 다른 말 (디스코드로 마
 CHANNEL_SYSTEM = ("지금은 디스코드 서버 채널에서 친구들과 같이 하는 대화야. 지금 말 건 친구에게 답하되 채널에 있는 사람이 다 본다는 걸 "
                   "생각해. 비밀, 건강·몸·돈, 연애 속사정처럼 한 사람에게만 할 얘기는 먼저 꺼내지 마. 이름을 바꾸거나 다른 친구의 "
                   "기록을 찾아 주겠다고 말하지 마. 친구처럼 바로 대화하고, 사용법을 먼저 설명하지 마.")
-DM_SYSTEM = ("지금은 디스코드에서 마롱이와 하는 개인 DM이야. 이름을 바꾸거나 다른 친구의 기록을 찾아 주겠다고 말하지 마. "
+DM_SYSTEM = ("지금은 마롱이와 한 사람이 나누는 개인 대화야. 이름을 바꾸거나 다른 친구의 기록을 찾아 주겠다고 말하지 마. "
              "친구처럼 바로 대화하고, 사용법이나 선톡 설정을 먼저 설명하지 마. "
              "먼저 말 거는 말(선톡)은 잠금 화면 알림에 그대로 보여. 친구가 전에 말한 시험·약속·하던 일을 이어 가는 건 "
              "좋지만, 몸·연애·성·돈·비밀처럼 남이 보면 곤란한 얘기는 선톡에서 먼저 꺼내지 마.")
@@ -314,7 +313,8 @@ class PrivateChatAgent(Agent):
             now = datetime.now(tz)
             lines += ["", schedule_guide(self.ring, surface=self.schedule_source)] + schedule_lines(msg.schedule_rows, msg.schedule_total, tz, now)
             if self.google:
-                lines += calendar_lines(msg.google_link, msg.google_events, msg.google_more, tz, now)
+                lines += calendar_lines(msg.google_link, msg.google_events, msg.google_more, tz, now,
+                                        surface=self.schedule_source)
         guides = self._web_guides(msg)
         if guides:
             lines += ["", guides]
