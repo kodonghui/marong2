@@ -100,9 +100,9 @@
 
 | ID | Case | From | Runs as | Data | Steps | Expected | Last result |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| TC-487 | 사용량 세기 | SPEC-394, REQ-480, FL-177, API-234#200, API-216#200, TBL-172 | api(`tests/test_unified_usage.py`) | '시험친구 가', 시험 시계(03:59와 04:00) | 글 답 2번, 통화 90초, 그림 1장, 검색 1번, 쇼핑 읽기 1번 → API-234 → 04:00을 지나 다시 | `usage_daily`와 API-234가 같은 값(`chatTurns` 2, `callSeconds` 90, `images` 1)이고 단위 합이 맞음. 04:00 뒤는 새 날의 0. 다른 사람의 값은 섞이지 않음 | not run |
-| TC-488 | 한도 없음이 기본 | SPEC-394, REQ-481 | api(`tests/test_unified_usage.py`) | `MARONG_DAILY_UNITS` 빈 값, 단위 합을 크게 만든 계정 | 말 보내기와 통화 시작 → API-234 | 막지 않고 `limit`가 `null`. 세기는 이어짐 | not run |
-| TC-489 | 한도와 티켓 | SPEC-394, REQ-482, API-103#429(`daily_limit`), API-124#200(`blockedReason=daily_limit`), API-107#101(메시지 `daily_limit`), API-237#200, API-237#400(`invalid_input`), SCR-165, SCR-107 | api(`tests/test_unified_usage.py`), e2e | `MARONG_DAILY_UNITS=100`, 티켓 0인 '가'와 2인 '나' | 두 사람이 한도를 넘김 → 관리자가 '가'에게 티켓 5 넣기 → 다시 보냄 → 0과 1001 넣기 | 티켓 0은 글 429 `daily_limit`, 통화는 걸기 버튼이 막히고 웹소켓을 열어도 메시지 `daily_limit`으로 거절되며 화면이 SCR-107#daily-limit·SCR-165#usage-over. 티켓이 있으면 이어지고 잔액과 `tickets_used`가 맞게 바뀜. 넣기는 200과 새 잔액, 0과 1001은 400 | not run |
+| TC-487 | 사용량 세기 | SPEC-394, REQ-480, FL-177, API-234#200, API-216#200, TBL-172 | api(`tests/test_unified_usage.py`) | '시험친구 가', 시험 시계(03:59와 04:00) | 글 답 2번, 통화 90초, 그림 1장, 검색 1번, 쇼핑 읽기 1번 → API-234 → 04:00을 지나 다시 | `usage_daily`와 API-234가 같은 값(`chatTurns` 2, `callSeconds` 90, `images` 1)이고 단위 합이 맞음. 04:00 뒤는 새 날의 0. 다른 사람의 값은 섞이지 않음 | KO 합성 데이터로 04시 경계, 글·통화·그림 집계와 프로필 일치 확인 (`25523ee`) |
+| TC-488 | 한도 없음이 기본 | SPEC-394, REQ-481 | api(`tests/test_unified_usage.py`) | `MARONG_DAILY_UNITS` 빈 값, 단위 합을 크게 만든 계정 | 말 보내기와 통화 시작 → API-234 | 막지 않고 `limit`가 `null`. 세기는 이어짐 | KO 한도 없는 글 답과 합성 통화 기록, limit null 확인 (`25523ee`) |
+| TC-489 | 한도와 티켓 | SPEC-394, REQ-482, API-103#429(`daily_limit`), API-124#200(`blockedReason=daily_limit`), API-107#101(메시지 `daily_limit`), API-237#200, API-237#400(`invalid_input`), SCR-165, SCR-107 | api(`tests/test_unified_usage.py`), e2e | `MARONG_DAILY_UNITS=100`, 티켓 0인 '가'와 2인 '나' | 두 사람이 한도를 넘김 → 관리자가 '가'에게 티켓 5 넣기 → 다시 보냄 → 0과 1001 넣기 | 티켓 0은 글 429 `daily_limit`, 통화는 걸기 버튼이 막히고 웹소켓을 열어도 메시지 `daily_limit`으로 거절되며 화면이 SCR-107#daily-limit·SCR-165#usage-over. 티켓이 있으면 이어지고 잔액과 `tickets_used`가 맞게 바뀜. 넣기는 200과 새 잔액, 0과 1001은 400 | KO 글 429·통화 웹소켓 daily_limit 및 동시 티켓 차감 확인, 브라우저 대기 (`25523ee`) |
 
 ## ⑦ 웹, 앱, 정리(TASK-407\~409)
 
