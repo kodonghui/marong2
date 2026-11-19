@@ -899,6 +899,11 @@ async function start() {
     const draft = sessionStorage.getItem('marong.session.draft');
     if (draft && !ui.text.value) ui.text.value = draft;
     sessionStorage.removeItem('marong.session.draft');
+    const character = sessionStorage.getItem('marong.character.applied');
+    if (character) {
+      sessionStorage.removeItem('marong.character.applied');
+      notice(`이제 ${character}로 바뀌었어! 대화랑 기억은 그대로야`);
+    }
   } catch { /* sessionStorage can be blocked */ }
   unblock();
   app.hasMore = page.body.hasMore;
