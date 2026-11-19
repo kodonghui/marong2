@@ -101,6 +101,47 @@ describe('call page inside the app', { skip }, () => {
     await context.close();
   });
 
+  it('TC-478: brief waits stay silent and a longer wait ends before reply playback', async () => {
+    const context = await browser.newContext(PHONE);
+    await context.addInitScript(INIT_SCRIPT);
+    await context.addInitScript(() => {
+      window.waitEvents = [];
+      const prototype = AudioBufferSourceNode.prototype;
+      const { start, stop } = prototype;
+      for (const [name, method] of [['start', start], ['stop', stop]]) {
+        prototype[name] = function (...args) {
+          if (this.loop && this.buffer?.duration === 1.5) window.waitEvents.push(name);
+          return method.apply(this, args);
+        };
+      }
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto(site.url);
+      await page.waitForFunction(() => !document.getElementById('start').disabled);
+      await page.click('#start');
+      await page.waitForFunction(() => typeof waitBuffer !== 'undefined' && waitBuffer !== null && ready);
+      site.sendControl({ type: 'wait', on: true, reason: 'tool' });
+      await page.waitForTimeout(480);
+      site.sendControl({ type: 'wait', on: false });
+      await page.waitForTimeout(400);
+      assert.deepEqual(await page.evaluate(() => window.waitEvents), []);
+
+      site.sendControl({ type: 'wait', on: true, reason: 'tool' });
+      await page.waitForFunction(() => window.waitEvents.includes('start'));
+      assert.equal(await page.locator('#status').textContent(), '찾아보는 중…');
+      assert.equal(await page.locator('#stop').isEnabled(), true);
+      site.sendControl({ type: 'wait', on: false });
+      site.sendReplyAudio(0);
+      await page.waitForFunction(() => playbackStats.playedMs > 0);
+      assert.equal(await page.evaluate(() => waitSource), null);
+      assert.deepEqual(await page.evaluate(() => window.waitEvents), ['start', 'stop']);
+      assert.notEqual(await page.locator('#status').textContent(), '찾아보는 중…');
+    } finally {
+      await context.close();
+    }
+  });
+
   it('TC-151: inside the app the call screen has no text panel from the first paint; a browser keeps it', async () => {
     const context = await browser.newContext(PHONE);
     await context.addInitScript(INIT_SCRIPT);

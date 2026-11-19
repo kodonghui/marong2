@@ -32,7 +32,15 @@ class AppAdmin:
 
     async def page(self, req):
         await self.require_admin(req)
-        return self.chat.unified_page("admin")
+        response = self.chat.unified_page("admin")
+        characters = self.chat.characters
+        if characters.enabled and characters.budget:
+            async with self.chat.store.pool.connection() as conn:
+                spent = await characters.spent(conn)
+            percent = round(spent * 100 / characters.budget)
+            display = f'<p class="caption">이번 달 그림 예산 사용률 {percent}%</p>'
+            response.body = response.body.replace(b"<!-- image-budget -->", display.encode("utf-8"))
+        return response
 
     async def create_invite(self, req):
         await self.require_admin(req, write=True)

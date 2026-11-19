@@ -74,6 +74,8 @@ def choices(card):
         return (("yes", "맞아"), ("edit", "고칠래"))
     if card["kind"] == "ask_support":
         return (("listen", "일단 들어 줘"), ("solve", "같이 방법 찾자"))
+    if card["kind"] == "memory_ok":
+        return (("keep", "기억해"), ("forget", "잊어"))
     if card["kind"] == "card_proposal":
         return (("yes", "응"), ("no", "아니"))
     return ()
@@ -301,6 +303,11 @@ class FriendCards:
             return {"card": row, "effect": effect, "applied": True, "sentence": sentence}
 
     async def answer_card(self, friend, card, value, **kwargs):
+        if card["kind"] == "memory_ok":
+            from .memory_consent import answer
+
+            return await answer(self.store.pool, friend, card["id"], value, room=kwargs["room"],
+                                via=kwargs["via"], at=kwargs["at"])
         if card["kind"] == "card_proposal":
             return await self.answer_proposal(friend, card["id"], value, via=kwargs["via"], at=kwargs["at"],
                                               publish_message=kwargs.get("publish_message", False))

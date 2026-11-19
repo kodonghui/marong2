@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko" data-theme="night">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>마롱이 · 마롱이가 기억하는 나</title>
+  <link rel="stylesheet" href="/chat/chat.css">
+  <link rel="stylesheet" href="/chat/persona/persona.css">
+  <script src="/chat/persona/persona.js" defer></script>
+</head>
+<body>
+  <main class="persona-page memory-page" data-page="memory">
+    <header class="bar"><a href="/chat/persona/">‹ 친구 약속</a><h1>마롱이가 기억하는 나</h1></header>
+    <p>대화에서 들은 걸 이렇게 적어 뒀어. 잊어 달라고 하면 바로 잊을게</p>
+    <p class="feedback" id="feedback" role="status"></p>
+    <p id="memory-trace" class="hint"></p>
+    <a id="memory-back" class="text-button" href="/chat/persona/" hidden></a>
+    <button id="reload" class="text-button" type="button" hidden>다시 해 볼게</button>
+    <div id="memory-skeleton" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+    <div id="content" hidden>
+      <div id="memory-empty" class="persona-box memory-empty" hidden>
+        <img src="/face/v1/01-neutral.webp" width="152" height="152" alt="">
+        <p>아직 따로 적어 둔 건 없어. 얘기하다 보면 여기에 쌓여</p>
+      </div>
+      <div id="memory-list"></div>
+      <button id="memory-more" class="text-button" type="button" hidden>더 보기</button>
+    </div>
+  </main>
+</body>
+</html>

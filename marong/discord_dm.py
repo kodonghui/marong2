@@ -132,6 +132,7 @@ class DiscordIncoming(Incoming):
     presaved_id: int | None = None        # the in-app chat stored this text before answering (Agent.handle)
     channel: bool = False                 # a channel of the private server shared by friends, not the friend's own DM
     addressed: str | None = None          # (channel) "call" | "follow": Marong answers it. None: only read (stored)
+    visible_friends: set[int] | None = None  # linked friends allowed to read the current channel
     heard: list = field(default_factory=list)     # (channel) [(when, name, text)] other bots / unlinked people, not stored
     friends: list = field(default_factory=list)   # (channel) names of the friends linked to Marong on this server
 
@@ -224,7 +225,7 @@ def question_view(row):
         return None
     view = discord.ui.View(timeout=None)
     for value, label in choices(row):
-        kinds = {"ask_support": "support", "card_draft": "draft", "card_proposal": "proposal"}
+        kinds = {"ask_support": "support", "card_draft": "draft", "card_proposal": "proposal", "memory_ok": "memory"}
         step = row["step"] if row["kind"] == "card_question" else kinds[row["kind"]]
         custom_id = f"card:{step}:{value}:{row['id']}"
         view.add_item(discord.ui.Button(label=label, custom_id=custom_id))
@@ -236,6 +237,9 @@ class PrivateChatAgent(Agent):
     ring = False  # MARONG_APP_RING=1: schedule_add takes call promises (docs/app-ring.md SPEC-128)
     topics = False  # MARONG_TOPICS=1: the phrases that turn hello calls and pictures on or off (SPEC-277)
     schedule_source = "discord"
+    direct_system = DM_SYSTEM
+    app_line = APP_LINE
+    app_calendar_text = APP_GOOGLE_TEXT
 
     def __init__(self, settings, store, embeddings, llm, on_saved=None, *, first_replies=None, google=None, shop=None,
                  web=None, clock=time.monotonic):
@@ -250,7 +254,7 @@ class PrivateChatAgent(Agent):
 
     def _tools(self, msg):
         # Identity and opt-in never change on model output. Only the friend's own schedule does.
-        tools = list(schedule_tools(self.ring)) if getattr(msg, "friend_id", None) else []
+        tools = list(schedule_tools(self.ring, surface=self.schedule_source)) if getattr(msg, "friend_id", None) else []
         # Mall product pages only (web_fetch). None once today's reads are used up or the API refused the tool.
         fetch = self.shop.tool() if self.shop is not None else None
         tools += [fetch] if fetch else []
@@ -290,7 +294,7 @@ class PrivateChatAgent(Agent):
         # reference sections, which may quote friends, come after it).
         head = situation.split("\n\n", 1)[0].split("\n")
         channel = any(line.startswith(CHANNEL_HEAD) for line in head)
-        return super()._system(situation + "\n\n" + (CHANNEL_SYSTEM if channel else DM_SYSTEM))
+        return super()._system(situation + "\n\n" + (CHANNEL_SYSTEM if channel else self.direct_system))
 
     def _situation(self, msg, person, notes, summaries, recalled, circle=None):
         text = super()._situation(msg, person, notes, summaries, recalled, circle)
@@ -304,11 +308,11 @@ class PrivateChatAgent(Agent):
         at = next((i + 1 for i, line in enumerate(lines) if line.startswith("- 지금 말 건 친구")), 2)
         lines[at:at] = self._dm_lines(msg.dm_link, private=(person or {}).get("share") is False)
         if msg.via == "app":
-            lines.insert(at, APP_LINE)
+            lines.insert(at, self.app_line)
         if msg.friend_id:
             tz = ZoneInfo(self.s.timezone)
             now = datetime.now(tz)
-            lines += ["", schedule_guide(self.ring)] + schedule_lines(msg.schedule_rows, msg.schedule_total, tz, now)
+            lines += ["", schedule_guide(self.ring, surface=self.schedule_source)] + schedule_lines(msg.schedule_rows, msg.schedule_total, tz, now)
             if self.google:
                 lines += calendar_lines(msg.google_link, msg.google_events, msg.google_more, tz, now)
         guides = self._web_guides(msg)
@@ -497,7 +501,7 @@ class PrivateChatAgent(Agent):
     async def _google_command(self, msg):
         """'구글 캘린더 연결·끊기': the link goes out only in the sent text, the history keeps LINK_MARK."""
         if msg.via == "app":  # a one-time link is given in the Discord DM only (SPEC-112)
-            return APP_GOOGLE_TEXT, {"google": "app"}
+            return self.app_calendar_text, {"google": "app"}
         if msg.google_command == "connect":
             if not self.google or not msg.friend_id:
                 return UNAVAILABLE_TEXT, {"google": "unavailable"}
@@ -556,6 +560,8 @@ class PrivateChatAgent(Agent):
     async def _run_tool(self, block, msg):
         if block.name == "card_update":
             return await self._card_update(block, msg)
+        if block.name == "memory_list":
+            return await super()._run_tool(block, msg)
         result = {"type": "tool_result", "tool_use_id": block.id}
         friend_id = getattr(msg, "friend_id", None)
         if block.name not in SCHEDULE_TOOL_NAMES or not friend_id:
@@ -741,7 +747,7 @@ class DiscordDM(discord.Client):
         key = (event.data or {}).get("custom_id")
         if not isinstance(key, str) or not key.startswith("card:"):
             return
-        parts = re.fullmatch(r"card:([1-3]|draft|support|proposal):([a-z_]{1,20}):([1-9][0-9]{0,17})", key)
+        parts = re.fullmatch(r"card:([1-3]|draft|support|proposal|memory):([a-z_]{1,20}):([1-9][0-9]{0,17})", key)
         cards = getattr(self.agent, "friend_cards", None)
         if not parts or not cards or event.guild is not None:
             return
@@ -755,6 +761,8 @@ class DiscordDM(discord.Client):
                 row = await self.store._one("SELECT id,kind FROM marong.chat_cards WHERE id=%s AND friend_id=%s",
                                              (int(parts[3]), friend))
                 if not row:
+                    return
+                if row["kind"] == "memory_ok" and getattr(self.agent, "friend_memory_mode", "off") != "on":
                     return
                 result = await cards.answer_card(friend, row, parts[2], room=room, via="button", at=datetime.now(KST))
                 answered_view = discord.ui.View(timeout=None)
@@ -1068,6 +1076,14 @@ class DiscordDM(discord.Client):
         incoming = items[-1]
         if addressed:
             incoming.heard, incoming.friends = self._heard_lines(room), friends
+            if (getattr(self.agent, "friend_memory_mode", "off") == "on"
+                    and getattr(msg.guild, "chunked", False)
+                    and msg.channel.type is discord.ChannelType.text):
+                try:
+                    visible = [str(member.id) for member in msg.channel.members if not member.bot]
+                    incoming.visible_friends = await asyncio.wait_for(self.store.visible_channel_friends(visible), .5)
+                except Exception as error:
+                    log.warning("discord_channel_roster_unavailable %s", type(error).__name__)
 
         async def reply(body):
             if incoming.reaction:

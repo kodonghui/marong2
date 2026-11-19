@@ -17,7 +17,7 @@ const FACES = path.join(REPO, 'marong', 'call', 'static', 'face', 'v1');
 const APP_WWW = path.join(REPO, 'apps', 'android', 'www');
 const TOPICS = path.join(REPO, 'marong', 'topics');
 const TOPIC_PATH = /^\/chat\/topics\/(v[0-9]{1,3}\/[a-z0-9-]{1,40}\.webp)$/;
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.webp': 'image/webp', '.txt': 'text/plain; charset=utf-8' };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.webp': 'image/webp', '.wav': 'audio/wav', '.txt': 'text/plain; charset=utf-8' };
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 function fileFor(pathname) {
@@ -31,12 +31,13 @@ function fileFor(pathname) {
   return pick(STATIC, pathname.slice(1));
 }
 
-function frame(text) {
-  const payload = Buffer.from(text, 'utf8');
+function frame(data, opcode = 1) {
+  const payload = Buffer.from(data);
+  const flags = 0x80 | opcode;
   const length = payload.length;
-  const header = length < 126 ? Buffer.from([0x81, length])
-    : length < 65536 ? Buffer.from([0x81, 126, length >> 8, length & 255])
-    : (() => { const h = Buffer.alloc(10); h[0] = 0x81; h[1] = 127; h.writeBigUInt64BE(BigInt(length), 2); return h; })();
+  const header = length < 126 ? Buffer.from([flags, length])
+    : length < 65536 ? Buffer.from([flags, 126, length >> 8, length & 255])
+    : (() => { const h = Buffer.alloc(10); h[0] = flags; h[1] = 127; h.writeBigUInt64BE(BigInt(length), 2); return h; })();
   return Buffer.concat([header, payload]);
 }
 
@@ -139,6 +140,24 @@ async function startCallSite({ status = {}, port = 0, log = () => {}, chat = 404
     requests,
     audio,
     openSockets: () => sockets.size,
+    sendControl(message) {
+      const encoded = frame(JSON.stringify(message));
+      for (const socket of sockets) socket.write(encoded);
+    },
+    sendReplyAudio(epoch, turn = 1) {
+      const samples = 12000;
+      const packet = Buffer.alloc(24 + samples * 2);
+      packet.write('MRG2', 0, 4, 'ascii');
+      packet.writeUInt32BE(epoch, 4);
+      packet.writeUInt32BE(turn, 8);
+      packet.writeUInt32BE(1, 12);
+      packet.writeUInt32BE(samples, 20);
+      for (let i = 0; i < samples; i++) packet.writeInt16LE(Math.round(2000 * Math.sin(i * Math.PI / 20)), 24 + i*2);
+      for (const socket of sockets) {
+        socket.write(frame(packet, 2));
+        socket.write(frame(JSON.stringify({type: 'audio_end', epoch, turn})));
+      }
+    },
     async close() {
       for (const socket of sockets) socket.destroy();
       await new Promise((resolve) => server.close(resolve));

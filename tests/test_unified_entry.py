@@ -39,6 +39,29 @@ class WorkLoopsTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             loops_home("unknown")
 
+    async def test_unified_input_schedules_memory_for_the_session_owner_once(self):
+        db = TestDB()
+        self.addCleanup(db.close)
+        db.apply_unified_prerequisites()
+        db.apply_unified()
+        with patch.dict(os.environ, {"MARONG_FRIEND_MEMORY": "shadow"}):
+            store = UnifiedStore(db.app_url)
+        await store.open(wait=True)
+        self.addAsyncCleanup(store.close)
+        sessions = AppSessions(store.pool, os.urandom(32), contact_schedule=(2, 8, 22))
+        first, _ = await sessions.create_invite("join")
+        second, _ = await sessions.create_invite("join")
+        a = await sessions.find_session((await sessions.join(first, "Fixture A", "웹")).token)
+        b = await sessions.find_session((await sessions.join(second, "Fixture B", "웹")).token)
+        saved = await store.app_incoming(a, "app:fixture-memory", "Synthetic memory.", None)
+        self.assertIsNotNone(saved)
+        self.assertIsNone(await store.app_incoming(a, "app:fixture-memory", "Synthetic memory.", None))
+        self.assertEqual(
+            db.admin("SELECT friend_id,source FROM marong.memory_jobs WHERE friend_id IN (%s,%s)",
+                     (a["friend_id"], b["friend_id"])),
+            [(a["friend_id"], "text")],
+        )
+
     async def test_only_one_session_runs_and_cancellation_hands_the_lock_over(self):
         db = TestDB()
         self.addCleanup(db.close)

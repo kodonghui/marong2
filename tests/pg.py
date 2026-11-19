@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 class TestDB:
     def __init__(self):
         self.dir = tempfile.mkdtemp(prefix="marong-pg-")  # 경로에 빈칸이 없어야 함
-        self.srv = pgserver.get_server(self.dir, cleanup_mode="stop")
+        self.srv = pgserver.get_server(self.dir, cleanup_mode="delete")
         with psycopg.connect(self.srv.get_uri(), autocommit=True) as c:
             c.execute("CREATE DATABASE marong")
         self.admin_url = self.srv.get_uri("marong")

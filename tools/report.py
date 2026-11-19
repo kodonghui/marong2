@@ -135,12 +135,26 @@ def call_sessions(c, start, until, tz):
         rows, [42, 21, 21, 12, 16, 15, 20, 20, 15, 24, 12, 15, 15, 16, 14, 24])
 
 
+def forget_marks_available(c):
+    return bool(c.execute("SELECT to_regclass('marong.forget_marks') AS marks").fetchone()["marks"])
+
+
+def forget_filter(available, target, ident, *, rewritten=False):
+    if not available:
+        return ""
+    state = " AND fm.state<>'rewritten'" if rewritten else ""
+    return (f" AND NOT EXISTS (SELECT 1 FROM marong.forget_marks fm "
+            f"WHERE fm.target_type={target} AND fm.target_id={ident}{state}) ")
+
+
 def call_transcripts(c, start, until):
     """Saved ASR/output text, including drafts, through the filtered read-only view."""
     if not c.execute("SELECT to_regclass('call.transcript_report') AS report").fetchone()['report']:
         return []
-    records = c.execute("""SELECT * FROM call.transcript_report
-        WHERE started_at >= %s AND started_at < %s ORDER BY started_at,id""", (start, until)).fetchall()
+    filter_ = forget_filter(forget_marks_available(c), "'call_turn'", "t.id")
+    records = c.execute("""SELECT t.* FROM call.transcript_report t
+        WHERE t.started_at >= %s AND t.started_at < %s""" + filter_ + " ORDER BY t.started_at,t.id",
+        (start, until)).fetchall()
     return [row for row in records if not report_private(row)]
 
 
@@ -182,6 +196,11 @@ def also(memory: dict) -> str:
 
 def fetch(c, start: datetime, until: datetime, vectors: bool = True) -> dict:
     w = {"s": start, "u": until}
+    available = forget_marks_available(c)
+    summary = "s.content"
+    if available:
+        summary = ("coalesce((SELECT fm.replacement FROM marong.forget_marks fm WHERE "
+                   "fm.target_type='summary' AND fm.target_id=s.id AND fm.state='rewritten'),s.content)")
     # 벡터 전체가 필요 없으면(시트) 앞 8개 값만 읽음: 768개짜리를 30일치 통째로 읽지 않게
     vector = "e.embedding::text" if vectors else "((e.embedding::real[])[1:8])::text"
     data = {
@@ -189,25 +208,32 @@ def fetch(c, start: datetime, until: datetime, vectors: bool = True) -> dict:
             "SELECT m.id, m.room_key, m.user_key, p.name, f.name AS friend_name, m.role, m.content, m.reply_to, m.meta, m.created_at "
             "FROM marong.messages m LEFT JOIN marong.people p ON p.user_key = m.user_key "
             "LEFT JOIN marong.friends f ON f.id = p.friend_id "
-            "WHERE m.created_at >= %(s)s AND m.created_at < %(u)s ORDER BY m.id", w).fetchall(),
+            "WHERE m.created_at >= %(s)s AND m.created_at < %(u)s"
+            + forget_filter(available, "'message'", "m.id")
+            + forget_filter(available, "'message'", "m.reply_to") + " ORDER BY m.id", w).fetchall(),
         "embeddings": c.execute(
             "SELECT e.model, e.source_type, e.source_id, e.room_key, e.created_at, vector_dims(e.embedding) AS dims, "
             f"  {vector} AS vector, coalesce(m.content, s.content) AS content FROM marong.embeddings e "
             "LEFT JOIN marong.messages m ON e.source_type = 'message' AND m.id = e.source_id "
             "LEFT JOIN marong.summaries s ON e.source_type = 'summary' AND s.id = e.source_id "
             "WHERE e.created_at >= %(s)s AND e.created_at < %(u)s "
-            "ORDER BY e.created_at, e.source_type, e.source_id", w).fetchall(),
+            + forget_filter(available, "e.source_type", "e.source_id")
+            + forget_filter(available, "'message'", "m.reply_to")
+            + "ORDER BY e.created_at, e.source_type, e.source_id", w).fetchall(),
         "summaries": c.execute(
-            "SELECT id, room_key, first_id, last_id, content, meta, created_at FROM marong.summaries "
-            "WHERE created_at >= %(s)s AND created_at < %(u)s ORDER BY id", w).fetchall(),
+            f"SELECT s.id,s.room_key,s.first_id,s.last_id,{summary} AS content,s.meta,s.created_at FROM marong.summaries s "
+            "WHERE s.created_at >= %(s)s AND s.created_at < %(u)s"
+            + forget_filter(available, "'summary'", "s.id", rewritten=True) + " ORDER BY s.id", w).fetchall(),
         "notes": c.execute(
             "SELECT n.id, n.room_key, n.user_key, p.name, n.content, n.summary_id, n.created_at FROM marong.notes n "
             "LEFT JOIN marong.people p ON p.user_key = n.user_key "
-            "WHERE n.created_at >= %(s)s AND n.created_at < %(u)s ORDER BY n.id", w).fetchall(),
+            "WHERE n.created_at >= %(s)s AND n.created_at < %(u)s"
+            + forget_filter(available, "'note'", "n.id") + " ORDER BY n.id", w).fetchall(),
         "shared": c.execute(
             "SELECT s.id, s.friend_id, f.name, s.content, s.close_content, s.meta, s.created_at FROM marong.shared_notes s "
             "JOIN marong.friends f ON f.id = s.friend_id "
-            "WHERE s.created_at >= %(s)s AND s.created_at < %(u)s ORDER BY s.id", w).fetchall(),
+            "WHERE s.created_at >= %(s)s AND s.created_at < %(u)s"
+            + forget_filter(available, "'shared_note'", "s.id") + " ORDER BY s.id", w).fetchall(),
         # 친구·공유 탭은 기간과 상관없이 지금 상태: 친구(카카오 키가 묶인 친구만), 말해 준 사이, 같은 단체방, 가장 최근 공유 메모
         "friends": c.execute(
             "SELECT f.id, f.name, f.share, max(p.last_seen) AS last FROM marong.friends f "
@@ -220,8 +246,9 @@ def fetch(c, start: datetime, until: datetime, vectors: bool = True) -> dict:
             "SELECT DISTINCT a.friend_id AS a, b.friend_id AS b FROM rf a "
             "  JOIN rf b ON b.room_key = a.room_key AND b.friend_id <> a.friend_id").fetchall(),
         "latest_shared": {r["friend_id"]: r for r in c.execute(
-            "SELECT DISTINCT ON (friend_id) friend_id, content, close_content, created_at FROM marong.shared_notes "
-            "ORDER BY friend_id, id DESC").fetchall()},
+            "SELECT DISTINCT ON (s.friend_id) s.friend_id,s.content,s.close_content,s.created_at "
+            "FROM marong.shared_notes s WHERE true" + forget_filter(available, "'shared_note'", "s.id")
+            + " ORDER BY s.friend_id,s.id DESC").fetchall()},
         "requests": c.execute(
             "SELECT q.user_key, q.friend_id, q.kind, q.detail, q.created_at, r.is_channel, r.proactive, "
             "  r.proactive_per_day, p.name AS key_name, p.friend_id AS key_friend, p.last_seen AS key_seen "
@@ -252,9 +279,12 @@ def fetch(c, start: datetime, until: datetime, vectors: bool = True) -> dict:
             msg_ids.add(m["reply_to"])
     data["ref_messages"] = {r["id"]: r for r in c.execute(
         "SELECT m.id, m.role, m.user_key, p.name, m.content FROM marong.messages m "
-        "LEFT JOIN marong.people p ON p.user_key = m.user_key WHERE m.id = ANY(%s)", (sorted(msg_ids),)).fetchall()}
+        "LEFT JOIN marong.people p ON p.user_key = m.user_key WHERE m.id = ANY(%s)"
+        + forget_filter(available, "'message'", "m.id") + forget_filter(available, "'message'", "m.reply_to"),
+        (sorted(msg_ids),)).fetchall()}
     data["ref_summaries"] = {r["id"]: r for r in c.execute(
-        "SELECT id, content FROM marong.summaries WHERE id = ANY(%s)", (sorted(sum_ids),)).fetchall()}
+        f"SELECT s.id,{summary} AS content FROM marong.summaries s WHERE s.id = ANY(%s)"
+        + forget_filter(available, "'summary'", "s.id", rewritten=True), (sorted(sum_ids),)).fetchall()}
     data["ref_messages"] = {id: row for id, row in data["ref_messages"].items() if not report_private(row)}
     data["ref_summaries"] = {id: row for id, row in data["ref_summaries"].items() if not report_private(row)}
     room_keys = sorted({x["room_key"] for k in ("messages", "embeddings", "summaries", "notes") for x in data[k]})

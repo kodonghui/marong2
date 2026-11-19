@@ -8,6 +8,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import AsyncMock
 
 from aiohttp import FormData
 from aiohttp.test_utils import TestClient, TestServer
@@ -108,7 +109,14 @@ class TestCharacter(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await worker.step())
             self.assertEqual((await client.post(target + "/candidates", headers=a)).status, 202)
             self.assertTrue(await worker.step())
-            api.budget = Decimal(0)
+            chat.admin.email_hash = "a" * 64
+            chat.access = SimpleNamespace(check=AsyncMock(return_value=("ok", chat.admin.email_hash)))
+            db.admin("""UPDATE marong.character_jobs SET cost_usd=16 WHERE character_id=%s AND step='preview'""",
+                     (created["id"],))
+            admin = await client.get("/chat/admin/", headers={"Cf-Access-Jwt-Assertion": "fixture"})
+            self.assertIn("이번 달 그림 예산 사용률 80%", await admin.text())
+            db.admin("""UPDATE marong.character_jobs SET cost_usd=20 WHERE character_id=%s AND step='preview'""",
+                     (created["id"],))
             self.assertEqual((await client.post(BASE, json={"kind": "cat"}, headers=a)).status, 409)
             self.assertEqual((await client.post(target + "/candidates", headers=a)).status, 409)
             self.assertEqual((await client.post(target + "/pick", json={"slot": "candidate_2"}, headers=a)).status, 202)

@@ -115,13 +115,24 @@ CALL_UNAVAILABLE = ("이 친구는 아직 마롱이랑 통화할 수 없어서 �
                     "알려 줄지 물어봐.")
 
 
-def schedule_tools(ring: bool = False) -> tuple:
+def schedule_tools(ring: bool = False, *, surface="discord") -> tuple:
     """일정 도구들. ring 이면 schedule_add 에 call 칸이 있다."""
-    return (SCHEDULE_ADD_CALL_TOOL, SCHEDULE_CANCEL_TOOL, SCHEDULE_LIST_TOOL) if ring else SCHEDULE_TOOLS
+    if surface != "app":
+        return (SCHEDULE_ADD_CALL_TOOL, SCHEDULE_CANCEL_TOOL, SCHEDULE_LIST_TOOL) if ring else SCHEDULE_TOOLS
+    base = SCHEDULE_ADD_CALL_TOOL if ring else SCHEDULE_ADD_TOOL
+    schema = base["input_schema"]
+    properties = {key: {**value, "description": value["description"].replace("앱이 없으면 디스코드 DM으로 통화하자고 보내", "웹에서는 받기 버튼을 보여 줘")
+                        .replace("DM으로", "앱 글 대화로")}
+                  if "description" in value else value for key,value in schema["properties"].items()}
+    return ({**base, "input_schema": {**schema, "properties": properties}}, SCHEDULE_CANCEL_TOOL, SCHEDULE_LIST_TOOL)
 
 
-def schedule_guide(ring: bool = False) -> str:
-    return GUIDE + CALL_GUIDE if ring else GUIDE
+def schedule_guide(ring: bool = False, *, surface="discord") -> str:
+    guide = GUIDE + CALL_GUIDE if ring else GUIDE
+    if surface == "app":
+        return guide.replace("디스코드 알림", "앱 알림").replace(
+            "앱이 없으면 디스코드 DM으로 통화하자고 보내", "웹을 열면 받기 버튼이 보여")
+    return guide
 
 # 답할 때 '지금 상황'에 붙이는 안내(목록은 schedule_lines)
 GUIDE = """# 일정과 알림
@@ -317,9 +328,13 @@ async def run_tool(store, name: str, inp: dict, *, friend_id: int, room_key: str
                 {"tool": name, "result": "already", "id": row["id"]}
         done = f"저장했어: {describe(row, tz, now)}."
         if item.action == "call":
-            done += " 그때 마롱이가 전화를 걸어(앱이 없으면 디스코드 DM으로 통화하자고 보내)."
+            done += " 그때 마롱이가 전화를 걸어."
+            if source != "app":
+                done += " 앱이 없으면 디스코드 DM으로 통화하자고 보내."
+        elif row["remind_at"] is not None:
+            done += " 그때 글 대화에 알려 줄게." if source == "app" else " 그때 이 DM으로 먼저 말할게."
         else:
-            done += (" 그때 이 DM으로 먼저 말할게." if row["remind_at"] is not None else " 알림 없이 기억만 해.")
+            done += " 알림 없이 기억만 해."
         return done + " 친구에게 짧게 확인해 줘.", {"tool": name, "result": "ok", "id": row["id"]}
     if name == "schedule_cancel":
         schedule_id = inp.get("id")

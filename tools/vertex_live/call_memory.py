@@ -19,7 +19,7 @@ from call_usage import Ledger
 from call_cost import MonthlyCost
 from call_tuning import BASE
 from marong.room_scope import writing_room
-from marong.friend_scope import ACCEPTED_CIRCLE
+from marong.friend_scope import accepted_circle
 from marong.usage import Usage, configured_limit
 
 
@@ -113,6 +113,7 @@ def pack(items, budget):
 
 class MemoryStore:
     def __init__(self, dsn):
+        self.friend_marks = False
         self.pool = AsyncConnectionPool(dsn, min_size=1, max_size=4, open=False, timeout=2,
             kwargs={'autocommit': True, 'row_factory': dict_row, 'options': '-c statement_timeout=2500'})
         self.live_usage = Ledger(self)
@@ -124,6 +125,8 @@ class MemoryStore:
         row = await self.one("SELECT value FROM call.meta WHERE key='schema_version'")
         if not row or row['value'] != '2':
             raise RuntimeError('call_schema_version')
+        marks = await self.one("SELECT to_regclass('marong.forget_marks') IS NOT NULL AS ready")
+        self.friend_marks = marks["ready"]
 
     async def close(self):
         await self.live_usage.close()
@@ -169,9 +172,34 @@ class MemoryStore:
             JOIN marong.friends f ON f.id=c.friend_id WHERE l.email_sha256=%s AND c.enabled""", (email_hash,))
         return Principal(row['caller_id'], row['friend_id'], row['name'], row['context_revision']) if row else None
 
+    def context_version(self):
+        version = "context_revision"
+        if self.friend_marks:
+            version += ("+coalesce((SELECT max(f.id) FROM marong.memory_forgets f "
+                        "WHERE f.friend_id=call.callers.friend_id AND (f.items>0 OR f.messages>0)),0)")
+        return version
+
     async def revision(self, p):
-        row = await self.one('SELECT context_revision FROM call.callers WHERE id=%s AND enabled', (p.caller_id,))
-        return row['context_revision'] if row else -1
+        row = await self.one(f'SELECT {self.context_version()} AS revision FROM call.callers WHERE id=%s AND enabled',
+                             (p.caller_id,))
+        return row['revision'] if row else -1
+
+    def friend_memory_enabled(self):
+        return self.friend_marks and os.getenv("MARONG_FRIEND_MEMORY") == "on"
+
+    def keep_source(self, kind, ident):
+        if not self.friend_marks:
+            return ""
+        return (" AND NOT EXISTS (SELECT 1 FROM marong.forget_marks fm "
+                f"WHERE fm.target_type='{kind}' AND fm.target_id={ident}) ")
+
+    def keep_call_copy(self, call_id, turn_id=None):
+        if not self.friend_marks:
+            return ""
+        scope = f" AND ({turn_id} IS NULL OR t.id={turn_id})" if turn_id else ""
+        return (" AND NOT EXISTS (SELECT 1 FROM call.turns t JOIN marong.forget_marks fm "
+                "ON fm.target_type='call_turn' AND fm.target_id=t.id "
+                f"WHERE t.call_id={call_id}{scope}) ")
 
     @staticmethod
     def params(p):
@@ -190,6 +218,7 @@ class MemoryStore:
           AND ({summary_visibility(p, 'n')} OR n.summary_id IS NULL)
           AND NOT call.kakao_hidden('note',n.id,n.room_key)
           AND NOT EXISTS(SELECT 1 FROM call.source_exclusions x WHERE x.caller_id=%(caller)s AND x.source_type='kakao_note' AND x.source_id=n.id::text)
+        """ + self.keep_source("note", "n.id") + """
           ORDER BY n.user_key,(n.room_key IN (SELECT room_key FROM roots)) DESC,n.id DESC
         ) n ORDER BY id DESC LIMIT 4""", params)
         summaries = await self.all(scope + f"""SELECT id,content,created_at,'kakao_summary' AS source
@@ -197,41 +226,46 @@ class MemoryStore:
           AND {summary_visibility(p, 's')}
           AND NOT call.kakao_hidden('summary',id,room_key)
           AND NOT EXISTS(SELECT 1 FROM call.source_exclusions x WHERE x.caller_id=%(caller)s AND x.source_type='kakao_summary' AND x.source_id=s.id::text)
+        """ + self.keep_source("summary", "s.id") + """
           ORDER BY last_id DESC LIMIT 3""", params)
         recent = await self.all(scope + """SELECT m.id,m.role,m.content,m.created_at,'kakao_message' AS source
           FROM marong.messages m WHERE room_key IN (SELECT room_key FROM rooms)
           AND m.meta->>'delivered' IS DISTINCT FROM 'false' AND NOT call.kakao_hidden('message',id,room_key)
           AND NOT EXISTS(SELECT 1 FROM call.source_exclusions x WHERE x.caller_id=%(caller)s AND x.source_type='kakao_message' AND x.source_id=m.id::text)
+        """ + self.keep_source("message", "m.id") + self.keep_source("message", "m.reply_to") + """
           ORDER BY id DESC LIMIT 10""", params)
         # Other people contribute only the existing, explicitly shared notes.
         friends = [] if p.unified or p.private_rooms is not None else await self.all("""SELECT f.name,fs.label,s.content,
           CASE WHEN fs.close THEN s.close_content ELSE '' END AS close_content
           FROM marong.friendships fs JOIN marong.friends f
             ON f.id=CASE WHEN fs.friend_a=%s THEN fs.friend_b ELSE fs.friend_a END
-          LEFT JOIN LATERAL(SELECT content,close_content FROM marong.shared_notes WHERE friend_id=f.id ORDER BY id DESC LIMIT 1) s ON true
-          WHERE %s IN(fs.friend_a,fs.friend_b) AND f.share AND coalesce(to_jsonb(fs)->>'state','accepted')='accepted'
-          ORDER BY f.id LIMIT 8""", (p.friend_id,p.friend_id))
+          LEFT JOIN LATERAL(SELECT n.content,n.close_content FROM marong.shared_notes n WHERE n.friend_id=f.id
+          """ + self.keep_source("shared_note", "n.id") + """ ORDER BY n.id DESC LIMIT 1) s ON true
+          WHERE %s IN(fs.friend_a,fs.friend_b) AND f.share AND coalesce(to_jsonb(fs)->>'state','accepted')='accepted' ORDER BY f.id LIMIT 8""", (p.friend_id,p.friend_id))
         for row in friends:
             row['content'] = (row['content'] or '') + '\n' + (row.pop('close_content') or '')
         if p.unified and os.getenv("MARONG_FRIENDS") == "1":
             try:
-                circle = await asyncio.wait_for(self.all(ACCEPTED_CIRCLE, {"friend": p.friend_id, "limit": 20}), .7)
+                query = accepted_circle(self.keep_source("shared_note", "x.id"))
+                circle = await asyncio.wait_for(self.all(query, {"friend": p.friend_id, "limit": 20}), .7)
             except (Error, TimeoutError):
                 circle = []
-            friends = [{"name": row["name"], "label": row["label"],
+            friends = [{"name": row["name"], "label": row["label"], "close": row["close"],
                         "content": "\n".join(filter(None, (row["shared"], row["shared_close"])))} for row in circle]
         memories = await self.all("""SELECT m.id,m.content,m.created_at,'call_memory' AS source FROM call.memories m
           JOIN call.calls c ON c.id=m.call_id WHERE m.caller_id=%s AND m.status='active' AND c.deleted_at IS NULL
-          ORDER BY m.created_at DESC LIMIT %s""", (p.caller_id,memory_limit))
+          """ + self.keep_call_copy("m.call_id", "m.turn_id") + " ORDER BY m.created_at DESC LIMIT %s", (p.caller_id,memory_limit))
         cards = await self.all("""SELECT c.id,k.summary AS content,k.created_at,'call_card' AS source
           FROM call.cards k JOIN call.calls c ON c.id=k.call_id WHERE c.caller_id=%s AND c.deleted_at IS NULL
-          AND k.forgotten_at IS NULL ORDER BY c.started_at DESC LIMIT 3""", (p.caller_id,))
+          AND k.forgotten_at IS NULL""" + self.keep_call_copy("c.id") +
+          " ORDER BY c.started_at DESC LIMIT 3", (p.caller_id,))
         history = []
         if call_id:
             history = await self.all("""SELECT t.id,t.role,t.content,t.started_at,'current_call' AS source
               FROM call.turns t JOIN call.calls c ON c.id=t.call_id
               WHERE c.caller_id=%s AND c.id=%s AND c.deleted_at IS NULL
-              AND t.forgotten_at IS NULL AND t.finalized AND NOT t.interrupted ORDER BY t.seq DESC LIMIT 40""", (p.caller_id,call_id))
+              AND t.forgotten_at IS NULL AND t.finalized AND NOT t.interrupted"""
+              + self.keep_source("call_turn", "t.id") + " ORDER BY t.seq DESC LIMIT 40", (p.caller_id,call_id))
         payload = {'friend': p.name, 'kakao_notes': pack(notes,1000), 'kakao_summaries': pack(summaries,1500),
             'kakao_recent': list(reversed(pack(recent,1500))), 'shared_friends': pack(friends,1500),
             'call_memories': pack(memories,1500), 'call_cards': pack(cards,1500),
@@ -244,25 +278,55 @@ class MemoryStore:
         q='%'+query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
         params=self.params(p)|{'q':q}
         scope = memory_scope(p)
-        rows=await self.all(scope+f"""SELECT * FROM (
+        rows=await self.all(scope+"""SELECT * FROM (
           SELECT 'kakao_message' AS source,m.id::text AS id,m.content,m.created_at FROM marong.messages m
           WHERE m.room_key IN(SELECT room_key FROM rooms) AND m.content ILIKE %(q)s
           AND m.meta->>'delivered' IS DISTINCT FROM 'false' AND NOT call.kakao_hidden('message',m.id,m.room_key)
+        """ + self.keep_source("message", "m.id") + self.keep_source("message", "m.reply_to") + f"""
           UNION ALL SELECT 'kakao_note',n.id::text,n.content,n.created_at FROM marong.notes n JOIN marong.people p USING(user_key)
           WHERE n.room_key IN(SELECT room_key FROM rooms) AND p.friend_id=%(friend)s AND n.content ILIKE %(q)s
           AND ({summary_visibility(p, 'n')} OR n.summary_id IS NULL)
           AND NOT call.kakao_hidden('note',n.id,n.room_key)
+        """ + self.keep_source("note", "n.id") + f"""
           UNION ALL SELECT 'kakao_summary',s.id::text,s.content,s.created_at FROM marong.summaries s
           WHERE {summary_visibility(p, 's')} AND s.room_key IN(SELECT room_key FROM rooms) AND s.content ILIKE %(q)s
           AND NOT call.kakao_hidden('summary',s.id,s.room_key)
+        """ + self.keep_source("summary", "s.id") + """
           UNION ALL SELECT 'call_memory',m.id::text,m.content,m.created_at FROM call.memories m
           JOIN call.calls c ON c.id=m.call_id WHERE m.caller_id=%(caller)s AND m.status='active'
           AND c.deleted_at IS NULL AND m.content ILIKE %(q)s
+        """ + self.keep_call_copy("m.call_id", "m.turn_id") + """
           UNION ALL SELECT 'call_card',c.id::text,k.summary,k.created_at FROM call.cards k JOIN call.calls c ON c.id=k.call_id
           WHERE c.caller_id=%(caller)s AND c.deleted_at IS NULL AND k.forgotten_at IS NULL AND k.summary ILIKE %(q)s
+        """ + self.keep_call_copy("c.id") + """
         ) hits WHERE NOT EXISTS(SELECT 1 FROM call.source_exclusions x WHERE x.caller_id=%(caller)s
           AND x.source_type=hits.source AND x.source_id=hits.id) ORDER BY created_at DESC LIMIT 12""", params)
+        if self.friend_memory_enabled():
+            from call_friend_memory import recall_items
+            async with self.pool.connection() as conn:
+                typed = await recall_items(conn, p.friend_id, query.casefold())
+            rows = [*typed, *rows]
         return {'result':'found' if rows else 'not_found','items':pack(rows,3000)}
+
+    async def forget_friend(self, p, call_id, segment, key, args):
+        if not self.friend_memory_enabled() or not call_id or not segment or not key:
+            return {"result": "not_saved", "ok": False}
+        from call_friend_memory import forget_item
+        request_key = "call:" + hashlib.sha256((call_id + ":" + key).encode()).hexdigest()
+        async with self.pool.connection() as conn, conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock(%s::bigint)", (p.friend_id,))
+            call = await self._owned(conn, p, call_id)
+            old = await self._operation(conn, call_id, request_key)
+            if old:
+                return old
+            active = await conn.execute(
+                "SELECT 1 FROM call.segments WHERE id=%s AND call_id=%s AND state='open'", (segment, call_id))
+            if call["status"] != "live" or not await active.fetchone():
+                return {"result": "not_saved", "ok": False}
+            result = await forget_item(conn, p, call_id, segment, request_key, args)
+            stored = {k: v for k, v in result.items() if k != "candidates"}
+            await self._record_operation(conn, call_id, segment, request_key, "forget", stored, [], 0)
+            return result
 
     async def start_call(self, p, client_id, voice, prompt_version, *, entrypoint='web'):
         async with self.pool.connection() as c, c.transaction():
@@ -427,7 +491,9 @@ class MemoryStore:
             await self._owned(c,p,call_id)
             old=await self._operation(c,call_id,key)
             if old:return old
-            cur=await c.execute("SELECT id,content FROM call.turns WHERE call_id=%s AND role='user' AND finalized AND NOT interrupted AND forgotten_at IS NULL ORDER BY seq DESC LIMIT 40",(call_id,))
+            cur=await c.execute("SELECT t.id,t.content FROM call.turns t WHERE t.call_id=%s AND t.role='user'"
+                " AND t.finalized AND NOT t.interrupted AND t.forgotten_at IS NULL"
+                + self.keep_source("call_turn", "t.id") + " ORDER BY t.seq DESC LIMIT 40",(call_id,))
             turn=next((t for t in await cur.fetchall() if quoted(quote,t['content'])),None)
             if not turn:return {'result':'not_saved','reason':'unverified_quote'}
             idem=hashlib.sha256((call_id+quote).encode()).hexdigest()
@@ -495,15 +561,30 @@ class MemoryStore:
         return bool((await cur.fetchone())['t'])
 
     async def list_memories(self,p):
-        return await self.all("SELECT m.id,m.content,m.created_at FROM call.memories m JOIN call.calls c ON c.id=m.call_id WHERE m.caller_id=%s AND m.status='active' AND c.deleted_at IS NULL ORDER BY m.created_at DESC LIMIT 100",(p.caller_id,))
+        return await self.all("""
+            SELECT m.id,m.content,m.created_at FROM call.memories m JOIN call.calls c ON c.id=m.call_id
+            WHERE m.caller_id=%s AND m.status='active' AND c.deleted_at IS NULL
+        """ + self.keep_call_copy("m.call_id", "m.turn_id") + """
+            ORDER BY m.created_at DESC LIMIT 100
+        """, (p.caller_id,))
 
     async def list_calls(self,p):
-        return await self.all("SELECT c.id,c.status,c.started_at,c.ended_at,c.organize_status,CASE WHEN k.forgotten_at IS NULL THEN k.summary END AS summary FROM call.calls c LEFT JOIN call.cards k ON k.call_id=c.id WHERE c.caller_id=%s AND c.deleted_at IS NULL ORDER BY c.started_at DESC LIMIT 50",(p.caller_id,))
+        return await self.all("""
+            SELECT c.id,c.status,c.started_at,c.ended_at,c.organize_status,
+                   CASE WHEN k.forgotten_at IS NULL """ + self.keep_call_copy("c.id") + """
+                        THEN k.summary END AS summary
+            FROM call.calls c LEFT JOIN call.cards k ON k.call_id=c.id
+            WHERE c.caller_id=%s AND c.deleted_at IS NULL ORDER BY c.started_at DESC LIMIT 50
+        """, (p.caller_id,))
 
     async def detail(self,p,call_id):
         row=await self.one('SELECT id,status,started_at,ended_at,organize_status FROM call.calls WHERE id=%s AND caller_id=%s AND deleted_at IS NULL',(call_id,p.caller_id))
         if not row:raise PermissionError('call_not_found')
-        row['turns']=await self.all("SELECT id,role,CASE WHEN forgotten_at IS NULL THEN content ELSE '잊은 내용' END AS content,finalized,forgotten_at FROM call.turns WHERE call_id=%s ORDER BY seq LIMIT 500",(call_id,))
+        row['turns'] = await self.all("""
+            SELECT t.id,t.role,CASE WHEN t.forgotten_at IS NULL """ + self.keep_source("call_turn", "t.id") + """
+                                   THEN t.content ELSE '잊은 내용' END AS content,t.finalized,t.forgotten_at
+            FROM call.turns t WHERE t.call_id=%s ORDER BY t.seq LIMIT 500
+        """, (call_id,))
         return row
 
     async def delete_call(self,p,call_id):

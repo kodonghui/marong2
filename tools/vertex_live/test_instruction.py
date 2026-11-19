@@ -60,6 +60,15 @@ def main():
             guide = active['systemInstruction']['parts'][-1]['text']
             assert '통화 중 기억 찾기' in guide and '친구가 요청한 통화 끊기' in guide
             assert '통화 중 웹 검색' in guide and '앱으로' not in guide
+        with patch.dict('os.environ', {'MARONG_FRIEND_MEMORY': 'on'}):
+            active = server.setup(memory=True)['setup']
+            names = {tool['name'] for tool in active['tools'][0]['functionDeclarations']}
+            assert {'recall', 'memory_forget'} <= names
+            guide = active['systemInstruction']['parts'][-1]['text']
+            assert '응, 잊었어' in guide and '지금은 못 지웠어, 이따 톡으로 다시 말해 줘' in guide
+            assert 'tools' not in server.setup(memory=False)['setup']
+            inactive = server.setup(memory=True, friend_memory=False)['setup']
+            assert all(tool['name'] != 'memory_forget' for tool in inactive['tools'][0]['functionDeclarations'])
         for rule in EARLIER:
             assert rule in text, 'earlier rule dropped: ' + rule
         for rule in COUNSEL:

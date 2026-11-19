@@ -123,6 +123,13 @@ class DiscordStore(AppStore, TopicStore, GoogleStore, ScheduleStore, Store):
         # The same rule for summaries found by words (keyword_hits): only DM and channel summaries.
         return "AND (s.room_key LIKE 'discord-dm:%%' OR s.room_key LIKE 'discord-ch:%%') "
 
+    async def visible_channel_friends(self, discord_ids: list[str]) -> set[int]:
+        rows = await self._all(
+            "SELECT friend_id FROM marong.discord_dm_links WHERE discord_user_id=ANY(%s::text[])",
+            (discord_ids,),
+        )
+        return {row["friend_id"] for row in rows}
+
     async def channel_friends(self) -> list[str]:
         """Names of the friends linked to Marong on Discord: who Marong talks with in the private server's channels."""
         rows = await self._all("SELECT f.name FROM marong.discord_dm_links d JOIN marong.friends f ON f.id=d.friend_id "
