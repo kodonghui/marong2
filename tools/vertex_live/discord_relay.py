@@ -15,6 +15,7 @@ from pathlib import Path
 from aiohttp import web
 
 from call_memory import CallBusy, MemoryStore, Principal
+from call_cost import BLOCKED, budget_status
 from live_session import LiveSession
 from server import LOCATION, MODEL, SEARCH, VOICE, google_headers, setup
 
@@ -81,7 +82,16 @@ class DiscordRelay:
         call, person, client_id = await self.identity(request)
         if call.lease.locked() or await self.store.discord_busy(person, client_id):
             raise web.HTTPConflict()
+        await self.check_budget(person, client_id)
         return web.Response(status=204)
+
+    async def check_budget(self, person, client_id):
+        if (await budget_status(self.store, 'discord') in BLOCKED
+                and not await self.store.can_resume_call(person, 'discord', client_id)):
+            problem = {'type': 'https://marong.corthex-hq.com/problems/budget-exhausted',
+                       'title': '이번 달 통화 예산을 다 씀', 'status': 429, 'code': 'budget_exhausted',
+                       'traceId': uuid.uuid4().hex[:16]}
+            raise web.HTTPTooManyRequests(text=json.dumps(problem), content_type='application/problem+json')
 
     async def live(self, request):
         call, person, client_id = await self.identity(request)
@@ -90,6 +100,7 @@ class DiscordRelay:
         async with call.lease:
             if await self.store.discord_busy(person, client_id):
                 raise web.HTTPConflict()
+            await self.check_budget(person, client_id)
             ws = web.WebSocketResponse(heartbeat=15, max_msg_size=32_000)
             await ws.prepare(request)
             diagnostics = {}

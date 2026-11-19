@@ -785,6 +785,22 @@ $('state-retry').addEventListener('click', () => (app.blocked === 'login' ? loca
 
 // ── start ────────────────────────────────────────────────────
 
+async function showDiary() {
+  const entry = $('diary-entry');
+  if (!entry) return;
+  $('diary-button')?.remove();
+  try {
+    const response = await fetch('/chat/diary/api/latest', {cache: 'no-store', credentials: 'same-origin'});
+    if (!response.ok) return;
+    const diary = await response.json();
+    if ((diary.enabled === true || diary.date) && !$('diary-button')) {
+      entry.after(entry.content.cloneNode(true));
+    }
+  } catch {
+    // The diary is optional while its tables are unavailable.
+  }
+}
+
 async function start() {
   app.ready = false;
   block('loading');
@@ -810,6 +826,7 @@ async function start() {
   toBottom();
   app.ready = true;
   syncSend();
+  void showDiary();
   if ($('menu-profile')) refreshProfile();
   waitLoop();
 }

@@ -13,6 +13,9 @@ from marong.app_runtime import app_settings, app_tables, google_settings, greeti
 from marong.cache_warm import CacheWarmer
 from marong.config import load_dotenv, load_settings
 from marong.deepseek import from_env as deepseek_route
+from marong.diary import image_budget
+from marong.diary_models import DiaryModels
+from marong.diary_worker import DiaryWorker
 from marong.discord_dm import DEFAULT_ORIGIN, DiscordAgent, DiscordDM, DiscordProactive, DiscordReminders
 from marong.discord_store import DiscordStore
 from marong.embed import Embeddings
@@ -52,6 +55,7 @@ async def main():
     tasks = []
     google, google_web = None, None
     push, chat = None, None
+    diary_models = None
     try:
         await store.open(wait=True)
         await store.proactive_rooms()  # Fail before login if the private binding schema is unavailable.
@@ -63,6 +67,9 @@ async def main():
             app_config = None
         if worker_store:
             await worker_store.open(wait=True)
+        diary_enabled = os.getenv("MARONG_DIARY") == "1"
+        if app_config or diary_enabled:
+            diary_models = DiaryModels(settings, os.environ)
         emb.start()
         if worker:
             tasks.append(asyncio.create_task(run_locked(settings.database_url, "memory", worker.run)))
@@ -80,7 +87,7 @@ async def main():
             push = AppPush(store, app_config["fcm"], ring_enabled=app_config["ring"])
             agent.ring = app_config["ring"]
             chat = AppChat(store, agent, client, AccessVerifier(app_config["access"]), push, origin=origin,
-                           port=app_config["port"], timezone=settings.timezone)
+                           port=app_config["port"], timezone=settings.timezone, diary_models=diary_models)
             saved = agent.on_saved
 
             def on_saved():  # every saved message also wakes the chat screens' waits (SPEC-114)
@@ -103,6 +110,10 @@ async def main():
                 reminders = DiscordReminders(settings, store, agent, client, app=push, origin=origin)
                 tasks.append(asyncio.create_task(run_locked(settings.database_url, "proactive", proactive.run)))
                 tasks.append(asyncio.create_task(run_locked(settings.database_url, "reminders", reminders.run)))
+                if diary_enabled:
+                    diary = DiaryWorker(store, diary_models, reminders,
+                                        image_budget(os.getenv("MARONG_DIARY_IMAGE_BUDGET_USD")), on_saved=agent.on_saved)
+                    tasks.append(asyncio.create_task(run_locked(settings.database_url, "diary", diary.run)))
             if google and is_loop_home:
                 google.notify = client.tell
                 google_web = await serve_google(google)
@@ -120,6 +131,8 @@ async def main():
             await google_web.cleanup()
         if google:
             await google.close()
+        if diary_models:
+            await diary_models.close()
         if worker_store:
             await worker_store.close()
         await store.close()

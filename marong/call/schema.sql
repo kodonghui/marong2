@@ -266,4 +266,113 @@ GRANT SELECT ON call.callers, call.cards, call.memories, call.settings, call.bud
 GRANT SELECT (id, caller_id, status, started_at, ended_at, end_reason, organize_status) ON call.calls TO marong;
 GRANT SELECT (kind, call_id, sent_at, usage_seconds, usage_estimated, outcome) ON call.ai_runs TO marong;
 
+-- Call-cost tables. Migration 007 also extends the segment constraints and reporting views.
+-- TBL-110 live_prices (CTX-006) ← SPEC-170, SPEC-172, SPEC-173, SPEC-180 | terms: TERM-035
+-- Rule: rows are only added. The price of usage is the row of the same model with the latest starts_at at or before
+-- the time the usage was received; dollars already priced never change (REQ-187). US dollars per 1M tokens.
+CREATE TABLE IF NOT EXISTS call.live_prices (
+  id                    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  model                 text NOT NULL CHECK (char_length(model) BETWEEN 1 AND 100),
+  starts_at             timestamptz NOT NULL,
+  text_in               numeric(10, 4) NOT NULL CHECK (text_in >= 0),
+  audio_in              numeric(10, 4) NOT NULL CHECK (audio_in >= 0),
+  image_in              numeric(10, 4) NOT NULL CHECK (image_in >= 0),
+  text_out              numeric(10, 4) NOT NULL CHECK (text_out >= 0),
+  audio_out             numeric(10, 4) NOT NULL CHECK (audio_out >= 0),
+  search_per_1000       numeric(10, 4) NOT NULL DEFAULT 0 CHECK (search_per_1000 >= 0),
+  search_free_per_month integer NOT NULL DEFAULT 0 CHECK (search_free_per_month >= 0),
+  checked_on            date NOT NULL,                     -- the cost view asks for a recheck after 90 days (REQ-188)
+  source                text NOT NULL CHECK (char_length(source) BETWEEN 1 AND 200),
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (model, starts_at)
+);
+INSERT INTO call.live_prices (model, starts_at, text_in, audio_in, image_in, text_out, audio_out, search_per_1000,
+                              search_free_per_month, checked_on, source) VALUES
+  ('gemini-3.8-live', '2026-07-01 00:00:00+00', 0.75, 3.00, 1.00, 4.50, 12.00, 14, 5000, '2026-11-16',
+   'Vertex AI pricing page, regional endpoint'),
+  ('gemini-3.8-flash', '2026-11-01 00:00:00+00', 0.75, 0.75, 0.75, 3.75, 3.75, 0, 0, '2026-11-16',
+   'Gemini API pricing page; Vertex value to confirm'),
+  ('gemini-3.8-flash', '2027-01-01 00:00:00+00', 1.50, 1.50, 1.50, 7.50, 7.50, 0, 0, '2026-11-16',
+   'Gemini API pricing page; Vertex value to confirm')
+  ON CONFLICT (model, starts_at) DO NOTHING;
+
+-- TBL-111 live_tunings (CTX-002) ← SPEC-177, SPEC-178, SPEC-179, SPEC-180 | terms: TERM-037
+-- Rule: one name, one set of values; rows are only added. A segment reads the current tuning when it opens and keeps
+-- it (REQ-189). Voice, language and instructions are not tuning values. Ranges and defaults: functional spec 3.3.
+CREATE TABLE IF NOT EXISTS call.live_tunings (
+  name                text PRIMARY KEY CHECK (name ~ '^[a-z0-9-]{2,40}$'),
+  compression_trigger integer NOT NULL CHECK (compression_trigger BETWEEN 2048 AND 32768),
+  compression_target  integer NOT NULL CHECK (compression_target >= 1024 AND compression_target * 2 <= compression_trigger),
+  vad_silence_ms      integer NOT NULL CHECK (vad_silence_ms BETWEEN 300 AND 2000),
+  vad_prefix_ms       integer NOT NULL CHECK (vad_prefix_ms BETWEEN 0 AND 500),
+  max_output_tokens   integer NOT NULL CHECK (max_output_tokens BETWEEN 256 AND 2048),
+  seed_call_memories  smallint NOT NULL CHECK (seed_call_memories BETWEEN 0 AND 30),
+  web_quiet_mic       boolean NOT NULL,
+  quiet_rms           numeric(5, 4) NOT NULL CHECK (quiet_rms BETWEEN 0.005 AND 0.05),
+  text_handoff        boolean NOT NULL,
+  handoff_tokens      integer NOT NULL CHECK (handoff_tokens BETWEEN 3000 AND 30000),
+  handoff_chars       integer NOT NULL CHECK (handoff_chars BETWEEN 1000 AND 8000),
+  created_at          timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO call.live_tunings (name, compression_trigger, compression_target, vad_silence_ms, vad_prefix_ms,
+                               max_output_tokens, seed_call_memories, web_quiet_mic, quiet_rms, text_handoff,
+                               handoff_tokens, handoff_chars)
+  VALUES ('base-20261116', 8192, 4096, 700, 100, 1024, 30, false, 0.018, false, 7000, 4000)
+  ON CONFLICT (name) DO NOTHING;
+-- TBL-112 live_usage (CTX-006) ← SPEC-169, SPEC-170, SPEC-171, SPEC-173, SPEC-180, SPEC-181 | terms: TERM-034
+-- One row per turn the engine reported (kind turn), saved by the segment's writer every 2 s and when it closes.
+-- Rule: (segment_ref, seq) is saved once. Rows outlive the call: deleting a call clears call_id and segment_id and keeps
+-- segment_ref and the dollars; it first adds one estimate row for a segment that is counted as an estimate, so this
+-- month's cost does not drop (SPEC-171).
+CREATE TABLE IF NOT EXISTS call.live_usage (
+  id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  kind            text NOT NULL DEFAULT 'turn' CHECK (kind IN ('turn', 'estimate')),
+  call_id         uuid REFERENCES call.calls (id) ON DELETE SET NULL,
+  segment_id      uuid REFERENCES call.segments (id) ON DELETE SET NULL,
+  segment_ref     uuid NOT NULL,                           -- the segment id, kept after the call is deleted (no key)
+  seq             integer NOT NULL CHECK (seq >= 0),       -- order in the segment; 0 for the estimate row
+  received_at     timestamptz NOT NULL,                    -- an estimate row carries the segment's open time
+  entrypoint      text NOT NULL CHECK (entrypoint IN ('web', 'discord')),
+  tuning          text REFERENCES call.live_tunings (name) ON DELETE RESTRICT,
+  model           text NOT NULL,
+  text_in         integer NOT NULL DEFAULT 0 CHECK (text_in >= 0),
+  audio_in        integer NOT NULL DEFAULT 0 CHECK (audio_in >= 0),
+  image_in        integer NOT NULL DEFAULT 0 CHECK (image_in >= 0),       -- image and video
+  tool_in         integer NOT NULL DEFAULT 0 CHECK (tool_in >= 0),
+  cached_in       integer NOT NULL DEFAULT 0 CHECK (cached_in >= 0),      -- part of the input, priced as input for now
+  text_out        integer NOT NULL DEFAULT 0 CHECK (text_out >= 0),
+  audio_out       integer NOT NULL DEFAULT 0 CHECK (audio_out >= 0),
+  thoughts        integer NOT NULL DEFAULT 0 CHECK (thoughts >= 0),
+  total_tokens    integer NOT NULL DEFAULT 0 CHECK (total_tokens >= 0),   -- as reported, for checking the split
+  searches        smallint NOT NULL DEFAULT 0 CHECK (searches >= 0),      -- priced per month, not in usd
+  details_missing boolean NOT NULL DEFAULT false,          -- no modality details: counted as audio (details_missing)
+  values_fixed    boolean NOT NULL DEFAULT false,          -- a value was not a number or negative, saved as 0 (usage_bad)
+  seconds         numeric(10, 1) CHECK (seconds >= 0),     -- estimate row: the segment's length
+  price_id        bigint REFERENCES call.live_prices (id) ON DELETE RESTRICT,
+  usd             numeric(12, 6) CHECK (usd >= 0),         -- turn row without a matching price: NULL (unpriced)
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (segment_ref, seq),
+  CHECK (kind <> 'turn' OR (seq >= 1 AND seconds IS NULL AND (price_id IS NULL) = (usd IS NULL))),
+  CHECK (kind <> 'estimate' OR (seq = 0 AND seconds IS NOT NULL AND price_id IS NULL AND usd IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS live_usage_received_idx ON call.live_usage (received_at);
+CREATE INDEX IF NOT EXISTS live_usage_call_idx ON call.live_usage (call_id) WHERE call_id IS NOT NULL;
+
+-- TBL-113 live_counters (CTX-006) ← SPEC-169, SPEC-170, SPEC-174, SPEC-180 | terms: none
+-- Counts the cost view shows per UTC month and entry point: usage dropped from a full queue, usage lost after the
+-- last retry, and budget checks that could not count. Each process keeps them in memory and adds them on its next
+-- successful write, so a count can arrive late; counts still in memory when a process stops are only in its log.
+CREATE TABLE IF NOT EXISTS call.live_counters (
+  month      date NOT NULL CHECK (extract(day FROM month) = 1),
+  entrypoint text NOT NULL CHECK (entrypoint IN ('web', 'discord')),
+  name       text NOT NULL CHECK (name IN ('usage_dropped', 'usage_lost', 'budget_unknown')),
+  count      integer NOT NULL DEFAULT 0 CHECK (count >= 0),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (month, entrypoint, name)
+);
+
+GRANT SELECT, INSERT ON call.live_prices, call.live_tunings, call.live_usage TO marong_call;
+GRANT SELECT, INSERT, UPDATE ON call.live_counters TO marong_call;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA call TO marong_call;
+
 RESET ROLE;

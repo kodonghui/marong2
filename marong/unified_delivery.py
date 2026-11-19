@@ -18,11 +18,12 @@ log = logging.getLogger(__name__)
 
 
 class UnifiedDelivery:
-    def __init__(self, store, push, authentication, on_saved):
+    def __init__(self, store, push, authentication, on_saved, *, origin=None):
         self.store = store
         self.push = push
         self.authentication = authentication
         self.on_saved = on_saved
+        self.origin = origin
 
     async def notifications_allowed(self, friend_id):
         if self.authentication != "session":

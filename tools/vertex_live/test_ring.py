@@ -282,13 +282,13 @@ async def check_http(server):
                 await ws.receive()
                 await ws.close()
                 for _ in range(100):
-                    if not server.active:
+                    if not server.active_calls:
                         break
                     await asyncio.sleep(.01)
             page = await (await client.get('/')).text()
-            assert '/app.js?v=20261117-topic1' in page
+            assert '/app.js?v=20261119-call-wait1' in page
             script = await (await client.get('/app.js')).text()
-            assert '03-listening' not in script and "faceNames={1:'01-neutral',15:" in script  # 삐뚤어진 '듣는 얼굴'을 다시 쓰지 않음
+            assert '03-listening' not in script and "faceNames={1:'01-neutral',4:'04-thinking',15:" in script  # 삐뚤어진 '듣는 얼굴'을 다시 쓰지 않음
     assert seen == [RING_ID, None, None], seen
 
 

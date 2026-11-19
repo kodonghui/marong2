@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko" data-theme="night">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#121729">
+  <title>마롱이의 일기</title>
+  <link rel="icon" href="/face/v1/01-neutral.webp">
+  <link rel="stylesheet" href="/chat/diary/tokens.css">
+  <link rel="stylesheet" href="/chat/diary/diary.css">
+  <script src="/chat/diary/diary.js" type="module"></script>
+</head>
+<body>
+  <main class="diary">
+    <header class="bar">
+      <a class="back" href="/chat/">‹ 글 대화</a>
+      <h1>마롱이의 일기</h1>
+      <div class="header-actions">
+        <button id="calendar" type="button" class="icon" aria-label="달력">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4m8-4v4M8 14h2m4 0h2m-8 4h2m4 0h2"/></svg>
+        </button>
+        <button id="more" type="button" class="icon" aria-label="더 보기" aria-controls="menu" aria-expanded="false">
+          <span aria-hidden="true">⋯</span>
+        </button>
+      </div>
+      <div id="menu" class="menu" hidden></div>
+    </header>
+    <p class="caption" id="off-note" hidden>지금은 새 일기를 쓰지 않아</p>
+    <div id="banner" class="banner" role="status" hidden></div>
+    <div id="day" aria-live="polite" aria-atomic="true"></div>
+    <nav id="pages" class="pages" aria-label="일기 날 넘기기" hidden></nav>
+    <p id="toast" class="toast" role="status" hidden></p>
+    <dialog id="sheet"></dialog>
+  </main>
+</body>
+</html>

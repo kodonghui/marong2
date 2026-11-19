@@ -29,6 +29,7 @@ from .cache_warm import hour_writes
 from .chat_tool_graph import answer_with_tools
 from .capabilities import TEXT_FEATURE_NAMES, availability, description as feature_description, text_matrix
 from .config import PER_DAY_MAX, Settings, proactive_schedule
+from .diary import recent_stamp
 from .friend_card import CARD_UPDATE, KST, QUESTIONS, CardError, FriendCards, ModelRun, proposal_text, question_choices, text_choice
 from .persona_prompt import FriendPrompt, append_prefix
 from .persona_instructions import InterpretationError, REFUSAL, interpret, refusal_lines
@@ -674,6 +675,10 @@ class Agent:
                   "recalled": [self._hit(h) for h in recalled], "friends": [c["id"] for c in known],
                   "close": [c["id"] for c in known if self._close_facts(c)] if msg.is_channel else []}
         situation = self._situation(msg, person, notes, shown, recalled, circle)
+        stamp = await self._diary_stamp(msg, person)
+        if stamp:
+            header, separator, rest = situation.partition("\n\n")
+            situation = header + "\n" + stamp + separator + rest
         if msg.is_channel and getattr(self.store, "discord_context_enabled", False):
             try:
                 discord_context = await asyncio.wait_for(
@@ -739,6 +744,21 @@ class Agent:
         claim = room.pop("persona_care_claim", None)
         if claim and not ok:
             await self.safety.failed_care(room["friend_id"], claim[0], claim[1])
+
+    async def _diary_stamp(self, msg: Incoming, person: dict | None) -> str:
+        friend = (person or {}).get("friend_id")
+        if not friend or not msg.is_channel or getattr(msg, "channel", False):
+            return ""
+        try:
+            day = await asyncio.wait_for(recent_stamp(self.store, friend, msg.room_key, datetime.now(KST)), 0.5)
+        except Exception as error:
+            log.warning("diary_stamp_unavailable %s", type(error).__name__)
+            return ""
+        if day is None:
+            return ""
+        name = clean_name(person.get("name")) or "친구"
+        return (f"- {name}가 {day.month}월 {day.day}일 마롱이 일기에 도장을 찍어 줬어"
+                "(일기 내용은 여기 없어. 자연스러울 때만 고마워해도 돼)")
 
     def _shown_photos(self, room_key: str, first: int | None) -> dict[int, dict]:
         """답할 때 다시 보여 줄 사진(메시지 id → 사진 블록): 이번에 답하는 말들(first 부터)의 사진만."""
@@ -920,10 +940,11 @@ class Agent:
         """이 방이 다른 방과 기억을 같이 쓰는지(1:1 방에 묶인 단체방이거나, 단체방이 묶인 1:1 방)."""
         return bool((person or {}).get("memory_room") or (person or {}).get("followers"))
 
-    @staticmethod
-    def _known(circle: list[dict]) -> list[dict]:
+    friend_context_limit = FRIENDS_SHOWN
+
+    def _known(self, circle: list[dict]) -> list[dict]:
         """지금 친구와 아는 사이인 친구(공유 메모를 넣는 친구)."""
-        return [c for c in circle if c["told"] or c["same_group"]][:FRIENDS_SHOWN]
+        return [c for c in circle if c["told"] or c["same_group"]][:self.friend_context_limit]
 
     @staticmethod
     def _facts(text: str | None, limit: int) -> str:
@@ -939,6 +960,8 @@ class Agent:
     def _relation(c: dict) -> str:
         """지금 친구 쪽에서 본 그 친구와의 사이. 저장된 관계는 말해 준 친구 쪽에서 본 상대라서(동희가 '현경이 내 여친이야'
         → 여자친구) 지금 친구가 말해 줬으면 '네 여자친구', 그 친구가 말해 줬으면 '동희한테 너는 여자친구'로 바꿔 보여 준다."""
+        if c.get("unified"):
+            return c["label"]
         parts = []
         if c["told"]:
             label = c["label"]

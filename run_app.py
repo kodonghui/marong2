@@ -28,9 +28,13 @@ from marong.character.vision import VisionExtractor
 from marong.character.worker import CharacterWorker, WorkerBudget
 from marong.config import load_dotenv, load_settings
 from marong.deepseek import from_env as deepseek_route
+from marong.diary import image_budget
+from marong.diary_models import DiaryModels
+from marong.diary_worker import DiaryWorker
 from marong.discord_dm import PrivateChatAgent
 from marong.embed import Embeddings
 from marong.google_calendar import GoogleCalendar, serve as serve_google
+from marong.internal_shop import InternalShop
 from marong.llm import LLM
 from marong.memory import MemoryWorker
 from marong.pet.settings import PriceBook
@@ -47,6 +51,7 @@ log = logging.getLogger("marong.runtime")
 
 class AppAgent(PrivateChatAgent):
     schedule_source = "app"
+    friend_context_limit = 20
 
     async def _friend_system(self, system, friend, room, *, private):
         if private and friend:
@@ -94,7 +99,7 @@ async def serve(settings, credentials, options, secret, authentication, home, st
     memory_enabled = home == "app" and os.getenv("MARONG_DISCORD_MEMORY_WORKER") == "1"
     memory_store = Store(settings.database_url, call_bridge=True) if memory_enabled else None
     tasks = []
-    google = google_web = chat = character_http = None
+    google = google_web = chat = diary_models = character_http = None
     fcm = options["fcm"]
     try:
         await store.open(wait=True)
@@ -122,12 +127,16 @@ async def serve(settings, credentials, options, secret, authentication, home, st
                                contact_schedule=(settings.proactive_per_day, *settings.proactive_hours),
                                invite_days=int(os.getenv("MARONG_INVITE_DAYS", "7")),
                                session_days=int(os.getenv("MARONG_SESSION_DAYS", "90")))
+        diary_enabled = os.getenv("MARONG_DIARY") == "1"
+        if diary_enabled:
+            diary_models = DiaryModels(settings, os.environ)
         chat = AppChat(store, agent, locks, AccessVerifier(options["access"]), push,
                        origin=options["origin"], port=options["port"], timezone=settings.timezone,
                        sessions=sessions, authentication=authentication,
-                       admin_email_hash=os.getenv("MARONG_ADMIN_EMAIL_SHA256"))
+                       admin_email_hash=os.getenv("MARONG_ADMIN_EMAIL_SHA256"), diary_models=diary_models)
         chat.profile = AppProfile(chat, character=os.getenv("MARONG_CHARACTER") == "1",
                                   friends=os.getenv("MARONG_FRIENDS") == "1", google=google is not None,
+                                  voice_samples=os.getenv("MARONG_VOICE_SAMPLES_DIR"),
                                   daily_limit=int(os.environ["MARONG_DAILY_UNITS"]) if os.getenv("MARONG_DAILY_UNITS") else None)
         saved = agent.on_saved
 
@@ -136,8 +145,11 @@ async def serve(settings, credentials, options, secret, authentication, home, st
             chat.pulse()
 
         agent.on_saved = on_saved
-        delivery = UnifiedDelivery(store, push, authentication, on_saved)
+        delivery = UnifiedDelivery(store, push, authentication, on_saved, origin=options["origin"])
         chat.delivery = delivery
+        if os.getenv("MARONG_CALL_SHOP") == "1":
+            chat.internal_shop = InternalShop(llm, web, shop, settings.anthropic_model,
+                                              os.getenv("MARONG_INTERNAL_SECRET", ""))
         if os.getenv("MARONG_CHARACTER_DIR"):
             try:
                 budget = Decimal(os.getenv("MARONG_IMAGE_MONTHLY_USD", "20"))
@@ -179,6 +191,10 @@ async def serve(settings, credentials, options, secret, authentication, home, st
             proactive = AppProactive(settings, store, agent, locks, delivery, topics=topics)
             reminders = AppReminders(settings, store, agent, delivery, origin=options["origin"])
             jobs.update(proactive=proactive.run, reminders=reminders.run)
+            if diary_enabled:
+                diary = DiaryWorker(store, diary_models, delivery, image_budget(os.getenv("MARONG_DIARY_IMAGE_BUDGET_USD")),
+                                    unified=True)
+                jobs["diary"] = diary.run
             call_texts = await store._one("SELECT to_regclass('marong.call_texts') IS NOT NULL AS ready")
             if call_texts["ready"]:
                 async def call_text():
@@ -208,6 +224,8 @@ async def serve(settings, credentials, options, secret, authentication, home, st
             await google.close()
         if fcm:
             await fcm.close()
+        if diary_models:
+            await diary_models.close()
         if character_http:
             await character_http.close()
         if memory_store:

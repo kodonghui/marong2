@@ -49,6 +49,8 @@ FILES = {"": ("index.html", "text/html"), "chat.js": ("chat.js", "text/javascrip
 UNIFIED_FILES = {"account.html": "text/html", "admin.html": "text/html", "unified.css": "text/css",
                  "unified.js": "text/javascript", "account.js": "text/javascript", "admin.js": "text/javascript",
                  "profile.html": "text/html", "profile.js": "text/javascript",
+                 "voice.html": "text/html", "voice.js": "text/javascript", "friends.html": "text/html",
+                 "friends.js": "text/javascript",
                  "character.html": "text/html", "character.js": "text/javascript"}
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 FID = re.compile(r"[A-Za-z0-9_-]{16,200}\Z")
@@ -58,6 +60,11 @@ NUMBER = re.compile(r"[0-9]{1,18}\Z")
 PROBLEMS = {
     "invalid_input": (400, "요청 모양이 틀림"),
     "voice_unknown": (400, "고를 수 있는 목소리가 아님"),
+    "self_request": (400, "내 친구 코드임"),
+    "code_not_found": (404, "친구 코드를 찾지 못함"),
+    "already_friends": (409, "이미 친구 관계임"),
+    "request_exists": (409, "기다리는 친구 요청이 있음"),
+    "request_limit": (429, "오늘 친구 요청 수를 다 씀"),
     "photo_invalid": (400, "사진 형식이나 크기가 맞지 않음"),
     "too_large": (413, "사진 요청 크기 초과"),
     "check_unavailable": (503, "사진 검사 준비 중"),
@@ -66,7 +73,6 @@ PROBLEMS = {
     "job_running": (409, "그 캐릭터의 작업이 진행 중"),
     "wrong_stage": (409, "현재 만들기 단계에서 할 수 없음"),
     "no_regen_left": (409, "후보 다시 만들기를 다 씀"),
-    "not_ready": (409, "캐릭터가 아직 준비되지 않음"),
     "login_required": (401, "로그인이 필요함"),
     "code_wrong": (401, "코드가 맞지 않음"),
     "invite_not_found": (404, "없는 초대 링크"),
@@ -81,6 +87,14 @@ PROBLEMS = {
     "no_dm": (403, "이 친구의 디스코드 DM 연결이 없거나 아직 DM을 한 번도 보내지 않음"),
     "too_many_messages": (429, "1분에 20번 넘게 보냄"),
     "no_picture": (404, "그 이름의 그림이 없음"),
+    "not_ready": (409, "아직 준비되지 않음"),
+    "stale_revision": (409, "보낸 판 번호가 지금 판과 다름"),
+    "busy": (409, "이 일기를 고치거나 다시 그리는 중"),
+    "fix_limit": (409, "고치기 다섯 번을 다 씀"),
+    "redraw_limit": (409, "다시 그리기 두 번을 다 씀"),
+    "drawing_budget": (429, "이번 달 그림 월 예산을 다 씀"),
+    "fix_failed": (503, "고치기 모델이 실패함"),
+    "stale_test": (409, "화면이 연 시험과 지금 시험 묶음이 다름"),
     "no_release": (404, "지금 받을 수 있는 앱 파일이 아님"),
     "feature_off": (403, "이 기능이 꺼져 있음"),
     "needs_owner": (403, "선톡을 늘리는 요청은 동희님이 정함"),
@@ -102,9 +116,10 @@ HEADERS = {
 
 
 class Problem(Exception):
-    def __init__(self, code: str, errors: list | None = None, headers: dict | None = None):
+    def __init__(self, code: str, errors: list | None = None, headers: dict | None = None, *, title=None):
         super().__init__(code)
         self.code, self.errors, self.headers = code, errors or [], headers or {}
+        self.title = title
 
 
 def bad(*errors) -> Problem:
@@ -114,7 +129,7 @@ def bad(*errors) -> Problem:
 class AppChat:
     def __init__(self, store, agent, client, access, push, *, origin: str = DEFAULT_ORIGIN, port: int = DEFAULT_PORT,
                  timezone: str = "Asia/Seoul", clock=time.monotonic, releases: AppReleases | None = None,
-                 sessions=None, authentication="access", admin_email_hash=None):
+                 sessions=None, authentication="access", admin_email_hash=None, diary_models=None):
         self.store = store
         self.agent = agent      # DiscordAgent: the same one that answers the Discord DM
         self.client = client    # DiscordDM: its room locks keep one answer at a time per room
@@ -128,6 +143,7 @@ class AppChat:
         self.sessions = sessions
         self.authentication = auth_mode(authentication)
         self.delivery = None
+        self.internal_shop = None
         self.tick = asyncio.Event()          # set and replaced whenever a message is saved in this process
         self.reply_traces = OrderedDict()
         self.waiters = defaultdict(list)     # friend id -> events of their waits, oldest first
@@ -139,6 +155,7 @@ class AppChat:
             self.files[""] = (self.files[""][0].replace(b"<!-- persona-link -->",
                 '<a class="icon-button" href="/chat/persona/" aria-label="친구 약속">나</a>'.encode("utf-8")), "text/html")
         self.runner = None
+        self.diary_models = diary_models
         from .app_persona import AppPersona
         self.persona = AppPersona(self)
         from .app_admin import AppAdmin
@@ -149,6 +166,9 @@ class AppChat:
         if sessions is not None:
             from .character.http import CharacterAPI
             self.characters = CharacterAPI(self)
+        if sessions is not None:
+            from .app_friends import AppFriends
+            self.friends = AppFriends(self)
         if sessions is not None:
             self.files.update({name: ((STATIC / name).read_bytes(), mime) for name, mime in UNIFIED_FILES.items()})
 
@@ -166,7 +186,7 @@ class AppChat:
 
     def _problem(self, p: Problem, trace: str) -> web.Response:
         status, title = PROBLEMS[p.code]
-        body = {"type": f"{self.origin}/problems/{p.code.replace('_', '-')}", "title": title, "status": status,
+        body = {"type": f"{self.origin}/problems/{p.code.replace('_', '-')}", "title": p.title or title, "status": status,
                 "code": p.code, "traceId": trace}
         if p.errors:
             body["errors"] = p.errors
@@ -181,6 +201,7 @@ class AppChat:
     @web.middleware
     async def guard(self, req, handler):
         trace = secrets.token_hex(8)
+        req["trace_id"] = trace
         try:
             res = await handler(req)
         except Problem as p:
@@ -673,12 +694,20 @@ class AppChat:
     # ── server ─────────────────────────────────────────────────
 
     def web_app(self) -> web.Application:
+        from .app_diary import AppDiary
+        from .app_listen import AppListen
+
         app = web.Application(client_max_size=BODY_MAX, middlewares=[self.guard])
+        AppDiary(self).register(app)
+        AppListen(self).register(app)
         app.router.add_get("/chat/healthz", self.health)
+        if self.internal_shop is not None:
+            from .internal_shop import LOOKUP_PATH
+            app.router.add_post(LOOKUP_PATH, self.internal_shop.read)
         if self.sessions is not None:
             app.router.add_get("/chat/join/{token}", self.account_page)
             app.router.add_get("/chat/login", self.account_page)
-            app.router.add_get("/chat/{name:unified\\.(?:css|js)|(?:account|admin|profile|character)\\.js}", self.page)
+            app.router.add_get("/chat/{name:unified\\.(?:css|js)|(?:account|admin|profile|voice|friends|character)\\.js}", self.page)
             app.router.add_get("/chat/api/invites/{token}", self.check_invite)
             app.router.add_post("/chat/api/join", self.join_with_invite)
             app.router.add_post("/chat/api/login/code", self.login_with_device_code)
@@ -686,6 +715,7 @@ class AppChat:
             app.router.add_post("/chat/api/logout", self.logout)
             self.admin.register(app.router)
             self.profile.register(app.router)
+            self.friends.register(app.router)
             self.characters.register(app.router)
         app.router.add_get("/chat", self.home)
         app.router.add_get("/chat/", self.page)

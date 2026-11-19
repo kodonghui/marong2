@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { request } from 'node:http';
+import { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
   AudioPlayerStatus, NoSubscriberBehavior, StreamType, VoiceConnectionStatus,
@@ -23,7 +24,7 @@ if (!validId(appId) || !Array.isArray(configured) || !configured.length ||
 }
 const rooms = new Map(configured.map(({ guild_id, channel_id, user_id }) =>
   [guild_id, { guildId: guild_id, channelId: channel_id, ownerId: user_id,
-    current: null, clientId: randomUUID(), retry: null, joining: false, callStarted: false, hungUp: false }]));
+    current: null, notice: null, clientId: randomUUID(), retry: null, joining: false, callStarted: false, hungUp: false }]));
 
 const RELAY = 'ws+unix:///run/marong-discord-voice/live.sock:/live';
 const SOCKET = '/run/marong-discord-voice/live.sock';
@@ -63,10 +64,10 @@ function available(room) {
     const check = request({ socketPath: SOCKET, path: '/available', method: 'GET',
       headers: headersFor(room, room.clientId), timeout: 5_000 }, response => {
       response.resume();
-      resolve(response.statusCode === 204);
+      resolve(response.statusCode);
     });
     check.on('timeout', () => check.destroy());
-    check.on('error', () => resolve(false));
+    check.on('error', () => resolve(0));
     check.end();
   });
 }
@@ -282,8 +283,15 @@ async function startWhenAvailable(guild, room) {
   room.joining = true;
   const clientId = room.clientId;
   try {
-    if (!canJoin(guild, room) || !await available(room)) return;
+    if (!canJoin(guild, room)) return;
+    const state = await available(room);
     if (!eligible(guild, room) || room.clientId !== clientId) return;
+    if (state === 429) {
+      room.hungUp = true;
+      await playBudgetNotice(guild, room, clientId);
+      return;
+    }
+    if (state !== 204) return;
     room.callStarted = true;
     await begin(guild, room);
   } catch {
@@ -291,6 +299,49 @@ async function startWhenAvailable(guild, room) {
   } finally {
     room.joining = false;
     schedule(guild, room, 5_000);
+  }
+}
+
+async function playBudgetNotice(guild, room, clientId) {
+  let clip;
+  try {
+    clip = await readFile(new URL('./budget-notice.ogg', import.meta.url));
+    if (clip.subarray(0, 4).toString() !== 'OggS') throw new Error('invalid_notice');
+  } catch {
+    log('budget_notice_unavailable');
+    return;
+  }
+  if (!eligible(guild, room) || room.clientId !== clientId) return;
+  const connection = joinVoiceChannel({
+    channelId: room.channelId, guildId: room.guildId, adapterCreator: guild.voiceAdapterCreator,
+    selfDeaf: true, selfMute: false,
+  });
+  const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Stop } });
+  const notice = { stop() {
+    player.stop(true);
+    if (connection.state.status !== VoiceConnectionStatus.Destroyed) connection.destroy();
+  } };
+  room.notice = notice;
+  const controller = new AbortController();
+  const elapsed = setTimeout(() => controller.abort(), 20_000);
+  const wait = new Promise(resolve => {
+    player.once('error', resolve);
+    connection.once(VoiceConnectionStatus.Destroyed, resolve);
+    controller.signal.addEventListener('abort', resolve, { once: true });
+  });
+  try {
+    await entersState(connection, VoiceConnectionStatus.Ready, 10_000);
+    if (!eligible(guild, room) || room.clientId !== clientId || !connection.voicePrivacyCode
+        || !connection.subscribe(player)) return;
+    const done = Promise.race([wait, new Promise(resolve => player.once(AudioPlayerStatus.Idle, resolve))]);
+    player.play(createAudioResource(Readable.from([clip]), { inputType: StreamType.OggOpus }));
+    await done;
+  } catch {
+    log('budget_notice_failed');
+  } finally {
+    clearTimeout(elapsed);
+    notice.stop();
+    if (room.notice === notice) room.notice = null;
   }
 }
 
@@ -303,6 +354,7 @@ function reconcile(guild) {
     const left = gatewayReady && guild.available &&
       guild.voiceStates.cache.get(room.ownerId)?.channelId !== room.channelId;
     if (left) room.hungUp = false;
+    if (room.notice) room.notice.stop();
     if (room.current) close(room.current, left ? 'participant_left' : 'voice_paused', left);
     if (left && (room.callStarted || room.joining)) {
       if (room.callStarted) finishCall(room, room.clientId);
@@ -354,6 +406,7 @@ client.on(Events.GuildDelete, guild => {
   clearTimeout(room.retry);
   room.retry = null;
   if (room.current) close(room.current, 'guild_removed');
+  if (room.notice) room.notice.stop();
 });
 client.on(Events.Error, () => log('discord_gateway_error'));
 
@@ -363,6 +416,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
     for (const room of rooms.values()) {
       clearTimeout(room.retry);
       if (room.current) close(room.current, 'service_stop');
+      if (room.notice) room.notice.stop();
     }
     client.destroy();
   });

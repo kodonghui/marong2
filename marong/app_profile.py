@@ -1,26 +1,15 @@
 """Read and update the signed-in friend's profile (API-216 and API-217)."""
 
+import asyncio
 from datetime import timedelta
 import os
-import re
+from pathlib import Path
 
 from aiohttp import web
 
 from .app_chat import Problem
 from .app_session import SessionError
-
-
-VOICE_NAME = re.compile(r"[A-Za-z]{2,24}")
-
-
-def call_voices(env=os.environ):
-    configured = tuple(dict.fromkeys(v.strip() for v in env.get("MARONG_CALL_VOICES", "Sulafat").split(",")
-                                      if VOICE_NAME.fullmatch(v.strip())))
-    return configured or ("Sulafat",)
-
-
-def voice_default(voices):
-    return "Sulafat" if "Sulafat" in voices else voices[0]
+from .call_voice import chosen_voice, configured_voices
 
 
 def usage_day(now, tz):
@@ -28,12 +17,14 @@ def usage_day(now, tz):
 
 
 class AppProfile:
-    def __init__(self, chat, *, character=None, friends=None, google=False, voices=None, daily_limit=None):
+    def __init__(self, chat, *, character=None, friends=None, google=False, voices=None, daily_limit=None,
+                 voice_samples=None):
         self.chat = chat
         self.features = {"character": bool(character), "friends": bool(friends)}
         self.google = google
-        self.voices = voices or call_voices()
+        self.voices = voices or configured_voices()
         self.daily_limit = daily_limit
+        self.voice_samples = Path(voice_samples) if voice_samples else None
 
     async def who(self, req, *, write=False):
         who = await self.chat._who(req, write=write)
@@ -118,9 +109,50 @@ class AppProfile:
             if error.code not in {"login_required", "unauthenticated"}:
                 raise
             raise web.HTTPFound("/chat/login")
-        return self.chat.unified_page("profile")
+        return self.chat.unified_page("voice" if req.path.endswith("/voice") else "profile")
+
+    def voice_file(self, name):
+        if not self.voice_samples:
+            return None
+        for suffix in ("mp3", "ogg", "wav"):
+            path = self.voice_samples / f"{name}.{suffix}"
+            if path.is_file():
+                return path
+        return None
+
+    def voice_metadata(self):
+        voices = []
+        for name in self.voices:
+            label = name
+            if self.voice_samples:
+                try:
+                    found = (self.voice_samples / f"{name}.txt").read_text(encoding="utf-8").splitlines()
+                    if found and found[0].strip():
+                        label = found[0].strip()[:20]
+                except (OSError, UnicodeError):
+                    pass
+            voices.append({"name": name, "label": label, "default": name == chosen_voice(choices=self.voices),
+                           "sampleUrl": f"/chat/voices/{name}" if self.voice_file(name) else None})
+        return voices
+
+    async def voice_list(self, req):
+        await self.who(req)
+        return self.chat._json(200, {"voices": await asyncio.to_thread(self.voice_metadata)})
+
+    async def voice_sample(self, req):
+        await self.who(req)
+        name = req.match_info["name"]
+        if name not in self.voices:
+            raise Problem("not_found")
+        path = await asyncio.to_thread(self.voice_file, name)
+        if not path:
+            raise Problem("not_found")
+        return web.FileResponse(path)
 
     def register(self, router):
         router.add_get("/chat/me", self.page)
+        router.add_get("/chat/me/voice", self.page)
         router.add_get("/chat/api/profile", self.get)
         router.add_patch("/chat/api/profile", self.patch)
+        router.add_get("/chat/api/voices", self.voice_list)
+        router.add_get("/chat/voices/{name}", self.voice_sample)

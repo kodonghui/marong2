@@ -31,6 +31,7 @@ import hashlib
 import os
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -41,6 +42,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from marong.config import PER_DAY_MAX, load_dotenv  # noqa: E402
+from marong import diary_admin  # noqa: E402
+from marong.diary import image_budget  # noqa: E402
 from marong.topics import parse_window, prefs_of, window_text  # noqa: E402
 
 # Haiku 5.5 가격(1M 토큰당 달러, 프롬프트 10만 토큰 이하). 캐시 읽기는 입력의 0.1배, 캐시 쓰기는 5분 1.25배·1시간 2배
@@ -80,7 +83,7 @@ def find_room(c, who: str) -> dict:
     return rows[0]
 
 
-def find_friend(c, who: str) -> int:
+def find_friend(c, who: str, *, show_matching_ids: bool = False) -> int:
     """친구 이름 또는 #키 → 친구 id. 못 찾거나 같은 이름이 여럿이면 끝냄."""
     if is_key(who):
         friend_id = find_key(c, who)["friend_id"]
@@ -89,6 +92,8 @@ def find_friend(c, who: str) -> int:
         return friend_id
     found = c.execute("SELECT f.id FROM marong.friends f WHERE f.name = %s "
                       "AND EXISTS (SELECT 1 FROM marong.people p WHERE p.friend_id = f.id)", (who,)).fetchall()
+    if len(found) > 1 and show_matching_ids:
+        raise diary_admin.DiaryAdminError("친구 ID: " + ", ".join(str(row["id"]) for row in found))
     if len(found) != 1:
         sys.exit(f"'{who}' 친구가 " + ("없음" if not found else "여럿이라 #키로 지정해 주세요") + "(friends 로 보기)")
     return found[0]["id"]
@@ -482,14 +487,27 @@ def topics(c, tz, args):
     print(f"{name}: {'선 전화' if field == 'hello_call' else '그림 화두'} {'켬' if on else '끔'}")
 
 
+def diary(c, tz, args):
+    try:
+        diary_admin.command(c, args, lambda conn, who: find_friend(conn, who, show_matching_ids=True),
+                            datetime.now(tz), image_budget(os.getenv("MARONG_DIARY_IMAGE_BUDGET_USD")))
+    except (diary_admin.DiaryAdminError, ValueError) as error:
+        print(error, file=sys.stderr)
+        raise SystemExit(2) from None
+    except psycopg.Error:
+        print("일기 DB에 닿지 않아요.", file=sys.stderr)
+        raise SystemExit(2) from None
+
+
 COMMANDS = {"friends": friends, "people": people, "rooms": rooms, "show": show, "stats": stats,
             "link": link, "unlink": unlink, "share": share, "friendship": friendship, "schedule": schedule,
-            "merge": merge, "topics": topics}
+            "merge": merge, "topics": topics, "diary": diary}
 WRITES = {"link", "unlink", "share", "friendship", "schedule", "merge"}
 
 
 def writes(args: list[str]) -> bool:
-    return args[0] in WRITES or (args[0] == "topics" and args[1:] != ["status"])
+    return (args[0] in WRITES or (args[0] == "topics" and args[1:] != ["status"])
+            or (args[0] == "diary" and diary_admin.writes(args[1:])))
 
 
 def main() -> None:
