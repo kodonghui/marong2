@@ -24,6 +24,7 @@ import psycopg
 from tools.vertex_live.tool_trace import app_delivery, app_step, step as trace_step
 
 from .app_release import AppReleases
+from .app_session import COOKIE, SessionError, auth_mode, device_label, identify_request
 from .app_store import APP_KEY
 from .discord_dm import DEFAULT_ORIGIN, DiscordIncoming, proactive_preference
 from .google_calendar import LINK_MARK, command as google_command
@@ -50,6 +51,14 @@ VERSION = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\Z")
 RELEASE_CHECK_PATH = "/chat/api/app/release"
 NUMBER = re.compile(r"[0-9]{1,18}\Z")
 PROBLEMS = {
+    "invalid_input": (400, "요청 모양이 틀림"),
+    "login_required": (401, "로그인이 필요함"),
+    "code_wrong": (401, "코드가 맞지 않음"),
+    "invite_not_found": (404, "없는 초대 링크"),
+    "invite_used": (410, "이미 쓴 초대 링크"),
+    "invite_expired": (410, "기한이 지난 초대 링크"),
+    "too_many_tries": (429, "틀린 코드를 너무 많이 넣음"),
+    "too_many_codes": (429, "기기 추가 코드를 너무 많이 만듦"),
     "invalid_request": (400, "요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)"),
     "unauthenticated": (401, "Access 로그인 증명이 없거나 맞지 않음"),
     "not_allowed": (403, "허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐"),
@@ -89,7 +98,8 @@ def bad(*errors) -> Problem:
 
 class AppChat:
     def __init__(self, store, agent, client, access, push, *, origin: str = DEFAULT_ORIGIN, port: int = DEFAULT_PORT,
-                 timezone: str = "Asia/Seoul", clock=time.monotonic, releases: AppReleases | None = None):
+                 timezone: str = "Asia/Seoul", clock=time.monotonic, releases: AppReleases | None = None,
+                 sessions=None, authentication="access"):
         self.store = store
         self.agent = agent      # DiscordAgent: the same one that answers the Discord DM
         self.client = client    # DiscordDM: its room locks keep one answer at a time per room
@@ -100,6 +110,8 @@ class AppChat:
         self.tz = ZoneInfo(timezone)
         self.clock = clock
         self.releases = releases if releases is not None else AppReleases()
+        self.sessions = sessions
+        self.authentication = auth_mode(authentication)
         self.tick = asyncio.Event()          # set and replaced whenever a message is saved in this process
         self.reply_traces = OrderedDict()
         self.waiters = defaultdict(list)     # friend id -> events of their waits, oldest first
@@ -147,9 +159,12 @@ class AppChat:
             res = await handler(req)
         except Problem as p:
             res = self._problem(p, trace)
+        except SessionError as p:
+            headers = {"Retry-After": str(p.retry_after)} if p.retry_after is not None else None
+            res = self._problem(Problem(p.code, headers=headers), trace)
         except web.HTTPException as e:
             res = e
-        except psycopg.OperationalError as e:  # includes the pool timeout
+        except (psycopg.OperationalError, TimeoutError) as e:  # includes the pool timeout
             log.warning("app_chat_db_unavailable %s", type(e).__name__)
             res = self._problem(Problem("db_unavailable"), trace)
         except Exception as e:
@@ -159,15 +174,67 @@ class AppChat:
             prefix, _, version = req.headers.get("User-Agent", "").partition("/")
             if prefix == "MarongApp" and VERSION.fullmatch(version):
                 log.info("app_release check version=%s status=%d", version, res.status)
+        if req.get("session_refresh") and res.status < 400:
+            self._set_session_cookie(res, req["session_refresh"])
         res.headers.update(HEADERS)
         if req.get("cache") and res.status == 200:  # a picture of a picture set never changes (API-140)
             res.headers["Cache-Control"] = req["cache"]
         return res
 
+    def _require_app_origin(self, req):
+        if req.headers.get("Origin") != self.origin:
+            raise Problem("cross_site")
+
+    async def _session_body(self, req, required, optional=()):
+        try:
+            body = await self._body(req)
+        except Problem as e:
+            raise Problem("invalid_input", e.errors) from None
+        if required not in body or set(body) - {required, *optional}:
+            raise Problem("invalid_input")
+        return body
+
+    def _set_session_cookie(self, response, token, *, clear=False):
+        age = 0 if clear else int(self.sessions.session_age.total_seconds())
+        response.set_cookie(COOKIE, token, max_age=age, path="/", httponly=True, secure=True, samesite="Lax")
+        return response
+
+    async def check_invite(self, req):
+        kind = await self.sessions.check_invite(req.match_info["token"])
+        return self._json(200, {"kind": kind, "state": "open"})
+
+    async def join_with_invite(self, req):
+        self._require_app_origin(req)
+        body = await self._session_body(req, "token", ("name",))
+        session = await self.sessions.join(body["token"], body.get("name"), device_label(req.headers.get("User-Agent", "")))
+        return self._set_session_cookie(self._json(201, session.public()), session.token)
+
+    async def login_with_device_code(self, req):
+        self._require_app_origin(req)
+        body = await self._session_body(req, "code")
+        address = req.headers.get("CF-Connecting-IP") or req.remote or "unknown"
+        session = await self.sessions.redeem_device_code(body["code"], address,
+                                                         device_label(req.headers.get("User-Agent", "")))
+        return self._set_session_cookie(self._json(200, session.public()), session.token)
+
+    async def create_device_code(self, req):
+        who = await self._who(req, write=True)
+        if who["profile_id"] is None:
+            await self.sessions.ensure_profile(who["friend_id"])
+        code, expiry = await self.sessions.create_device_code(who["friend_id"])
+        return self._json(201, {"code": code, "expiresAt": expiry.isoformat()})
+
+    async def logout(self, req):
+        self._require_app_origin(req)
+        await self.sessions.logout(req.cookies.get(COOKIE))
+        return self._set_session_cookie(web.Response(status=204), "", clear=True)
+
     async def _who(self, req, write: bool = False, *, require_dm: bool = True) -> dict:
         """The signed-in call friend and their DM room (SPEC-111). Writes must come from the call address."""
-        if write and req.headers.get("Origin") != self.origin:
-            raise Problem("cross_site")
+        if write:
+            self._require_app_origin(req)
+        if self.sessions is not None:
+            return await self._unified_who(req)
         status, email_hash = await self.access.check(req.headers.get("Cf-Access-Jwt-Assertion", ""))
         if status == "unavailable":
             raise Problem("db_unavailable")
@@ -178,6 +245,26 @@ class AppChat:
             raise Problem("not_allowed")
         if require_dm and (not who["room_key"] or not who["channel_id"]):
             raise Problem("no_dm")
+        return who
+
+    async def _unified_who(self, req):
+        async def from_access():
+            token = req.headers.get("Cf-Access-Jwt-Assertion", "")
+            if not token:
+                raise Problem("login_required")
+            status, email_hash = await self.access.check(token)
+            if status == "unavailable":
+                raise Problem("db_unavailable")
+            if status != "ok":
+                raise Problem(status)
+            return await self.sessions.find_access_member(email_hash)
+
+        token = req.cookies.get(COOKIE)
+        who = await identify_request(self.authentication, token, self.sessions.find_session, from_access)
+        if not who or not who["room_key"]:
+            raise Problem("login_required")
+        if who.get("renewed"):
+            req["session_refresh"] = token
         return who
 
     async def app_release(self, req):
@@ -309,6 +396,13 @@ class AppChat:
         return web.Response(body=body, content_type="image/webp")
 
     async def page(self, req):
+        if self.sessions is not None and self.authentication != "access" and not req.match_info.get("name"):
+            try:
+                await self._unified_who(req)
+            except (Problem, SessionError) as error:
+                if error.code not in {"login_required", "unauthenticated"}:
+                    raise
+                raise web.HTTPFound("/chat/login") from None
         found = self.files.get(req.match_info.get("name", ""))
         if not found:
             raise web.HTTPNotFound()
@@ -366,7 +460,8 @@ class AppChat:
         if old:
             return self._json(200, {"message": self.message(old)})
         preference = proactive_preference(text)
-        await self.store.incoming(who["discord_user_id"], who["channel_id"], key, preference)
+        if self.sessions is None:
+            await self.store.incoming(who["discord_user_id"], who["channel_id"], key, preference)
         saved = await self.store.add_message(room, "user", text, user_key=who["user_key"], kakao_id=key,
                                              meta={"transport": "app"})
         row = await self.store.app_message(room, key)
@@ -394,7 +489,7 @@ class AppChat:
             reply = None
             try:
                 with app_step("account_lookup", storage=True):
-                    link = await self.store.link(who["discord_user_id"])
+                    link = await self.store.link(who["discord_user_id"]) if self.sessions is None else None
                 msg = DiscordIncoming(room, who["user_key"], text, kakao_id=key, proactive_preference=preference,
                                       google_command=google_command(text), topic_command=topic_phrase(text),
                                       friend_id=who["friend_id"], dm_link=link, via="app", presaved_id=saved_id)
@@ -536,6 +631,12 @@ class AppChat:
     def web_app(self) -> web.Application:
         app = web.Application(client_max_size=BODY_MAX, middlewares=[self.guard])
         app.router.add_get("/chat/healthz", self.health)
+        if self.sessions is not None:
+            app.router.add_get("/chat/api/invites/{token}", self.check_invite)
+            app.router.add_post("/chat/api/join", self.join_with_invite)
+            app.router.add_post("/chat/api/login/code", self.login_with_device_code)
+            app.router.add_post("/chat/api/device-codes", self.create_device_code)
+            app.router.add_post("/chat/api/logout", self.logout)
         app.router.add_get("/chat", self.home)
         app.router.add_get("/chat/", self.page)
         app.router.add_get("/chat/{name:chat\\.(?:js|css)}", self.page)
