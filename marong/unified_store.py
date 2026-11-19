@@ -10,11 +10,13 @@ from .store import PROACTIVE_MESSAGE
 CONTACT_STATE = f"""
 SELECT d.*, f.name, room.room_key, true AS is_channel, d.last_incoming_at AS last_said,
        {writing_user_key('d.friend_id')} AS user_key,
+       p.character_id IS NOT NULL AS wearing_character,
        now()-greatest(d.last_incoming_at,d.opted_in_at) AS quiet_for,
        now()-greatest(d.last_attempt_at, unanswered.last_sent) AS sent_ago,
        unanswered.n AS unanswered
 FROM marong.contact_settings d
 JOIN marong.friends f ON f.id=d.friend_id
+LEFT JOIN marong.friend_profiles p ON p.friend_id=d.friend_id
 JOIN LATERAL (SELECT {writing_room_key('d.friend_id')} AS room_key) room ON room.room_key IS NOT NULL
 CROSS JOIN LATERAL (
     SELECT count(*) AS n,max(m.created_at) AS last_sent
