@@ -49,7 +49,7 @@ const app = {
   first: null, last: 0, hasMore: false, loadingMore: false,
   waiting: false, waitControl: null, backoff: 0, typing: false,
   read: 0, answered: 0, // '읽음': my messages after `answered` up to `read` (SPEC-148)
-  until: 0, countdown: null,
+  until: 0, countdown: null, dailyBlocked: false,
   shown: new Map(),   // message id -> li
   pending: new Map(), // clientId -> {text, li}
   profileActive: false,
@@ -558,9 +558,34 @@ document.addEventListener('visibilitychange', () => {
 
 // ── sending (API-103) ────────────────────────────────────────
 
+async function refreshDailyLimit() {
+  if (!app.dailyBlocked) return;
+  const result = await api('/usage');
+  if (result.status === 200) {
+    const {units, limit, tickets} = result.body;
+    if (limit === null || units < limit || tickets > 0) {
+      app.dailyBlocked = false;
+      notice('');
+      syncSend();
+    }
+  }
+}
+setInterval(refreshDailyLimit, 30000);
+window.addEventListener('focus', refreshDailyLimit);
+
+function dailyLimit() {
+  app.dailyBlocked = true;
+  notice('오늘 쓸 수 있는 양을 다 썼어. 새벽 4시에 다시 채워져');
+  const link = document.createElement('a');
+  link.href = '/chat/me';
+  link.textContent = '내 마롱이에서 보기';
+  ui.notice.append(' ', link);
+  syncSend();
+}
+
 function syncSend() {
   const limited = Date.now() < app.until;
-  ui.send.disabled = !app.ready || Boolean(app.blocked) || limited || !ui.text.value.trim();
+  ui.send.disabled = app.dailyBlocked || !app.ready || Boolean(app.blocked) || limited || !ui.text.value.trim();
 }
 
 function notice(text) {
@@ -642,6 +667,13 @@ async function post(clientId) {
   }
   if (!handle(r)) return;
   const code = r.body && r.body.code;
+  if (code === 'daily_limit') {
+    app.pending.delete(clientId);
+    entry.li.remove();
+    if (!ui.text.value.trim()) { ui.text.value = entry.text; grow(); }
+    dailyLimit();
+    return;
+  }
   if (r.status === 429) {
     // Keep what was written: back into the box, and the button waits (SCR-107).
     app.pending.delete(clientId);

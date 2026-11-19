@@ -197,11 +197,15 @@ async def status(req):
     blocked = await budget_status(memory_store, 'web') in BLOCKED
     if person and not blocked:
         blocked = await personal_budget_blocked(memory_store,person.caller_id,PERSONAL_BUDGET)
+    blocked_reason = 'budget' if blocked else None
+    if not blocked and person and person.unified and await memory_store.daily_usage.blocked(person.friend_id):
+        blocked = True
+        blocked_reason = 'daily_limit'
     owner=call_owner(authn,person)
     slot=active_calls.get(owner)
     session=slot.session if slot else None
     voice=chosen_voice(authn.get('voice')) if session is None else session.voice
-    return web.json_response({'ready':True,'active':bool(slot),'canCall':not blocked,'blockedReason':'budget' if blocked else None,'model':MODEL,'voice':voice,'route':'Vertex AI','project':PROJECT,'automaticReconnect':True,'durationLimit':None,'callCountLimit':None,'build':BUILD,'webRTC':rtc_transport.enabled(),'memoryConnected':bool(person),'name':person.name if person else None,'diagnostics':session.d if session else {}})
+    return web.json_response({'ready':True,'active':bool(slot),'canCall':not blocked,'blockedReason':blocked_reason,'model':MODEL,'voice':voice,'route':'Vertex AI','project':PROJECT,'automaticReconnect':True,'durationLimit':None,'callCountLimit':None,'build':BUILD,'webRTC':rtc_transport.enabled(),'memoryConnected':bool(person),'name':person.name if person else None,'diagnostics':session.d if session else {}})
 
 async def health(req):return web.json_response({'ok':True,'route':'Vertex AI','model':MODEL,'build':BUILD})
 
@@ -356,6 +360,10 @@ async def live(req):
         if person and not browser_resume and await personal_budget_blocked(memory_store,person.caller_id,PERSONAL_BUDGET):
             await ws.send_json({'type':'budget_exhausted'})
             return ws
+        if person and person.unified and not browser_resume and await memory_store.daily_usage.blocked(person.friend_id):
+            if not await memory_store.resume_voice(person, client_id):
+                await ws.send_json({'type':'daily_limit'})
+                return ws
         if owner in active_calls:
             await ws.send_json({'type':'call_busy'})
             return ws

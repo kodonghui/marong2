@@ -1,7 +1,6 @@
 """Read and update the signed-in friend's profile (API-216 and API-217)."""
 
 import asyncio
-from datetime import timedelta
 import os
 from pathlib import Path
 
@@ -12,8 +11,7 @@ from .app_session import SessionError
 from .call_voice import chosen_voice, configured_voices
 
 
-def usage_day(now, tz):
-    return (now.astimezone(tz) - timedelta(hours=4)).date()
+from .usage import usage_day
 
 
 class AppProfile:
@@ -23,7 +21,7 @@ class AppProfile:
         self.features = {"character": bool(character), "friends": bool(friends)}
         self.google = google
         self.voices = voices or configured_voices()
-        self.daily_limit = daily_limit
+        self.daily_limit = chat.usage.limit if chat.usage else daily_limit
         self.voice_samples = Path(voice_samples) if voice_samples else None
 
     async def who(self, req, *, write=False):
@@ -71,6 +69,10 @@ class AppProfile:
     async def get(self, req):
         who = await self.who(req)
         return self.chat._json(200, await self.read(who["friend_id"]))
+
+    async def usage(self, req):
+        who = await self.who(req)
+        return self.chat._json(200, await self.chat.usage.get(who["friend_id"]))
 
     async def patch(self, req):
         who = await self.who(req, write=True)

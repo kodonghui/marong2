@@ -194,5 +194,6 @@ class CharacterWorker:
                 await conn.execute("UPDATE marong.characters SET stage='name' WHERE id=%s", (ident,))
                 await batch.remove(conn, ident, PHOTOS)
             await conn.execute("UPDATE marong.character_jobs SET state='done',finished_at=now() WHERE id=%s", (job["id"],))
+            await self.api.chat.usage.record(job["friend_id"], conn=conn, images=len(drawings))
             after = await self.api.spent(conn)
         self.warn_budget(before, after)
