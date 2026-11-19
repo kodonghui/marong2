@@ -96,12 +96,12 @@ class Bridge:
         finally:
             if bridges.get(self.client) is self:bridges.pop(self.client,None)
 
-async def acquire(owner,client):
+async def acquire(owner,client,*,capacity=2):
     old=bridges.get(client)
     if old and not old.closed:
         if old.owner!=owner:raise PermissionError()
         old.idle_at=time.monotonic();return old
-    if len(bridges)>=2:raise ValueError('rtc_busy')
+    if len(bridges)>=capacity:raise ValueError('rtc_busy')
     bridge=Bridge(owner,client);bridges[client]=bridge
     try:await asyncio.wait_for(bridge.open(),12)
     except Exception:await bridge.close();raise

@@ -52,7 +52,7 @@ async def main():
         def factory(**kw):u=Upstream();upstreams.append(u);return HTTP(u)
         async def idle():
             for _ in range(100):
-                if not relay.active:return
+                if not relay.active_calls:return
                 await asyncio.sleep(.01)
             raise AssertionError('session cleanup')
         with patch.object(relay,'google_headers',AsyncMock(return_value={})),patch.object(live_session,'ClientSession',factory):

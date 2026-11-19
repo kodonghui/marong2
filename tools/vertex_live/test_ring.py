@@ -282,7 +282,7 @@ async def check_http(server):
                 await ws.receive()
                 await ws.close()
                 for _ in range(100):
-                    if not server.active:
+                    if not server.active_calls:
                         break
                     await asyncio.sleep(.01)
             page = await (await client.get('/')).text()

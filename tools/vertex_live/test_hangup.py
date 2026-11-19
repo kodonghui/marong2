@@ -246,7 +246,7 @@ async def check_http(server):
                 assert [x['name'] for t in setup.get('tools',[]) for x in t.get('functionDeclarations',[])]==tools,query
                 await ws.send_json({'type':'stop'});await ws.receive();await ws.close()
                 for _ in range(100):
-                    if not server.active:break
+                    if not server.active_calls:break
                     await asyncio.sleep(.01)
             page=await (await c.get('/')).text()
             assert '/app.js?v=20261117-topic1' in page

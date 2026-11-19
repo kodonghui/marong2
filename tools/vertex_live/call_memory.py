@@ -254,6 +254,13 @@ class MemoryStore:
             (p.caller_id, entrypoint, entrypoint, client_id))
         return row is not None
 
+    async def resume_voice(self, p, client_id):
+        row = await self.one("""
+            SELECT voice FROM call.calls WHERE caller_id=%s AND entrypoint='web' AND client_id=%s
+            AND status<>'ended' AND deleted_at IS NULL
+        """, (p.caller_id, client_id))
+        return row["voice"] if row else None
+
     async def claim_ring(self, p, call_id, ring_id=None):
         """A call Marong placed at a time the friend set (marong.app_rings, docs/app-ring.md SPEC-136).
         The ringing row (this one when ring_id is given, else the caller's latest whose answer window is open) becomes

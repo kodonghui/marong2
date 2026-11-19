@@ -26,7 +26,7 @@ async def main():
                 auth=await server.identity(SimpleNamespace(headers=headers,cookies={'marong_live':server.COOKIE}))
                 bridge.owner=auth['owner'];server.rtc_transport.bridges[client]=bridge
                 ws=await c.ws_connect('/live?client='+client+'&rtc=1',headers=headers)
-                initial=await event(ws,'ready');session=server.active_session
+                initial=await event(ws,'ready');session=next(iter(server.active_calls.values())).session
                 assert initial['audioTransport']=='webrtc'
                 # A queued, partly played sentence: pending tail must be handed over.
                 bridge.feed(b'\x01\x02'*9000,session.epoch,42,1200);bridge.finish(session.epoch,42)

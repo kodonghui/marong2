@@ -26,14 +26,16 @@ async def main():
                 response=await c.post('/api/rtc',json={'client':client},headers=headers)
                 assert response.status==200 and (await response.json())['room']=='synthetic-room'
                 session=SimpleNamespace(owner='a',client_id=client,rtc=None,pcm_forced=False)
-                server.active=True;server.active_session=session
-                assert (await c.post('/api/rtc',json={'client':client},headers=headers|{'X-Test-Owner':'b'})).status==409
+                server.active_calls['a']=server.CallSlot(client,session)
+                acquire.side_effect=PermissionError()
+                assert (await c.post('/api/rtc',json={'client':client},headers=headers|{'X-Test-Owner':'b'})).status==403
+                acquire.side_effect=None
                 assert (await c.post('/api/rtc',json={'client':str(uuid.uuid4())},headers=headers)).status==409
                 assert (await c.post('/api/rtc',json={'client':client},headers=headers)).status==200
                 assert session.rtc is bridge and bridge.session is session
                 session.pcm_forced=True
                 assert (await c.post('/api/rtc',json={'client':client},headers=headers)).status==409
-                server.active=False;server.active_session=None
+                server.active_calls.clear()
     print('PASS RTC authorization, same-call binding and no RTC reattachment after PCM failover')
 
 asyncio.run(main())
