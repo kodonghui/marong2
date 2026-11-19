@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from marong.access import AccessVerifier
 from marong.app_chat import AppChat
+from marong.app_profile import AppProfile
 from marong.app_push import AppPush
 from marong.app_runtime import app_settings, app_tables, google_settings, greeting_settings, model_tools, topic_tables
 from marong.app_session import AppSessions, auth_mode
@@ -25,6 +26,7 @@ from marong.memory import MemoryWorker
 from marong.store import Store
 from marong.topics import Topics
 from marong.unified_delivery import AppProactive, AppReminders, UnifiedDelivery
+from marong.unified_prompt import character_section, marker_positions
 from marong.unified_store import UnifiedStore
 from marong.work_loops import loops_home, run_locked
 
@@ -34,6 +36,17 @@ log = logging.getLogger("marong.runtime")
 
 class AppAgent(PrivateChatAgent):
     schedule_source = "app"
+
+    async def _friend_system(self, system, friend, room, *, private):
+        if private and friend:
+            profile = await asyncio.wait_for(self.store.character_prompt(friend, os.getenv("MARONG_FRIENDS") == "1"), .5)
+            if profile:
+                if profile["kind"]:
+                    pet_prompt = await asyncio.to_thread(self.persona, pet=True)
+                    if system and system[0].get("cache_control"):
+                        system = [{**system[0], "text": pet_prompt}, *system[1:]]
+                system = [*system[:-1], {"type": "text", "text": character_section(profile)}, system[-1]]
+        return await super()._friend_system(system, friend, room, private=private)
 
 
 class RoomLocks:
@@ -55,8 +68,7 @@ def character_settings(settings):
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError as e:
         raise SystemExit("Cannot read prompt for character mode") from e
-    start, end = "<!-- adult:start -->", "<!-- adult:end -->"
-    if lines.count(start) != 1 or lines.count(end) != 1 or lines.index(start) >= lines.index(end):
+    if marker_positions(lines) is None:
         raise SystemExit("Prompt needs one ordered pair of adult section markers")
 
 
@@ -94,7 +106,7 @@ async def serve(settings, credentials, options, secret, authentication, home, st
         if warm:
             agent.warmer = CacheWarmer(llm, settings.timezone)
         locks = RoomLocks()
-        push = AppPush(store, fcm, ring_enabled=agent.ring)
+        push = AppPush(store, fcm, ring_enabled=agent.ring, title_for=store.app_bot_name)
         sessions = AppSessions(store.pool, secret,
                                contact_schedule=(settings.proactive_per_day, *settings.proactive_hours),
                                invite_days=int(os.getenv("MARONG_INVITE_DAYS", "7")),
@@ -103,6 +115,9 @@ async def serve(settings, credentials, options, secret, authentication, home, st
                        origin=options["origin"], port=options["port"], timezone=settings.timezone,
                        sessions=sessions, authentication=authentication,
                        admin_email_hash=os.getenv("MARONG_ADMIN_EMAIL_SHA256"))
+        chat.profile = AppProfile(chat, character=os.getenv("MARONG_CHARACTER") == "1",
+                                  friends=os.getenv("MARONG_FRIENDS") == "1", google=google is not None,
+                                  daily_limit=int(os.environ["MARONG_DAILY_UNITS"]) if os.getenv("MARONG_DAILY_UNITS") else None)
         saved = agent.on_saved
 
         def on_saved():

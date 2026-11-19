@@ -41,6 +41,7 @@ from .photo import Photo
 from .store import Store, keyword_terms, speaker_label
 from .style import EMPTY_FALLBACK, GENTLE_COUNSEL, REPEAT_SIMILARITY, check as style_check, fallback as style_fallback, repeat_similarity, tidy
 from .topics import TOPIC_GUIDE, topic_text
+from .unified_prompt import common_prompt
 
 log = logging.getLogger("agent")
 
@@ -216,9 +217,10 @@ class Agent:
         # (방, 사진 메시지 id) → 사진 블록. 사진에 답할 때(뒤에 온 말과 묶어 답할 때도) 사진 자체를 다시 보여 줌
         self._photos: OrderedDict[tuple[str, int], dict] = OrderedDict()
 
-    def persona(self) -> str:
+    def persona(self, *, pet=False) -> str:
         p = Path(self.s.prompt_path)
-        prompt = p.read_text(encoding="utf-8").strip() if p.exists() else ""
+        raw = p.read_text(encoding="utf-8") if p.exists() else ""
+        prompt = common_prompt(raw, pet=pet).strip()
         knowledge = load_knowledge(self.s.knowledge_dir)
         return f"{prompt}\n\n{knowledge}".strip() if knowledge else prompt
 

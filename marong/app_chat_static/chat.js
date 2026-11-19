@@ -52,6 +52,7 @@ const app = {
   until: 0, countdown: null,
   shown: new Map(),   // message id -> li
   pending: new Map(), // clientId -> {text, li}
+  profileActive: false,
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -104,6 +105,28 @@ function relogin(result) {
     return;
   }
   block('login');
+}
+
+let ringExpiry;
+async function refreshProfile() {
+  if (!$('menu-profile')) return;
+  const result = await api('/profile');
+  if (result.status !== 200) return;
+  app.profileActive = true;
+  const profile = result.body;
+  const brand = document.querySelector('.brand');
+  if (brand && brand.firstChild?.nodeType === Node.TEXT_NODE) brand.firstChild.textContent = profile.botName;
+  document.title = profile.botName + ' · 글 대화';
+  $('menu-profile').hidden = false;
+  $('menu-friends').hidden = !profile.features.friends;
+  const ring = $('ring-accept');
+  clearTimeout(ringExpiry);
+  const until = Date.parse(profile.pendingRing?.until || '');
+  ring.hidden = !Number.isFinite(until) || until <= Date.now();
+  if (!ring.hidden) {
+    ring.href = '/?ring=' + encodeURIComponent(profile.pendingRing.ringId);
+    ringExpiry = setTimeout(() => { ring.hidden = true; }, until - Date.now());
+  }
 }
 
 const BLOCKS = {
@@ -504,6 +527,7 @@ async function waitLoop() {
         app.backoff = 0;
         const typing = app.typing, read = app.read;
         const added = add(r.body.messages);
+        if (app.profileActive && r.body.messages.some(message => message.kind === 'ring')) refreshProfile();
         setTyping(r.body.typing);
         setRead(r.body);
         // Nothing new at once: another open screen took this wait over. Do not take it straight back.
@@ -780,8 +804,12 @@ async function start() {
   toBottom();
   app.ready = true;
   syncSend();
+  if ($('menu-profile')) refreshProfile();
   waitLoop();
 }
 
 start();
+document.addEventListener('visibilitychange', () => {
+  if (app.profileActive && document.visibilityState === 'visible') refreshProfile();
+});
 void discoverPersona();

@@ -238,11 +238,11 @@
     if (state && state.status !== 200) { inviteError(state, load); return; }
     let me = null;
     if (document.body.dataset.sessionCookie) {
-      me = await request(api + '/me');
+      me = await request(api + '/profile');
       if (me.status !== 200 && me.status !== 401) { failure(me, load); return; }
     }
     if (join && me?.status === 200) {
-      setPage('이 기기는 이미 ' + endLetter(me.body.name, '으로', '로') + ' 들어와 있어');
+      setPage('이 기기는 이미 ' + endLetter(me.body.friendName, '으로', '로') + ' 들어와 있어');
       actions.append(link('글 대화로 가기', '/chat/'),
         button('이 링크로 다시 들어가기', () => showInvite(state.body.kind), 'btn2'));
     } else if (join) showInvite(state.body.kind);
