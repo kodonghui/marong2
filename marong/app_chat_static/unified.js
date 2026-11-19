@@ -58,9 +58,14 @@ const Unified = (() => {
     target.hidden = !message;
   }
 
+  function endLetter(name, withBatchim, withoutBatchim) {
+    const last = name.charCodeAt(name.length - 1);
+    return name + (last >= 0xac00 && last <= 0xd7a3 && (last - 0xac00) % 28 ? withBatchim : withoutBatchim);
+  }
+
   const date = (iso) => iso ? new Intl.DateTimeFormat('ko-KR', {
     timeZone: 'Asia/Seoul', dateStyle: 'short', timeStyle: 'short',
   }).format(new Date(iso)) : '—';
 
-  return {node, button, link, request, signal, date};
+  return {node, button, link, request, signal, date, endLetter};
 })();

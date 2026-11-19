@@ -1,7 +1,7 @@
 'use strict';
 
 (() => {
-  const {node, button, link, request, signal} = Unified;
+  const {node, button, link, request, signal, endLetter} = Unified;
   const area = document.getElementById('account');
   const face = document.getElementById('face');
   const headline = document.getElementById('headline');
@@ -12,11 +12,6 @@
   const join = location.pathname.startsWith('/chat/join/');
   const token = join ? location.pathname.split('/').pop() : null;
   let stateTimer;
-
-  function endLetter(name, withBatchim, withoutBatchim) {
-    const last = name.charCodeAt(name.length - 1);
-    return name + (last >= 0xac00 && last <= 0xd7a3 && (last - 0xac00) % 28 ? withBatchim : withoutBatchim);
-  }
 
   function setPage(title, worried = false) {
     clearInterval(stateTimer);
