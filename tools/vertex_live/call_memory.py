@@ -277,16 +277,16 @@ class MemoryStore:
         q='%'+query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
         params=self.params(p)|{'q':q}
         scope = memory_scope(p)
-        rows=await self.all(scope+f"""SELECT * FROM (
+        rows=await self.all(scope+"""SELECT * FROM (
           SELECT 'kakao_message' AS source,m.id::text AS id,m.content,m.created_at FROM marong.messages m
           WHERE m.room_key IN(SELECT room_key FROM rooms) AND m.content ILIKE %(q)s
           AND m.meta->>'delivered' IS DISTINCT FROM 'false' AND NOT call.kakao_hidden('message',m.id,m.room_key)
-        """ + self.keep_source("message", "m.id") + self.keep_source("message", "m.reply_to") + """
+        """ + self.keep_source("message", "m.id") + self.keep_source("message", "m.reply_to") + f"""
           UNION ALL SELECT 'kakao_note',n.id::text,n.content,n.created_at FROM marong.notes n JOIN marong.people p USING(user_key)
           WHERE n.room_key IN(SELECT room_key FROM rooms) AND p.friend_id=%(friend)s AND n.content ILIKE %(q)s
           AND ({summary_visibility(p, 'n')} OR n.summary_id IS NULL)
           AND NOT call.kakao_hidden('note',n.id,n.room_key)
-        """ + self.keep_source("note", "n.id") + """
+        """ + self.keep_source("note", "n.id") + f"""
           UNION ALL SELECT 'kakao_summary',s.id::text,s.content,s.created_at FROM marong.summaries s
           WHERE {summary_visibility(p, 's')} AND s.room_key IN(SELECT room_key FROM rooms) AND s.content ILIKE %(q)s
           AND NOT call.kakao_hidden('summary',s.id,s.room_key)
