@@ -41,14 +41,16 @@ class UnifiedAuthTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.db.close)
         self.db.apply_unified_prerequisites()
         self.db.apply_unified()
-        self.store = DiscordStore(self.db.app_url)
+        self.store = UnifiedStore(self.db.app_url)
         await self.store.open(wait=True)
         self.addAsyncCleanup(self.store.close)
         self.now = datetime(2026, 1, 3, 12, tzinfo=timezone.utc)
         self.key = secrets.token_bytes(32)
         self.sessions = AppSessions(self.store.pool, self.key, contact_schedule=(3, 8, 22), now=lambda: self.now)
+        self.admin_hash = hashlib.sha256(b"fixture-admin").hexdigest()
         self.chat = AppChat(self.store, SimpleNamespace(friend_cards=None), None, None, None,
-                            origin=ORIGIN, sessions=self.sessions, authentication="session")
+                            origin=ORIGIN, sessions=self.sessions, authentication="session",
+                            admin_email_hash=self.admin_hash)
         self.client = TestClient(TestServer(self.chat.web_app()))
         await self.client.start_server()
         self.addAsyncCleanup(self.client.close)
@@ -73,6 +75,65 @@ class UnifiedAuthTest(unittest.IsolatedAsyncioTestCase):
         response = await self.post(JOIN, {"token": invite, "name": "Fixture"})
         self.assertEqual(response.status, 201)
         return response.cookies[COOKIE].value
+
+    async def test_admin_invites_members_ticket_balance_and_revocation(self):
+        base = "/chat/admin"
+        admin = {"Cf-Access-Jwt-Assertion": "fixture-admin", "Origin": ORIGIN}
+        self.chat.access = SimpleNamespace(check=AsyncMock(side_effect=lambda token: (
+            "ok", hashlib.sha256(token.encode()).hexdigest())))
+        cookie = await self.joined()
+        owner = (await self.sessions.find_session(cookie))["friend_id"]
+        member_cookie = {"Cookie": f"{COOKIE}={cookie}", "Origin": ORIGIN}
+        for suffix in ("/", "/api/invites", "/api/members"):
+            for headers in (member_cookie, {"Cf-Access-Jwt-Assertion": "fixture-member"}):
+                await self.problem(await self.client.get(base + suffix, headers=headers), 403, "not_allowed")
+        response = await self.client.get(base + "/", headers=admin)
+        self.assertEqual(response.status, 200)
+        self.assertIn("/chat/admin.js", await response.text())
+        for asset in ("unified.js", "admin.js", "account.js", "unified.css"):
+            self.assertEqual((await self.client.get("/chat/" + asset)).status, 200)
+        path = base + "/api/invites"
+        await self.problem(await self.client.post(path, json={"kind": "join"}, headers={
+            **admin, "Origin": "https://other.invalid"}), 403, "cross_site")
+        for payload in ({"kind": "join", "friendId": None}, {"kind": "link", "friendId": owner},
+                        {"kind": "join", "note": "x" * 41}):
+            await self.problem(await self.client.post(path, json=payload, headers=admin), 400, "invalid_input")
+        unknown = 100_000
+        await self.problem(await self.client.post(path, json={"kind": "relogin", "friendId": unknown}, headers=admin),
+                           404, "not_found")
+        legacy = self.db.admin("INSERT INTO marong.friends(name) VALUES ('Fixture legacy') RETURNING id")[0][0]
+        await self.problem(await self.client.post(path, json={"kind": "relogin", "friendId": legacy}, headers=admin),
+                           400, "invalid_input")
+        invite = await self.client.post(path, json={"kind": "link", "friendId": legacy, "note": "Fixture"}, headers=admin)
+        self.assertEqual(invite.status, 201)
+        self.assertEqual(invite.headers["Cache-Control"], "no-store")
+        url = (await invite.json())["url"]
+        self.assertTrue(url.startswith(ORIGIN + "/chat/join/"))
+        page = await self.client.get(url.removeprefix(ORIGIN))
+        self.assertEqual(page.status, 200)
+        self.assertNotIn(url.rsplit("/", 1)[1], await page.text())
+        invite_list = await (await self.client.get(path, headers=admin)).json()
+        self.assertNotIn(url, str(invite_list))
+        self.assertEqual([item["state"] for item in invite_list["invites"]], ["open", "used"])
+        people = await (await self.client.get(base + "/api/members", headers=admin)).json()
+        self.assertEqual(people["unlinked"], [{"friendId": legacy, "name": "Fixture legacy"}])
+        self.assertEqual((people["members"][0]["friendId"], people["members"][0]["sessions"]), (owner, 1))
+        ticket = base + f"/api/members/{owner}/tickets"
+        for add in (0, 1001, False, "5"):
+            await self.problem(await self.client.post(ticket, json={"add": add}, headers=admin), 400, "invalid_input")
+        for expected, add in ((3, 3), (8, 5)):
+            response = await self.client.post(ticket, json={"add": add}, headers=admin)
+            self.assertEqual((response.status, await response.json()), (200, {"tickets": expected}))
+        await self.problem(await self.client.post(base + f"/api/members/{unknown}/tickets", json={"add": 1},
+                                                 headers=admin), 404, "not_found")
+        code, _ = await self.sessions.create_device_code(owner)
+        revoke = base + f"/api/members/{owner}/revoke"
+        for _ in range(2):
+            self.assertEqual((await self.client.post(revoke, headers=admin)).status, 204)
+        await self.problem(await self.client.get("/chat/api/me", headers=member_cookie), 401, "login_required")
+        await self.problem(await self.post(LOGIN, {"code": code}), 401, "code_wrong")
+        people = await (await self.client.get(base + "/api/members", headers=admin)).json()
+        self.assertEqual((people["members"][0]["tickets"], people["members"][0]["sessions"]), (8, 0))
 
     async def test_check_redeem_and_validate_invites(self):
         token, expiry = await self.sessions.create_invite("join")

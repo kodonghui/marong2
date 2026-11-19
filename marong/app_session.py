@@ -10,7 +10,7 @@ import math
 import re
 import secrets
 
-from .room_scope import writing_room
+from .room_scope import writing_room, writing_room_key, writing_user_key
 
 
 COOKIE = "marong_session"
@@ -68,10 +68,8 @@ MEMBER_COLUMNS = f"""
     f.id AS friend_id, f.name, p.friend_id AS profile_id, COALESCE(p.bot_name,'마롱이') AS bot_name,
     p.character_id, p.voice,
     c.id AS caller_id, c.enabled AS call_enabled, c.context_revision,
-    (SELECT r.room_key FROM marong.rooms r WHERE r.owner_friend_id=f.id AND {writing_room('r')}
-     ORDER BY (r.room_key LIKE 'discord-dm:%%') DESC,r.first_seen,r.room_key LIMIT 1) AS room_key,
-    COALESCE((SELECT user_key FROM marong.people WHERE friend_id=f.id
-              AND user_key LIKE 'discord-user:%%' ORDER BY user_key LIMIT 1), 'app-user:' || f.id) AS user_key
+    {writing_room_key('f.id')} AS room_key,
+    {writing_user_key('f.id')} AS user_key
 """
 MEMBER_JOINS = """
     LEFT JOIN marong.friend_profiles p ON p.friend_id=f.id
@@ -144,7 +142,7 @@ class AppSessions:
     async def create_invite(self, kind, friend_id=None, note=""):
         if (kind not in ("join", "link", "relogin") or not isinstance(note, str) or len(note) > 40
                 or (kind == "join" and friend_id is not None)
-                or (kind != "join" and (type(friend_id) is not int or friend_id <= 0))):
+                or (kind != "join" and (type(friend_id) is not int or not 0 < friend_id <= 2**63 - 1))):
             raise SessionError("invalid_input")
         now = self.now()
         expiry = now + self.invite_age
@@ -156,7 +154,7 @@ class AppSessions:
                 """, (friend_id,))
                 if friend is None:
                     raise SessionError("not_found")
-                if kind == "relogin" and friend["profile_id"] is None:
+                if (kind == "link") == (friend["profile_id"] is not None):
                     raise SessionError("invalid_input")
             for _ in range(5):
                 token = secrets.token_urlsafe(32)

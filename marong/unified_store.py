@@ -1,10 +1,105 @@
 """The app store uses an account's owned room keys for its reply context."""
 
+from psycopg.types.json import Jsonb
+
 from .discord_store import DiscordStore
-from .room_scope import writing_room
+from .room_scope import writing_room, writing_room_key, writing_user_key
+from .store import PROACTIVE_MESSAGE
+
+
+CONTACT_STATE = f"""
+SELECT d.*, f.name, room.room_key, true AS is_channel, d.last_incoming_at AS last_said,
+       {writing_user_key('d.friend_id')} AS user_key,
+       now()-greatest(d.last_incoming_at,d.opted_in_at) AS quiet_for,
+       now()-greatest(d.last_attempt_at, unanswered.last_sent) AS sent_ago,
+       unanswered.n AS unanswered
+FROM marong.contact_settings d
+JOIN marong.friends f ON f.id=d.friend_id
+JOIN LATERAL (SELECT {writing_room_key('d.friend_id')} AS room_key) room ON room.room_key IS NOT NULL
+CROSS JOIN LATERAL (
+    SELECT count(*) AS n,max(m.created_at) AS last_sent
+    FROM marong.messages m
+    WHERE m.room_key=room.room_key AND m.role='assistant' AND m.meta->>'delivered'='true'
+      AND {PROACTIVE_MESSAGE}
+      AND m.created_at > greatest(d.last_incoming_at, d.opted_in_at, (
+          SELECT max(c.started_at) FROM call.calls c JOIN call.callers k ON k.id=c.caller_id
+          WHERE k.friend_id=d.friend_id
+      ))
+) unanswered
+"""
 
 
 class UnifiedStore(DiscordStore):
+    async def writing_target(self, friend_id):
+        return await self._one(f"""
+            SELECT {writing_room_key('f.id')} AS room_key,
+                   EXISTS (SELECT 1 FROM marong.app_sessions s WHERE s.friend_id=f.id
+                           AND s.revoked_at IS NULL AND s.expires_at>now()) AS has_session
+            FROM marong.friends f WHERE f.id=%s
+        """, (friend_id,))
+
+    async def contact(self, friend_id):
+        return await self._one("SELECT * FROM marong.contact_settings WHERE friend_id=%s", (friend_id,))
+
+    async def app_incoming(self, who, key, text, preference):
+        row = await self._one("""
+            WITH saved AS (
+                INSERT INTO marong.messages(room_key,user_key,role,content,kakao_id,meta)
+                VALUES (%(room)s,%(user)s,'user',%(text)s,%(key)s,%(meta)s)
+                ON CONFLICT (room_key,kakao_id) DO NOTHING RETURNING id
+            ), touched AS (
+              UPDATE marong.contact_settings SET last_incoming_at=clock_timestamp(),failures=0,
+              opted_in_at=CASE WHEN %(preference)s::boolean IS TRUE THEN coalesce(opted_in_at,clock_timestamp())
+                               WHEN %(preference)s::boolean IS FALSE THEN NULL ELSE opted_in_at END,
+              proactive_moved_at=CASE WHEN coalesce(%(preference)s::boolean,opted_in_at IS NOT NULL)
+                                     THEN coalesce(proactive_moved_at,clock_timestamp()) ELSE proactive_moved_at END
+              WHERE friend_id=%(friend)s AND EXISTS (SELECT 1 FROM saved)
+            )
+            SELECT id FROM saved
+        """, {"friend": who["friend_id"], "preference": preference, "room": who["room_key"],
+              "user": who["user_key"], "text": text, "key": key, "meta": Jsonb({"transport": "app"})})
+        return row["id"] if row else None
+
+    async def proactive_rooms(self, room_key=None):
+        return await self._all(
+            CONTACT_STATE + " WHERE d.opted_in_at IS NOT NULL AND (%s::text IS NULL OR room.room_key=%s)"
+                            " ORDER BY d.per_day DESC,d.last_incoming_at",
+            (room_key, room_key),
+        )
+
+    async def proactive_count(self, within):
+        row = await self._one(f"""
+            SELECT count(*) AS n FROM marong.messages m JOIN marong.rooms r USING (room_key)
+            WHERE {writing_room('r')} AND m.meta->>'proactive'='true' AND m.created_at>=now()-%s
+        """, (within,))
+        return row["n"]
+
+    async def claim_slot(self, room, begin):
+        row = await self._one("""
+            UPDATE marong.contact_settings SET last_slot=%s,last_attempt_at=clock_timestamp()
+            WHERE friend_id=%s AND opted_in_at=%s AND last_incoming_at IS NOT DISTINCT FROM %s
+              AND per_day=%s AND start_hour=%s AND end_hour=%s AND failures<2
+              AND (last_slot IS NULL OR last_slot<%s) RETURNING friend_id
+        """, (begin, room["friend_id"], room["opted_in_at"], room["last_incoming_at"],
+              room["per_day"], room["start_hour"], room["end_hour"], begin))
+        return bool(row)
+
+    async def record_delivery(self, room, begin, ok):
+        await self._one("""
+            UPDATE marong.contact_settings SET failures=CASE WHEN %s THEN 0 ELSE least(2,failures+1) END
+            WHERE friend_id=%s AND last_slot=%s AND last_incoming_at IS NOT DISTINCT FROM %s RETURNING friend_id
+        """, (ok, room["friend_id"], begin, room["last_incoming_at"]))
+
+    def _reminder_destination(self):
+        return f"{writing_room_key('s.friend_id')} AS dm_room"
+
+    def _topic_message_room(self):
+        return f"m.room_key = {writing_room_key('o.friend_id')}"
+
+    def _topic_quiet_room(self):
+        return f"""SELECT {writing_room_key('d.friend_id')} AS room_key,d.opted_in_at
+                   FROM marong.contact_settings d WHERE d.friend_id=%(f)s"""
+
     def _reply_rooms(self, room: str) -> str:
         # room appears once because the vector search passes it as one positional parameter.
         return f"""(

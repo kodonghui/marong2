@@ -42,6 +42,13 @@ class TopicStore:
         """Where the note after a missed hello call went (SPEC-270)."""
         await self._one("UPDATE marong.topic_sends SET via = %s WHERE ring_id = %s::uuid RETURNING id", (via, ring_id))
 
+    def _topic_message_room(self):
+        return ("EXISTS (SELECT 1 FROM marong.discord_dm_links d "
+                "WHERE d.room_key=m.room_key AND d.friend_id=o.friend_id)")
+
+    def _topic_quiet_room(self):
+        return "SELECT room_key,opted_in_at FROM marong.discord_dm_links WHERE friend_id=%(f)s"
+
     async def topic_answers(self, window: timedelta, limit: int = 50) -> list[str]:
         """Decide the answers of open topics (SPEC-275): a word from the friend in their DM or the in-app chat, a call
         they started or the hello call taken within `window` after the topic went out is 'answered', none by then is
@@ -51,8 +58,8 @@ class TopicStore:
             "  WHERE answer IS NULL AND status = 'sent' ORDER BY sent_at LIMIT %(n)s), "
             "found AS (SELECT o.id, o.sent_at, least("
             "  (SELECT min(m.created_at) FROM marong.messages m "
-            "    JOIN marong.discord_dm_links d ON d.room_key = m.room_key AND d.friend_id = o.friend_id "
-            "    WHERE m.role = 'user' AND m.created_at > o.sent_at AND m.created_at <= o.sent_at + %(w)s), "
+            "    WHERE " + self._topic_message_room() + " AND m.role = 'user' "
+            "      AND m.created_at > o.sent_at AND m.created_at <= o.sent_at + %(w)s), "
             "  (SELECT min(c.started_at) FROM call.calls c JOIN call.callers k ON k.id = c.caller_id "
             "    WHERE k.friend_id = o.friend_id AND c.started_at > o.sent_at AND c.started_at <= o.sent_at + %(w)s), "
             "  (SELECT r.answered_at FROM marong.app_rings r WHERE r.id = o.ring_id AND r.status = 'answered' "
@@ -68,7 +75,7 @@ class TopicStore:
         in-app chat) or call start, or after they turned proactive messages on when they never spoke, a delivered
         proactive message or a hello call that rang."""
         row = await self._one(
-            "WITH link AS (SELECT room_key, opted_in_at FROM marong.discord_dm_links WHERE friend_id = %(f)s), "
+            "WITH link AS (" + self._topic_quiet_room() + "), "
             "last AS (SELECT coalesce(greatest("
             "  (SELECT max(m.created_at) FROM marong.messages m JOIN link USING (room_key) WHERE m.role = 'user'), "
             "  (SELECT max(c.started_at) FROM call.calls c JOIN call.callers k ON k.id = c.caller_id "

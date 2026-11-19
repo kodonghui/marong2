@@ -45,6 +45,8 @@ READ_ROOMS_MAX = 256     # rooms whose '읽음' this process keeps (one per call
 STATIC = Path(__file__).with_name("app_chat_static")
 FILES = {"": ("index.html", "text/html"), "chat.js": ("chat.js", "text/javascript"),
          "chat.css": ("chat.css", "text/css")}
+UNIFIED_FILES = {"account.html": "text/html", "admin.html": "text/html", "unified.css": "text/css",
+                 "unified.js": "text/javascript", "account.js": "text/javascript", "admin.js": "text/javascript"}
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 FID = re.compile(r"[A-Za-z0-9_-]{16,200}\Z")
 VERSION = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\Z")
@@ -99,7 +101,7 @@ def bad(*errors) -> Problem:
 class AppChat:
     def __init__(self, store, agent, client, access, push, *, origin: str = DEFAULT_ORIGIN, port: int = DEFAULT_PORT,
                  timezone: str = "Asia/Seoul", clock=time.monotonic, releases: AppReleases | None = None,
-                 sessions=None, authentication="access"):
+                 sessions=None, authentication="access", admin_email_hash=None):
         self.store = store
         self.agent = agent      # DiscordAgent: the same one that answers the Discord DM
         self.client = client    # DiscordDM: its room locks keep one answer at a time per room
@@ -112,6 +114,7 @@ class AppChat:
         self.releases = releases if releases is not None else AppReleases()
         self.sessions = sessions
         self.authentication = auth_mode(authentication)
+        self.delivery = None
         self.tick = asyncio.Event()          # set and replaced whenever a message is saved in this process
         self.reply_traces = OrderedDict()
         self.waiters = defaultdict(list)     # friend id -> events of their waits, oldest first
@@ -125,6 +128,10 @@ class AppChat:
         self.runner = None
         from .app_persona import AppPersona
         self.persona = AppPersona(self)
+        from .app_admin import AppAdmin
+        self.admin = AppAdmin(self, admin_email_hash)
+        if sessions is not None:
+            self.files.update({name: ((STATIC / name).read_bytes(), mime) for name, mime in UNIFIED_FILES.items()})
 
     # ── plumbing ───────────────────────────────────────────────
 
@@ -381,6 +388,15 @@ class AppChat:
     async def home(self, req):
         raise web.HTTPFound("/chat/")
 
+    def unified_page(self, name, *, signed_cookie=False):
+        data, kind = self.files[name + ".html"]
+        if signed_cookie:
+            data = data.replace(b'<body>', b'<body data-session-cookie="yes">', 1)
+        return web.Response(body=data, content_type=kind, charset="utf-8")
+
+    async def account_page(self, req):
+        return self.unified_page("account", signed_cookie=bool(req.cookies.get(COOKIE)))
+
     async def picture(self, req):
         """API-140: a picture topic's picture (SPEC-274, SPEC-269), for the chat page and the call page. Only names in
         the picture list, removed ones too; anything else is no_picture. Not checked against Access again: the same
@@ -462,8 +478,10 @@ class AppChat:
         preference = proactive_preference(text)
         if self.sessions is None:
             await self.store.incoming(who["discord_user_id"], who["channel_id"], key, preference)
-        saved = await self.store.add_message(room, "user", text, user_key=who["user_key"], kakao_id=key,
-                                             meta={"transport": "app"})
+            saved = await self.store.add_message(room, "user", text, user_key=who["user_key"], kakao_id=key,
+                                                meta={"transport": "app"})
+        else:
+            saved = await self.store.app_incoming(who, key, text, preference)
         row = await self.store.app_message(room, key)
         if saved is None:  # the same message arrived twice at once: the other request answers it
             return self._json(200, {"message": self.message(row)})
@@ -489,7 +507,8 @@ class AppChat:
             reply = None
             try:
                 with app_step("account_lookup", storage=True):
-                    link = await self.store.link(who["discord_user_id"]) if self.sessions is None else None
+                    link = (await self.store.link(who["discord_user_id"]) if self.sessions is None
+                            else await self.store.contact(who["friend_id"]))
                 msg = DiscordIncoming(room, who["user_key"], text, kakao_id=key, proactive_preference=preference,
                                       google_command=google_command(text), topic_command=topic_phrase(text),
                                       friend_id=who["friend_id"], dm_link=link, via="app", presaved_id=saved_id)
@@ -521,6 +540,10 @@ class AppChat:
                     with app_step("reply_push", delivery="push") as push:
                         if push:
                             push.io(inputs={"message": {"role": "assistant", "content": reply}})
+                        if self.delivery and not await self.delivery.notifications_allowed(who["friend_id"]):
+                            if push:
+                                push.record(result="skipped", reason="no_session")
+                            return
                         outcome = await self.push.notify(who["friend_id"], "reply", reply, ttl_s=REPLY_TTL_S)
                         if push and isinstance(outcome, tuple) and len(outcome) == 2:
                             accepted, available = outcome
@@ -632,11 +655,15 @@ class AppChat:
         app = web.Application(client_max_size=BODY_MAX, middlewares=[self.guard])
         app.router.add_get("/chat/healthz", self.health)
         if self.sessions is not None:
+            app.router.add_get("/chat/join/{token}", self.account_page)
+            app.router.add_get("/chat/login", self.account_page)
+            app.router.add_get("/chat/{name:unified\\.(?:css|js)|account\\.js|admin\\.js}", self.page)
             app.router.add_get("/chat/api/invites/{token}", self.check_invite)
             app.router.add_post("/chat/api/join", self.join_with_invite)
             app.router.add_post("/chat/api/login/code", self.login_with_device_code)
             app.router.add_post("/chat/api/device-codes", self.create_device_code)
             app.router.add_post("/chat/api/logout", self.logout)
+            self.admin.register(app.router)
         app.router.add_get("/chat", self.home)
         app.router.add_get("/chat/", self.page)
         app.router.add_get("/chat/{name:chat\\.(?:js|css)}", self.page)

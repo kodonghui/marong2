@@ -228,10 +228,11 @@ def question_view(row):
     return view
 
 
-class DiscordAgent(Agent):
+class PrivateChatAgent(Agent):
     caption_prompt = CAPTION_PROMPT.replace("카카오톡", "디스코드 DM")
     ring = False  # MARONG_APP_RING=1: schedule_add takes call promises (docs/app-ring.md SPEC-128)
     topics = False  # MARONG_TOPICS=1: the phrases that turn hello calls and pictures on or off (SPEC-277)
+    schedule_source = "discord"
 
     def __init__(self, settings, store, embeddings, llm, on_saved=None, *, first_replies=None, google=None, shop=None,
                  web=None, clock=time.monotonic):
@@ -526,7 +527,7 @@ class DiscordAgent(Agent):
         try:
             content, action = await run_schedule_tool(
                 self.store, block.name, block.input or {}, friend_id=friend_id, room_key=msg.room_key,
-                source="discord", source_message_id=msg.saved_id, tz=ZoneInfo(self.s.timezone), ring=self.ring)
+                source=self.schedule_source, source_message_id=msg.saved_id, tz=ZoneInfo(self.s.timezone), ring=self.ring)
         except Exception as e:
             log.error("db_error %s", brief(e))
             app_note(reason="storage_error")
@@ -591,7 +592,7 @@ class DiscordAgent(Agent):
         if msg.proactive_preference is True:
             return "응, 나도 먼저 톡할게 🌰", {}
         if text in GUIDE:
-            link = await self.store.link(msg.user_key.removeprefix("discord-user:"))
+            link = msg.dm_link
             schedule_text = ""
             if link:
                 (start, end), per_day = proactive_schedule(link["start_hour"], link["end_hour"], link["per_day"])
@@ -634,6 +635,10 @@ class DiscordAgent(Agent):
             return reply
         log.info("discord_reaction_skipped why=%s", "gap" if emoji and text else "alone" if emoji else "emoji")
         return text or emoji or reactions.ALONE_TEXT  # only a mark: say the emoji instead of pressing it
+
+
+class DiscordAgent(PrivateChatAgent):
+    pass
 
 
 def vocative_pattern(names):
@@ -1059,7 +1064,7 @@ class DiscordDM(discord.Client):
         return ok
 
 
-class DiscordProactive(Proactive):
+class PrivateProactive(Proactive):
     def __init__(self, settings, store, agent, client, *, clock=None, app=None, topics=None, **kwargs):
         super().__init__(settings, store, agent, None, client.room_lock, **kwargs)
         self.client = client
@@ -1076,6 +1081,9 @@ class DiscordProactive(Proactive):
         if self.app is None or not self.app.enabled:
             return False
         return any(can_notify(d) for d in await self.store.app_devices(room["friend_id"]))
+
+    async def can_reach(self, room):
+        return self.client.available or await self._app_phone(room)
 
     def _slot(self, room, now):
         hours, count = schedule(room, self.s)
@@ -1141,7 +1149,7 @@ class DiscordProactive(Proactive):
         planned = self.plan(room, now)
         if not self.ready() or planned is None:
             return empty
-        if not self.client.available and not await self._app_phone(room):
+        if not await self.can_reach(room):
             return empty  # Discord is away and no phone takes it: keep the slot for when Discord is back
         if send_until is not None and time.monotonic() >= send_until:
             return empty
@@ -1278,7 +1286,11 @@ class DiscordProactive(Proactive):
         ))
 
 
-class DiscordReminders(RingCalls):
+class DiscordProactive(PrivateProactive):
+    pass
+
+
+class PrivateReminders(RingCalls):
     """Deliver the reminders friends asked for to their own linked DM, separately from proactive greetings.
     With the app (app_delivery): to the friend's phone when they have one for it (D18), and call promises ring it."""
 
@@ -1314,23 +1326,33 @@ class DiscordReminders(RingCalls):
                 await self.sweep_rings()  # calls nobody answered (docs/app-ring.md SPEC-138)
             except Exception as e:  # never keeps the reminders below from going out
                 log.warning("ring_sweep_error %s", type(e).__name__)
-        if not (self.client.available or (self.app is not None and self.app.enabled)):
+        if not self.ready():
             return 0
         sent = 0
         for row in await self.store.claim_due_reminders():
             sent += await self.deliver(row)
         return sent
 
+    def ready(self):
+        return self.client.available or (self.app is not None and self.app.enabled)
+
+    def has_destination(self, row):
+        return bool(row["channel_id"])
+
     async def deliver(self, row) -> int:
         now = self.clock()
         following = occurrence(row["repeat_anchor"], row["repeat"], now, self.tz) if row["repeat"] != "none" else None
         late = row["late"]
-        if late > LATE_LIMIT or not row["channel_id"]:
+        if late > LATE_LIMIT or not self.has_destination(row):
             await self.store.finish_reminder(row, "missed", following)
             log.info("discord_reminder_missed id=%s late_min=%d dm=%s", row["id"], late.total_seconds() // 60,
-                     bool(row["channel_id"]))
+                     self.has_destination(row))
             return 0
         if row.get("action") == "call" and self.app is not None and self.app.ring_enabled:
             return await self.place_call(row, late, following)
         text, _ = tidy(reminder_text(row, self.tz, late))
         return await self.remind(row, text, following, {"reminder": row["id"], "late_s": int(late.total_seconds())})
+
+
+class DiscordReminders(PrivateReminders):
+    pass
