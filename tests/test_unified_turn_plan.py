@@ -4,9 +4,11 @@ import asyncio
 from datetime import date, datetime
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from fakes import ScriptedLLM, message, text, tool_use
+from marong.agent import Agent
 from marong.chat_tool_graph import answer_with_tools
 from marong.turn_plan import plan_turn
 
@@ -67,6 +69,25 @@ class PlanTests(unittest.TestCase):
         follow = plan_turn("그럼 다음 주는 뭐 있어?", ("이번 주 일정 확인",), tools, now)
         self.assertEqual(follow.window, windows[3][1])
         self.assertEqual(plan_turn(windows[0][0], (), set(), now).intents, ("chat",))
+
+
+class ModeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_shadow_prefetch_off_and_rule_failure(self):
+        agent = SimpleNamespace(_tools=lambda _: [{"name": "schedule_list"}])
+        msg = SimpleNamespace()
+        with patch.dict("os.environ", MARONG_TURN_PLAN="shadow"):
+            await Agent._plan_turn(agent, msg, "다음 달 일정 조회")
+            self.assertIsNone(msg.turn_plan)
+        with patch.dict("os.environ", MARONG_TURN_PLAN="prefetch"):
+            await Agent._plan_turn(agent, msg, "다음 달 일정 조회")
+            self.assertEqual(msg.turn_plan.intents, ("schedule_read",))
+            self.assertIsNotNone(msg.turn_plan.window)
+            with patch("marong.agent.plan_turn", side_effect=ValueError("fixture")):
+                await Agent._plan_turn(agent, msg, "다음 달 일정 조회")
+                self.assertIsNone(msg.turn_plan)
+        with patch.dict("os.environ", MARONG_TURN_PLAN="off"), patch("marong.agent.plan_turn") as plan:
+            await Agent._plan_turn(agent, msg, "다음 달 일정 조회")
+            plan.assert_not_called()
 
 
 class GraphTests(unittest.IsolatedAsyncioTestCase):
