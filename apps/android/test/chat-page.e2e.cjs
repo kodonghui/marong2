@@ -62,10 +62,11 @@ describe('chat page', { skip }, () => {
     await site?.close();
   });
 
-  async function openChat({ at = null, init = null, device = {} } = {}) {
+  async function openChat({ at = null, init = null, device = {}, routes = null } = {}) {
     const context = await browser.newContext({ ...PHONE, ...device });
     contexts.push(context);
     if (init) await context.addInitScript(init);
+    if (routes) await routes(context);
     const page = await context.newPage();
     const outside = [];
     page.on('request', (request) => { if (!request.url().startsWith(site.url)) outside.push(request.url()); });
@@ -90,6 +91,69 @@ describe('chat page', { skip }, () => {
       waits: [], postDelayMs: 0, read: 0, answered: 0, marks: true, pictures: {}, pictureDelayMs: 0 });
     history(site);
   }
+
+  it('TC-447: identifies missed app notes and remembers the bottom separately for each account', async () => {
+    reset();
+    site.state.read = 32;
+    site.state.messages.find(message => message.id === 34).from = 'marong';
+    site.state.messages.find(message => message.id === 34).kind = 'proactive';
+    let friendCode = 'ABCDEF';
+    const { page } = await openChat({routes: context => context.route('**/chat/api/profile', route => route.fulfill({
+      json: { botName: '마롱이', friendCode, features: { friends: false }, pendingRing: null },
+    }))});
+    await ready(page);
+    const marker = page.locator('li[data-id="35"] .unread');
+    await marker.waitFor();
+    assert.match(await marker.innerText(), /여기부터 안 읽은 말이야/);
+    assert.equal(await page.locator('li[data-id="34"] .unread').count(), 0, 'skip old Discord deliveries');
+    await marker.getByRole('button', {name: '맨 아래로'}).click();
+    await page.waitForFunction(() => {
+      const log = document.getElementById('log');
+      return log.scrollHeight - log.scrollTop - log.clientHeight < 2;
+    });
+    await page.reload();
+    await ready(page);
+    await page.waitForSelector('#menu-profile', {state: 'attached'});
+    await page.waitForFunction(() => !document.getElementById('menu-profile').hidden);
+    assert.equal(await marker.count(), 0, 'already seen in this browser');
+    friendCode = 'BCDEFG';
+    await page.reload();
+    await marker.waitFor();
+    await marker.getByRole('button', {name: '맨 아래로'}).click();
+    await page.goto('about:blank');
+    const later = site.add('marong', '새 합성 선톡', {kind: 'proactive'});
+    await page.goto(site.url + '/chat/');
+    await page.locator('li[data-id="' + later.id + '"] .unread').waitFor();
+    assert.equal(await marker.count(), 0);
+  });
+
+  it('TC-489: a newly available ticket unlocks sending without losing the draft', async () => {
+    reset();
+    let tickets = 0;
+    const { page } = await openChat({routes: async context => {
+      await context.route('**/chat/api/profile', route => route.fulfill({
+        json: { botName: '마롱이', features: {friends: false}, usageToday: {tickets, units: 1, limit: 1} },
+      }));
+      await context.route('**/chat/api/messages', route => {
+        if (route.request().method() === 'POST' && !tickets) {
+          return route.fulfill({status: 429, json: {code: 'daily_limit'}});
+        }
+        return route.continue();
+      });
+    }});
+    await ready(page);
+    await page.locator('#text').fill('남겨 둘 합성 글');
+    await page.locator('#send').click();
+    await page.getByText('오늘 쓸 수 있는 양을 다 썼어.', {exact: false}).waitFor();
+    assert.equal(await page.locator('#text').inputValue(), '남겨 둘 합성 글');
+    assert.equal(await page.locator('#send').isDisabled(), true);
+    tickets = 1;
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.waitForFunction(() => !document.getElementById('send').disabled);
+    await page.locator('#send').click();
+    await page.waitForFunction(() => document.getElementById('text').value === '');
+    assert.equal(site.state.posted.at(-1).text, '남겨 둘 합성 글');
+  });
 
   it('TC-132: the last 30 at the bottom, day lines, tags, text only as text, links, older ones on scroll', async () => {
     reset();
