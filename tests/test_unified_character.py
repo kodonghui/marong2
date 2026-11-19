@@ -20,6 +20,7 @@ from marong.app_push import AppPush
 from marong.app_session import AppSessions, COOKIE
 from marong.character.graphics import EXPRESSIONS, TEMPLATE_IDS, Templates, alpha, fit_score, head_in_box
 from marong.character.http import CharacterAPI
+from marong.character.traits import MAX_COAT_COLORS, TEXT_LIMITS, output_schema, valid_result
 from marong.character.worker import CharacterWorker
 from marong.unified_store import UnifiedStore
 from pg import TestDB
@@ -36,6 +37,17 @@ OBSERVED = {
 
 
 class TestCharacter(unittest.IsolatedAsyncioTestCase):
+    def test_vision_schema_explains_limits_enforced_after_parsing(self):
+        fields = output_schema()["properties"]
+        for field, max_length in TEXT_LIMITS.items():
+            self.assertIn(f"{max_length}자 이하", fields[field]["description"])
+            self.assertTrue(valid_result(dict(OBSERVED, **{field: "가" * max_length})))
+            self.assertFalse(valid_result(dict(OBSERVED, **{field: "가" * (max_length + 1)})))
+
+        self.assertEqual(fields["coatColors"]["minItems"], 1)
+        self.assertIn(f"1개에서 {MAX_COAT_COLORS}개까지", fields["coatColors"]["description"])
+        self.assertFalse(valid_result(dict(OBSERVED, coatColors=["크림", "크림"])))
+
     def test_all_five_templates_match_their_masks(self):
         templates = Templates()
         for template in TEMPLATE_IDS:
