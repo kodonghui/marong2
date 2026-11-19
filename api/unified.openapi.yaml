@@ -1,0 +1,3787 @@
+# 마롱이 통합 앱(MVP) API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/unified.md(SPEC-370~396), DB: marong/migrations/020_unified.sql(TBL-164~172), 표 설명: docs/05-erd/unified.md
+openapi: 3.1.0
+info:
+  title: 마롱이 통합 앱(MVP) API
+  version: 0.1.0-draft
+  description: |-
+    앱과 브라우저의 가입(SCR-163), 로그인(SCR-164), 내 마롱이(SCR-165), 입혀 보기(SCR-166), 목소리 고르기(SCR-167), 친구(SCR-168), 관리자(SCR-169), 캐릭터 만들기(SCR-170\~174) 화면이 앱 서버(TERM-194)와 주고받는 계약이에요. 원본은 이 파일이고 코드는 이 파일을 따라가요(06단계). 글 대화 API(`api/app-chat.openapi.yaml`)와 같은 서버·같은 `/chat/` 아래예요. 범위는 동희님 주변 사람이 쓰는 MVP예요(D103). 고지, 동의, 나이 확인, 결제는 없어요.
+
+    - 로그인은 쿠키 `marong_session`이에요(HttpOnly, Secure, SameSite=Lax, Path=/, Max-Age 90일). 쿠키에는 토큰이 있고 서버에는 그 SHA-256만 있어요(TBL-165). 쓸 때 하루에 한 번 만료를 90일 뒤로 밀어요. 쿠키가 없거나 끝났으면 401 `login_required`예요. 통화 서버도 같은 쿠키를 같은 표에서 확인해요(SPEC-374).
+    - 로그인 없이 부르는 것은 초대 링크 확인(API-211), 가입(API-212), 코드 로그인(API-213) 셋뿐이에요.
+    - 모든 값은 로그인한 친구의 id로만 읽고 바꿔요. 경로에 내 친구 id는 없어요. 남의 캐릭터나 없는 id는 없는 것과 같아요(404 `not_found`).
+    - 쓰기 요청(POST·PUT·PATCH·DELETE)은 `Origin`이 `https://marong.corthex-hq.com`이어야 해요. 아니면 403 `cross_site`예요. 본문은 16KB까지이고 사진 올리기(API-220)만 26MB까지예요.
+    - 관리자 경로(`/chat/admin/api/`)는 Cloudflare Access 뒤에 그대로 있어요. 서버가 `Cf-Access-Jwt-Assertion`을 다시 확인하고 이메일 해시가 동희님 계정인지 봐요. 로그인 쿠키는 보지 않아요. 증명이 없거나 동희님이 아니면 403 `not_allowed`예요(SPEC-395). 설정값 `MARONG_AUTH`와 무관하게 이 경로는 늘 Access로만 확인해요.
+    - 오류는 다른 계약과 같은 RFC 9457 Problem Details에 `code`와 `traceId`를 더한 모양이에요. 코드 목록은 `components.x-corthex.errors`예요. JSON 응답은 모두 `Cache-Control: no-store`이고 그림만 `private`이에요.
+    - 응답에는 토큰·코드의 해시, 파일 경로, 모델 이름, 작업 비용, 대화 글이 없어요. 초대 링크 주소(API-235)와 기기 추가 코드(API-214)는 만든 응답에 한 번만 있어요. 로그에는 결과 코드와 친구의 짧은 키만 남기고 토큰·코드·이름은 남기지 않아요.
+    - 페이지(`/chat/join/:token`, `/chat/login`, `/chat/me`, `/chat/friends`, `/chat/character/…`, `/chat/admin/`)와 그 js·css, 목소리 견본 파일은 HTML과 파일이라 이 계약에 넣지 않았어요. 화면은 07 사이트맵과 08 화면 정의에 있어요.
+    - 이 파일 밖에서 바뀌는 것: 글 대화(API-101\~106), 성향 맞춤, 앱 업데이트(API-141), 통화 서버의 API는 경로와 모양이 그대로이고 로그인만 이 계약의 쿠키로 바뀌어요(`no_dm`이 없어져요). 글 보내기(API-103)에 429 `daily_limit`(설정값 `MARONG_DAILY_UNITS`가 있고 티켓이 0일 때만)이 생겨요. 통화 시작(API-107)은 웹소켓이라 브라우저가 상태 번호를 읽지 못해요. 그래서 통화 시작의 거절은 지금의 `call_busy`·`budget_exhausted`처럼 연결을 받은 뒤 보내고 닫는 메시지예요: `{"type":"call_busy"}`(그 친구가 이미 통화 중), `{"type":"calls_full"}`(서버가 `MARONG_CALL_MAX`에 닿음), `{"type":"daily_limit"}`(하루 한도), `{"type":"budget_exhausted"}`(전체 예산과 사람별 상한). 통화 홈 상태(API-124)의 `blockedReason`에 `daily_limit`이 늘어서 화면이 걸기 전에 버튼을 막아요. 그 고침은 각 계약 파일에서 해요(TASK-395, TASK-401, TASK-406).
+
+    계약에서 정한 것(Claude 제안, 2026-11-19, 검토 대상).
+    1. 검증 오류는 400 `invalid_input`이에요(422는 쓰지 않음). 경로 id의 형식이 틀리면 400, 없거나 남의 것이면 404예요. 초대 토큰만은 형식이 틀려도 404 `invite_not_found`예요.
+    2. 바꾸는 요청이 지금 값과 같으면 200이고 아무것도 바뀌지 않아요(프로필 값, 같은 캐릭터 적용, 가까운 사이 값). 이미 뺀 캐릭터 빼기와 세션 없는 로그아웃은 204예요.
+    3. 표가 상태 코드만 정한 성공 응답의 본문은 이렇게 두었어요: 코드 로그인(API-213)은 가입과 같은 `{friendName, botName}`, 작업을 넣는 요청(API-223\~225)은 사진 올리기와 같은 `{character}`, 친구 요청(API-231)은 `{request}`, 요청 답(API-232)은 `{state}`.
+    4. 틀린 코드, 기한 지난 코드, 이미 쓴 코드는 모두 401 `code_wrong`이에요. 같은 주소에서 10분에 5번 틀리면 10분 동안 429 `too_many_tries`예요.
+    5. 캐릭터 설정(`MARONG_CHARACTER=0`)이 꺼져 있으면 캐릭터를 만들고 바꾸는 API(API-219\~229, API-238)가, 친구 설정(`MARONG_FRIENDS=0`)이 꺼져 있으면 친구 API(API-230\~233, API-239)가 404 `not_found`예요(명세 공통 9). 따로 코드를 두지 않았어요. 화면은 그 메뉴를 그리지 않아요. 그림 읽기(API-242)와 프로필의 캐릭터 값(API-216)은 설정이 꺼져 있어도 답해서, 이미 적용한 캐릭터의 얼굴은 그대로 보여요.
+    6. 만들기 단계가 받는 요청: `photos`·`traits`에서 사진 올리기, `traits`·`preview`에서 특징표 정하기, `preview`에서 미리 보기, `preview`(미리 보기 그림이 있을 때)·`candidates`에서 후보 그리기, `candidates`(와 표정 작업이 실패한 `sheet`)에서 고르기, `name`·`done`에서 이름. 그 밖은 409 `wrong_stage`예요. 캐릭터 하나에 기다리거나 도는 작업은 하나뿐이고(TBL-171 고유 색인) 그동안 바꾸는 요청은 409 `job_running`이에요. 작업 결과는 API-221을 다시 물어서 봐요.
+    7. 적용(API-228)은 캐릭터와 마롱이 이름을 한 번에 바꿔요. 기본 마롱이로 되돌리면 이름은 '마롱이'가 돼요. 적용 뒤 이름만 따로 바꾸는 것은 API-217이에요.
+    8. 그림 예산을 다 쓰면 그림을 그리는 요청(API-219, 223, 224)이 409 `image_budget`이에요. 표정 그리기(API-225)는 막지 않아요(고른 후보를 버리지 않으려고). 만들던 캐릭터는 그대로 두고 다음 달에 이어요.
+    9. 친구 요청은 같은 두 사람 사이에 하나예요. 답하기(API-232)의 `friendId`는 요청을 보낸 친구이고, 기다리는 요청이 없으면 404예요. 친구 끊기와 가까운 사이는 아는 사이(`accepted`)에만 돼요.
+    10. 사용량 응답의 칸은 글 답 수, 통화 초, 그림 수, 사용 단위예요. 검색 수와 쇼핑 읽기 수는 TBL-172에 세기만 하고 응답에 넣지 않았어요.
+    11. Access로만 확인된 기존 친구(`MARONG_AUTH`가 `access`·`both`일 때)가 이 계약의 API를 부르면, 프로필 행이 없을 때 서버가 `link`와 같은 방법으로 빠진 행을 먼저 만들어요(SPEC-374). 그래서 프로필(API-216)은 늘 친구 코드를 가져요.
+    12. 약속 전화의 받기(REQ-464): 프로필(API-216)의 `pendingRing`이 지금 울리는 약속 전화예요. 웹 화면은 그 값이 있으면 받기 버튼을 그리고, 누르면 통화 화면을 `ring` 값과 함께 열어요. 통화 서버가 지금처럼 그 벨을 받음으로 바꿔요(API-107).
+    13. 친구 요청의 `requestedAt`은 TBL `friendships.requested_at`이에요. 거절했거나 끊긴 쌍에 다시 요청하면 같은 행의 보낸 사람과 보낸 때를 새로 쓰고 답한 때를 비워요.
+
+    Open: 초대 링크를 거두는 요청(TBL-164 `revoked_at`)과 보낸 친구 요청을 거두는 요청은 이 계약에 없어요. 필요해지면 ID를 더해요. 로컬 서버 포트는 앱 서버 진입점(SPEC-376)을 만들 때 확정해요.
+servers:
+- url: https://marong.corthex-hq.com
+  description: 앱 서버. 터널이 /chat/ 아래를 앱 서버로 보내요. /chat/admin/ 아래만 Cloudflare Access 뒤예요
+- url: http://127.0.0.1:8796
+  description: '서버 안에서 직접(배포 확인용). 지금 글 대화 서버의 포트예요 [추정: 앱 서버가 같은 포트를 이어받음]'
+security:
+- session: []
+paths:
+  /chat/api/invites/{token}:
+    get:
+      operationId: checkInvite
+      summary: 초대 링크 확인
+      description: 가입 화면(SCR-163)이 열릴 때 불러요. 쓸 수 있는 링크면 종류를 돌려줘요. 종류가 `join`이면 화면이 이름 칸을 보여요. 누구의 링크인지(친구 id, 이름, 메모)는 돌려주지 않아요. 이 요청은 링크를 쓴 것으로 치지 않아요.
+      security: []
+      x-corthex:
+        id: API-211
+        spec:
+        - SPEC-370
+        omit:
+          '400': 형식이 틀린 토큰도 404 invite_not_found
+          '401': 로그인 없이 부름
+          '403': 읽기라 Origin을 보지 않음
+          '409': 쓴 링크는 410
+          '429': 횟수 제한이 없음
+      parameters:
+      - $ref: '#/components/parameters/InviteToken'
+      responses:
+        '200':
+          description: 쓸 수 있는 초대 링크
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InviteCheck'
+              examples:
+                join:
+                  value:
+                    kind: join
+                    state: open
+                link:
+                  value:
+                    kind: link
+                    state: open
+        '404':
+          $ref: '#/components/responses/InviteNotFound'
+        '410':
+          $ref: '#/components/responses/InviteGone'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/join:
+    post:
+      operationId: joinWithInvite
+      summary: 초대 링크로 가입·연결·다시 로그인
+      description: 초대 링크를 쓰고 이 기기를 로그인시켜요. `join`이면 친구 행, 프로필(친구 코드 포함), 먼저 말 걸기 설정, 방, 통화 계정을 한 트랜잭션에서 만들고(SPEC-373) 링크를 쓴 것으로 적어요. `link`는 동희님이 고른 기존 친구 행에 빠진 행(프로필, 먼저 말 걸기 설정, 방)만 만들고, `relogin`은 세션만 만들어요. `name`은 `join`에서만 쓰고 다른 종류에서는 보내도 읽지 않아요. 이미 로그인된 기기가 보내도 받아서 그 기기의 쿠키를 새 로그인으로 바꾸고, 앞의 로그인은 끊지 않아요(화면은 보내기 전에 SCR-163#signed-in에서 한 번 물어요). 같은 링크를 두 기기가 동시에 쓰면 하나만 201이고 다른 하나는 410이에요.
+      security: []
+      x-corthex:
+        id: API-212
+        spec:
+        - SPEC-370
+        - SPEC-371
+        - SPEC-373
+        omit:
+          '401': 로그인 없이 부름
+          '409': 쓴 링크는 410
+          '429': 횟수 제한이 없음
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JoinRequest'
+            examples:
+              join:
+                value:
+                  token: example-token-not-real-00000000000000000000
+                  name: 하늘
+              link:
+                value:
+                  token: example-token-not-real-00000000000000000000
+      responses:
+        '201':
+          description: 가입(또는 연결·다시 로그인)됨. 로그인 쿠키를 줘요
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetSession'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+              examples:
+                joined:
+                  value:
+                    friendName: 하늘
+                    botName: 마롱이
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/InviteNotFound'
+        '410':
+          $ref: '#/components/responses/InviteGone'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/login/code:
+    post:
+      operationId: loginWithDeviceCode
+      summary: 기기 추가 코드로 로그인
+      description: 로그인 화면(SCR-164)에서 다른 기기가 만든 6자리 코드를 넣어요. 맞으면 코드를 쓴 것으로 적고 이 기기에 로그인 쿠키를 줘요. 틀린 코드, 10분이 지난 코드, 이미 쓴 코드는 모두 401 `code_wrong`이에요. 같은 주소에서 10분에 5번 틀리면 10분 동안 429예요(맞는 코드도 그동안은 429).
+      security: []
+      x-corthex:
+        id: API-213
+        spec:
+        - SPEC-372
+        omit:
+          '404': 없는 코드는 401 code_wrong
+          '409': 쓴 코드는 401 code_wrong
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CodeLogin'
+            examples:
+              code:
+                value:
+                  code: '402917'
+      responses:
+        '200':
+          description: 로그인됨. 로그인 쿠키를 줘요
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetSession'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+              examples:
+                logged-in:
+                  value:
+                    friendName: 하늘
+                    botName: 초코
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/CodeWrong'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '429':
+          $ref: '#/components/responses/TooManyTries'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/device-codes:
+    post:
+      operationId: createDeviceCode
+      summary: 기기 추가 코드 만들기
+      description: 로그인한 기기에서 다른 기기에 넣을 6자리 코드를 만들어요. 10분 동안 한 번만 쓸 수 있어요. 코드는 이 응답에만 있고 서버에는 서버 비밀 값으로 만든 HMAC만 남아요(TBL-166). 새 코드를 만들면 그 사람의 아직 안 쓴 앞 코드는 끝나요(살아 있는 코드는 한 사람에 하나). 한 시간에 5번까지예요.
+      x-corthex:
+        id: API-214
+        spec:
+        - SPEC-372
+        omit:
+          '400': 본문이 없음
+          '404': 경로가 id를 담지 않음
+          '409': 부딪히는 상태가 없음
+      responses:
+        '201':
+          description: 만든 코드(한 번만 보여요)
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceCode'
+              examples:
+                code:
+                  value:
+                    code: '402917'
+                    expiresAt: '2026-11-20T10:25:00+09:00'
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '429':
+          $ref: '#/components/responses/TooManyCodes'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/logout:
+    post:
+      operationId: logout
+      summary: 이 기기 로그아웃
+      description: 이 기기의 세션을 끊고(TBL-165 `revoked_at`) 쿠키를 지워요. 다른 기기의 로그인은 그대로예요. 쿠키가 없거나 이미 끝난 세션이어도 204이고 쿠키를 지워요.
+      x-corthex:
+        id: API-215
+        spec:
+        - SPEC-371
+        omit:
+          '400': 본문이 없음
+          '401': 세션이 없어도 204
+          '404': 경로가 id를 담지 않음
+          '409': 부딪히는 상태가 없음
+          '429': 횟수 제한이 없음
+      responses:
+        '204':
+          description: 로그아웃됨
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/ClearSession'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/profile:
+    get:
+      operationId: getProfile
+      summary: 내 마롱이(프로필)
+      description: 내 마롱이 화면(SCR-165)과 글 대화·통화 화면의 머리말이 불러요. 마롱이 이름, 쓰는 캐릭터(없으면 `null` = 기본 마롱이), 통화 목소리(`null` = 기본 목소리), 내 친구 코드, 공유 설정, 오늘 사용량이 와요. 이미 적용한 캐릭터는 캐릭터 설정(`MARONG_CHARACTER`)이 꺼져 있어도 그대로 읽혀요(명세 공통 9).
+      x-corthex:
+        id: API-216
+        spec:
+        - SPEC-377
+        - SPEC-394
+        omit:
+          '400': 입력이 없음
+          '403': 읽기라 Origin을 보지 않고, 설정으로 끄는 기능이 아님
+          '404': 경로가 id를 담지 않음
+          '409': 읽기만 함
+          '429': 읽기만 함
+      responses:
+        '200':
+          description: 내 프로필
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+              examples:
+                default:
+                  value:
+                    friendName: 하늘
+                    botName: 마롱이
+                    character: null
+                    voice: null
+                    friendCode: K7M2QX
+                    share: true
+                    usageToday:
+                      chatTurns: 42
+                      callSeconds: 780
+                      images: 0
+                      units: 432
+                    features:
+                      character: true
+                      friends: true
+                    google: not_connected
+                    pendingRing: null
+                worn:
+                  value:
+                    friendName: 하늘
+                    botName: 초코
+                    character:
+                      id: 12
+                      name: 초코
+                      kind: dog
+                      faceUrl: /chat/api/characters/12/images/front
+                    voice: Sulafat
+                    friendCode: K7M2QX
+                    share: true
+                    usageToday:
+                      chatTurns: 42
+                      callSeconds: 780
+                      images: 0
+                      units: 432
+                    features:
+                      character: true
+                      friends: true
+                    google: connected
+                    pendingRing: null
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+    patch:
+      operationId: patchProfile
+      summary: 마롱이 이름·목소리·공유 설정 바꾸기
+      description: 보낸 칸만 바꿔요. 지금 값과 같으면 200이고 아무것도 바뀌지 않아요. `botName`은 1\~12자예요(앞뒤 공백은 떼고 세요). `voice`는 목소리 목록(API-218)의 `name`이고 `null`이면 기본 목소리로 돌아가요. 목소리는 다음 통화부터 쓰여요. `share`는 내 얘기를 다른 친구에게 해도 되는지(`friends.share`)예요.
+      x-corthex:
+        id: API-217
+        spec:
+        - SPEC-377
+        - SPEC-381
+        - SPEC-385
+        omit:
+          '404': 경로가 id를 담지 않음
+          '409': 나중 쓰기가 이김
+          '429': 횟수 제한이 없음
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfilePatch'
+            examples:
+              name:
+                value:
+                  botName: 초코
+              voice:
+                value:
+                  voice: Sulafat
+              share-off:
+                value:
+                  share: false
+      responses:
+        '200':
+          description: 바뀐 프로필
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+              examples:
+                renamed:
+                  value:
+                    friendName: 하늘
+                    botName: 초코
+                    character:
+                      id: 12
+                      name: 초코
+                      kind: dog
+                      faceUrl: /chat/api/characters/12/images/front
+                    voice: Sulafat
+                    friendCode: K7M2QX
+                    share: true
+                    usageToday:
+                      chatTurns: 42
+                      callSeconds: 780
+                      images: 0
+                      units: 432
+                    features:
+                      character: true
+                      friends: true
+                    google: connected
+                    pendingRing: null
+        '400':
+          $ref: '#/components/responses/ProfileInvalid'
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/voices:
+    get:
+      operationId: listVoices
+      summary: 고를 수 있는 통화 목소리
+      description: 목소리 고르기 화면(SCR-167)이 불러요. 목록은 설정값 `MARONG_CALL_VOICES`의 순서예요. `sampleUrl`은 미리 만들어 둔 짧은 견본 소리 파일이고, 견본이 없는 목소리는 `null`이에요. `default`가 참인 것이 기본 목소리예요.
+      x-corthex:
+        id: API-218
+        spec:
+        - SPEC-385
+        omit:
+          '400': 입력이 없음
+          '403': 읽기라 Origin을 보지 않고, 설정으로 끄는 기능이 아님
+          '404': 경로가 id를 담지 않음
+          '409': 읽기만 함
+          '429': 읽기만 함
+      responses:
+        '200':
+          description: 목소리 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceList'
+              examples:
+                voices:
+                  value:
+                    voices:
+                    - name: Sulafat
+                      label: 따뜻한 목소리
+                      sampleUrl: /chat/static/voices/sulafat.mp3
+                      default: true
+                    - name: Leda
+                      label: 밝은 목소리
+                      sampleUrl: /chat/static/voices/leda.mp3
+                      default: false
+                    - name: Orus
+                      label: 차분한 목소리
+                      sampleUrl: null
+                      default: false
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/profile/character:
+    put:
+      operationId: applyCharacter
+      summary: 캐릭터 적용, 또는 기본 마롱이로 되돌리기
+      description: '`characterId`의 캐릭터를 이 계정의 마롱이로 써요. 프로필의 캐릭터와 마롱이 이름(캐릭터 이름)을 한 번에 바꿔요(SPEC-379). `null`이면 기본 마롱이로 돌아가고 이름은 ''마롱이''가 돼요. 다음 글 답과 다음 통화부터 쓰이고, 대화와 기억은 그대로 이어져요. 지금 쓰는 캐릭터를 다시 보내면 200이고 아무것도 바뀌지 않아요.'
+      x-corthex:
+        id: API-228
+        spec:
+        - SPEC-379
+        omit:
+          '429': 횟수 제한이 없음
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CharacterApply'
+            examples:
+              apply:
+                value:
+                  characterId: 12
+              back-to-default:
+                value:
+                  characterId: null
+      responses:
+        '200':
+          description: 바뀐 프로필
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+              examples:
+                worn:
+                  value:
+                    friendName: 하늘
+                    botName: 초코
+                    character:
+                      id: 12
+                      name: 초코
+                      kind: dog
+                      faceUrl: /chat/api/characters/12/images/front
+                    voice: Sulafat
+                    friendCode: K7M2QX
+                    share: true
+                    usageToday:
+                      chatTurns: 42
+                      callSeconds: 780
+                      images: 0
+                      units: 432
+                    features:
+                      character: true
+                      friends: true
+                    google: connected
+                    pendingRing: null
+                default:
+                  value:
+                    friendName: 하늘
+                    botName: 마롱이
+                    character: null
+                    voice: null
+                    friendCode: K7M2QX
+                    share: true
+                    usageToday:
+                      chatTurns: 42
+                      callSeconds: 780
+                      images: 0
+                      units: 432
+                    features:
+                      character: true
+                      friends: true
+                    google: not_connected
+                    pendingRing: null
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/NotReady'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/characters:
+    get:
+      operationId: listCharacters
+      summary: 내 캐릭터 목록
+      description: 내 마롱이 화면(SCR-165)이 불러요. 만드는 중(`draft`)과 다 만든(`ready`) 캐릭터가 만든 순서로 와요. 뺀 캐릭터는 없어요. 지금 쓰는 캐릭터는 프로필(API-216)의 `character.id`로 알아요.
+      x-corthex:
+        id: API-229
+        spec:
+        - SPEC-378
+        omit:
+          '400': 입력이 없음
+          '403': 읽기라 Origin을 보지 않음. 설정이 꺼져 있으면 404
+          '409': 읽기만 함
+          '429': 읽기만 함
+      responses:
+        '200':
+          description: 캐릭터 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CharacterList'
+              examples:
+                one:
+                  value:
+                    characters:
+                    - id: 12
+                      kind: dog
+                      stage: done
+                      status: ready
+                      name: 초코
+                      template: dog_small
+                      traits:
+                        species: dog
+                        breedGuess: 푸들
+                        coatColors:
+                        - 갈색
+                        pattern: 단색
+                        earShape: 늘어진 귀
+                        eyeColor: 검은색
+                        build: 작음
+                        furLength: 곱슬
+                        distinctive: 왼쪽 귀 끝이 조금 밝음
+                      tone: 신나면 말끝을 길게 늘여요
+                      regenLeft: 2
+                      job:
+                        step: sheet
+                        state: done
+                        error: null
+                      images:
+                        preview: /chat/api/characters/12/images/preview
+                        candidate_1: /chat/api/characters/12/images/candidate_1
+                        candidate_2: /chat/api/characters/12/images/candidate_2
+                        candidate_3: /chat/api/characters/12/images/candidate_3
+                        candidate_4: /chat/api/characters/12/images/candidate_4
+                        front: /chat/api/characters/12/images/front
+                        smile: /chat/api/characters/12/images/smile
+                        excited: /chat/api/characters/12/images/excited
+                        sleepy: /chat/api/characters/12/images/sleepy
+                        surprised: /chat/api/characters/12/images/surprised
+                        sad: /chat/api/characters/12/images/sad
+                        pout: /chat/api/characters/12/images/pout
+                    limit: 3
+                empty:
+                  value:
+                    characters: []
+                    limit: 3
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+    post:
+      operationId: createCharacter
+      summary: 캐릭터 만들기 시작
+      description: 캐릭터 줄을 하나 만들어요(단계 `photos`, 상태 `draft`). 만드는 중이거나 다 만든 캐릭터가 이미 3개면 409 `too_many_characters`, 이번 달 그림 예산을 다 썼으면 409 `image_budget`이에요.
+      x-corthex:
+        id: API-219
+        spec:
+        - SPEC-378
+        - SPEC-380
+        omit:
+          '429': 개수(3개)와 그림 예산으로 막음
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CharacterCreate'
+            examples:
+              dog:
+                value:
+                  kind: dog
+      responses:
+        '201':
+          description: 만든 캐릭터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CharacterEnvelope'
+              examples:
+                created:
+                  value:
+                    character:
+                      id: 12
+                      kind: dog
+                      stage: photos
+                      status: draft
+                      name: null
+                      template: null
+                      traits: null
+                      tone: ''
+                      regenLeft: 2
+                      job: null
+                      images: {}
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/CharacterLimitOrBudget'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/characters/{id}:
+    get:
+      operationId: getCharacter
+      summary: 캐릭터와 만들기 진행 상태
+      description: 만들기 화면(SCR-170\~174)이 작업이 끝날 때까지 2초마다 다시 물어요. `job`은 가장 최근 만들기 작업이고 한 번도 없었으면 `null`이에요. `images`에는 지금 있는 그림의 주소만 와요(올린 사진은 표정 그림이 끝나면 지워져서 빠져요).
+      x-corthex:
+        id: API-221
+        spec:
+        - SPEC-378
+        omit:
+          '403': 읽기라 Origin을 보지 않음. 설정이 꺼져 있으면 404
+          '409': 읽기만 함
+          '429': 읽기만 함
+      parameters:
+      - $ref: '#/components/parameters/CharacterId'
+      responses:
+        '200':
+          description: 캐릭터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CharacterEnvelope'
+              examples:
+                reading-traits:
+                  value:
+                    character:
+                      id: 12
+                      kind: dog
+                      stage: photos
+                      status: draft
+                      name: null
+                      template: null
+                      traits: null
+                      tone: ''
+                      regenLeft: 2
+                      job:
+                        step: traits
+                        state: queued
+                        error: null
+                      images:
+                        photo_1: /chat/api/characters/12/images/photo_1
+                        photo_2: /chat/api/characters/12/images/photo_2
+                candidates:
+                  value:
+                    character:
+                      id: 12
+                      kind: dog
+                      stage: candidates
+                      status: draft
+                      name: null
+                      template: dog_small
+                      traits:
+                        species: dog
+                        breedGuess: 푸들
+                        coatColors:
+                        - 갈색
+                        pattern: 단색
+                        earShape: 늘어진 귀
+                        eyeColor: 검은색
+                        build: 작음
+                        furLength: 곱슬
+                        distinctive: 왼쪽 귀 끝이 조금 밝음
+                      tone: 신나면 말끝을 길게 늘여요
+                      regenLeft: 2
+                      job:
+                        step: candidates
+                        state: done
+                        error: null
+                      images:
+                        photo_1: /chat/api/characters/12/images/photo_1
+                        photo_2: /chat/api/characters/12/images/photo_2
+                        preview: /chat/api/characters/12/images/preview
+                        candidate_1: /chat/api/characters/12/images/candidate_1
+                        candidate_2: /chat/api/characters/12/images/candidate_2
+                        candidate_3: /chat/api/characters/12/images/candidate_3
+                        candidate_4: /chat/api/characters/12/images/candidate_4
+                sheet-failed:
+                  value:
+                    character:
+                      id: 12
+                      kind: dog
+                      stage: sheet
+                      status: draft
+                      name: null
+                      template: dog_small
+                      traits:
+                        species: dog
+                        breedGuess: 푸들
+                        coatColors:
+                        - 갈색
+                        pattern: 단색
+                        earShape: 늘어진 귀
+                        eyeColor: 검은색
+                        build: 작음
+                        furLength: 곱슬
+                        distinctive: 왼쪽 귀 끝이 조금 밝음
+                      tone: 신나면 말끝을 길게 늘여요
+                      regenLeft: 2
+                      job:
+                        step: sheet
+                        state: failed
+                        error: timeout
+                      images:
+                        photo_1: /chat/api/characters/12/images/photo_1
+                        photo_2: /chat/api/characters/12/images/photo_2
+                        preview: /chat/api/characters/12/images/preview
+                        candidate_1: /chat/api/characters/12/images/candidate_1
+                        candidate_2: /chat/api/characters/12/images/candidate_2
+                        candidate_3: /chat/api/characters/12/images/candidate_3
+                        candidate_4: /chat/api/characters/12/images/candidate_4
+                ready:
+                  value:
+                    character:
+                      id: 12
+                      kind: dog
+                      stage: done
+                      status: ready
+                      name: 초코
+                      template: dog_small
+                      traits:
+                        species: dog
+                        breedGuess: 푸들
+                        coatColors:
+                        - 갈색
+                        pattern: 단색
+                        earShape: 늘어진 귀
+                        eyeColor: 검은색
+                        build: 작음
+                        furLength: 곱슬
+                        distinctive: 왼쪽 귀 끝이 조금 밝음
+                      tone: 신나면 말끝을 길게 늘여요
+                      regenLeft: 2
+                      job:
+                        step: sheet
+                        state: done
+                        error: null
+                      images:
+                        preview: /chat/api/characters/12/images/preview
+                        candidate_1: /chat/api/characters/12/images/candidate_1
+                        candidate_2: /chat/api/characters/12/images/candidate_2
+                        candidate_3: /chat/api/characters/12/images/candidate_3
+                        candidate_4: /chat/api/characters/12/images/candidate_4
+                        front: /chat/api/characters/12/images/front
+                        smile: /chat/api/characters/12/images/smile
+                        excited: /chat/api/characters/12/images/excited
+                        sleepy: /chat/api/characters/12/images/sleepy
+                        surprised: /chat/api/characters/12/images/surprised
+                        sad: /chat/api/characters/12/images/sad
+                        pout: /chat/api/characters/12/images/pout
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+    patch:
+      operationId: nameCharacter
+      summary: 캐릭터 이름 짓기
+      description: 단계가 `name`이면 이름을 짓고 만들기를 끝내요(단계 `done`, 상태 `ready`). 이미 `done`이면 이름만 바꿔요. 이름은 1\~12자예요. 쓰는 중인 캐릭터의 이름을 바꿔도 프로필의 마롱이 이름은 바뀌지 않아요(그건 API-217).
+      x-corthex:
+        id: API-226
+        spec:
+        - SPEC-378
+        omit:
+          '429': 횟수 제한이 없음
+      parameters:
+      - $ref: '#/components/parameters/CharacterId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CharacterName'
+            examples:
+              name:
+                value:
+                  name: 초코
+      responses:
+        '200':
+          description: 이름을 지은 캐릭터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CharacterEnvelope'
+              examples:
+                ready:
+                  value:
+                    character:
+                      id: 12
+                      kind: dog
+                      stage: done
+                      status: ready
+                      name: 초코
+                      template: dog_small
+                      traits:
+                        species: dog
+                        breedGuess: 푸들
+                        coatColors:
+                        - 갈색
+                        pattern: 단색
+                        earShape: 늘어진 귀
+                        eyeColor: 검은색
+                        build: 작음
+                        furLength: 곱슬
+                        distinctive: 왼쪽 귀 끝이 조금 밝음
+                      tone: 신나면 말끝을 길게 늘여요
+                      regenLeft: 2
+                      job:
+                        step: sheet
+                        state: done
+                        error: null
+                      images:
+                        preview: /chat/api/characters/12/images/preview
+                        candidate_1: /chat/api/characters/12/images/candidate_1
+                        candidate_2: /chat/api/characters/12/images/candidate_2
+                        candidate_3: /chat/api/characters/12/images/candidate_3
+                        candidate_4: /chat/api/characters/12/images/candidate_4
+                        front: /chat/api/characters/12/images/front
+                        smile: /chat/api/characters/12/images/smile
+                        excited: /chat/api/characters/12/images/excited
+                        sleepy: /chat/api/characters/12/images/sleepy
+                        surprised: /chat/api/characters/12/images/surprised
+                        sad: /chat/api/characters/12/images/sad
+                        pout: /chat/api/characters/12/images/pout
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/WrongStage'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+    delete:
+      operationId: retireCharacter
+      summary: 캐릭터 빼기
+      description: 캐릭터를 목록에서 빼요(상태 `retired`). 줄은 지우지 않고 그림 파일만 지워요. 지금 쓰는 캐릭터였으면 프로필이 기본 마롱이로 돌아가요(이름 '마롱이'). 만드는 중인 캐릭터도 뺄 수 있지만 작업이 도는 동안은 409예요. 이미 뺀 캐릭터면 204예요.
+      x-corthex:
+        id: API-238
+        spec:
+        - SPEC-379
+        omit:
+          '429': 횟수 제한이 없음
+      parameters:
+      - $ref: '#/components/parameters/CharacterId'
+      responses:
+        '204':
+          description: 뺌
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/JobRunning'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/characters/{id}/photos:
+    put:
+      operationId: putCharacterPhotos
+      summary: 사진 올리기
+      description: 반려동물 사진 1\~3장을 올려요(JPEG·PNG·WebP, 한 장 8MB와 긴 변 4096px까지, 넘으면 400 `photo_invalid`). 화면이 먼저 줄이고 EXIF를 빼서 보내고, 서버가 다시 인코딩하고 사람 얼굴을 가린 사진만 저장해요. 원본은 저장하지 않아요. 저장한 뒤 특징 읽기 작업을 줄에 넣고 202를 돌려줘요. 작업이 끝나면 단계가 `traits`가 되고 읽은 특징표와 권하는 몸 템플릿이 캐릭터에 들어가요. 단계가 `photos`나 `traits`일 때만 받고, 다시 올리면 앞 사진을 바꿔요.
+      x-corthex:
+        id: API-220
+        spec:
+        - SPEC-378
+        omit:
+          '429': 그림 예산과 작업 하나 규칙으로 막음
+      parameters:
+      - $ref: '#/components/parameters/CharacterId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - photos
+              properties:
+                photos:
+                  type: array
+                  minItems: 1
+                  maxItems: 3
+                  items:
+                    type: string
+                    format: binary
+                    maxLength: 8388608
+            examples:
+              two:
+                value:
+                  photos:
+                  - (JPEG)
+                  - (JPEG)
+      responses:
+        '202':
+          description: 사진을 받았고 특징 읽기 작업이 줄에 들어감
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CharacterEnvelope'
+              examples:
+                queued:
+                  value:
+                    character:
+                      id: 12
+                      kind: dog
+                      stage: photos
+                      status: draft
+                      name: null
+                      template: null
+                      traits: null
+                      tone: ''
+                      regenLeft: 2
+                      job:
+                        step: traits
+                        state: queued
+                        error: null
+                      images:
+                        photo_1: /chat/api/characters/12/images/photo_1
+                        photo_2: /chat/api/characters/12/images/photo_2
+        '400':
+          $ref: '#/components/responses/PhotoInvalid'
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/StageOrJob'
+        '413':
+          $ref: '#/components/responses/TooLarge'
+        '503':
+          $ref: '#/components/responses/PhotoUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/characters/{id}/traits:
+    patch:
+      operationId: confirmTraits
+      summary: 특징표와 몸 템플릿 정하기
+      description: 특징표 고치기 화면(SCR-171)에서 고친 특징표 전체와 고른 몸 템플릿, 말투 한 줄을 저장해요. 단계가 `traits`나 `preview`일 때 받고, 저장하면 단계가 `preview`가 돼요(미리 보기가 마음에 안 들어 다시 고칠 때도 이 요청이에요). 템플릿은 종류에 맞아야 해요(강아지는 `dog_*`, 고양이는 `cat*`). 그림은 이 요청으로 그리지 않아요.
+      x-corthex:
+        id: API-222
+        spec:
+        - SPEC-378
+        omit:
+          '429': 횟수 제한이 없음
+      parameters:
+      - $ref: '#/components/parameters/CharacterId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TraitsConfirm'
+            examples:
+              confirm:
+                value:
+                  traits:
+                    species: dog
+                    breedGuess: 푸들
+                    coatColors:
+                    - 갈색
+                    pattern: 단색
+                    earShape: 늘어진 귀
+                    eyeColor: 검은색
+                    build: 작음
+                    furLength: 곱슬
+                    distinctive: 왼쪽 귀 끝이 조금 밝음
+                  template: dog_small
+                  tone: 신나면 말끝을 길게 늘여요
+      responses:
+        '200':
+          description: 특징표를 정한 캐릭터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CharacterEnvelope'
+              examples:
+                confirmed:
+                  value:
+                    character:
+                      id: 12
+                      kind: dog
+                      stage: preview
+                      status: draft
+                      name: null
+                      template: dog_small
+                      traits:
+                        species: dog
+                        breedGuess: 푸들
+                        coatColors:
+                        - 갈색
+                        pattern: 단색
+                        earShape: 늘어진 귀
+                        eyeColor: 검은색
+                        build: 작음
+                        furLength: 곱슬
+                        distinctive: 왼쪽 귀 끝이 조금 밝음
+                      tone: 신나면 말끝을 길게 늘여요
+                      regenLeft: 2
+                      job:
+                        step: traits
+                        state: done
+                        error: null
+                      images:
+                        photo_1: /chat/api/characters/12/images/photo_1
+                        photo_2: /chat/api/characters/12/images/photo_2
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/StageOrJob'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/characters/{id}/preview:
+    post:
+      operationId: drawPreview
+      summary: 미리 보기 한 장 그리기
+      description: 정한 특징표와 템플릿으로 미리 보기 한 장을 그리는 작업을 줄에 넣어요. 단계가 `preview`일 때만 받아요. 그림 모델에는 사진을 보내지 않아요. 끝나면 `images.preview`가 생기고(앞의 미리 보기는 바뀌어요) 단계는 `preview` 그대로예요. 결제 단계는 없어요.
+      x-corthex:
+        id: API-223
+        spec:
+        - SPEC-378
+        - SPEC-380
+        omit:
+          '429': 그림 예산과 작업 하나 규칙으로 막음
+      parameters:
+      - $ref: '#/components/parameters/CharacterId'
+      responses:
+        '202':
+          description: 미리 보기 작업이 줄에 들어감
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CharacterEnvelope'
+              examples:
+                queued:
+                  value:
+                    character:
+                      id: 12
+                      kind: dog
+                      stage: preview
+                      status: draft
+                      name: null
+                      template: dog_small
+                      traits:
+                        species: dog
+                        breedGuess: 푸들
+                        coatColors:
+                        - 갈색
+                        pattern: 단색
+                        earShape: 늘어진 귀
+                        eyeColor: 검은색
+                        build: 작음
+                        furLength: 곱슬
+                        distinctive: 왼쪽 귀 끝이 조금 밝음
+                      tone: 신나면 말끝을 길게 늘여요
+                      regenLeft: 2
+                      job:
+                        step: preview
+                        state: queued
+                        error: null
+                      images:
+                        photo_1: /chat/api/characters/12/images/photo_1
+                        photo_2: /chat/api/characters/12/images/photo_2
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/PreviewConflict'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/characters/{id}/candidates:
+    post:
+      operationId: drawCandidates
+      summary: 후보 4장 그리기, 다시 만들기
+      description: 후보 4장을 그리는 작업을 줄에 넣어요. 단계가 `preview`이고 미리 보기 그림이 있으면 처음 그리기예요(다시 만들기 횟수를 쓰지 않아요). 단계가 `candidates`이면 다시 만들기라 `regenLeft`가 하나 줄고, 0이면 409 `no_regen_left`예요. 작업이 실패하면 줄어든 횟수를 되돌려요. 끝나면 단계가 `candidates`가 되고 `images.candidate_1`\~`candidate_4`가 생겨요(앞의 후보는 바뀌어요).
+      x-corthex:
+        id: API-224
+        spec:
+        - SPEC-378
+        - SPEC-380
+        omit:
+          '429': 다시 만들기 횟수와 그림 예산으로 막음
+      parameters:
+      - $ref: '#/components/parameters/CharacterId'
+      responses:
+        '202':
+          description: 후보 작업이 줄에 들어감
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CharacterEnvelope'
+              examples:
+                queued:
+                  value:
+                    character:
+                      id: 12
+                      kind: dog
+                      stage: preview
+                      status: draft
+                      name: null
+                      template: dog_small
+                      traits:
+                        species: dog
+                        breedGuess: 푸들
+                        coatColors:
+                        - 갈색
+                        pattern: 단색
+                        earShape: 늘어진 귀
+                        eyeColor: 검은색
+                        build: 작음
+                        furLength: 곱슬
+                        distinctive: 왼쪽 귀 끝이 조금 밝음
+                      tone: 신나면 말끝을 길게 늘여요
+                      regenLeft: 2
+                      job:
+                        step: candidates
+                        state: queued
+                        error: null
+                      images:
+                        photo_1: /chat/api/characters/12/images/photo_1
+                        photo_2: /chat/api/characters/12/images/photo_2
+                        preview: /chat/api/characters/12/images/preview
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/CandidatesConflict'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/characters/{id}/pick:
+    post:
+      operationId: pickCandidate
+      summary: 후보 고르고 표정 그리기
+      description: 후보 하나를 골라요. 고른 그림이 정면(`front`)이 되고 표정 6장(`smile`, `excited`, `sleepy`, `surprised`, `sad`, `pout`)을 그리는 작업이 줄에 들어가요. 단계가 `candidates`일 때 받고, 단계가 `sheet`인데 표정 작업이 실패했을 때도 받아요(다시 시도). 고르기를 받으면 단계가 바로 `sheet`가 되고, 작업이 끝나면 `name`이 돼요. 그때 올린 사진(`photo_1`\~`photo_3`)만 지워져요. 미리 보기와 고르지 않은 후보는 남아요.
+      x-corthex:
+        id: API-225
+        spec:
+        - SPEC-378
+        omit:
+          '429': 작업 하나 규칙으로 막음
+      parameters:
+      - $ref: '#/components/parameters/CharacterId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CandidatePick'
+            examples:
+              second:
+                value:
+                  slot: candidate_2
+      responses:
+        '202':
+          description: 표정 작업이 줄에 들어감
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CharacterEnvelope'
+              examples:
+                queued:
+                  value:
+                    character:
+                      id: 12
+                      kind: dog
+                      stage: sheet
+                      status: draft
+                      name: null
+                      template: dog_small
+                      traits:
+                        species: dog
+                        breedGuess: 푸들
+                        coatColors:
+                        - 갈색
+                        pattern: 단색
+                        earShape: 늘어진 귀
+                        eyeColor: 검은색
+                        build: 작음
+                        furLength: 곱슬
+                        distinctive: 왼쪽 귀 끝이 조금 밝음
+                      tone: 신나면 말끝을 길게 늘여요
+                      regenLeft: 2
+                      job:
+                        step: sheet
+                        state: running
+                        error: null
+                      images:
+                        photo_1: /chat/api/characters/12/images/photo_1
+                        photo_2: /chat/api/characters/12/images/photo_2
+                        preview: /chat/api/characters/12/images/preview
+                        candidate_1: /chat/api/characters/12/images/candidate_1
+                        candidate_2: /chat/api/characters/12/images/candidate_2
+                        candidate_3: /chat/api/characters/12/images/candidate_3
+                        candidate_4: /chat/api/characters/12/images/candidate_4
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/StageOrJob'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/characters/{id}/try:
+    get:
+      operationId: tryCharacter
+      summary: 입혀 보기
+      description: 입혀 보기 화면(SCR-166)이 불러요. 그 캐릭터를 적용하면 글 대화 화면과 통화 화면이 어떻게 보이는지 그릴 재료를 줘요. 대화 예시와 통화 첫 말은 코드에 있는 고정 문장에 이름만 넣은 것이라 모델을 부르지 않고, 아무것도 저장하지 않아요. 적용 전에는 대화에 영향이 없어요.
+      x-corthex:
+        id: API-227
+        spec:
+        - SPEC-379
+        omit:
+          '403': 읽기라 Origin을 보지 않음. 설정이 꺼져 있으면 404
+          '429': 읽기만 함
+      parameters:
+      - $ref: '#/components/parameters/CharacterId'
+      responses:
+        '200':
+          description: 입혀 본 모습
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TryOn'
+              examples:
+                try:
+                  value:
+                    botName: 초코
+                    faces:
+                      front: /chat/api/characters/12/images/front
+                      smile: /chat/api/characters/12/images/smile
+                      excited: /chat/api/characters/12/images/excited
+                      sleepy: /chat/api/characters/12/images/sleepy
+                      surprised: /chat/api/characters/12/images/surprised
+                      sad: /chat/api/characters/12/images/sad
+                      pout: /chat/api/characters/12/images/pout
+                    chatSample:
+                    - from: me
+                      text: 오늘 뭐 했어?
+                    - from: bot
+                      text: 나는 네 생각 하면서 기다렸지. 너는 뭐 했어?
+                    - from: bot
+                      text: 밥은 챙겨 먹었어?
+                    callLine: 여보세요, 나 초코야.
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/NotReady'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/characters/{id}/images/{slot}:
+    get:
+      operationId: getCharacterImage
+      summary: 캐릭터 그림 파일
+      description: '내 캐릭터의 그림 한 장이에요. 올린 사진(얼굴을 가린 것)은 JPEG, 그린 그림은 PNG예요. 로그인한 친구의 캐릭터만 주고 `Cache-Control: private`이라 중간 캐시에 남지 않아요. 그 자리에 지금 그림이 없으면 404예요. 통화 화면의 얼굴도 이 주소를 써요.'
+      x-corthex:
+        id: API-242
+        spec:
+        - SPEC-378
+        omit:
+          '403': 읽기라 Origin을 보지 않음. 설정이 꺼져 있으면 404
+          '409': 읽기만 함
+          '429': 읽기만 함
+      parameters:
+      - $ref: '#/components/parameters/CharacterId'
+      - $ref: '#/components/parameters/Slot'
+      responses:
+        '200':
+          description: 그림 파일
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/PrivateCache'
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+              examples:
+                png:
+                  value: (PNG 1024×1024)
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+              examples:
+                jpeg:
+                  value: (JPEG)
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/friends:
+    get:
+      operationId: listFriends
+      summary: 친구, 받은 요청, 보낸 요청
+      description: 친구 화면(SCR-168)이 불러요. `friends`는 아는 사이(`accepted`)예요. `close`는 지금 적용되는 값(둘 다 켰을 때만 참)이고 `closeMine`은 내가 켠 값이에요. 상대가 켰는지는 따로 알려 주지 않아요. `incoming`은 내가 답할 요청, `outgoing`은 내가 보내고 답을 기다리는 요청이에요. 거절했거나 끊은 사이는 어디에도 없어요.
+      x-corthex:
+        id: API-230
+        spec:
+        - SPEC-381
+        omit:
+          '400': 입력이 없음
+          '403': 읽기라 Origin을 보지 않음. 설정이 꺼져 있으면 404
+          '409': 읽기만 함
+          '429': 읽기만 함
+      responses:
+        '200':
+          description: 친구 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FriendList'
+              examples:
+                some:
+                  value:
+                    friends:
+                    - friendId: 7
+                      name: 바다
+                      close: true
+                      closeMine: true
+                    - friendId: 9
+                      name: 노을
+                      close: false
+                      closeMine: true
+                    incoming:
+                    - friendId: 11
+                      name: 구름
+                      requestedAt: '2026-11-19T21:10:00+09:00'
+                    outgoing: []
+                empty:
+                  value:
+                    friends: []
+                    incoming: []
+                    outgoing: []
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/friends/requests:
+    post:
+      operationId: requestFriend
+      summary: 친구 코드로 친구 요청 보내기
+      description: 상대의 친구 코드를 넣어 요청을 보내요. 코드는 대문자로 바꿔서 봐요. 같은 두 사람 사이의 기다리는 요청은 하나뿐이라, 내가 이미 보냈거나 상대가 먼저 보냈으면 409 `request_exists`예요(상대가 보낸 요청은 API-232로 답해요). 거절됐거나 끊은 사이에는 다시 보낼 수 있어요. 하루(새벽 4시 기준)에 10번까지예요.
+      x-corthex:
+        id: API-231
+        spec:
+        - SPEC-381
+        omit: {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FriendRequestCreate'
+            examples:
+              code:
+                value:
+                  friendCode: P4TN8B
+      responses:
+        '201':
+          description: 보낸 요청
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FriendRequestEnvelope'
+              examples:
+                sent:
+                  value:
+                    request:
+                      friendId: 7
+                      name: 바다
+                      requestedAt: '2026-11-19T21:10:00+09:00'
+        '400':
+          $ref: '#/components/responses/FriendRequestInvalid'
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/CodeNotFound'
+        '409':
+          $ref: '#/components/responses/FriendConflict'
+        '429':
+          $ref: '#/components/responses/RequestLimit'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/friends/requests/{friendId}:
+    post:
+      operationId: answerFriendRequest
+      summary: 받은 친구 요청에 답하기
+      description: '`friendId`는 요청을 보낸 친구예요. `accept`면 아는 사이가 되고 `decline`이면 요청이 닫혀요. 상대에게 거절을 따로 알리지 않아요. 그 친구가 보낸 기다리는 요청이 없으면(이미 답했거나 내가 보낸 요청이면) 404예요.'
+      x-corthex:
+        id: API-232
+        spec:
+        - SPEC-381
+        omit:
+          '409': 이미 답한 요청은 404
+          '429': 횟수 제한이 없음
+      parameters:
+      - $ref: '#/components/parameters/FriendId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FriendRequestAnswer'
+            examples:
+              accept:
+                value:
+                  action: accept
+              decline:
+                value:
+                  action: decline
+      responses:
+        '200':
+          description: 답한 결과
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FriendRequestResult'
+              examples:
+                accepted:
+                  value:
+                    state: accepted
+                declined:
+                  value:
+                    state: declined
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/friends/{friendId}:
+    patch:
+      operationId: setFriendClose
+      summary: '''가까운 사이'' 켜고 끄기(내 바람)'
+      description: 그 친구와의 '가까운 사이'에 대한 내 값을 바꿔요. 두 사람이 모두 켰을 때만 `close`가 참이 되고 근황 층까지 공유돼요(REQ-457). 한쪽이 끄면 바로 거짓이 돼요. 아는 사이가 아니면 404예요.
+      x-corthex:
+        id: API-233
+        spec:
+        - SPEC-381
+        omit:
+          '409': 나중 쓰기가 이김
+          '429': 횟수 제한이 없음
+      parameters:
+      - $ref: '#/components/parameters/FriendId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FriendClosePatch'
+            examples:
+              'on':
+                value:
+                  close: true
+              'off':
+                value:
+                  close: false
+      responses:
+        '200':
+          description: 지금 값
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FriendClose'
+              examples:
+                waiting-other:
+                  value:
+                    close: false
+                    closeMine: true
+                both:
+                  value:
+                    close: true
+                    closeMine: true
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+    delete:
+      operationId: endFriend
+      summary: 친구 끊기
+      description: 그 친구와의 사이를 끝내요(상태 `ended`). 줄은 지우지 않아요. 두 사람의 '가까운 사이' 값도 꺼져요. 상대에게 따로 알리지 않아요. 아는 사이가 아니면 404예요.
+      x-corthex:
+        id: API-239
+        spec:
+        - SPEC-381
+        omit:
+          '409': 부딪히는 상태가 없음
+          '429': 횟수 제한이 없음
+      parameters:
+      - $ref: '#/components/parameters/FriendId'
+      responses:
+        '204':
+          description: 끊음
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/api/usage:
+    get:
+      operationId: getUsage
+      summary: 오늘 사용량
+      description: 오늘(새벽 4시에 바뀌는 하루)의 글 답 수, 통화 초, 그림 수와 그것을 합친 사용 단위예요. `limit`은 설정값 `MARONG_DAILY_UNITS`이고 비어 있으면 `null`이에요(세기만 하고 막지 않아요). `tickets`는 남은 티켓이에요. 오늘 쓴 것이 없어도 200이고 값이 0이에요.
+      x-corthex:
+        id: API-234
+        spec:
+        - SPEC-394
+        omit:
+          '400': 입력이 없음
+          '403': 읽기라 Origin을 보지 않고, 설정으로 끄는 기능이 아님
+          '404': 경로가 id를 담지 않음
+          '409': 읽기만 함
+          '429': 읽기만 함
+      responses:
+        '200':
+          description: 오늘 사용량
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Usage'
+              examples:
+                counting:
+                  value:
+                    day: '2026-11-19'
+                    chatTurns: 42
+                    callSeconds: 780
+                    images: 0
+                    units: 432
+                    limit: null
+                    tickets: 0
+                limited:
+                  value:
+                    day: '2026-11-19'
+                    chatTurns: 120
+                    callSeconds: 1800
+                    images: 1
+                    units: 1060
+                    limit: 1000
+                    tickets: 3
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/admin/api/invites:
+    get:
+      operationId: adminListInvites
+      summary: 초대 링크 목록
+      description: 관리자 화면(SCR-169)이 불러요. 최근에 만든 것부터 100개까지 와요. 토큰과 링크 주소는 없어요(만들 때 한 번만 보여요). `state`는 `open`(쓸 수 있음), `used`, `expired`, `revoked`(거둠)예요.
+      security:
+      - cfAccess: []
+      x-corthex:
+        id: API-240
+        spec:
+        - SPEC-395
+        omit:
+          '400': 입력이 없음
+          '401': Access 증명이 없어도 403 not_allowed(SPEC-395)
+          '404': 경로가 id를 담지 않음
+          '409': 읽기만 함
+          '429': 읽기만 함
+      responses:
+        '200':
+          description: 초대 링크 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InviteList'
+              examples:
+                list:
+                  value:
+                    invites:
+                    - id: 5
+                      kind: join
+                      note: 구름
+                      state: open
+                      expiresAt: '2026-11-26T10:20:00+09:00'
+                      usedBy: null
+                    - id: 4
+                      kind: join
+                      note: 하늘
+                      state: used
+                      expiresAt: '2026-11-25T09:00:00+09:00'
+                      usedBy:
+                        friendId: 5
+                        name: 하늘
+        '403':
+          $ref: '#/components/responses/AdminForbiddenRead'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+    post:
+      operationId: adminCreateInvite
+      summary: 초대 링크 만들기
+      description: 한 사람이 한 번 쓰는 초대 링크를 만들어요. 7일(`MARONG_INVITE_DAYS`) 뒤에 끝나요. `join`은 새 사람 가입이라 `friendId`를 보내지 않고, `link`(기존 친구 행 연결)는 프로필이 아직 없는 친구를, `relogin`(다시 로그인)은 프로필이 있는 친구를 `friendId`로 꼭 받아요. 종류와 프로필 유무가 안 맞으면 400이에요. 이메일이 같다고 자동으로 잇지 않아요. 링크 주소는 이 응답에만 있고 서버에는 토큰의 SHA-256만 남아요(TBL-164). `note`는 동희님만 보는 메모예요.
+      security:
+      - cfAccess: []
+      x-corthex:
+        id: API-235
+        spec:
+        - SPEC-370
+        - SPEC-395
+        omit:
+          '401': Access 증명이 없어도 403 not_allowed(SPEC-395)
+          '409': 부딪히는 상태가 없음
+          '429': 동희님만 부름
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteCreate'
+            examples:
+              join:
+                value:
+                  kind: join
+                  note: 구름
+              link:
+                value:
+                  kind: link
+                  friendId: 2
+      responses:
+        '201':
+          description: 만든 초대 링크(한 번만 보여요)
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InviteCreated'
+              examples:
+                created:
+                  value:
+                    url: https://marong.corthex-hq.com/chat/join/example-token-not-real-00000000000000000000
+                    expiresAt: '2026-11-26T10:20:00+09:00'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '403':
+          $ref: '#/components/responses/AdminForbiddenWrite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/admin/api/members:
+    get:
+      operationId: adminListMembers
+      summary: 회원 목록
+      description: '`members`는 프로필이 있는 친구(초대 링크로 가입했거나 연결한 사람)이고 가입한 순서로 와요. `sessions`는 살아 있는 기기 로그인 수, `lastSeenAt`은 가장 최근에 쓴 때(로그인이 없으면 `null`)예요. `unlinked`는 프로필이 아직 없는 기존 친구 행이에요(`link` 초대 링크를 만들 때 고르는 목록, 이름과 id만). 대화 글은 없어요.'
+      security:
+      - cfAccess: []
+      x-corthex:
+        id: API-236
+        spec:
+        - SPEC-395
+        omit:
+          '400': 입력이 없음
+          '401': Access 증명이 없어도 403 not_allowed(SPEC-395)
+          '404': 경로가 id를 담지 않음
+          '409': 읽기만 함
+          '429': 읽기만 함
+      responses:
+        '200':
+          description: 회원 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberList'
+              examples:
+                list:
+                  value:
+                    members:
+                    - friendId: 5
+                      name: 하늘
+                      botName: 초코
+                      sessions: 2
+                      lastSeenAt: '2026-11-19T22:40:00+09:00'
+                      tickets: 0
+                      usageToday:
+                        chatTurns: 42
+                        callSeconds: 780
+                        images: 0
+                        units: 432
+                    - friendId: 11
+                      name: 구름
+                      botName: 마롱이
+                      sessions: 0
+                      lastSeenAt: null
+                      tickets: 10
+                      usageToday:
+                        chatTurns: 0
+                        callSeconds: 0
+                        images: 0
+                        units: 0
+                    unlinked:
+                    - friendId: 2
+                      name: 바다
+        '403':
+          $ref: '#/components/responses/AdminForbiddenRead'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/admin/api/members/{friendId}/revoke:
+    post:
+      operationId: adminRevokeSessions
+      summary: 로그인 끊기
+      description: 그 회원의 살아 있는 기기 로그인을 모두 끊고(TBL-165 `revoked_at`) 아직 안 쓴 기기 추가 코드도 끝내요(TBL-166 `used_at`). 다음 요청부터 401이고, 로그인이 하나도 없는 동안은 앱 알림도 가지 않아요(SPEC-383).  도는 통화는 그 통화가 끝날 때까지 가요. 다시 들어오게 하려면 `relogin` 초대 링크를 만들어요. 살아 있는 로그인이 없어도 204예요.
+      security:
+      - cfAccess: []
+      x-corthex:
+        id: API-241
+        spec:
+        - SPEC-395
+        omit:
+          '401': Access 증명이 없어도 403 not_allowed(SPEC-395)
+          '409': 부딪히는 상태가 없음
+          '429': 동희님만 부름
+      parameters:
+      - $ref: '#/components/parameters/FriendId'
+      responses:
+        '204':
+          description: 끊음
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '403':
+          $ref: '#/components/responses/AdminForbiddenWrite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+  /chat/admin/api/members/{friendId}/tickets:
+    post:
+      operationId: adminAddTickets
+      summary: 티켓 넣기
+      description: 그 회원의 티켓 잔액에 `add`만큼 더해요(1\~1000). 빼는 요청은 없어요. 판매·결제는 없고 동희님이 손으로 넣어요. 응답은 더한 뒤 잔액이에요.
+      security:
+      - cfAccess: []
+      x-corthex:
+        id: API-237
+        spec:
+        - SPEC-394
+        - SPEC-395
+        omit:
+          '401': Access 증명이 없어도 403 not_allowed(SPEC-395)
+          '409': 부딪히는 상태가 없음
+          '429': 동희님만 부름
+      parameters:
+      - $ref: '#/components/parameters/FriendId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketsAdd'
+            examples:
+              ten:
+                value:
+                  add: 10
+      responses:
+        '200':
+          description: 더한 뒤 잔액
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tickets'
+              examples:
+                added:
+                  value:
+                    tickets: 10
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '403':
+          $ref: '#/components/responses/AdminForbiddenWrite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
+components:
+  x-corthex:
+    errors:
+      invalid_input:
+        status: 400
+        meaning: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖, 목록에 없는 값, 형식이 틀린 경로 id, join 초대에 친구 id를 넣거나 link·relogin 초대에 친구 id가 없음, relogin 초대인데 그 친구에게 프로필이 없음)
+        message: 뭔가 잘못 보냈나 봐. 다시 해 볼게
+        client: 입력 칸 오류면 그 칸 옆에 보이고, 아니면 오류 상태와 추적 id
+      voice_unknown:
+        status: 400
+        meaning: 고른 목소리가 설정값 MARONG_CALL_VOICES 목록에 없음(목록이 바뀐 뒤 옛 화면에서 고른 경우)
+        message: 그 목소리는 지금 못 골라. 목록을 다시 보여 줄게
+        client: 목소리 목록(API-218)을 다시 불러 보여 줌
+      photo_invalid:
+        status: 400
+        meaning: 사진이 없거나 3장을 넘음, JPEG·PNG·WebP가 아님, 열리지 않는 파일, 한 장이 8MB를 넘음, 긴 변이 4096px를 넘음
+        message: 이 사진은 못 쓰겠어. 다른 사진으로 해 줄래?
+        client: 고른 사진을 그대로 두고 틀린 장을 표시함
+      self_request:
+        status: 400
+        meaning: 내 친구 코드로 친구 요청을 보냄
+        message: 그건 네 코드야!
+        client: 입력 칸 옆에 보임
+      login_required:
+        status: 401
+        meaning: 로그인 쿠키가 없거나, 모르는 값이거나, 만료됐거나, 끊긴 세션
+        message: 다시 들어와 줘
+        client: 로그인 화면(SCR-164)으로 보냄
+      code_wrong:
+        status: 401
+        meaning: 기기 추가 코드가 틀렸거나, 10분이 지났거나, 이미 쓴 코드(셋을 구분하지 않음)
+        message: 코드가 안 맞아. 다시 확인해 줘
+        client: 입력 칸을 비우고 다시 넣게 함
+      cross_site:
+        status: 403
+        meaning: 쓰기 요청의 Origin이 https://marong.corthex-hq.com이 아님
+        message: 이 화면에서 다시 해 줘
+        client: 오류 상태. 자동으로 다시 보내지 않음
+      not_allowed:
+        status: 403
+        meaning: '관리자 경로에 Cloudflare Access 증명이 없거나 맞지 않음, 또는 그 이메일이 동희님 계정이 아님(SPEC-395: 둘 다 403)'
+        message: 이 계정으로는 열 수 없어
+        client: 쓸 수 없는 계정 상태. 다시 시도하지 않음
+      not_found:
+        status: 404
+        meaning: 없는 캐릭터·그림·친구·회원이거나 로그인한 친구의 것이 아님(뺀 캐릭터, 기다리는 요청이 없는 친구 포함). 설정이 꺼진 캐릭터 API(MARONG_CHARACTER=0)와 친구 API(MARONG_FRIENDS=0)도 이 코드
+        message: 찾지 못했어. 새로 보여 줄게
+        client: 목록을 다시 불러 보여 줌
+      invite_not_found:
+        status: 404
+        meaning: 모르는 토큰이거나 형식이 틀린 토큰
+        message: 이 링크는 못 쓰는 링크야. 동희한테 새로 받아 줘
+        client: 가입 화면의 못 쓰는 링크 상태
+      code_not_found:
+        status: 404
+        meaning: 그 친구 코드를 가진 사람이 없음
+        message: 그런 코드는 없어. 다시 확인해 줘
+        client: 입력 칸 옆에 보임
+      too_many_characters:
+        status: 409
+        meaning: 만드는 중이거나 다 만든 캐릭터가 이미 3개(REQ-446)
+        message: 캐릭터는 3개까지야. 하나를 빼고 다시 해 줘
+        client: 캐릭터 목록에서 빼기를 권함
+      image_budget:
+        status: 409
+        meaning: 이번 달 만들기 작업 비용의 합이 MARONG_IMAGE_MONTHLY_USD에 닿음(SPEC-380)
+        message: 이번 달엔 그림을 더 못 그려. 다음 달에 다시 하자
+        client: 만들기 단추를 막고 다음 달 안내를 보임. 만들던 캐릭터는 그대로 둠
+      wrong_stage:
+        status: 409
+        meaning: 캐릭터의 만들기 단계(stage)가 이 요청이 받는 단계가 아님
+        message: 순서가 안 맞아. 지금 상태를 다시 보여 줄게
+        client: 캐릭터(API-221)를 다시 불러 그 단계 화면으로 보냄
+      job_running:
+        status: 409
+        meaning: 그 캐릭터에 기다리거나 도는 만들기 작업이 이미 있음
+        message: 아직 만드는 중이야. 조금만 기다려 줘
+        client: 진행 상태를 보이고 API-221을 다시 부름
+      no_regen_left:
+        status: 409
+        meaning: 후보 다시 만들기 2번을 다 씀(regenLeft 0)
+        message: 다시 만들기는 다 썼어. 이 중에서 골라 줘
+        client: 다시 만들기 단추를 막음
+      not_ready:
+        status: 409
+        meaning: 캐릭터가 ready 상태가 아님(만드는 중)
+        message: 아직 다 못 만들었어. 끝까지 만들고 하자
+        client: 만들기 화면으로 보냄
+      already_friends:
+        status: 409
+        meaning: 그 사람과 이미 아는 사이(accepted)
+        message: 이미 친구야!
+        client: 친구 목록을 다시 불러 보여 줌
+      request_exists:
+        status: 409
+        meaning: 같은 두 사람 사이에 기다리는 친구 요청이 이미 있음(내가 보냈거나 상대가 보냄)
+        message: 이미 요청이 가 있어
+        client: 친구 목록을 다시 불러 받은 요청·보낸 요청을 보여 줌
+      invite_used:
+        status: 410
+        meaning: 이미 쓴 초대 링크
+        message: 이 링크는 이미 썼어. 다른 기기라면 기기 추가 코드로 들어와 줘
+        client: 가입 화면의 이미 쓴 링크 상태. 로그인 화면으로 가는 단추
+      invite_expired:
+        status: 410
+        meaning: 만든 지 7일(MARONG_INVITE_DAYS)이 지났거나 동희님이 거둔 초대 링크
+        message: 이 링크는 기한이 지났어. 동희한테 새로 받아 줘
+        client: 가입 화면의 기한 지난 링크 상태
+      too_large:
+        status: 413
+        meaning: 요청 본문 전체가 26MB를 넘음(한 장이 8MB를 넘는 것은 400 photo_invalid)
+        message: 사진이 너무 커. 조금 줄여서 올려 줘
+        client: 고른 사진을 그대로 두고 줄여서 다시 올리게 함
+      too_many_tries:
+        status: 429
+        meaning: 같은 주소에서 틀린 기기 추가 코드를 10분에 5번 넣음. 10분 동안 막음
+        message: 너무 많이 틀렸어. 조금 있다가 다시 해 줘
+        client: Retry-After까지 입력 칸을 막고 남은 시간을 보여 줌
+      too_many_codes:
+        status: 429
+        meaning: 기기 추가 코드를 한 시간에 5번 넘게 만듦
+        message: 코드를 너무 많이 만들었어. 조금 있다가 다시 해 줘
+        client: Retry-After까지 단추를 막음
+      request_limit:
+        status: 429
+        meaning: 친구 요청을 하루(새벽 4시 기준)에 10번 넘게 보냄
+        message: 오늘은 요청을 다 썼어. 내일 다시 해 줘
+        client: Retry-After까지 요청 단추를 막음
+      check_unavailable:
+        status: 503
+        meaning: 사람 얼굴을 찾는 모델을 읽지 못해 사진을 받지 않음(SPEC-317). 아무것도 저장하지 않음
+        message: 지금은 사진을 살펴볼 수가 없어. 조금 있다가 다시 올려 줘
+        client: 고른 사진을 그대로 두고 다시 올리기 버튼을 보임
+      db_unavailable:
+        status: 503
+        meaning: DB에 닿지 않거나 로그인 확인이 2초를 넘김(관리자 경로는 Access 공개키 포함). 로그인 화면으로 보내지 않음
+        message: 잠깐 문제가 생겼어. 조금 있다가 다시 해 줘
+        client: 다시 연결하는 중 상태. 5초 뒤부터 늘려 가며 다시
+      internal:
+        status: 500
+        meaning: 예상하지 못한 서버 오류
+        message: 잠깐 문제가 생겼어. 다시 해 볼래?
+        client: 오류 상태, 다시 시도, 추적 id 보여 줌
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: marong_session
+      description: 로그인 쿠키(TERM-174). 초대 링크로 가입하거나 기기 추가 코드로 로그인할 때 서버가 줘요. HttpOnly라 화면의 js는 읽지 못해요. 서버는 값의 SHA-256을 TBL-165에서 찾고 끊김·만료를 봐요.
+    cfAccess:
+      type: apiKey
+      in: header
+      name: Cf-Access-Jwt-Assertion
+      description: 관리자 경로 전용. Cloudflare Access가 붙이는 JWT(RS256). 서버가 Access 공개키로 서명·aud·iss·exp를 확인하고 email의 sha256이 동희님 계정인지 봐요. 브라우저가 직접 넣지 않아요.
+  headers:
+    RetryAfter:
+      description: 다시 보낼 수 있을 때까지의 초
+      schema:
+        type: string
+        pattern: ^[0-9]{1,5}$
+    SetSession:
+      description: 로그인 쿠키를 줘요. 값은 추측할 수 없는 토큰(32바이트)이에요
+      schema:
+        type: string
+      example: marong_session=<토큰>; Path=/; Max-Age=7776000; HttpOnly; Secure; SameSite=Lax
+    ClearSession:
+      description: 로그인 쿠키를 지워요
+      schema:
+        type: string
+      example: marong_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
+    NoStore:
+      description: 토큰·코드가 오가는 응답은 저장하지 않게 해요
+      schema:
+        type: string
+        enum:
+        - no-store
+    PrivateCache:
+      description: 그림은 그 사람의 브라우저에만 남겨요
+      schema:
+        type: string
+        pattern: ^private, max-age=[0-9]{1,6}$
+      example: private, max-age=3600
+  parameters:
+    InviteToken:
+      name: token
+      in: path
+      required: true
+      description: 초대 링크의 토큰. 로그에 남기지 않아요
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    CharacterId:
+      name: id
+      in: path
+      required: true
+      description: 캐릭터 id(TBL-169)
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    Slot:
+      name: slot
+      in: path
+      required: true
+      description: 그림 자리(TBL-170 slot)
+      schema:
+        type: string
+        enum:
+        - photo_1
+        - photo_2
+        - photo_3
+        - preview
+        - candidate_1
+        - candidate_2
+        - candidate_3
+        - candidate_4
+        - front
+        - smile
+        - excited
+        - sleepy
+        - surprised
+        - sad
+        - pout
+    FriendId:
+      name: friendId
+      in: path
+      required: true
+      description: 상대 친구의 id(관리자 경로에서는 그 회원의 id)
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+  responses:
+    InvalidInput:
+      description: 요청이 틀림
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            too-long:
+              value:
+                type: https://marong.corthex-hq.com/problems/invalid-input
+                title: 요청 모양이 틀림
+                status: 400
+                code: invalid_input
+                traceId: 0af7651916cd43dd
+                errors:
+                - field: name
+                  reason: too_long
+            missing:
+              value:
+                type: https://marong.corthex-hq.com/problems/invalid-input
+                title: 요청 모양이 틀림
+                status: 400
+                code: invalid_input
+                traceId: 0af7651916cd43dd
+                errors:
+                - field: body
+                  reason: required
+            bad-id:
+              value:
+                type: https://marong.corthex-hq.com/problems/invalid-input
+                title: 요청 모양이 틀림
+                status: 400
+                code: invalid_input
+                traceId: 0af7651916cd43dd
+                errors:
+                - field: id
+                  reason: bad_format
+    ProfileInvalid:
+      description: 요청이 틀림, 또는 목록에 없는 목소리
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            name-too-long:
+              value:
+                type: https://marong.corthex-hq.com/problems/invalid-input
+                title: 요청 모양이 틀림
+                status: 400
+                code: invalid_input
+                traceId: 0af7651916cd43dd
+                errors:
+                - field: botName
+                  reason: too_long
+            voice-unknown:
+              value:
+                type: https://marong.corthex-hq.com/problems/voice-unknown
+                title: 목록에 없는 목소리
+                status: 400
+                code: voice_unknown
+                traceId: 0af7651916cd43dd
+    PhotoInvalid:
+      description: 쓸 수 없는 사진, 또는 형식이 틀린 경로 id
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            photo-invalid:
+              value:
+                type: https://marong.corthex-hq.com/problems/photo-invalid
+                title: 쓸 수 없는 사진
+                status: 400
+                code: photo_invalid
+                traceId: 0af7651916cd43dd
+                errors:
+                - field: photos
+                  reason: bad_format
+            bad-id:
+              value:
+                type: https://marong.corthex-hq.com/problems/invalid-input
+                title: 요청 모양이 틀림
+                status: 400
+                code: invalid_input
+                traceId: 0af7651916cd43dd
+                errors:
+                - field: id
+                  reason: bad_format
+    FriendRequestInvalid:
+      description: 요청이 틀림, 또는 내 친구 코드
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            bad-code:
+              value:
+                type: https://marong.corthex-hq.com/problems/invalid-input
+                title: 요청 모양이 틀림
+                status: 400
+                code: invalid_input
+                traceId: 0af7651916cd43dd
+                errors:
+                - field: friendCode
+                  reason: bad_format
+            self:
+              value:
+                type: https://marong.corthex-hq.com/problems/self-request
+                title: 내 친구 코드
+                status: 400
+                code: self_request
+                traceId: 0af7651916cd43dd
+    LoginRequired:
+      description: 로그인 쿠키가 없거나 끝남
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            no-session:
+              value:
+                type: https://marong.corthex-hq.com/problems/login-required
+                title: 로그인이 필요함
+                status: 401
+                code: login_required
+                traceId: 0af7651916cd43dd
+    CodeWrong:
+      description: 기기 추가 코드가 맞지 않음
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            wrong:
+              value:
+                type: https://marong.corthex-hq.com/problems/code-wrong
+                title: 코드가 맞지 않음
+                status: 401
+                code: code_wrong
+                traceId: 0af7651916cd43dd
+    CrossSite:
+      description: 다른 사이트에서 온 쓰기 요청
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            cross-site:
+              value:
+                type: https://marong.corthex-hq.com/problems/cross-site
+                title: 다른 사이트에서 온 쓰기 요청
+                status: 403
+                code: cross_site
+                traceId: 00f067aa0ba902b7
+    AdminForbiddenRead:
+      description: Access 증명이 없거나 관리자 계정이 아님
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            not-allowed:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-allowed
+                title: 관리자 계정이 아님
+                status: 403
+                code: not_allowed
+                traceId: 00f067aa0ba902b7
+    AdminForbiddenWrite:
+      description: Access 증명이 없거나 관리자 계정이 아님, 또는 다른 사이트에서 온 쓰기 요청
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            not-allowed:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-allowed
+                title: 관리자 계정이 아님
+                status: 403
+                code: not_allowed
+                traceId: 00f067aa0ba902b7
+            cross-site:
+              value:
+                type: https://marong.corthex-hq.com/problems/cross-site
+                title: 다른 사이트에서 온 쓰기 요청
+                status: 403
+                code: cross_site
+                traceId: 00f067aa0ba902b7
+    NotFound:
+      description: 없거나 로그인한 친구의 것이 아님
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            not-found:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-found
+                title: 찾지 못함
+                status: 404
+                code: not_found
+                traceId: 4bf92f3577b34da6
+    InviteNotFound:
+      description: 없는 초대 링크
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unknown:
+              value:
+                type: https://marong.corthex-hq.com/problems/invite-not-found
+                title: 없는 초대 링크
+                status: 404
+                code: invite_not_found
+                traceId: 4bf92f3577b34da6
+    CodeNotFound:
+      description: 없는 친구 코드, 또는 친구 설정이 꺼져 있음
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unknown:
+              value:
+                type: https://marong.corthex-hq.com/problems/code-not-found
+                title: 없는 친구 코드
+                status: 404
+                code: code_not_found
+                traceId: 4bf92f3577b34da6
+            friends-off:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-found
+                title: 찾지 못함
+                status: 404
+                code: not_found
+                traceId: 4bf92f3577b34da6
+    CharacterLimitOrBudget:
+      description: 캐릭터가 이미 3개, 또는 이번 달 그림 예산을 다 씀
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            limit:
+              value:
+                type: https://marong.corthex-hq.com/problems/too-many-characters
+                title: 캐릭터가 이미 3개
+                status: 409
+                code: too_many_characters
+                traceId: 4bf92f3577b34da6
+            budget:
+              value:
+                type: https://marong.corthex-hq.com/problems/image-budget
+                title: 이번 달 그림 예산을 다 씀
+                status: 409
+                code: image_budget
+                traceId: 4bf92f3577b34da6
+    StageOrJob:
+      description: 지금 단계에서는 할 수 없음, 또는 만들기 작업이 도는 중
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            wrong-stage:
+              value:
+                type: https://marong.corthex-hq.com/problems/wrong-stage
+                title: 지금 단계에서는 할 수 없음
+                status: 409
+                code: wrong_stage
+                traceId: 4bf92f3577b34da6
+            job-running:
+              value:
+                type: https://marong.corthex-hq.com/problems/job-running
+                title: 만들기 작업이 도는 중
+                status: 409
+                code: job_running
+                traceId: 4bf92f3577b34da6
+    PreviewConflict:
+      description: 지금 단계에서는 할 수 없음, 만들기 작업이 도는 중, 또는 그림 예산을 다 씀
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            wrong-stage:
+              value:
+                type: https://marong.corthex-hq.com/problems/wrong-stage
+                title: 지금 단계에서는 할 수 없음
+                status: 409
+                code: wrong_stage
+                traceId: 4bf92f3577b34da6
+            job-running:
+              value:
+                type: https://marong.corthex-hq.com/problems/job-running
+                title: 만들기 작업이 도는 중
+                status: 409
+                code: job_running
+                traceId: 4bf92f3577b34da6
+            budget:
+              value:
+                type: https://marong.corthex-hq.com/problems/image-budget
+                title: 이번 달 그림 예산을 다 씀
+                status: 409
+                code: image_budget
+                traceId: 4bf92f3577b34da6
+    CandidatesConflict:
+      description: 지금 단계에서는 할 수 없음, 만들기 작업이 도는 중, 다시 만들기를 다 씀, 또는 그림 예산을 다 씀
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            wrong-stage:
+              value:
+                type: https://marong.corthex-hq.com/problems/wrong-stage
+                title: 지금 단계에서는 할 수 없음
+                status: 409
+                code: wrong_stage
+                traceId: 4bf92f3577b34da6
+            job-running:
+              value:
+                type: https://marong.corthex-hq.com/problems/job-running
+                title: 만들기 작업이 도는 중
+                status: 409
+                code: job_running
+                traceId: 4bf92f3577b34da6
+            no-regen:
+              value:
+                type: https://marong.corthex-hq.com/problems/no-regen-left
+                title: 후보 다시 만들기를 다 씀
+                status: 409
+                code: no_regen_left
+                traceId: 4bf92f3577b34da6
+            budget:
+              value:
+                type: https://marong.corthex-hq.com/problems/image-budget
+                title: 이번 달 그림 예산을 다 씀
+                status: 409
+                code: image_budget
+                traceId: 4bf92f3577b34da6
+    WrongStage:
+      description: 지금 단계에서는 할 수 없음
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            wrong-stage:
+              value:
+                type: https://marong.corthex-hq.com/problems/wrong-stage
+                title: 지금 단계에서는 할 수 없음
+                status: 409
+                code: wrong_stage
+                traceId: 4bf92f3577b34da6
+    NotReady:
+      description: 아직 다 만들지 않은 캐릭터
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            not-ready:
+              value:
+                type: https://marong.corthex-hq.com/problems/not-ready
+                title: 아직 다 만들지 않은 캐릭터
+                status: 409
+                code: not_ready
+                traceId: 4bf92f3577b34da6
+    JobRunning:
+      description: 만들기 작업이 도는 중
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            job-running:
+              value:
+                type: https://marong.corthex-hq.com/problems/job-running
+                title: 만들기 작업이 도는 중
+                status: 409
+                code: job_running
+                traceId: 4bf92f3577b34da6
+    FriendConflict:
+      description: 이미 친구, 또는 이미 기다리는 요청이 있음
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            already:
+              value:
+                type: https://marong.corthex-hq.com/problems/already-friends
+                title: 이미 친구
+                status: 409
+                code: already_friends
+                traceId: 4bf92f3577b34da6
+            pending:
+              value:
+                type: https://marong.corthex-hq.com/problems/request-exists
+                title: 이미 기다리는 요청이 있음
+                status: 409
+                code: request_exists
+                traceId: 4bf92f3577b34da6
+    InviteGone:
+      description: 이미 썼거나 기한이 지난 초대 링크
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            used:
+              value:
+                type: https://marong.corthex-hq.com/problems/invite-used
+                title: 이미 쓴 초대 링크
+                status: 410
+                code: invite_used
+                traceId: 4bf92f3577b34da6
+            expired:
+              value:
+                type: https://marong.corthex-hq.com/problems/invite-expired
+                title: 기한이 지난 초대 링크
+                status: 410
+                code: invite_expired
+                traceId: 4bf92f3577b34da6
+    TooLarge:
+      description: 사진이 너무 큼
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            too-large:
+              value:
+                type: https://marong.corthex-hq.com/problems/too-large
+                title: 사진이 너무 큼
+                status: 413
+                code: too_large
+                traceId: 4bf92f3577b34da6
+    TooManyTries:
+      description: 틀린 코드를 10분에 5번 넣음
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            tries:
+              value:
+                type: https://marong.corthex-hq.com/problems/too-many-tries
+                title: 틀린 코드를 너무 많이 넣음
+                status: 429
+                code: too_many_tries
+                traceId: 4bf92f3577b34da6
+    TooManyCodes:
+      description: 기기 추가 코드를 한 시간에 5번 넘게 만듦
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            codes:
+              value:
+                type: https://marong.corthex-hq.com/problems/too-many-codes
+                title: 기기 추가 코드를 너무 많이 만듦
+                status: 429
+                code: too_many_codes
+                traceId: 4bf92f3577b34da6
+    RequestLimit:
+      description: 친구 요청을 하루에 10번 넘게 보냄
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            limit:
+              value:
+                type: https://marong.corthex-hq.com/problems/request-limit
+                title: 오늘 친구 요청을 다 씀
+                status: 429
+                code: request_limit
+                traceId: 4bf92f3577b34da6
+    DbUnavailable:
+      description: DB에 닿지 않음(아무것도 바뀌지 않음)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            db:
+              value:
+                type: https://marong.corthex-hq.com/problems/db-unavailable
+                title: DB에 닿지 않음
+                status: 503
+                code: db_unavailable
+                traceId: 4bf92f3577b34da6
+    PhotoUnavailable:
+      description: DB에 닿지 않거나 사진 검사 모델을 읽지 못함(아무것도 바뀌지 않음)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            db:
+              value:
+                type: https://marong.corthex-hq.com/problems/db-unavailable
+                title: DB에 닿지 않음
+                status: 503
+                code: db_unavailable
+                traceId: 4bf92f3577b34da6
+            check:
+              value:
+                type: https://marong.corthex-hq.com/problems/check-unavailable
+                title: 사진을 살펴볼 수 없음
+                status: 503
+                code: check_unavailable
+                traceId: 4bf92f3577b34da6
+    Internal:
+      description: 예상하지 못한 서버 오류
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            internal:
+              value:
+                type: https://marong.corthex-hq.com/problems/internal
+                title: 예상하지 못한 서버 오류
+                status: 500
+                code: internal
+                traceId: 4bf92f3577b34da6
+  schemas:
+    Problem:
+      type: object
+      required:
+      - title
+      - status
+      - code
+      - traceId
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+          maxLength: 200
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+          maxLength: 300
+        instance:
+          type: string
+          format: uri-reference
+        code:
+          type: string
+          enum:
+          - invalid_input
+          - voice_unknown
+          - photo_invalid
+          - self_request
+          - login_required
+          - code_wrong
+          - cross_site
+          - not_allowed
+          - not_found
+          - invite_not_found
+          - code_not_found
+          - too_many_characters
+          - image_budget
+          - wrong_stage
+          - job_running
+          - no_regen_left
+          - not_ready
+          - already_friends
+          - request_exists
+          - invite_used
+          - invite_expired
+          - too_large
+          - too_many_tries
+          - too_many_codes
+          - request_limit
+          - check_unavailable
+          - db_unavailable
+          - internal
+        traceId:
+          type: string
+          pattern: ^[0-9a-f]{16}$
+        errors:
+          type: array
+          maxItems: 10
+          description: 검증 오류 위치. 보낸 값은 담지 않음
+          items:
+            type: object
+            required:
+            - field
+            - reason
+            properties:
+              field:
+                type: string
+                enum:
+                - body
+                - token
+                - name
+                - code
+                - botName
+                - voice
+                - share
+                - kind
+                - photos
+                - traits
+                - template
+                - tone
+                - slot
+                - characterId
+                - friendCode
+                - action
+                - close
+                - friendId
+                - note
+                - add
+                - id
+              reason:
+                type: string
+                enum:
+                - required
+                - too_short
+                - too_long
+                - bad_format
+                - out_of_range
+                - not_an_option
+    InviteCheck:
+      type: object
+      additionalProperties: false
+      required:
+      - kind
+      - state
+      properties:
+        kind:
+          type: string
+          enum:
+          - join
+          - link
+          - relogin
+          description: join이면 화면이 이름 칸을 보여요
+        state:
+          type: string
+          enum:
+          - open
+          description: 쓸 수 있는 링크만 200이라 늘 open
+    JoinRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - token
+      properties:
+        token:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{43}$
+          description: 초대 링크의 토큰(32바이트의 base64url)
+        name:
+          type: string
+          minLength: 1
+          maxLength: 12
+          description: 내 이름. 종류가 join이면 꼭 있어야 해요(앞뒤 공백은 떼고 세요)
+    Session:
+      type: object
+      additionalProperties: false
+      required:
+      - friendName
+      - botName
+      properties:
+        friendName:
+          type: string
+          maxLength: 40
+          description: 로그인한 친구의 이름
+        botName:
+          type: string
+          minLength: 1
+          maxLength: 12
+          description: 마롱이 이름(TERM-178)
+    CodeLogin:
+      type: object
+      additionalProperties: false
+      required:
+      - code
+      properties:
+        code:
+          type: string
+          pattern: ^[0-9]{6}$
+          description: 기기 추가 코드(TERM-175)
+    DeviceCode:
+      type: object
+      additionalProperties: false
+      required:
+      - code
+      - expiresAt
+      properties:
+        code:
+          type: string
+          pattern: ^[0-9]{6}$
+        expiresAt:
+          type: string
+          format: date-time
+          description: 만든 때부터 10분 뒤
+    UsageToday:
+      type: object
+      additionalProperties: false
+      required:
+      - chatTurns
+      - callSeconds
+      - images
+      - units
+      properties:
+        chatTurns:
+          type: integer
+          minimum: 0
+          description: 글 답 수
+        callSeconds:
+          type: integer
+          minimum: 0
+          description: 통화 초
+        images:
+          type: integer
+          minimum: 0
+          description: 그린 그림 수
+        units:
+          type: integer
+          minimum: 0
+          description: 사용 단위(TERM-191)로 합친 값
+      description: 오늘(새벽 4시 기준) 쓴 양
+    Usage:
+      type: object
+      additionalProperties: false
+      required:
+      - day
+      - chatTurns
+      - callSeconds
+      - images
+      - units
+      - limit
+      - tickets
+      properties:
+        day:
+          type: string
+          format: date
+          description: 사용량의 하루(한국 시간 새벽 4시에 바뀜)
+        chatTurns:
+          type: integer
+          minimum: 0
+          description: 글 답 수
+        callSeconds:
+          type: integer
+          minimum: 0
+          description: 통화 초
+        images:
+          type: integer
+          minimum: 0
+          description: 그린 그림 수
+        units:
+          type: integer
+          minimum: 0
+          description: 사용 단위(TERM-191)로 합친 값
+        limit:
+          oneOf:
+          - type: integer
+            minimum: 1
+            description: 하루 단위 한도(MARONG_DAILY_UNITS). 비어 있으면 null
+          - type: 'null'
+        tickets:
+          type: integer
+          minimum: 0
+          description: 남은 티켓(TERM-192)
+    ProfileCharacter:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - name
+      - kind
+      - faceUrl
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        name:
+          type: string
+          minLength: 1
+          maxLength: 12
+        kind:
+          type: string
+          enum:
+          - dog
+          - cat
+        faceUrl:
+          type: string
+          format: uri-reference
+          description: 정면 그림(API-242)
+    Profile:
+      type: object
+      additionalProperties: false
+      required:
+      - friendName
+      - botName
+      - character
+      - voice
+      - friendCode
+      - share
+      - usageToday
+      - features
+      - google
+      - pendingRing
+      properties:
+        friendName:
+          type: string
+          maxLength: 40
+        botName:
+          type: string
+          minLength: 1
+          maxLength: 12
+          description: 마롱이 이름(TERM-178)
+        character:
+          oneOf:
+          - $ref: '#/components/schemas/ProfileCharacter'
+          - type: 'null'
+          description: 쓰는 캐릭터. null이면 기본 마롱이(TERM-186)
+        voice:
+          oneOf:
+          - type: string
+            pattern: ^[A-Za-z]{2,24}$
+            description: 통화 목소리 이름. null이면 기본 목소리
+          - type: 'null'
+        friendCode:
+          type: string
+          pattern: ^[A-HJ-NP-Z2-9]{6}$
+          description: 내 친구 코드(TERM-187)
+        share:
+          type: boolean
+          description: 내 얘기를 다른 친구에게 해도 되는지(friends.share)
+        usageToday:
+          $ref: '#/components/schemas/UsageToday'
+        features:
+          type: object
+          additionalProperties: false
+          required:
+          - character
+          - friends
+          properties:
+            character:
+              type: boolean
+              description: MARONG_CHARACTER가 켜져 있으면 true. false여도 쓰는 캐릭터는 그대로 보여요
+            friends:
+              type: boolean
+              description: MARONG_FRIENDS가 켜져 있으면 true
+          description: 서버에서 켜진 기능. 화면은 꺼진 기능의 메뉴를 그리지 않아요(명세 공통 규칙 9)
+        google:
+          type: string
+          enum:
+          - connected
+          - not_connected
+          - 'off'
+          description: 구글 캘린더 연결 상태(SPEC-384). off는 이 서버에서 구글 연결 기능이 꺼져 있음
+        pendingRing:
+          oneOf:
+          - type: object
+            additionalProperties: false
+            required:
+            - ringId
+            - until
+            properties:
+              ringId:
+                type: string
+                format: uuid
+                description: 통화 화면을 열 때 `ring` 값으로 넘기는 id(API-107)
+              until:
+                type: string
+                format: date-time
+                description: 이때까지 받으면 이 전화로 침(TBL-102 `answer_until`)
+          - type: 'null'
+          description: 마롱이가 지금 걸고 있는 약속 전화(TBL-102에서 이 친구의 `ringing` 행이고 `answer_until` 전). 없으면 null. 웹 화면이 받기 버튼을 그리는 값이에요(SPEC-383)
+    ProfilePatch:
+      type: object
+      additionalProperties: false
+      properties:
+        botName:
+          type: string
+          minLength: 1
+          maxLength: 12
+          description: 마롱이 이름(TERM-178)
+        voice:
+          oneOf:
+          - type: string
+            pattern: ^[A-Za-z]{2,24}$
+          - type: 'null'
+        share:
+          type: boolean
+      minProperties: 1
+    Voice:
+      type: object
+      additionalProperties: false
+      required:
+      - name
+      - label
+      - sampleUrl
+      - default
+      properties:
+        name:
+          type: string
+          pattern: ^[A-Za-z]{2,24}$
+          description: MARONG_CALL_VOICES의 이름
+        label:
+          type: string
+          maxLength: 20
+          description: 화면에 보이는 한 줄 설명
+        sampleUrl:
+          oneOf:
+          - type: string
+            format: uri-reference
+            description: 목소리 견본(TERM-184)
+          - type: 'null'
+        default:
+          type: boolean
+    VoiceList:
+      type: object
+      additionalProperties: false
+      required:
+      - voices
+      properties:
+        voices:
+          type: array
+          minItems: 1
+          maxItems: 30
+          items:
+            $ref: '#/components/schemas/Voice'
+    Traits:
+      type: object
+      additionalProperties: false
+      required:
+      - species
+      - coatColors
+      - pattern
+      - earShape
+      - eyeColor
+      - build
+      - furLength
+      properties:
+        species:
+          type: string
+          enum:
+          - dog
+          - cat
+        breedGuess:
+          type: string
+          maxLength: 30
+        coatColors:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+            - 흰색
+            - 검은색
+            - 갈색
+            - 크림
+            - 회색
+            - 황토
+            - 주황
+            - 은색
+        pattern:
+          type: string
+          enum:
+          - 단색
+          - 얼룩
+          - 줄무늬
+          - 턱시도
+          - 포인트
+          - 삼색
+          - 브린들
+        patternNotes:
+          type: string
+          maxLength: 60
+        earShape:
+          type: string
+          enum:
+          - 선 귀
+          - 접힌 귀
+          - 늘어진 귀
+          - 반쯤 선 귀
+        eyeColor:
+          type: string
+          enum:
+          - 갈색
+          - 검은색
+          - 파란색
+          - 초록색
+          - 노란색
+          - 짝눈
+        build:
+          type: string
+          enum:
+          - 작음
+          - 중간
+          - 큼
+          - 긴 몸
+          - 통통함
+        furLength:
+          type: string
+          enum:
+          - 짧음
+          - 중간
+          - 긺
+          - 곱슬
+        distinctive:
+          type: string
+          maxLength: 60
+      description: 특징표. 칸과 값은 반려동물 계약(api/pet.openapi.yaml)의 Traits와 같고 species만 dog·cat이에요
+    Template:
+      type: string
+      enum:
+      - dog_small
+      - dog_large
+      - dog_long
+      - cat
+      - cat_round
+      description: 몸 템플릿 5종
+    Job:
+      type: object
+      additionalProperties: false
+      required:
+      - step
+      - state
+      - error
+      properties:
+        step:
+          type: string
+          enum:
+          - traits
+          - preview
+          - candidates
+          - sheet
+          description: 특징 읽기, 미리 보기, 후보 4장, 표정 6장
+        state:
+          type: string
+          enum:
+          - queued
+          - running
+          - done
+          - failed
+        error:
+          oneOf:
+          - type: string
+            enum:
+            - model_error
+            - model_refused
+            - timeout
+            - check_failed
+            - budget
+            description: state가 failed일 때만 있어요. 코드만 주고 모델의 글은 주지 않아요
+          - type: 'null'
+      description: 만들기 작업(TERM-185) 하나
+    Character:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - kind
+      - stage
+      - status
+      - name
+      - template
+      - traits
+      - tone
+      - regenLeft
+      - job
+      - images
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        kind:
+          type: string
+          enum:
+          - dog
+          - cat
+        stage:
+          type: string
+          enum:
+          - photos
+          - traits
+          - preview
+          - candidates
+          - sheet
+          - name
+          - done
+          description: 만들기가 어디까지 왔는지
+        status:
+          type: string
+          enum:
+          - draft
+          - ready
+          description: ready여야 입혀 보고 적용할 수 있어요. 뺀(retired) 캐릭터는 응답에 없어요
+        name:
+          oneOf:
+          - type: string
+            minLength: 1
+            maxLength: 12
+          - type: 'null'
+        template:
+          oneOf:
+          - $ref: '#/components/schemas/Template'
+          - type: 'null'
+        traits:
+          oneOf:
+          - $ref: '#/components/schemas/Traits'
+          - type: 'null'
+          description: 단계가 traits이면 서버가 사진에서 읽은 값, 그 뒤는 정한 값
+        tone:
+          type: string
+          maxLength: 60
+          description: 말투 한 줄. 없으면 빈 글
+        regenLeft:
+          type: integer
+          minimum: 0
+          maximum: 2
+          description: 남은 후보 다시 만들기
+        job:
+          oneOf:
+          - $ref: '#/components/schemas/Job'
+          - type: 'null'
+          description: 가장 최근 만들기 작업
+        images:
+          type: object
+          description: 지금 있는 그림의 자리와 주소(API-242)
+          propertyNames:
+            enum:
+            - photo_1
+            - photo_2
+            - photo_3
+            - preview
+            - candidate_1
+            - candidate_2
+            - candidate_3
+            - candidate_4
+            - front
+            - smile
+            - excited
+            - sleepy
+            - surprised
+            - sad
+            - pout
+          additionalProperties:
+            type: string
+            format: uri-reference
+    CharacterEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+      - character
+      properties:
+        character:
+          $ref: '#/components/schemas/Character'
+    CharacterList:
+      type: object
+      additionalProperties: false
+      required:
+      - characters
+      - limit
+      properties:
+        characters:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/Character'
+        limit:
+          type: integer
+          const: 3
+          description: 한 사람이 둘 수 있는 캐릭터 수(REQ-446)
+    CharacterCreate:
+      type: object
+      additionalProperties: false
+      required:
+      - kind
+      properties:
+        kind:
+          type: string
+          enum:
+          - dog
+          - cat
+    TraitsConfirm:
+      type: object
+      additionalProperties: false
+      required:
+      - traits
+      - template
+      properties:
+        traits:
+          $ref: '#/components/schemas/Traits'
+        template:
+          $ref: '#/components/schemas/Template'
+        tone:
+          type: string
+          maxLength: 60
+          description: 말투 한 줄. 안 보내면 지금 값 그대로
+    CandidatePick:
+      type: object
+      additionalProperties: false
+      required:
+      - slot
+      properties:
+        slot:
+          type: string
+          enum:
+          - candidate_1
+          - candidate_2
+          - candidate_3
+          - candidate_4
+    CharacterName:
+      type: object
+      additionalProperties: false
+      required:
+      - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 12
+    CharacterApply:
+      type: object
+      additionalProperties: false
+      required:
+      - characterId
+      properties:
+        characterId:
+          oneOf:
+          - type: integer
+            format: int64
+            minimum: 1
+            description: 적용할 캐릭터. null이면 기본 마롱이
+          - type: 'null'
+    TryOn:
+      type: object
+      additionalProperties: false
+      required:
+      - botName
+      - faces
+      - chatSample
+      - callLine
+      properties:
+        botName:
+          type: string
+          minLength: 1
+          maxLength: 12
+          description: 마롱이 이름(TERM-178)
+        faces:
+          type: object
+          description: 정면과 표정 6장의 주소
+          propertyNames:
+            enum:
+            - front
+            - smile
+            - excited
+            - sleepy
+            - surprised
+            - sad
+            - pout
+          additionalProperties:
+            type: string
+            format: uri-reference
+        chatSample:
+          type: array
+          minItems: 2
+          maxItems: 6
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - from
+            - text
+            properties:
+              from:
+                type: string
+                enum:
+                - me
+                - bot
+              text:
+                type: string
+                maxLength: 80
+        callLine:
+          type: string
+          maxLength: 80
+          description: 통화 화면 예시에 보일 첫 말
+    Friend:
+      type: object
+      additionalProperties: false
+      required:
+      - friendId
+      - name
+      - close
+      - closeMine
+      properties:
+        friendId:
+          type: integer
+          format: int64
+          minimum: 1
+        name:
+          type: string
+          maxLength: 40
+        close:
+          type: boolean
+          description: 가까운 사이(둘 다 켰을 때만 참)
+        closeMine:
+          type: boolean
+          description: 내가 켠 값(TERM-189)
+    FriendRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - friendId
+      - name
+      - requestedAt
+      properties:
+        friendId:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 상대 친구
+        name:
+          type: string
+          maxLength: 40
+        requestedAt:
+          type: string
+          format: date-time
+      description: 친구 요청(TERM-188) 하나
+    FriendList:
+      type: object
+      additionalProperties: false
+      required:
+      - friends
+      - incoming
+      - outgoing
+      properties:
+        friends:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/Friend'
+        incoming:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/FriendRequest'
+        outgoing:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/FriendRequest'
+    FriendRequestCreate:
+      type: object
+      additionalProperties: false
+      required:
+      - friendCode
+      properties:
+        friendCode:
+          type: string
+          pattern: ^[A-HJ-NP-Za-hj-np-z2-9]{6}$
+          description: 상대의 친구 코드. 소문자로 넣어도 받아요
+    FriendRequestEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+      - request
+      properties:
+        request:
+          $ref: '#/components/schemas/FriendRequest'
+    FriendRequestAnswer:
+      type: object
+      additionalProperties: false
+      required:
+      - action
+      properties:
+        action:
+          type: string
+          enum:
+          - accept
+          - decline
+    FriendRequestResult:
+      type: object
+      additionalProperties: false
+      required:
+      - state
+      properties:
+        state:
+          type: string
+          enum:
+          - accepted
+          - declined
+    FriendClosePatch:
+      type: object
+      additionalProperties: false
+      required:
+      - close
+      properties:
+        close:
+          type: boolean
+          description: 내 바람
+    FriendClose:
+      type: object
+      additionalProperties: false
+      required:
+      - close
+      - closeMine
+      properties:
+        close:
+          type: boolean
+        closeMine:
+          type: boolean
+    InviteCreate:
+      type: object
+      additionalProperties: false
+      required:
+      - kind
+      properties:
+        kind:
+          type: string
+          enum:
+          - join
+          - link
+          - relogin
+        friendId:
+          type: integer
+          format: int64
+          minimum: 1
+          description: link·relogin이면 꼭 있어야 하고 join이면 보내지 않아요
+        note:
+          type: string
+          maxLength: 40
+          description: 동희님만 보는 메모
+    InviteCreated:
+      type: object
+      additionalProperties: false
+      required:
+      - url
+      - expiresAt
+      properties:
+        url:
+          type: string
+          format: uri
+          description: 가입 화면 주소(/chat/join/<토큰>). 이 응답에만 있어요
+        expiresAt:
+          type: string
+          format: date-time
+    InviteUser:
+      type: object
+      additionalProperties: false
+      required:
+      - friendId
+      - name
+      properties:
+        friendId:
+          type: integer
+          format: int64
+          minimum: 1
+        name:
+          type: string
+          maxLength: 40
+    Invite:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - kind
+      - note
+      - state
+      - expiresAt
+      - usedBy
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        kind:
+          type: string
+          enum:
+          - join
+          - link
+          - relogin
+        note:
+          type: string
+          maxLength: 40
+        state:
+          type: string
+          enum:
+          - open
+          - used
+          - expired
+          - revoked
+        expiresAt:
+          type: string
+          format: date-time
+        usedBy:
+          oneOf:
+          - $ref: '#/components/schemas/InviteUser'
+          - type: 'null'
+          description: 쓴 친구. 아직 안 썼으면 null
+    InviteList:
+      type: object
+      additionalProperties: false
+      required:
+      - invites
+      properties:
+        invites:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/Invite'
+    Member:
+      type: object
+      additionalProperties: false
+      required:
+      - friendId
+      - name
+      - botName
+      - sessions
+      - lastSeenAt
+      - tickets
+      - usageToday
+      properties:
+        friendId:
+          type: integer
+          format: int64
+          minimum: 1
+        name:
+          type: string
+          maxLength: 40
+        botName:
+          type: string
+          minLength: 1
+          maxLength: 12
+          description: 마롱이 이름(TERM-178)
+        sessions:
+          type: integer
+          minimum: 0
+          description: 살아 있는 기기 로그인 수
+        lastSeenAt:
+          oneOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+        tickets:
+          type: integer
+          minimum: 0
+        usageToday:
+          $ref: '#/components/schemas/UsageToday'
+    MemberList:
+      type: object
+      additionalProperties: false
+      required:
+      - members
+      - unlinked
+      properties:
+        members:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/Member'
+        unlinked:
+          type: array
+          maxItems: 500
+          description: 프로필 행이 없는 기존 친구(TBL-167에 행이 없음)
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - friendId
+            - name
+            properties:
+              friendId:
+                type: integer
+                format: int64
+                minimum: 1
+              name:
+                type: string
+                maxLength: 40
+    TicketsAdd:
+      type: object
+      additionalProperties: false
+      required:
+      - add
+      properties:
+        add:
+          type: integer
+          minimum: 1
+          maximum: 1000
+    Tickets:
+      type: object
+      additionalProperties: false
+      required:
+      - tickets
+      properties:
+        tickets:
+          type: integer
+          minimum: 0

@@ -69,6 +69,18 @@ public class ChatActivity extends BridgeActivity {
         chat.finish();
     }
 
+    @Override
+    public void onStop() {
+        super.onStop();
+        AppUpdateJob.retryWhenQuiet(this);
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        AppUpdateJob.check(this);
+    }
+
     /**
      * The app's own Capacitor settings with two changes: the start path /chat/ and the chat's
      * "can't connect" page. Capacitor reads the debug flag only when it loads the file itself, and

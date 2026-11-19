@@ -7,10 +7,12 @@ from aiohttp import ClientError, ClientSession, ClientTimeout, WSMsgType, web
 from google.oauth2 import service_account
 from google.auth.transport.requests import Request
 import jwt
+import psycopg
+from marong.app_session import COOKIE as SESSION_COOKIE, SessionError, auth_mode, find_session, identify_request
 from live_session import LiveSession, BUILD
 from call_cost import BLOCKED, budget_status
 from memory_tools import DECLARATIONS, END_CALL
-from call_memory import CallBusy, MemoryStore
+from call_memory import CallBusy, MemoryStore, Principal
 import call_search
 import rtc_transport
 
@@ -22,6 +24,8 @@ LOCATION='us-central1'
 MODEL='gemini-3.8-live'
 VOICE='Sulafat'
 AUTH_MODE=os.environ.get('VERTEX_AUTH_MODE','api_key')
+AUTHENTICATION=auth_mode(os.environ.get("MARONG_AUTH","access"))
+SESSION_AGE=timedelta(days=int(os.environ.get("MARONG_SESSION_DAYS","90")))
 ROOT.mkdir(mode=0o700,parents=True,exist_ok=True)
 JOIN_FILE=ROOT/'join-token'
 if not JOIN_FILE.exists():
@@ -60,7 +64,7 @@ memory_store=None
 active_session=None
 diagnostics={'playbackUnderruns':0,'maxAudioGapMs':0,'bufferMs':0,'contextState':'unknown','providerInterruptions':0,'providerReconnects':0}
 
-async def identity(req):
+async def access_identity(req):
     # Access headers need signature, issuer, audience and allowlist validation.
     token=req.headers.get('Cf-Access-Jwt-Assertion','')
     if not token:
@@ -83,6 +87,43 @@ async def identity(req):
         return {'owner':claims['sub'],'email_hash':hashlib.sha256(claims['email'].strip().lower().encode()).hexdigest()}
     except (jwt.PyJWTError,ValueError,KeyError,TypeError,StopIteration,TimeoutError,OSError,ClientError):return None
 
+
+async def identity(req):
+    token = req.cookies.get(SESSION_COOKIE)
+
+    async def lookup(value):
+        if memory_store is None:
+            raise web.HTTPServiceUnavailable()
+        row = await find_session(memory_store.pool, value, age=SESSION_AGE)
+        if row is None:
+            return None
+        if not row["room_key"]:
+            raise SessionError("login_required")
+        if not row["call_enabled"]:
+            raise web.HTTPForbidden()
+        if row["renewed"]:
+            req["session_refresh"] = token
+        return {
+            "owner": f"friend:{row['friend_id']}",
+            "principal": Principal(row["caller_id"], row["friend_id"], row["name"], row["context_revision"]),
+        }
+
+    try:
+        return await identify_request(AUTHENTICATION, token, lookup, lambda: access_identity(req))
+    except SessionError as error:
+        if error.code == "login_required":
+            return None
+        raise
+    except (psycopg.OperationalError, TimeoutError):
+        raise web.HTTPServiceUnavailable() from None
+
+
+def refresh_session_cookie(req, response):
+    token = req.get("session_refresh")
+    if token:
+        response.set_cookie(SESSION_COOKIE, token, max_age=int(SESSION_AGE.total_seconds()),
+                            path="/", httponly=True, secure=True, samesite="Lax")
+
 def same_origin(req):return req.headers.get('Origin','') in ('https://'+req.host,'http://'+req.host)
 
 @web.middleware
@@ -90,12 +131,15 @@ async def security_headers(req,handler):
     try:res=await handler(req)
     except web.HTTPException as e:res=e
     if not isinstance(res,web.WebSocketResponse):
+        if res.status < 400:
+            refresh_session_cookie(req,res)
         res.headers.update({'Cache-Control':'public, max-age=31536000, immutable' if req.path.startswith('/face/v1/') and res.status==200 else 'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY',
           'Permissions-Policy':'microphone=(self), camera=()',
           'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; media-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"})
     return res
 
 async def auth(req):
+    if AUTHENTICATION=="session":raise web.HTTPNotFound()
     if not same_origin(req):raise web.HTTPForbidden()
     data=await req.json()
     if not isinstance(data,dict) or not hmac.compare_digest(str(data.get('token','')),JOIN):raise web.HTTPUnauthorized()
@@ -114,6 +158,8 @@ async def health(req):return web.json_response({'ok':True,'route':'Vertex AI','m
 
 async def static(req):
     name=req.match_info.get('file','index.html')
+    if name=="index.html" and AUTHENTICATION!="access" and not await identity(req):
+        raise web.HTTPFound("/chat/login")
     if name not in ('index.html','app.js','style.css','capture.js','playback.js','worker-socket.js','transport.js','rtc-client.js','livekit-client.js','livekit-client.LICENSE.txt'):raise web.HTTPNotFound()
     return web.FileResponse(HERE/'static'/name)
 
@@ -187,6 +233,8 @@ def setup(handle=None,seed='',memory=False,hangup=False,search=None,ring=None,tu
     return result
 
 async def get_principal(authn):
+    if person := authn.get("principal"):
+        return person
     if not memory_store or not authn.get('email_hash'):return None
     try:return await asyncio.wait_for(memory_store.principal(authn['email_hash']),2)
     except Exception:return None
@@ -216,7 +264,8 @@ async def end_call(req):
 async def live(req):
     global active,active_session
     authn=await identity(req)
-    if not authn or not same_origin(req):raise web.HTTPForbidden()
+    if not authn:raise web.HTTPUnauthorized()
+    if not same_origin(req):raise web.HTTPForbidden()
     if active:raise web.HTTPConflict(text='이미 통화 중이에요.')
     active=True
     diagnostics.clear()
@@ -228,6 +277,7 @@ async def live(req):
         # API-107: the ring a page opened from Marong's call carries (/?ring=). Anything else is no ring.
         try:ring=str(uuid.UUID(req.query.get('ring','')))
         except ValueError:ring=None
+        refresh_session_cookie(req,ws)
         await ws.prepare(req)
         if await budget_status(memory_store, 'web') in BLOCKED:
             if person:

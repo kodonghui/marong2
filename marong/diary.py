@@ -8,6 +8,8 @@ from zoneinfo import ZoneInfo
 
 from psycopg.rows import dict_row
 
+from .room_scope import writing_room
+
 KST = ZoneInfo("Asia/Seoul")
 DIARY_START = time(4)
 WRITE_FROM = time(4, 10)
@@ -31,20 +33,27 @@ _CONTACT = re.compile(r"@|http|www\.", re.IGNORECASE)
 _WORD = re.compile(r"[^\W\d_]+")
 _FRIEND = re.compile(r"\b[Tt]he +friend\b")
 
-_DAY_MESSAGES = """
-WITH private_rooms AS (
-    SELECT r.room_key, CASE WHEN r.room_key = d.room_key THEN 'dm' ELSE 'kakao' END AS source
+_LEGACY_ROOMS = """
     FROM marong.discord_dm_links d
     JOIN marong.rooms r ON r.room_key IN (d.room_key, d.kakao_room_key)
     WHERE d.friend_id = %(friend)s AND r.is_channel AND r.memory_room IS NULL
+"""
+_OWNED_ROOMS = """
+    FROM marong.rooms r JOIN marong.friends d ON d.id=r.owner_friend_id
+    WHERE d.id = %(friend)s AND r.is_channel AND r.memory_room IS NULL
+"""
+_DAY_MESSAGES = """
+WITH private_rooms AS (
+    SELECT r.room_key, CASE WHEN {writing} THEN 'dm' ELSE 'kakao' END AS source
+    {rooms}
       AND NOT r.room_key LIKE 'discord-ch:%%'
       AND EXISTS (
           SELECT 1 FROM marong.messages p JOIN marong.people person USING (user_key)
-          WHERE p.room_key = r.room_key AND p.role = 'user' AND person.friend_id = d.friend_id
+          WHERE p.room_key = r.room_key AND p.role = 'user' AND person.friend_id = %(friend)s
       )
       AND NOT EXISTS (
           SELECT 1 FROM marong.messages p LEFT JOIN marong.people person USING (user_key)
-          WHERE p.room_key = r.room_key AND p.role = 'user' AND person.friend_id IS DISTINCT FROM d.friend_id
+          WHERE p.room_key = r.room_key AND p.role = 'user' AND person.friend_id IS DISTINCT FROM %(friend)s
       )
 ), day_lines AS (
     SELECT m.created_at AS at, r.source, m.role,
@@ -84,10 +93,13 @@ def diary_day(at: datetime) -> date:
 
 
 async def recent_stamp(store, friend_id: int, room: str, now: datetime) -> date | None:
+    relation = ("JOIN marong.rooms r ON r.room_key=%s AND r.owner_friend_id=d.friend_id"
+                if hasattr(store, "writing_target") else
+                "JOIN marong.discord_dm_links link USING (friend_id) "
+                "JOIN marong.rooms r ON r.room_key=%s AND r.room_key IN (link.room_key, link.kakao_room_key)")
     row = await store._one(
-        """SELECT d.diary_date FROM marong.diaries d
-        JOIN marong.discord_dm_links link USING (friend_id)
-        JOIN marong.rooms r ON r.room_key=%s AND r.room_key IN (link.room_key, link.kakao_room_key)
+        f"""SELECT d.diary_date FROM marong.diaries d
+        {relation}
         WHERE d.friend_id=%s AND r.is_channel AND r.memory_room IS NULL
           AND d.state='ready' AND NOT d.hidden AND d.stamped_at > %s AND d.stamped_at <= %s
           AND (SELECT enabled FROM marong.diary_settings WHERE friend_id=d.friend_id
@@ -200,12 +212,14 @@ def bundle_lines(lines) -> DayBundle:
     return DayBundle("\n".join([*formatted, _DATA_END]), friend_chars)
 
 
-async def read_day_bundle(conn, friend_id: int, day: date) -> DayBundle:
+async def read_day_bundle(conn, friend_id: int, day: date, *, unified=False) -> DayBundle:
     start = datetime.combine(day, DIARY_START, KST)
     async with conn.cursor(row_factory=dict_row) as cursor:
         await cursor.execute("SELECT to_regclass('marong.forget_marks') IS NOT NULL AS has_marks")
         has_marks = (await cursor.fetchone())["has_marks"]
-        query = _DAY_MESSAGES.format(text_marks=_TEXT_MARKS if has_marks else "",
+        query = _DAY_MESSAGES.format(rooms=_OWNED_ROOMS if unified else _LEGACY_ROOMS,
+                                     writing=writing_room("r") if unified else "r.room_key=d.room_key",
+                                     text_marks=_TEXT_MARKS if has_marks else "",
                                      call_marks=_CALL_MARKS if has_marks else "")
         await cursor.execute(query, {"friend": friend_id, "start": start, "end": start + timedelta(days=1)})
         return bundle_lines(DiaryLine(**row) for row in await cursor.fetchall())

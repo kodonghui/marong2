@@ -1,0 +1,240 @@
+{
+  "format": 1,
+  "project": "marong",
+  "part": "unified",
+  "stages": {
+    "01-domain": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "PR #54가 main에 합쳐진 뒤 01~08·10·12를 한 번에 확인하는 체크포인트 요청",
+      "checks": [
+        {
+          "level": "info",
+          "message": "설계 제안(docs/unified-app.md)은 동희님이 설계 스레드에서 \"승인\"(2026-11-19 10:15:45 KST, D104). 이 단계 문서의 체크포인트는 아직 요청 전",
+          "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "docs/01-domain/unified.md: CTX-026~029, TERM-173~198(26개), 바뀌는 기존 맥락 CTX-001·002·005·006. Mermaid 1개 mermaid 10.9.1로 그려짐, 용어 검사 통과",
+          "at": "2026-11-19"
+        }
+      ],
+      "updated": "2026-11-19T03:57:28+00:00"
+    },
+    "02-prd": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "PR #54가 main에 합쳐진 뒤 01~08·10·12를 한 번에 확인하는 체크포인트 요청",
+      "checks": [
+        {
+          "level": "info",
+          "message": "설계 제안(docs/unified-app.md)은 동희님이 설계 스레드에서 \"승인\"(2026-11-19 10:15:45 KST, D104). 이 단계 문서의 체크포인트는 아직 요청 전",
+          "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "docs/02-prd/unified.md: REQ-430~483(54개, Must 45·Should 7·Could 2, 모두 active). 기존 요구사항 10줄의 Status를 changed로 고침(REQ-001·002·024·056·065·145·283·287·391·418). 허브 경고 3개(REQ-067·114·128은 자유 형식 문서에 정의된 번호)",
+          "at": "2026-11-19"
+        }
+      ],
+      "updated": "2026-11-19T03:57:28+00:00"
+    },
+    "03-user-flow": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "PR #54가 main에 합쳐진 뒤 01~08·10·12를 한 번에 확인하는 체크포인트 요청",
+      "checks": [
+        {
+          "level": "info",
+          "message": "설계 제안(docs/unified-app.md)은 동희님이 설계 스레드에서 \"승인\"(2026-11-19 10:15:45 KST, D104). 이 단계 문서의 체크포인트는 아직 요청 전",
+          "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "FL-169~178(10개). REQ 43개가 흐름에 있고 11개는 요구사항 문서의 흐름이 없는 요구사항 절에 이유와 함께 있음. Mermaid 10개 그려짐",
+          "at": "2026-11-19"
+        }
+      ],
+      "updated": "2026-11-19T03:57:28+00:00"
+    },
+    "04-functional-spec": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "PR #54가 main에 합쳐진 뒤 01~08·10·12를 한 번에 확인하는 체크포인트 요청",
+      "checks": [
+        {
+          "level": "info",
+          "message": "설계 제안(docs/unified-app.md)은 동희님이 설계 스레드에서 \"승인\"(2026-11-19 10:15:45 KST, D104). 이 단계 문서의 체크포인트는 아직 요청 전",
+          "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "docs/04-functional-spec/unified.md: SPEC-370~396(27개). REQ-430~483과 FL-169~178이 모두 From에 있음. 새 제안으로 정한 값은 문서 4절, 구현 전 코드에서 확인할 것은 6절(4개)",
+          "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "검토(2026-11-19 14시대 KST, 독립 검토 세 건)에서 실제 코드와 다른 곳을 고침: 통화 서버 위치(tools/vertex_live/), 통화 시작 거절은 WebSocket 메시지, 통화 쇼핑은 앱 서버 내부 경로(새 제안, 시간 측정 전), 약속 전화 받기(pendingRing, 새 제안), 관리자 확인(MARONG_ADMIN_EMAIL_SHA256, 새 제안), 통화 예산 코드는 PR #41에만 있음. 목록은 docs/10-wbs/unified.md의 검토에서 고친 것",
+          "at": "2026-11-19"
+        }
+      ],
+      "updated": "2026-11-19T05:43:22+00:00"
+    },
+    "05-erd": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "PR #54가 main에 합쳐진 뒤 01~08·10·12를 한 번에 확인하는 체크포인트 요청",
+      "checks": [
+        {
+          "level": "info",
+          "message": "설계 제안(docs/unified-app.md)은 동희님이 설계 스레드에서 \"승인\"(2026-11-19 10:15:45 KST, D104). 이 단계 문서의 체크포인트는 아직 요청 전",
+          "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "marong/migrations/020_unified.sql과 marong/call/migrations/008_unified.sql: TBL-164~172(9개), rooms·friendships의 새 칸. 임시 Postgres 16.2(pgserver, 합성 행)에서 두 번 적용, 확인 44개 통과. 운영 DB에는 적용하지 않음. 그림은 docs/05-erd/unified.md(erDiagram 그려짐)",
+          "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "검토 뒤 020_unified.sql을 고침(기기 코드 친구당 하나, friendships.requested_at, schedules.source에 app). ko-family의 임시 Postgres 16.2에서 기존 18개 파일 뒤에 020과 통화 008을 두 번 적용: 확인 50개 통과, 실패 0(2026-11-19 14:28:46 KST). 운영 DB에는 적용하지 않음",
+          "at": "2026-11-19"
+        }
+      ],
+      "updated": "2026-11-19T05:43:22+00:00"
+    },
+    "06-api": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "PR #54가 main에 합쳐진 뒤 01~08·10·12를 한 번에 확인하는 체크포인트 요청",
+      "checks": [
+        {
+          "level": "info",
+          "message": "설계 제안(docs/unified-app.md)은 동희님이 설계 스레드에서 \"승인\"(2026-11-19 10:15:45 KST, D104). 이 단계 문서의 체크포인트는 아직 요청 전",
+          "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "api/unified.openapi.yaml(OpenAPI 3.1.0, 0.1.0-draft): API-211~242(32개, 번호 겹침 0), $ref 79개 모두 풀림, 오류 코드 27개. YAML 읽기 통과. 구현 전이라 목 서버나 계약 시험은 없음",
+          "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "검토 뒤 계약을 다시 만듦: 작업 32개, 예시 292개, 오류 코드 28개. 생성기 검사(check-unified-api.js) 모두 통과. Profile에 features·google·pendingRing, MemberList에 unlinked, 오류 check_unavailable 추가. 계약 시험은 아직 없음(구현 PR에서)",
+          "at": "2026-11-19"
+        }
+      ],
+      "updated": "2026-11-19T05:43:22+00:00"
+    },
+    "07-sitemap": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "PR #54가 main에 합쳐진 뒤 01~08·10·12를 한 번에 확인하는 체크포인트 요청",
+      "checks": [
+        {
+          "level": "info",
+          "message": "설계 제안(docs/unified-app.md)은 동희님이 설계 스레드에서 \"승인\"(2026-11-19 10:15:45 KST, D104). 이 단계 문서의 체크포인트는 아직 요청 전",
+          "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "docs/07-sitemap/sitemap.yaml에 SCR-163~174(12개)를 더하고 SCR-107·109·112·001·002·113·119·120~122의 바뀌는 곳을 적음. YAML 읽기 통과, sitemap.md의 Mermaid 3개 그려짐",
+          "at": "2026-11-19"
+        }
+      ],
+      "updated": "2026-11-19T03:57:28+00:00"
+    },
+    "08-screen-states": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "PR #54가 main에 합쳐진 뒤 01~08·10·12를 한 번에 확인하는 체크포인트 요청",
+      "checks": [
+        {
+          "level": "info",
+          "message": "설계 제안(docs/unified-app.md)은 동희님이 설계 스레드에서 \"승인\"(2026-11-19 10:15:45 KST, D104). 이 단계 문서의 체크포인트는 아직 요청 전",
+          "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "docs/08-screens/unified.md: SCR-163~174의 상태 150개(자료·행동·실패·상태 표)와 다른 화면에서 바뀌는 곳. 와이어프레임은 그리지 않음(얼려 둔 토큰과 지금 부품만 씀). 허브의 화면 정의 없음 알림 0",
+          "at": "2026-11-19"
+        }
+      ],
+      "updated": "2026-11-19T03:57:28+00:00"
+    },
+    "09-mockup": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "PR #54가 main에 합쳐진 뒤 NEXUS에서 체크포인트 요청. 방향은 D105로 정해짐",
+      "checks": [
+        {
+          "level": "info",
+          "message": "2026-11-19 13시대 KST 설계 스레드 동희님 \"목업 보여조\"에 따라 대지 17장을 그림(SCR-163~174, SCR-107, SCR-002). 캔버스 https://claude.ai/artifact/GXVep4QepAUdFhH6gDmLb3, 기록 design/unified-mockup.md",
+          "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "새 토큰 없음(얼려 둔 103개). 2026-11-19 14시대 KST 대지 17장을 로컬 페이지에 띄워 잼: 넘침 0, 가로 넘침 0, 44px보다 작은 누르는 곳 0. 재면서 스타일 세 군데 고침. 캔버스 안 모습·430px 폭·아이폰 글꼴·대비는 재지 않음",
+          "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "방향 09-unified-1: 그린 그대로. 2026-11-19 14:13 KST 설계 스레드 동희님 \"ㅇㅇ ㄱㄱ 프롬프트 줘 지피티한테시킬게\"(D105). NEXUS 체크포인트는 병합 뒤 요청",
+          "at": "2026-11-19"
+        }
+      ],
+      "updated": "2026-11-19T05:13:40+00:00"
+    },
+    "10-wbs": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "PR #54가 main에 합쳐진 뒤 01~08·10·12를 한 번에 확인하는 체크포인트 요청",
+      "checks": [
+        {
+          "level": "info",
+          "message": "설계 제안(docs/unified-app.md)은 동희님이 설계 스레드에서 \"승인\"(2026-11-19 10:15:45 KST, D104). 이 단계 문서의 체크포인트는 아직 요청 전",
+          "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "docs/10-wbs/unified.md: GPT 인계 절과 TASK-379~410(32개, 패키지 U1~U10, 약 41.5일). SPEC-370~396·TBL-164~172·SCR-163~174마다 작업이 있고 의존에 고리 없음. README에 D104, 패키지 줄, ID 범위, 겹치는 파일, 순서를 더함",
+          "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "구현 시작: 2026-11-19 14:13 KST 설계 스레드 동희님 \"ㅇㅇ ㄱㄱ 프롬프트 줘 지피티한테시킬게\"(D105). GPT는 PR #54가 합쳐진 뒤 U1부터 시작",
+          "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "검토 뒤 GPT 인계와 작업 표를 고침: 시작 전 확인 세 가지, 코드 위치, 순서(TASK-410 → 395 → 394 → 401), 시험 명령, 검토에서 고친 것 절 추가. 새 제안 일곱 가지는 측정·확인 전이라 구현 PR에서 확인",
+          "at": "2026-11-19"
+        }
+      ],
+      "updated": "2026-11-19T05:43:22+00:00"
+    },
+    "12-qa": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "시험 계획 체크포인트 요청(다른 단계와 한 번에). 실행은 구현 뒤 GPT",
+      "checks": [
+        {
+          "level": "info",
+          "message": "설계 제안(docs/unified-app.md)은 동희님이 설계 스레드에서 \"승인\"(2026-11-19 10:15:45 KST, D104). 이 단계 문서의 체크포인트는 아직 요청 전",
+          "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "docs/12-qa/unified.md: TC-430~495(66개, 모두 not run). SPEC-370~396과 REQ-430~483이 모두 시험에 연결됨. 실기기 확인 가~마, 진짜 모델을 부르는 시험 2가지, 브라우저 에이전트 걷기 10흐름. 실행은 GPT",
+          "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "검토 뒤 TC-437·441·453·464·468·476·477·484·485·486·489를 실제 동작(메시지 거절, 내부 경로, 20초)에 맞춤. 시험은 아직 한 건도 돌리지 않음",
+          "at": "2026-11-19"
+        }
+      ],
+      "updated": "2026-11-19T05:43:22+00:00"
+    }
+  }
+}

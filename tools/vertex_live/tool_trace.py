@@ -1,0 +1,467 @@
+"""Send diagnostic traces to LangSmith, off the request thread."""
+
+import asyncio
+from contextlib import contextmanager
+from contextvars import ContextVar
+from datetime import datetime, timezone
+from functools import lru_cache
+import json
+import logging
+import os
+from pathlib import Path
+from queue import Full, Queue
+import re
+from threading import Thread
+import time
+from types import SimpleNamespace
+from urllib.error import HTTPError
+from urllib.request import HTTPRedirectHandler, Request, build_opener
+from uuid import uuid4
+
+
+PROJECT = "marong-tool-diagnostics"
+DEFAULT_ENDPOINT = "https://api.smith.langchain.com"
+ENDPOINTS = {DEFAULT_ENDPOINT, "https://eu.api.smith.langchain.com"}
+LABELS = {
+    "surface": {"app_chat", "discord_chat", "kakao_chat", "web_voice", "discord_voice"},
+    "tool": {"set_name", "ask_owner", "card_update", "schedule_add", "schedule_list",
+             "schedule_cancel", "recall", "current_time", "end_call"},
+    "stop_reason": {"end_turn", "tool_use", "pause_turn", "max_tokens", "stop_sequence",
+                    "refusal", "model_context_window_exceeded"},
+    "result": {"ok", "rejected", "invalid_result", "no_tool_blocks",
+               "time", "found", "not_found", "ask_which", "refused", "unavailable",
+               "not_saved", "ending", "memory_unavailable", "temporary_error",
+               "queued", "skipped", "fallback", "no_reply", "no_device"},
+    "reason": {"timeout", "cancelled", "invalid_input", "permission_denied", "unknown_tool",
+               "storage_error", "rate_limited", "provider_auth", "provider_rejected",
+               "provider_unavailable", "connection_error", "invalid_result", "not_found",
+               "call_unavailable", "capacity", "no_link", "disabled", "waiter_active",
+               "no_ack", "exception", "not_attempted"},
+    "recall": {"ok", "short", "off", "slow", "error"},
+    "delivery": {"poll", "history", "push"},
+}
+NUMBERS = {"round", "offered", "requested", "results_attempted", "results_sent",
+           "web_searches", "web_fetches", "status_code", "count", "attempt", "available",
+           "candidates", "recalled", "summaries", "notes", "recent", "cache_write_5m", "cache_write_1h"}
+STAGES = {"text_turn", "model_request", "tool_node", "tool_dispatch", "voice_setup", "voice_tool",
+          "provider_send", "voice_search", "app_turn", "account_lookup", "room_queue",
+          "context", "recent_memory", "memory_summaries", "memory_notes", "memory_search",
+          "friend_context", "discord_context", "call_context", "schedules_context", "calendar_link",
+          "calendar_context", "schedule_storage", "calendar_tool", "model_attempt",
+          "reply_prepare", "reply_save", "reply_publish", "reply_push", "app_http_delivery"}
+ROOT_STAGES = {"text_turn", "voice_setup", "voice_tool", "voice_search", "app_turn"}
+ERRORS = {"timeout", "cancelled", "invalid_input", "provider_http_error",
+          "connection_error", "exception", "storage_error"}
+MODEL_NAME = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,95}\Z")
+MASKED = "[가림]"
+OWNER_APP_IO_FILE = Path("/etc/marong-tool-trace/owner-app-io")
+OWNER_APP_IO_CREDENTIAL = re.compile(
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"
+    r"|\b(?:hms-|sk-|gh[pousr]_|github_pat_|lsv2_|AIza|xox[baprs]-)[\w-]{10,}"
+    r"|\bBearer\s+[\w.=-]{10,}|\beyJ[\w-]{8,}\.[\w-]+\.[\w-]+",
+    re.IGNORECASE,
+)
+PRIVATE_FIELDS = {
+    "authorization", "cookie", "set_cookie", "api_key", "client_secret", "access_token",
+    "refresh_token", "password", "private_key", "signature", "reasoning_content",
+}
+PRIVATE_BLOCKS = {"image", "thinking", "redacted_thinking"}
+SHARED_MEMORY_STAGES = {"memory_summaries", "memory_notes", "memory_search", "discord_context", "call_context"}
+ROLES = {"system", "developer", "user", "assistant", "tool"}
+BLOCK_TYPES = {"text", "image", "thinking", "redacted_thinking", "tool_use", "tool_result",
+               "server_tool_use", "web_search_tool_result", "web_fetch_tool_result", "function",
+               "object", "string", "array", "boolean", "number", "integer", "null"}
+TOOL_NAMES = LABELS["tool"] | {"web_search", "web_fetch"}
+PAYLOAD_FIELDS = {
+    "account", "args", "arguments", "body", "call", "choices", "content", "date", "description", "end",
+    "event_at", "findings", "finish_reason", "friend_id", "function", "id", "input", "input_schema", "is_error", "items",
+    "kwargs", "limit", "max_tokens", "message", "messages", "model", "name", "parameters", "properties",
+    "query", "records", "recalled", "recent", "remind_at", "repeat", "reply", "reply_to", "request",
+    "required", "response", "role", "room_key", "say", "since_id", "skip_summary_ids", "start", "status",
+    "status_code", "summaries", "system", "text", "title", "tool_call_id", "tool_calls", "tool_use_id",
+    "tools", "transport", "type", "value", "before_id", "created_at", "due_at", "end_time", "meta",
+    "notes", "source_id", "source_type", "action",
+}
+INPUT_FACTS = {"surface", "round", "tool", "offered", "requested", "results_attempted", "attempt", "delivery"}
+MAX_PAYLOAD_ITEMS = 100
+MAX_PAYLOAD_DEPTH = 10
+active = ContextVar("active_marong_trace", default=None)
+log = logging.getLogger(__name__)
+
+
+def _masked(value, depth=0, field=None):
+    """Keep protocol structure, allowlisted labels and counts, and drop arbitrary keys and values."""
+    if value is None:
+        return None
+    if depth >= MAX_PAYLOAD_DEPTH:
+        return MASKED
+    if isinstance(value, SimpleNamespace) or type(value).__module__.startswith("anthropic.types."):
+        value = vars(value)
+    if isinstance(value, dict):
+        result = {}
+        for key, entry in value.items():
+            if type(key) is not str or key not in PAYLOAD_FIELDS:
+                continue
+            if (key == "name" and type(entry) is str and entry in TOOL_NAMES
+                    and (value.get("type") in ("tool_use", "server_tool_use", "function")
+                         or "input_schema" in value or field == "function")):
+                result[key] = entry
+            else:
+                result[key] = _masked(entry, depth + 1, key)
+        if len(result) < len(value):
+            result["_masked_fields"] = len(value) - len(result)
+        return result
+    if isinstance(value, (list, tuple)):
+        if len(value) <= MAX_PAYLOAD_ITEMS:
+            return [_masked(item, depth + 1, field) for item in value]
+        half = MAX_PAYLOAD_ITEMS // 2
+        return ([_masked(item, depth + 1, field) for item in value[:half]]
+                + [{"_omitted_items": len(value) - MAX_PAYLOAD_ITEMS}]
+                + [_masked(item, depth + 1, field) for item in value[-half:]])
+    if type(value) is str:
+        if (field == "role" and value in ROLES) or (field == "type" and value in BLOCK_TYPES):
+            return value
+        if field == "arguments" and len(value) <= 4096:
+            try:
+                decoded = json.loads(value)
+            except (ValueError, RecursionError):
+                pass
+            else:
+                if isinstance(decoded, dict):
+                    return _masked(decoded, depth + 1)
+    return MASKED
+
+
+def _show_owner_app_io(friend_id):
+    if type(friend_id) is not int:
+        return False
+    try:
+        return OWNER_APP_IO_FILE.read_text(encoding="utf-8").strip() == str(friend_id)
+    except (OSError, UnicodeError):
+        return False
+
+
+class Span:
+    def __init__(self, stage, parent, **facts):
+        start = datetime.now(timezone.utc)
+        identifier = str(uuid4())
+        order = start.strftime("%Y%m%dT%H%M%S%fZ") + identifier
+        self.root = parent.root if parent else self
+        self.finished = False
+        self._owner_app_io = False
+        self.runs = parent.runs if parent and not self.root.finished else []
+        self.data = {
+            "id": identifier, "name": stage,
+            "run_type": {"tool_dispatch": "tool", "voice_tool": "tool", "model_attempt": "llm",
+                         "memory_search": "retriever"}.get(stage, "chain"),
+            "start_time": start.isoformat(), "inputs": {}, "outputs": {},
+            "trace_id": parent.data["trace_id"] if parent else identifier,
+            "dotted_order": f'{parent.data["dotted_order"]}.{order}' if parent else order,
+        }
+        if parent:
+            self.data["parent_run_id"] = parent.data["id"]
+        self.runs.append(self.data)
+        self.record(**facts)
+        if self.root.data["name"] == "app_turn":
+            self.data["inputs"] = {"operation": stage,
+                                   **{field: self.data["outputs"][field] for field in sorted(facts.keys() & INPUT_FACTS)
+                                      if field in self.data["outputs"]}}
+
+    def record(self, **facts):
+        for field, value in facts.items():
+            if value is None:
+                continue
+            if field in LABELS:
+                self.data["outputs"][field] = value if type(value) is str and value in LABELS[field] else "other"
+            elif field in NUMBERS and type(value) is int and value >= 0:
+                self.data["outputs"][field] = value
+
+    def fail(self, error):
+        self.data["error"] = error if error in ERRORS else "exception"
+
+    def io(self, *, inputs=None, outputs=None):
+        if self.root.data["name"] != "app_turn":
+            return
+        encode = self._owner_payload if self.root._owner_app_io else _masked
+        if inputs is not None:
+            self.data["inputs"].update(encode(inputs))
+        if outputs is not None:
+            self.data["outputs"].update(encode(outputs))
+
+    def app_message(self, friend_id, text, *, room_key=None, user_key=None):
+        if self.data["name"] == "app_turn" and _show_owner_app_io(friend_id):
+            self._owner_app_io = True
+            self._owner_message = text
+            self._owner_room = room_key
+            self._owner_user = user_key
+            self._owner_full_history = False
+            self.data["tags"] = ["owner-app-io"]
+        self.io(inputs={"message": {"role": "user", "content": text}})
+
+    def app_reply(self, text):
+        self.io(outputs={"reply": {"role": "assistant", "content": text}})
+
+    def _owns_room_row(self, row):
+        return (
+            self.root._owner_room is not None
+            and isinstance(row, dict)
+            and row.get("room_key") == self.root._owner_room
+            and (row.get("role") == "assistant"
+                 or (row.get("role") == "user" and self.root._owner_user is not None
+                     and row.get("user_key") == self.root._owner_user))
+        )
+
+    def _owner_payload(self, payload):
+        stage = self.data["name"]
+        if stage == "recent_memory" and isinstance(payload.get("records"), list):
+            records = payload["records"]
+            own_records = [record for record in records if self._owns_room_row(record)]
+            self.root._owner_full_history = len(own_records) == len(records)
+            payload = {
+                **payload,
+                "records": own_records,
+                "excluded_other_rooms": len(records) - len(own_records),
+            }
+        if stage == "friend_context":
+            # This lookup returns information from other accounts, including shared notes.
+            records = payload.get("records")
+            payload = {"record_count": len(records)} if isinstance(records, list) else {}
+        return self._owner_json(payload, memory=stage in SHARED_MEMORY_STAGES)
+
+    def _owner_json(self, value, *, depth=0, memory=False, field=None):
+        if depth >= 32:
+            return {"excluded": "nesting limit"}
+        if isinstance(value, SimpleNamespace) or type(value).__module__.startswith("anthropic.types."):
+            value = vars(value)
+        if isinstance(value, dict):
+            if isinstance(value.get("type"), str) and value["type"] in PRIVATE_BLOCKS:
+                return {"type": value["type"], "excluded": "attachment or provider reasoning"}
+            if value.get("role") in ("system", "developer"):
+                return {"role": value["role"], "excluded": "system context includes shared private data"}
+            result = {}
+            for key, item in value.items():
+                if type(key) is not str or key.lower().replace("-", "_") in PRIVATE_FIELDS:
+                    continue
+                if memory and key in {"content", "text", "name", "user_key", "room_key", "pair"}:
+                    continue
+                if key == "system":
+                    result[key] = {"excluded": "system context includes shared private data"}
+                elif memory and key == "query" and isinstance(item, str):
+                    current = self.root._owner_message
+                    result[key] = current if item.endswith(current) else {"excluded": "historical text"}
+                    if isinstance(result[key], str):
+                        result[key] = OWNER_APP_IO_CREDENTIAL.sub("[인증정보 제외]", result[key])
+                else:
+                    result[key] = self._owner_json(item, depth=depth + 1, memory=memory, field=key)
+            return result
+        if isinstance(value, (list, tuple)):
+            if field == "messages":
+                value = [self._owner_model_message(item) for item in value]
+            return [self._owner_json(item, depth=depth + 1, memory=memory) for item in value]
+        if isinstance(value, str):
+            return OWNER_APP_IO_CREDENTIAL.sub("[인증정보 제외]", value)
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if value is None or type(value) in (bool, int, float):
+            return value
+        return {"type": type(value).__name__}
+
+    def _owner_model_message(self, item):
+        if self.root._owner_full_history or not isinstance(item, dict):
+            return item
+        content = item.get("content")
+        if item.get("role") == "tool":
+            return item
+        current = self.root._owner_message
+        if isinstance(content, list):
+            def visible(block):
+                if not isinstance(block, dict):
+                    block = vars(block) if hasattr(block, "__dict__") else {}
+                text = block.get("text")
+                if block.get("type") == "text" and isinstance(text, str) and current and text.endswith(current):
+                    return {"type": "text", "text": current}
+                if block.get("type") in ("tool_use", "tool_result"):
+                    return block
+                return {"type": block.get("type"), "excluded": "unverified history"}
+            return {**item, "content": [visible(block) for block in content]}
+        if isinstance(content, str):
+            actual = current if current and content.endswith(current) else {"excluded": "unverified history"}
+            return {**item, "content": actual}
+        return item
+
+    def model(self, provider, model):
+        if provider in {"anthropic", "deepseek"} and isinstance(model, str) and MODEL_NAME.fullmatch(model):
+            self.data["extra"] = {"metadata": {"ls_provider": provider, "ls_model_name": model}}
+
+    def usage(self, inputs, outputs, cached=0, written=0, write_5m=0, write_1h=0):
+        def number(value):
+            return value if type(value) is int and value >= 0 else 0
+
+        if type(inputs) is not int or type(outputs) is not int:
+            return
+        inputs, outputs = number(inputs), number(outputs)
+        cached, written = min(inputs, number(cached)), min(inputs, number(written))
+        usage = {"input_tokens": inputs, "output_tokens": outputs, "total_tokens": inputs + outputs,
+                 "input_token_details": {"cache_read": cached, "cache_creation": written}}
+        self.data["outputs"]["usage_metadata"] = usage
+        self.data.update(prompt_tokens=inputs, completion_tokens=outputs, total_tokens=inputs + outputs)
+        self.record(cache_write_5m=number(write_5m), cache_write_1h=number(write_1h))
+
+    def capture(self, error, fallback="exception"):
+        _record_error(self, error, fallback)
+
+
+def _record_error(span, error, fallback="exception"):
+    status = getattr(error, "status_code", None)
+    # Hosted SDK exceptions do not all inherit from their built-in counterparts.
+    # Match the known classes without importing the chat SDK in the voice relay.
+    names = {cls.__name__ for cls in type(error).__mro__}
+    if isinstance(error, asyncio.CancelledError):
+        span.fail("cancelled")
+        span.record(reason="cancelled")
+    elif isinstance(error, TimeoutError) or names & {"APITimeoutError", "TimeoutException"}:
+        span.fail("timeout")
+        span.record(reason="timeout")
+    elif type(status) is int and 100 <= status <= 599:
+        span.fail("provider_http_error")
+        category = {401: "provider_auth", 403: "provider_auth", 429: "rate_limited"}
+        span.record(status_code=status, reason=category.get(status, "provider_unavailable" if status >= 500
+                    else "invalid_result" if status < 400 else "provider_rejected"))
+    elif isinstance(error, (TypeError, ValueError)):
+        span.fail("invalid_input")
+        span.record(reason="invalid_input")
+    elif fallback == "storage_error":
+        span.fail("storage_error")
+        span.record(reason="storage_error")
+    elif isinstance(error, OSError) or names & {"APIConnectionError", "ClientConnectionError", "NetworkError"}:
+        span.fail("connection_error")
+        span.record(reason="connection_error")
+    else:
+        span.fail("exception")
+        span.record(reason="exception")
+
+
+@contextmanager
+def step(stage, parent=None, **facts):
+    sink = _sink() if parent is None and stage in ROOT_STAGES else None
+    if stage not in STAGES or (parent is None and sink is None):
+        yield None
+        return
+    span = Span(stage, parent, **facts)
+    token = active.set(span)
+    try:
+        yield span
+    except (Exception, asyncio.CancelledError) as error:
+        if "error" not in span.data:
+            _record_error(span, error)
+        raise
+    finally:
+        active.reset(token)
+        span.data["end_time"] = datetime.now(timezone.utc).isoformat()
+        if sink is not None:
+            span.finished = True
+            sink.submit(span.runs)
+
+
+def app_parent():
+    parent = active.get()
+    return parent if parent and parent.root.data["name"] == "app_turn" else None
+
+
+@contextmanager
+def app_step(stage, *, storage=False, **facts):
+    with step(stage, app_parent(), **facts) as span:
+        if span is None:
+            yield None
+            return
+        try:
+            yield span
+        except Exception as error:
+            if storage:
+                span.capture(error, "storage_error")
+            raise
+
+
+def app_note(**facts):
+    if parent := app_parent():
+        parent.record(**facts)
+
+
+async def app_read(stage, read, *args, **kwargs):
+    with app_step(stage, storage=True) as span:
+        if span:
+            span.io(inputs={"args": args, "kwargs": kwargs})
+        result = await read(*args, **kwargs)
+        if span:
+            span.record(result="ok", count=len(result) if isinstance(result, list) else None)
+            span.io(outputs={"records": result})
+        return result
+
+
+def app_delivery(parent, transport, reply):
+    span = Span("app_http_delivery", parent, delivery=transport, result="ok", status_code=200)
+    span.io(outputs={"response": {"messages": [{"role": "assistant", "content": reply}]}})
+    span.data["end_time"] = datetime.now(timezone.utc).isoformat()
+    if parent.root.finished and (sink := _sink()):
+        sink.submit(span.runs)
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+class _Sender:
+    def __init__(self, key, endpoint, project, workspace):
+        self.endpoint = endpoint
+        self.project = project
+        self.headers = {"X-Api-Key": key, "Content-Type": "application/json"}
+        if workspace:
+            self.headers["X-Tenant-Id"] = workspace
+        self.opener = build_opener(_NoRedirect())
+        self.queue = Queue(maxsize=128)
+        self.last_warning = float("-inf")
+        Thread(target=self._send_pending, name="langsmith-tool-trace", daemon=True).start()
+
+    def _warn(self, reason):
+        now = time.monotonic()
+        if now - self.last_warning >= 60:
+            self.last_warning = now
+            log.warning("tool_trace_export_failed reason=%s", reason)
+
+    def submit(self, runs):
+        try:
+            self.queue.put_nowait(runs)
+        except Full:
+            self._warn("queue_full")
+
+    def publish(self, runs):
+        body = {"post": [{**run, "session_name": self.project} for run in runs], "patch": []}
+        req = Request(self.endpoint + "/runs/batch", json.dumps(body).encode(), self.headers)
+        with self.opener.open(req, timeout=3):
+            pass
+
+    def _send_pending(self):
+        while True:
+            runs = self.queue.get()
+            try:
+                self.publish(runs)
+            except HTTPError as error:
+                self._warn(f"http_{error.code}")
+            except Exception:
+                self._warn("transport")
+            finally:
+                self.queue.task_done()
+
+
+@lru_cache(maxsize=1)
+def _sink():
+    if os.getenv("MARONG_TOOL_TRACE") != "1":
+        return None
+    key = os.getenv("LANGSMITH_API_KEY") or os.getenv("LANGCHAIN_API_KEY")
+    endpoint = (os.getenv("LANGSMITH_ENDPOINT") or DEFAULT_ENDPOINT).rstrip("/")
+    if not key or endpoint not in ENDPOINTS:
+        log.warning("tool_trace_disabled reason=%s", "missing_key" if not key else "unsupported_endpoint")
+        return None
+    return _Sender(key, endpoint, os.getenv("LANGSMITH_PROJECT") or PROJECT,
+                   os.getenv("LANGSMITH_WORKSPACE_ID"))

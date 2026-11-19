@@ -449,7 +449,7 @@ def topics(c, tz, args):
             "WHERE EXISTS (SELECT 1 FROM marong.discord_dm_links d WHERE d.friend_id = f.id) "
             "   OR EXISTS (SELECT 1 FROM call.callers k WHERE k.friend_id = f.id) ORDER BY f.id").fetchall()
         if not rows:
-            print("디스코드 DM이나 통화가 연결된 친구가 없어요")
+            print("채팅이나 통화가 연결된 친구가 없어요")
         for r in rows:
             prefs = prefs_of(r if r["hello_call"] is not None else None)
             changed = (f" (바꾼 때 {when(r['updated_at'], tz)} {'관리자' if r['updated_by'] == 'admin' else '친구 말'})"

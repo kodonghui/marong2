@@ -21,3 +21,13 @@ rm app/google-services.json
 ```
 
 서명 키와 `google-services.json`은 Git에 넣지 않아요. 자세한 내용은 문서 9절을 봐 주세요.
+
+### 0.2.2 서명 준비
+
+선 전화와 자동 업데이트가 들어간 APK의 패키지는 `com.corthexhq.marong`, 버전 코드는 5예요.
+노트북의 운영용 `google-services.json`을 `android/app/`에 둔 상태에서 `npm ci`와 `npm run sync`를 실행해요.
+서명 준비만 할 때는 `MARONG_KEYSTORE_PROPERTIES`를 비운 뒤 `android/`에서 `./gradlew assembleRelease`를 실행해요.
+서명할 때는 위 빌드 명령에 노트북의 키 설정 경로를 지정해요. 게시할 때는 서명된 APK와 Gradle의
+`output-metadata.json`을 같은 폴더에 두고 저장소에서 `bash deploy/ovh.sh app-release publish <APK>`를 실행해요.
+
+깔고 나서 글 대화 메뉴의 ‘자동 업데이트’에서 ‘켜기’를 눌러 ‘이 출처 허용’을 켜 줘. 그러면 다음부터는 저절로 깔려.

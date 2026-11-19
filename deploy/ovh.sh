@@ -42,6 +42,32 @@ AS_MARONG="sudo -u marong sh -c"
 
 on_server() { "${SSH[@]}" "$HOST" "$@"; }
 
+app_release_metadata() {
+  local python=(python3)
+  if [[ ${OS:-} == Windows_NT ]] && command -v py >/dev/null 2>&1; then
+    python=(py -3)
+  fi
+  "${python[@]}" - "$1" <<'PY'
+import json
+from pathlib import Path
+import re
+import sys
+
+apk = Path(sys.argv[1])
+try:
+    data = json.loads(apk.with_name("output-metadata.json").read_text(encoding="utf-8"))
+    entry = data["elements"][0]
+    package, version, name = data["applicationId"], entry["versionCode"], entry["versionName"]
+    if (not apk.is_file() or entry["outputFile"] != apk.name or package != "com.corthexhq.marong"
+            or type(version) is not int or not 1 <= version <= 2_100_000_000
+            or not isinstance(name, str) or not re.fullmatch(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}", name)):
+        raise ValueError()
+except (OSError, ValueError, KeyError, IndexError, TypeError):
+    sys.exit("APK와 output-metadata.json의 파일 이름·패키지·버전을 확인해 주세요.")
+print(package, version, name)
+PY
+}
+
 case "${1:-}" in
   call-admin)
     shift
@@ -159,6 +185,30 @@ case "${1:-}" in
                    sudo journalctl -u marong-sheet -u marong-sheet-ask -n 8 --no-pager -o short-iso'
         ;;
       *) echo "사용법: bash deploy/ovh.sh sheet url|on|off|now|status"; exit 1 ;;
+    esac
+    ;;
+  app-release)
+    command="sudo -n -u marong /usr/bin/python3 /opt/marong-discord/tools/app_release.py"
+    case "${2:-}" in
+      status|pause|resume) on_server "$command $2" ;;
+      publish)
+        apk=${3:-}
+        if [[ -z "$apk" ]]; then echo "사용법: bash deploy/ovh.sh app-release publish <APK>"; exit 2; fi
+        metadata=$(app_release_metadata "$apk") || exit 2
+        read -r package version name <<< "$metadata"
+        staging=$(on_server 'umask 077; mktemp -d /var/tmp/marong-app-release.XXXXXXXX')
+        if [[ ! "$staging" =~ ^/var/tmp/marong-app-release\.[a-zA-Z0-9]{8}$ ]]; then
+          echo "서버에서 APK 임시 폴더를 만들지 못했습니다."
+          exit 2
+        fi
+        trap 'on_server "sudo -n rm -f -- $staging/app.apk $staging/output-metadata.json && sudo -n rmdir -- $staging" || true' EXIT
+        scp -- "$apk" "$HOST:$staging/app.apk"
+        scp -- "$(dirname -- "$apk")/output-metadata.json" "$HOST:$staging/output-metadata.json"
+        on_server "sudo -n chown marong:marong -- $staging $staging/app.apk $staging/output-metadata.json &&
+                   sudo -n chmod 600 -- $staging/app.apk $staging/output-metadata.json &&
+                   $command publish --apk $staging/app.apk --package $package --version-code $version --version-name $name"
+        ;;
+      *) echo "사용법: bash deploy/ovh.sh app-release publish <APK>|status|pause|resume"; exit 2 ;;
     esac
     ;;
   backup)

@@ -22,9 +22,31 @@ class TestDB:
         self.app_url = self.admin_url.replace("postgres:@", "marong@", 1)
 
     def apply_schema(self) -> None:
-        sql = (ROOT / "marong" / "schema.sql").read_text(encoding="utf-8")
+        self.apply_sql(ROOT / "marong" / "schema.sql")
+
+    def apply_sql(self, *files: Path) -> None:
         with psycopg.connect(self.admin_url, autocommit=True) as c:
-            c.execute(sql)
+            for path in files:
+                c.execute(path.read_text(encoding="utf-8"))
+
+    def apply_unified_prerequisites(self) -> None:
+        bot = ROOT / "marong" / "migrations"
+        call = ROOT / "marong" / "call" / "migrations"
+        self.apply_sql(
+            call.parent / "schema.sql",
+            *sorted(call.glob("00[2-4]_*.sql")),
+            *sorted(bot.glob("01[0-3]_*.sql")),
+            *sorted(call.glob("00[5-6]_*.sql")),
+            *sorted(bot.glob("01[4-8]_*.sql")),
+            call / "007_call_cost.sql",
+            bot / "019_persona.sql",
+        )
+
+    def apply_unified(self) -> None:
+        self.apply_sql(
+            ROOT / "marong" / "migrations" / "020_unified.sql",
+            ROOT / "marong" / "call" / "migrations" / "008_unified.sql",
+        )
 
     def admin(self, sql: str, params=()) -> list[tuple]:
         """슈퍼유저로 읽기(시험 확인용)."""

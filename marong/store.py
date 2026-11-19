@@ -252,7 +252,7 @@ class Store:
                            unanswered: int = 3) -> list[dict]:
         """답할 때 넣는 최근 대화(오래된 것부터). 고르는 법은 pick_recent. 친구에게 전달되지 못한 마롱이 답은 뺀다."""
         rows = await self._all(
-            "SELECT m.id, m.role, m.user_key, p.name, m.content, m.created_at, "
+            "SELECT m.id, m.role, m.user_key, p.name, m.content, m.created_at, m.room_key, "
             "  coalesce(m.meta->>'proactive' = 'true', false) AS proactive FROM marong.messages m "
             "LEFT JOIN marong.people p ON p.user_key = m.user_key "
             "WHERE m.room_key IN " + self._reply_rooms("%(room)s") + " AND m.meta->>'delivered' IS DISTINCT FROM 'false' "
@@ -293,6 +293,9 @@ class Store:
     def _summary_keyword_filter(self) -> str:
         return ""
 
+    def _history_rooms(self, room: str) -> str:
+        return scope(room)
+
     async def neighbors(self, room_key: str, ids: list[int]) -> dict[int, dict]:
         """메시지마다 짝이 되는 말(문답 한 쌍으로 기억하기): 친구 말이면 바로 뒤 마롱이 답, 마롱이 말이면 바로 앞 친구 말.
         같은 방 안에서만, 짝이 없으면 뺀다. {메시지 id: 짝 줄}(LangGraph 실측: 뽑은 사실보다 원문 문답 검색이 나음)."""
@@ -317,7 +320,7 @@ class Store:
         rows = await self._all(
             "SELECT s.id, s.first_id, s.last_id, s.content, m.created_at AS until FROM marong.summaries s "
             "JOIN marong.messages m ON m.id = s.last_id "
-            "WHERE s.room_key IN " + scope("%(room)s") + self._call_guard('summary','s.id','s.room_key') + " ORDER BY s.last_id DESC LIMIT %(limit)s",
+            "WHERE s.room_key IN " + self._history_rooms("%(room)s") + self._call_guard('summary','s.id','s.room_key') + " ORDER BY s.last_id DESC LIMIT %(limit)s",
             {"room": room_key, "limit": limit})
         return rows[::-1]
 
@@ -326,7 +329,7 @@ class Store:
         뿌리 쪽에 쌓여서 묶기 전 단체방 메모보다 앞섬)."""
         return await self._all(
             "SELECT DISTINCT ON (n.user_key) n.id, n.user_key, p.name, n.content, n.created_at FROM marong.notes n "
-            "JOIN marong.people p ON p.user_key = n.user_key WHERE n.room_key IN " + scope("%(room)s") + " "
+            "JOIN marong.people p ON p.user_key = n.user_key WHERE n.room_key IN " + self._history_rooms("%(room)s") + " "
             + self._call_guard('note','n.id','n.room_key') +
             "ORDER BY n.user_key, n.room_key = " + root("%(room)s") + " DESC, n.id DESC", {"room": room_key})
 

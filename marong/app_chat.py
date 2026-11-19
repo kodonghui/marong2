@@ -7,7 +7,8 @@ writes into their own Discord DM room, so Marong answers with the same memory, l
 Logs carry result names and counts only: no text, FID, install id, email or token (SPEC-126).
 """
 import asyncio
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
+from contextlib import AsyncExitStack
 import json
 import logging
 import math
@@ -20,6 +21,10 @@ from zoneinfo import ZoneInfo
 from aiohttp import web
 import psycopg
 
+from tools.vertex_live.tool_trace import app_delivery, app_step, step as trace_step
+
+from .app_release import AppReleases
+from .app_session import COOKIE, SessionError, auth_mode, device_label, identify_request
 from .app_store import APP_KEY
 from .discord_dm import DEFAULT_ORIGIN, DiscordIncoming, proactive_preference
 from .google_calendar import LINK_MARK, command as google_command
@@ -40,11 +45,22 @@ READ_ROOMS_MAX = 256     # rooms whose '읽음' this process keeps (one per call
 STATIC = Path(__file__).with_name("app_chat_static")
 FILES = {"": ("index.html", "text/html"), "chat.js": ("chat.js", "text/javascript"),
          "chat.css": ("chat.css", "text/css")}
+UNIFIED_FILES = {"account.html": "text/html", "admin.html": "text/html", "unified.css": "text/css",
+                 "unified.js": "text/javascript", "account.js": "text/javascript", "admin.js": "text/javascript"}
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 FID = re.compile(r"[A-Za-z0-9_-]{16,200}\Z")
 VERSION = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\Z")
+RELEASE_CHECK_PATH = "/chat/api/app/release"
 NUMBER = re.compile(r"[0-9]{1,18}\Z")
 PROBLEMS = {
+    "invalid_input": (400, "요청 모양이 틀림"),
+    "login_required": (401, "로그인이 필요함"),
+    "code_wrong": (401, "코드가 맞지 않음"),
+    "invite_not_found": (404, "없는 초대 링크"),
+    "invite_used": (410, "이미 쓴 초대 링크"),
+    "invite_expired": (410, "기한이 지난 초대 링크"),
+    "too_many_tries": (429, "틀린 코드를 너무 많이 넣음"),
+    "too_many_codes": (429, "기기 추가 코드를 너무 많이 만듦"),
     "invalid_request": (400, "요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖)"),
     "unauthenticated": (401, "Access 로그인 증명이 없거나 맞지 않음"),
     "not_allowed": (403, "허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐"),
@@ -60,6 +76,7 @@ PROBLEMS = {
     "drawing_budget": (429, "이번 달 그림 월 예산을 다 씀"),
     "fix_failed": (503, "고치기 모델이 실패함"),
     "stale_test": (409, "화면이 연 시험과 지금 시험 묶음이 다름"),
+    "no_release": (404, "지금 받을 수 있는 앱 파일이 아님"),
     "feature_off": (403, "이 기능이 꺼져 있음"),
     "needs_owner": (403, "선톡을 늘리는 요청은 동희님이 정함"),
     "not_found": (404, "이 계정으로 찾을 수 없음"),
@@ -92,7 +109,8 @@ def bad(*errors) -> Problem:
 
 class AppChat:
     def __init__(self, store, agent, client, access, push, *, origin: str = DEFAULT_ORIGIN, port: int = DEFAULT_PORT,
-                 timezone: str = "Asia/Seoul", clock=time.monotonic, diary_models=None):
+                 timezone: str = "Asia/Seoul", clock=time.monotonic, releases: AppReleases | None = None,
+                 sessions=None, authentication="access", admin_email_hash=None, diary_models=None):
         self.store = store
         self.agent = agent      # DiscordAgent: the same one that answers the Discord DM
         self.client = client    # DiscordDM: its room locks keep one answer at a time per room
@@ -102,7 +120,12 @@ class AppChat:
         self.port = port
         self.tz = ZoneInfo(timezone)
         self.clock = clock
+        self.releases = releases if releases is not None else AppReleases()
+        self.sessions = sessions
+        self.authentication = auth_mode(authentication)
+        self.delivery = None
         self.tick = asyncio.Event()          # set and replaced whenever a message is saved in this process
+        self.reply_traces = OrderedDict()
         self.waiters = defaultdict(list)     # friend id -> events of their waits, oldest first
         self.sent = defaultdict(deque)       # friend id -> when their last messages came (rate limit)
         self.read = {}                       # DM room -> the friend's newest message an answer here took up (SPEC-148)
@@ -115,6 +138,10 @@ class AppChat:
         self.diary_models = diary_models
         from .app_persona import AppPersona
         self.persona = AppPersona(self)
+        from .app_admin import AppAdmin
+        self.admin = AppAdmin(self, admin_email_hash)
+        if sessions is not None:
+            self.files.update({name: ((STATIC / name).read_bytes(), mime) for name, mime in UNIFIED_FILES.items()})
 
     # ── plumbing ───────────────────────────────────────────────
 
@@ -150,23 +177,82 @@ class AppChat:
             res = await handler(req)
         except Problem as p:
             res = self._problem(p, trace)
+        except SessionError as p:
+            headers = {"Retry-After": str(p.retry_after)} if p.retry_after is not None else None
+            res = self._problem(Problem(p.code, headers=headers), trace)
         except web.HTTPException as e:
             res = e
-        except psycopg.OperationalError as e:  # includes the pool timeout
+        except (psycopg.OperationalError, TimeoutError) as e:  # includes the pool timeout
             log.warning("app_chat_db_unavailable %s", type(e).__name__)
             res = self._problem(Problem("db_unavailable"), trace)
         except Exception as e:
             log.error("app_chat_error %s trace=%s", type(e).__name__, trace)
             res = self._problem(Problem("internal"), trace)
+        if req.method == "GET" and req.path == RELEASE_CHECK_PATH:
+            prefix, _, version = req.headers.get("User-Agent", "").partition("/")
+            if prefix == "MarongApp" and VERSION.fullmatch(version):
+                log.info("app_release check version=%s status=%d", version, res.status)
+        if req.get("session_refresh") and res.status < 400:
+            self._set_session_cookie(res, req["session_refresh"])
         res.headers.update(HEADERS)
         if req.get("cache") and res.status == 200:  # a picture of a picture set never changes (API-140)
             res.headers["Cache-Control"] = req["cache"]
         return res
 
-    async def _who(self, req, write: bool = False) -> dict:
-        """The signed-in call friend and their DM room (SPEC-111). Writes must come from the call address."""
-        if write and req.headers.get("Origin") != self.origin:
+    def _require_app_origin(self, req):
+        if req.headers.get("Origin") != self.origin:
             raise Problem("cross_site")
+
+    async def _session_body(self, req, required, optional=()):
+        try:
+            body = await self._body(req)
+        except Problem as e:
+            raise Problem("invalid_input", e.errors) from None
+        if required not in body or set(body) - {required, *optional}:
+            raise Problem("invalid_input")
+        return body
+
+    def _set_session_cookie(self, response, token, *, clear=False):
+        age = 0 if clear else int(self.sessions.session_age.total_seconds())
+        response.set_cookie(COOKIE, token, max_age=age, path="/", httponly=True, secure=True, samesite="Lax")
+        return response
+
+    async def check_invite(self, req):
+        kind = await self.sessions.check_invite(req.match_info["token"])
+        return self._json(200, {"kind": kind, "state": "open"})
+
+    async def join_with_invite(self, req):
+        self._require_app_origin(req)
+        body = await self._session_body(req, "token", ("name",))
+        session = await self.sessions.join(body["token"], body.get("name"), device_label(req.headers.get("User-Agent", "")))
+        return self._set_session_cookie(self._json(201, session.public()), session.token)
+
+    async def login_with_device_code(self, req):
+        self._require_app_origin(req)
+        body = await self._session_body(req, "code")
+        address = req.headers.get("CF-Connecting-IP") or req.remote or "unknown"
+        session = await self.sessions.redeem_device_code(body["code"], address,
+                                                         device_label(req.headers.get("User-Agent", "")))
+        return self._set_session_cookie(self._json(200, session.public()), session.token)
+
+    async def create_device_code(self, req):
+        who = await self._who(req, write=True)
+        if who["profile_id"] is None:
+            await self.sessions.ensure_profile(who["friend_id"])
+        code, expiry = await self.sessions.create_device_code(who["friend_id"])
+        return self._json(201, {"code": code, "expiresAt": expiry.isoformat()})
+
+    async def logout(self, req):
+        self._require_app_origin(req)
+        await self.sessions.logout(req.cookies.get(COOKIE))
+        return self._set_session_cookie(web.Response(status=204), "", clear=True)
+
+    async def _who(self, req, write: bool = False, *, require_dm: bool = True) -> dict:
+        """The signed-in call friend and their DM room (SPEC-111). Writes must come from the call address."""
+        if write:
+            self._require_app_origin(req)
+        if self.sessions is not None:
+            return await self._unified_who(req)
         status, email_hash = await self.access.check(req.headers.get("Cf-Access-Jwt-Assertion", ""))
         if status == "unavailable":
             raise Problem("db_unavailable")
@@ -175,9 +261,53 @@ class AppChat:
         who = await self.store.app_login(email_hash)
         if not who or not who["enabled"]:
             raise Problem("not_allowed")
-        if not who["room_key"] or not who["channel_id"]:
+        if require_dm and (not who["room_key"] or not who["channel_id"]):
             raise Problem("no_dm")
         return who
+
+    async def _unified_who(self, req):
+        async def from_access():
+            token = req.headers.get("Cf-Access-Jwt-Assertion", "")
+            if not token:
+                raise Problem("login_required")
+            status, email_hash = await self.access.check(token)
+            if status == "unavailable":
+                raise Problem("db_unavailable")
+            if status != "ok":
+                raise Problem(status)
+            return await self.sessions.find_access_member(email_hash)
+
+        token = req.cookies.get(COOKIE)
+        who = await identify_request(self.authentication, token, self.sessions.find_session, from_access)
+        if not who or not who["room_key"]:
+            raise Problem("login_required")
+        if who.get("renewed"):
+            req["session_refresh"] = token
+        return who
+
+    async def app_release(self, req):
+        await self._who(req, require_dm=False)
+        release = await asyncio.to_thread(self.releases.latest)
+        return self._json(200, release.public()) if release else web.Response(status=204)
+
+    async def app_apk(self, req):
+        await self._who(req, require_dm=False)
+        opened = await asyncio.to_thread(self.releases.open, req.match_info["file"])
+        if opened is None:
+            raise Problem("no_release")
+        release, file = opened
+        with file:
+            res = web.StreamResponse(headers={**HEADERS, "Content-Length": str(release.size),
+                                              "Content-Type": "application/vnd.android.package-archive"})
+            try:
+                await res.prepare(req)
+                while chunk := await asyncio.to_thread(file.read, 65536):
+                    await res.write(chunk)
+                await res.write_eof()
+            except ConnectionError:
+                return res  # the phone disconnected, so no complete download was served
+        log.info("app_release apk sent code=%d", release.code)
+        return res
 
     @staticmethod
     async def _body(req) -> dict:
@@ -269,6 +399,15 @@ class AppChat:
     async def home(self, req):
         raise web.HTTPFound("/chat/")
 
+    def unified_page(self, name, *, signed_cookie=False):
+        data, kind = self.files[name + ".html"]
+        if signed_cookie:
+            data = data.replace(b'<body>', b'<body data-session-cookie="yes">', 1)
+        return web.Response(body=data, content_type=kind, charset="utf-8")
+
+    async def account_page(self, req):
+        return self.unified_page("account", signed_cookie=bool(req.cookies.get(COOKIE)))
+
     async def picture(self, req):
         """API-140: a picture topic's picture (SPEC-274, SPEC-269), for the chat page and the call page. Only names in
         the picture list, removed ones too; anything else is no_picture. Not checked against Access again: the same
@@ -284,6 +423,13 @@ class AppChat:
         return web.Response(body=body, content_type="image/webp")
 
     async def page(self, req):
+        if self.sessions is not None and self.authentication != "access" and not req.match_info.get("name"):
+            try:
+                await self._unified_who(req)
+            except (Problem, SessionError) as error:
+                if error.code not in {"login_required", "unauthenticated"}:
+                    raise
+                raise web.HTTPFound("/chat/login") from None
         found = self.files.get(req.match_info.get("name", ""))
         if not found:
             raise web.HTTPNotFound()
@@ -307,9 +453,11 @@ class AppChat:
         limit = self._number(req.query.get("limit"), "limit", minimum=1, maximum=PAGE_MAX) or PAGE_DEFAULT
         rows = await self.store.app_messages(who["room_key"], before, limit)
         marks = await self._marks(who["room_key"])
-        return self._json(200, {"messages": await self.persona.messages(who, rows[:limit][::-1]),
+        response = self._json(200, {"messages": await self.persona.messages(who, rows[:limit][::-1]),
                                 "hasMore": len(rows) > limit, "readUpTo": marks["readUpTo"],
                                 "answeredUpTo": marks["answeredUpTo"]})
+        self._note_http_delivery(rows[:limit], "history")
+        return response
 
     async def send(self, req):
         """API-103: store at once (202), answer in the background under the room lock (SPEC-112)."""
@@ -339,9 +487,12 @@ class AppChat:
         if old:
             return self._json(200, {"message": self.message(old)})
         preference = proactive_preference(text)
-        await self.store.incoming(who["discord_user_id"], who["channel_id"], key, preference)
-        saved = await self.store.add_message(room, "user", text, user_key=who["user_key"], kakao_id=key,
-                                             meta={"transport": "app"})
+        if self.sessions is None:
+            await self.store.incoming(who["discord_user_id"], who["channel_id"], key, preference)
+            saved = await self.store.add_message(room, "user", text, user_key=who["user_key"], kakao_id=key,
+                                                meta={"transport": "app"})
+        else:
+            saved = await self.store.app_incoming(who, key, text, preference)
         row = await self.store.app_message(room, key)
         if saved is None:  # the same message arrived twice at once: the other request answers it
             return self._json(200, {"message": self.message(row)})
@@ -351,33 +502,78 @@ class AppChat:
         return self._json(202, {"message": self.message(row)})
 
     async def _delivered(self, text: str) -> bool:
-        return True  # the reply reaches the screen through the wait (API-104), or a notification
+        with app_step("reply_prepare", result="queued") as prepared:
+            if prepared:
+                prepared.io(inputs={"reply": text})
+            return True  # the wait endpoint or a push handles delivery
 
     async def _answer(self, who: dict, saved_id: int, text: str, key: str, preference) -> None:
-        room = who["room_key"]
-        reply = None
-        try:
-            link = await self.store.link(who["discord_user_id"])
-            msg = DiscordIncoming(room, who["user_key"], text, kakao_id=key, proactive_preference=preference,
-                                  google_command=google_command(text), topic_command=topic_phrase(text),
-                                  friend_id=who["friend_id"], dm_link=link, via="app", presaved_id=saved_id)
-            async with self.client.room_lock(room):
-                self._took_up(room, saved_id)
-                self.pulse()  # '읽음' and '대답 중' once this answer holds the room (SPEC-148, SPEC-149)
-                reply = await self.agent.handle(msg, self._delivered)
-        except Exception as e:
-            log.error("app_chat_reply_failed %s", type(e).__name__)
-        finally:
-            self.pulse()
-        if reply is None:
-            return
-        log.info("app_chat_replied")
-        # The friend closed the chat before the answer came: tell their phone (SPEC-120). Never Discord.
-        if not self.waiters.get(who["friend_id"]) and self.push.enabled:
+        with trace_step("app_turn", surface="app_chat") as trace:
+            if trace:
+                trace.app_message(who["friend_id"], text, room_key=who["room_key"], user_key=who["user_key"])
+                self.reply_traces[saved_id] = (time.monotonic(), trace)
+                if len(self.reply_traces) > 256:
+                    self.reply_traces.popitem(last=False)
+            room = who["room_key"]
+            reply = None
             try:
-                await self.push.notify(who["friend_id"], "reply", reply, ttl_s=REPLY_TTL_S)
+                with app_step("account_lookup", storage=True):
+                    link = (await self.store.link(who["discord_user_id"]) if self.sessions is None
+                            else await self.store.contact(who["friend_id"]))
+                msg = DiscordIncoming(room, who["user_key"], text, kakao_id=key, proactive_preference=preference,
+                                      google_command=google_command(text), topic_command=topic_phrase(text),
+                                      friend_id=who["friend_id"], dm_link=link, via="app", presaved_id=saved_id)
+                async with AsyncExitStack() as resources:
+                    with app_step("room_queue"):
+                        await resources.enter_async_context(self.client.room_lock(room))
+                    self._took_up(room, saved_id)
+                    self.pulse()  # '읽음' and '대답 중' once this answer holds the room (SPEC-148, SPEC-149)
+                    reply = await self.agent.handle(msg, self._delivered)
             except Exception as e:
-                log.warning("app_reply_notify_failed %s", type(e).__name__)
+                if trace:
+                    trace.capture(e)
+                log.error("app_chat_reply_failed %s", type(e).__name__)
+            finally:
+                with app_step("reply_publish", result="queued" if reply is not None else "skipped"):
+                    self.pulse()
+            if reply is None:
+                if trace:
+                    self.reply_traces.pop(saved_id, None)
+                    trace.record(result="no_reply")
+                return
+            if trace:
+                trace.record(result="ok")
+                trace.app_reply(reply)
+            log.info("app_chat_replied")
+            # The friend closed the chat before the answer came: tell their phone (SPEC-120). Never Discord.
+            if not self.waiters.get(who["friend_id"]) and self.push.enabled:
+                try:
+                    with app_step("reply_push", delivery="push") as push:
+                        if push:
+                            push.io(inputs={"message": {"role": "assistant", "content": reply}})
+                        if self.delivery and not await self.delivery.notifications_allowed(who["friend_id"]):
+                            if push:
+                                push.record(result="skipped", reason="no_session")
+                            return
+                        outcome = await self.push.notify(who["friend_id"], "reply", reply, ttl_s=REPLY_TTL_S)
+                        if push and isinstance(outcome, tuple) and len(outcome) == 2:
+                            accepted, available = outcome
+                            push.record(result="ok" if accepted else "rejected" if available else "no_device",
+                                        reason="no_ack" if available and not accepted else None,
+                                        count=accepted, available=available)
+                except Exception as e:
+                    log.warning("app_reply_notify_failed %s", type(e).__name__)
+            else:
+                with app_step("reply_push", result="skipped",
+                              reason="waiter_active" if self.waiters.get(who["friend_id"]) else "disabled"):
+                    pass
+
+    def _note_http_delivery(self, rows, transport):
+        for row in rows:
+            if row.get("role") == "assistant":
+                pending = self.reply_traces.pop(row.get("reply_to"), None)
+                if pending and time.monotonic() - pending[0] <= 600:
+                    app_delivery(pending[1], transport, row.get("content"))
 
     async def wait(self, req):
         """API-104: new messages at once, else after up to 25 s an empty list (SPEC-114). `typing` and `read` are what
@@ -422,7 +618,9 @@ class AppChat:
                 self.waiters.pop(friend, None)
         if mine.is_set() and not fresh:
             rows = []
-        return self._json(200, {"messages": await self.persona.messages(who, rows), **marks})
+        response = self._json(200, {"messages": await self.persona.messages(who, rows), **marks})
+        self._note_http_delivery(rows, "poll")
+        return response
 
     async def device(self, req):
         """API-105: this phone's notification state (SPEC-115, SPEC-139)."""
@@ -472,6 +670,16 @@ class AppChat:
         AppDiary(self).register(app)
         AppListen(self).register(app)
         app.router.add_get("/chat/healthz", self.health)
+        if self.sessions is not None:
+            app.router.add_get("/chat/join/{token}", self.account_page)
+            app.router.add_get("/chat/login", self.account_page)
+            app.router.add_get("/chat/{name:unified\\.(?:css|js)|account\\.js|admin\\.js}", self.page)
+            app.router.add_get("/chat/api/invites/{token}", self.check_invite)
+            app.router.add_post("/chat/api/join", self.join_with_invite)
+            app.router.add_post("/chat/api/login/code", self.login_with_device_code)
+            app.router.add_post("/chat/api/device-codes", self.create_device_code)
+            app.router.add_post("/chat/api/logout", self.logout)
+            self.admin.register(app.router)
         app.router.add_get("/chat", self.home)
         app.router.add_get("/chat/", self.page)
         app.router.add_get("/chat/{name:chat\\.(?:js|css)}", self.page)
@@ -481,6 +689,8 @@ class AppChat:
         app.router.add_get("/chat/api/messages/wait", self.wait)
         app.router.add_put("/chat/api/devices/{installId}", self.device)
         app.router.add_get("/chat/topics/{set}/{file}", self.picture)
+        app.router.add_get(RELEASE_CHECK_PATH, self.app_release, allow_head=False)
+        app.router.add_get("/chat/app/{file:.*}", self.app_apk, allow_head=False)
         self.persona.register(app)
         return app
 

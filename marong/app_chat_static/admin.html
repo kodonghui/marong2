@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko" data-theme="night">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#121729">
+  <title>마롱이 · 관리자</title>
+  <link rel="icon" href="/face/v1/01-neutral.webp">
+  <link rel="stylesheet" href="/chat/chat.css">
+  <link rel="stylesheet" href="/chat/unified.css">
+  <script src="/chat/unified.js" defer></script>
+  <script src="/chat/admin.js" defer></script>
+</head>
+<body>
+  <main class="unified">
+    <header><h1>관리자</h1></header>
+    <section class="stack" id="admin" aria-busy="true">
+      <p class="err" id="admin-error" role="status" hidden></p>
+      <p class="caption" id="admin-notice" role="status" hidden></p>
+      <h2>초대 링크</h2>
+      <div class="stack" id="invite-controls"></div>
+      <ul class="stack records" id="invites"></ul>
+      <h2>가입한 사람</h2>
+      <ul class="stack records" id="members"></ul>
+    </section>
+  </main>
+</body>
+</html>

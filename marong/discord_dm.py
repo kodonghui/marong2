@@ -18,6 +18,8 @@ from zoneinfo import ZoneInfo
 
 import discord
 
+from tools.vertex_live.tool_trace import app_note, app_step
+
 from . import reactions
 from .agent import CAPTION_PROMPT, Agent, Incoming
 from .app_delivery import RingCalls
@@ -226,10 +228,11 @@ def question_view(row):
     return view
 
 
-class DiscordAgent(Agent):
+class PrivateChatAgent(Agent):
     caption_prompt = CAPTION_PROMPT.replace("카카오톡", "디스코드 DM")
     ring = False  # MARONG_APP_RING=1: schedule_add takes call promises (docs/app-ring.md SPEC-128)
     topics = False  # MARONG_TOPICS=1: the phrases that turn hello calls and pictures on or off (SPEC-277)
+    schedule_source = "discord"
 
     def __init__(self, settings, store, embeddings, llm, on_saved=None, *, first_replies=None, google=None, shop=None,
                  web=None, clock=time.monotonic):
@@ -386,8 +389,14 @@ class DiscordAgent(Agent):
         if isinstance(msg, DiscordIncoming) and msg.friend_id:
             tz = ZoneInfo(self.s.timezone)
             try:
-                msg.schedule_rows, msg.schedule_total = await asyncio.wait_for(
-                    self.store.upcoming_schedules(msg.friend_id, datetime.now(tz), tz), 2)
+                with app_step("schedules_context", storage=True) as schedules:
+                    if schedules:
+                        schedules.io(inputs={"friend_id": msg.friend_id})
+                    msg.schedule_rows, msg.schedule_total = await asyncio.wait_for(
+                        self.store.upcoming_schedules(msg.friend_id, datetime.now(tz), tz), 2)
+                    if schedules:
+                        schedules.record(result="ok", count=len(msg.schedule_rows), available=msg.schedule_total)
+                        schedules.io(outputs={"records": msg.schedule_rows})
             except Exception as e:  # Answer without the list; the model is told it could not be read.
                 log.warning("schedule_context_error %s", type(e).__name__)
             if self.google:
@@ -400,7 +409,18 @@ class DiscordAgent(Agent):
     async def _google_context(self, msg, tz):
         """The friend's Google link and upcoming events. A slow or failing Google never blocks the answer."""
         try:
-            msg.google_link = await asyncio.wait_for(self.store.google_link(msg.friend_id), 2)
+            with app_step("calendar_link", storage=True) as lookup:
+                if lookup:
+                    lookup.io(inputs={"friend_id": msg.friend_id})
+                msg.google_link = await asyncio.wait_for(self.store.google_link(msg.friend_id), 2)
+                if lookup:
+                    link = msg.google_link
+                    connected = link and link["status"] == "connected"
+                    can_read = connected and link["can_read"]
+                    if can_read:
+                        lookup.record(result="ok")
+                    else:
+                        lookup.record(result="skipped", reason="permission_denied" if connected else "no_link")
         except Exception as e:
             log.warning("google_context_error %s", type(e).__name__)
             msg.google_link = UNKNOWN_LINK
@@ -409,7 +429,14 @@ class DiscordAgent(Agent):
         if not link or link["status"] != "connected" or not link["can_read"]:
             return
         try:
-            got = await asyncio.wait_for(self.google.upcoming(msg.friend_id, datetime.now(tz)), GOOGLE_CONTEXT_S)
+            with app_step("calendar_context") as calendar:
+                got = await asyncio.wait_for(self.google.upcoming(msg.friend_id, datetime.now(tz)), GOOGLE_CONTEXT_S)
+                if calendar:
+                    if got is None:
+                        calendar.record(result="rejected", reason="provider_auth")
+                    else:
+                        calendar.record(result="ok", count=len(got[0]))
+                        calendar.io(outputs={"records": got[0]})
             if got is None:  # Google refused the token just now: show the link as it is now (broken).
                 msg.google_link = await asyncio.wait_for(self.store.google_link(msg.friend_id), 2) or UNKNOWN_LINK
             else:
@@ -421,10 +448,13 @@ class DiscordAgent(Agent):
         """Google events for schedule_list's period, appended to its result."""
         tz = ZoneInfo(self.s.timezone)
         try:
-            start = parse_when(inp.get("start"), tz)[0].replace(hour=0, minute=0, second=0, microsecond=0)
-            end = parse_when(inp.get("end"), tz)[0].replace(hour=0, minute=0, second=0, microsecond=0)
-            return await asyncio.wait_for(
-                self.google.list_text(friend_id, start, end + timedelta(days=1), datetime.now(tz)), GOOGLE_LIST_S)
+            with app_step("calendar_tool") as lookup:
+                if lookup:
+                    lookup.io(inputs={"arguments": inp})
+                start = parse_when(inp.get("start"), tz)[0].replace(hour=0, minute=0, second=0, microsecond=0)
+                end = parse_when(inp.get("end"), tz)[0].replace(hour=0, minute=0, second=0, microsecond=0)
+                return await asyncio.wait_for(
+                    self.google.list_text(friend_id, start, end + timedelta(days=1), datetime.now(tz)), GOOGLE_LIST_S)
         except Exception as e:
             log.warning("google_list_error %s", type(e).__name__)
             return "\n구글 캘린더는 지금 못 읽었어."
@@ -492,13 +522,15 @@ class DiscordAgent(Agent):
         result = {"type": "tool_result", "tool_use_id": block.id}
         friend_id = getattr(msg, "friend_id", None)
         if block.name not in SCHEDULE_TOOL_NAMES or not friend_id:
+            app_note(reason="permission_denied" if block.name in SCHEDULE_TOOL_NAMES else "unknown_tool")
             return {**result, "content": f"{block.name} 도구는 없어.", "is_error": True}
         try:
             content, action = await run_schedule_tool(
                 self.store, block.name, block.input or {}, friend_id=friend_id, room_key=msg.room_key,
-                source="discord", source_message_id=msg.saved_id, tz=ZoneInfo(self.s.timezone), ring=self.ring)
+                source=self.schedule_source, source_message_id=msg.saved_id, tz=ZoneInfo(self.s.timezone), ring=self.ring)
         except Exception as e:
             log.error("db_error %s", brief(e))
+            app_note(reason="storage_error")
             msg.actions.append({"tool": block.name, "result": "db_error"})
             return {**result, "is_error": True,
                     "content": "저장소 오류로 못 했어. 맞춰 뒀다고 하지 말고, 지금은 저장이 안 된다고 솔직하게 말해."}
@@ -560,7 +592,7 @@ class DiscordAgent(Agent):
         if msg.proactive_preference is True:
             return "응, 나도 먼저 톡할게 🌰", {}
         if text in GUIDE:
-            link = await self.store.link(msg.user_key.removeprefix("discord-user:"))
+            link = msg.dm_link
             schedule_text = ""
             if link:
                 (start, end), per_day = proactive_schedule(link["start_hour"], link["end_hour"], link["per_day"])
@@ -603,6 +635,10 @@ class DiscordAgent(Agent):
             return reply
         log.info("discord_reaction_skipped why=%s", "gap" if emoji and text else "alone" if emoji else "emoji")
         return text or emoji or reactions.ALONE_TEXT  # only a mark: say the emoji instead of pressing it
+
+
+class DiscordAgent(PrivateChatAgent):
+    pass
 
 
 def vocative_pattern(names):
@@ -1028,7 +1064,7 @@ class DiscordDM(discord.Client):
         return ok
 
 
-class DiscordProactive(Proactive):
+class PrivateProactive(Proactive):
     def __init__(self, settings, store, agent, client, *, clock=None, app=None, topics=None, **kwargs):
         super().__init__(settings, store, agent, None, client.room_lock, **kwargs)
         self.client = client
@@ -1045,6 +1081,9 @@ class DiscordProactive(Proactive):
         if self.app is None or not self.app.enabled:
             return False
         return any(can_notify(d) for d in await self.store.app_devices(room["friend_id"]))
+
+    async def can_reach(self, room):
+        return self.client.available or await self._app_phone(room)
 
     def _slot(self, room, now):
         hours, count = schedule(room, self.s)
@@ -1110,7 +1149,7 @@ class DiscordProactive(Proactive):
         planned = self.plan(room, now)
         if not self.ready() or planned is None:
             return empty
-        if not self.client.available and not await self._app_phone(room):
+        if not await self.can_reach(room):
             return empty  # Discord is away and no phone takes it: keep the slot for when Discord is back
         if send_until is not None and time.monotonic() >= send_until:
             return empty
@@ -1247,7 +1286,11 @@ class DiscordProactive(Proactive):
         ))
 
 
-class DiscordReminders(RingCalls):
+class DiscordProactive(PrivateProactive):
+    pass
+
+
+class PrivateReminders(RingCalls):
     """Deliver the reminders friends asked for to their own linked DM, separately from proactive greetings.
     With the app (app_delivery): to the friend's phone when they have one for it (D18), and call promises ring it."""
 
@@ -1283,23 +1326,33 @@ class DiscordReminders(RingCalls):
                 await self.sweep_rings()  # calls nobody answered (docs/app-ring.md SPEC-138)
             except Exception as e:  # never keeps the reminders below from going out
                 log.warning("ring_sweep_error %s", type(e).__name__)
-        if not (self.client.available or (self.app is not None and self.app.enabled)):
+        if not self.ready():
             return 0
         sent = 0
         for row in await self.store.claim_due_reminders():
             sent += await self.deliver(row)
         return sent
 
+    def ready(self):
+        return self.client.available or (self.app is not None and self.app.enabled)
+
+    def has_destination(self, row):
+        return bool(row["channel_id"])
+
     async def deliver(self, row) -> int:
         now = self.clock()
         following = occurrence(row["repeat_anchor"], row["repeat"], now, self.tz) if row["repeat"] != "none" else None
         late = row["late"]
-        if late > LATE_LIMIT or not row["channel_id"]:
+        if late > LATE_LIMIT or not self.has_destination(row):
             await self.store.finish_reminder(row, "missed", following)
             log.info("discord_reminder_missed id=%s late_min=%d dm=%s", row["id"], late.total_seconds() // 60,
-                     bool(row["channel_id"]))
+                     self.has_destination(row))
             return 0
         if row.get("action") == "call" and self.app is not None and self.app.ring_enabled:
             return await self.place_call(row, late, following)
         text, _ = tidy(reminder_text(row, self.tz, late))
         return await self.remind(row, text, following, {"reminder": row["id"], "late_s": int(late.total_seconds())})
+
+
+class DiscordReminders(PrivateReminders):
+    pass

@@ -13,6 +13,7 @@ from psycopg.types.json import Jsonb
 from .app_push import TALK
 from .diary import KST, STOP_AT, WRITE_FROM, drawing_allowed, read_day_bundle, scene_error
 from .diary_models import ModelResult, PROMPT_VERSION, validate_draft
+from .room_scope import writing_room_key
 
 log = logging.getLogger("marong.diary")
 NOTICE_FROM = time(8, 30)
@@ -64,7 +65,7 @@ async def insert_picture(conn, row, revision, origin, run_id, picture):
 
 
 class DiaryWorker:
-    def __init__(self, store, models, delivery, budget, *, now=None, rng=None, on_saved=None):
+    def __init__(self, store, models, delivery, budget, *, now=None, rng=None, on_saved=None, unified=False):
         self.store = store
         self.models = models
         self.delivery = delivery
@@ -73,6 +74,13 @@ class DiaryWorker:
         self.rng = rng or random.SystemRandom()
         self.on_saved = on_saved
         self.running = False
+        self.unified = unified
+
+    def destination(self, friend):
+        if self.unified:
+            return f"SELECT {writing_room_key(friend)} AS room_key,NULL::text AS channel_id"
+        return (f"SELECT room_key,channel_id FROM marong.discord_dm_links "
+                f"WHERE friend_id={friend} AND channel_id IS NOT NULL")
 
     async def run(self):
         job = None
@@ -136,8 +144,8 @@ class DiaryWorker:
                 f"""INSERT INTO marong.diaries (friend_id,diary_date,next_at,created_at,updated_at)
                 SELECT d.friend_id,%(day)s,%(now)s,%(now)s,%(now)s
                 FROM (SELECT c.friend_id, %(day)s::date AS diary_date
-                    FROM call.callers c JOIN marong.discord_dm_links l USING (friend_id)
-                    WHERE c.enabled AND l.channel_id IS NOT NULL) d
+                    FROM call.callers c JOIN LATERAL ({self.destination("c.friend_id")}) l ON l.room_key IS NOT NULL
+                    WHERE c.enabled) d
                 WHERE (SELECT enabled FROM marong.diary_settings
                        WHERE friend_id=d.friend_id AND from_date<=d.diary_date ORDER BY id DESC LIMIT 1)
                   AND {_STOPPED}
@@ -174,7 +182,7 @@ class DiaryWorker:
 
     async def _write(self, row, deadline, trace):
         async with self.store.pool.connection() as conn:
-            bundle = await read_day_bundle(conn, row["friend_id"], row["diary_date"])
+            bundle = await read_day_bundle(conn, row["friend_id"], row["diary_date"], unified=self.unified)
         now = self.now()
         if not bundle.enough or now >= deadline:
             await self.store._one(
@@ -347,7 +355,7 @@ class DiaryWorker:
             f"""WITH due AS (
                 SELECT d.id, l.room_key, l.channel_id FROM marong.diaries d
                 JOIN call.callers c ON c.friend_id=d.friend_id AND c.enabled
-                JOIN marong.discord_dm_links l ON l.friend_id=d.friend_id AND l.channel_id IS NOT NULL
+                JOIN LATERAL ({self.destination("d.friend_id")}) l ON l.room_key IS NOT NULL
                 WHERE d.diary_date=%(day)s AND d.notice_state='waiting' AND d.notice_next_at<=%(now)s
                     AND d.state='ready' AND NOT d.hidden AND {_STOPPED}
                 ORDER BY d.notice_next_at,d.id LIMIT 1 FOR UPDATE OF d SKIP LOCKED
@@ -374,10 +382,17 @@ class DiaryWorker:
         left = int((end - self.now()).total_seconds())
         outcome, meta = "later", {}
         if still_eligible and left > 0:
-            outcome, meta = await self.delivery.say(
-                row["friend_id"], row["channel_id"], text, kind="diary", app_channel=TALK,
-                ttl_s=left, open_path="/chat/", app_text=first,
-            )
+            if self.unified:
+                sent = await self.delivery.say(
+                    row["friend_id"], text, kind="diary", app_channel=TALK, ttl_s=left, app_text=first,
+                    meta={"diary": True}, key=f"app-diary:{row['id']}",
+                )
+                outcome = "sent" if sent else "later"
+            else:
+                outcome, meta = await self.delivery.say(
+                    row["friend_id"], row["channel_id"], text, kind="diary", app_channel=TALK,
+                    ttl_s=left, open_path="/chat/", app_text=first,
+                )
         done = self.now()
         attempts = row["notice_attempts"] + (outcome != "later")
         next_at = done + timedelta(minutes=1 if outcome == "later" else 10)
@@ -394,7 +409,7 @@ class DiaryWorker:
                 (state, attempts, next_at if state == "waiting" else None, done if state == "sent" else None,
                  line if state == "sent" else None, done, row["id"]),
             )
-            if state == "sent":
+            if state == "sent" and not self.unified:
                 await conn.execute(
                     "INSERT INTO marong.messages(room_key,role,content,meta) VALUES (%s,'assistant',%s,%s)",
                     (row["room_key"], text, Jsonb({**meta, "diary": True, "delivered": True})),

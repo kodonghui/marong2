@@ -112,6 +112,12 @@ public class RingActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onStop() {
+        super.onStop();
+        AppUpdateJob.retryWhenQuiet(this);
+    }
+
+    @Override
     protected void onDestroy() {
         main.removeCallbacksAndMessages(null);
         if (shown.get() == this) {

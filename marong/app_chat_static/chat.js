@@ -87,7 +87,15 @@ async function api(path, options = {}, root = API) {
 
 // ── blocking states (SCR-107) ────────────────────────────────
 
-function relogin() {
+function relogin(result) {
+  if (result?.body?.code === 'login_required') {
+    try {
+      sessionStorage.setItem('marong.session.return', location.pathname + location.search + location.hash);
+      sessionStorage.setItem('marong.session.draft', ui.text.value || app.pending.values().next().value?.text || '');
+    } catch { /* the browser can block sessionStorage */ }
+    location.replace('/chat/login?expired=1');
+    return;
+  }
   let last = 0;
   try { last = Number(sessionStorage.getItem('marong.chat.relogin')) || 0; } catch { last = 0; }
   if (Date.now() - last > 30_000) {
@@ -134,7 +142,7 @@ function unblock() {
 /** true: the caller may go on. Blocking answers change the whole screen. */
 function handle(result) {
   const code = result.body && result.body.code;
-  if (result.status === 401) { relogin(); return false; }
+  if (result.status === 401) { relogin(result); return false; }
   if (result.status === 403 && (code === 'not_allowed' || code === 'no_dm')) { block(code); return false; }
   return true;
 }
@@ -267,7 +275,7 @@ function showCard(li, body, message) {
         return;
       }
       group.removeAttribute('aria-busy');
-      if (r.status === 401) { relogin(); return; }
+      if (r.status === 401) { relogin(r); return; }
       if (r.status === 404) {
         showCard(li, body, {...message, card: null});
         await refreshCards();
@@ -661,7 +669,22 @@ const RING = {
 
 const bridgeCan = (name) => Boolean(window.__marongApp && typeof window.__marongApp[name] === 'function');
 
+const updateRow = document.createElement('div');
+updateRow.className = 'menu-update';
+updateRow.hidden = true;
+const updateText = document.createElement('p');
+const updateButton = document.createElement('button');
+updateButton.type = 'button';
+updateButton.className = 'text-button';
+updateButton.textContent = '켜기';
+updateRow.append(updateText, updateButton);
+ui.menu.append(updateRow);
+
 function showMenu() {
+  const permission = inApp() ? app.device?.installUpdates : undefined;
+  updateRow.hidden = typeof permission !== 'boolean';
+  updateText.textContent = permission ? '자동 업데이트: 켜짐' : '자동 업데이트: 꺼짐 · 켜 두면 새 버전이 저절로 깔려';
+  updateButton.hidden = permission !== false || !bridgeCan('openInstallSettings');
   const me = app.me;
   if (!me) return;
   const why = me.delivery.reason;
@@ -722,6 +745,10 @@ $('menu-ring-settings').addEventListener('click', () => {
 $('menu-full-screen').addEventListener('click', () => {
   try { window.__marongApp.openFullScreenSettings(); } catch { /* old app */ }
 });
+updateButton.addEventListener('click', () => {
+  if (!bridgeCan('openInstallSettings')) return;
+  void Promise.resolve(window.__marongApp.openInstallSettings()).catch(() => {});
+});
 // The app reported a changed phone (back from Android's settings): show the new state.
 window.addEventListener('marongdevice', () => { if (!ui.menu.hidden) refreshMenu(); });
 $('state-retry').addEventListener('click', () => (app.blocked === 'login' ? location.reload() : start()));
@@ -755,7 +782,12 @@ async function start() {
   const page = await api(`/messages?limit=${PAGE}`);
   if (!handle(page)) return;
   if (page.status !== 200) { block('broken', page.body && page.body.traceId); return; }
-  try { sessionStorage.removeItem('marong.chat.relogin'); } catch { /* fine */ }
+  try {
+    sessionStorage.removeItem('marong.chat.relogin');
+    const draft = sessionStorage.getItem('marong.session.draft');
+    if (draft && !ui.text.value) ui.text.value = draft;
+    sessionStorage.removeItem('marong.session.draft');
+  } catch { /* sessionStorage can be blocked */ }
   unblock();
   app.hasMore = page.body.hasMore;
   setRead(page.body);

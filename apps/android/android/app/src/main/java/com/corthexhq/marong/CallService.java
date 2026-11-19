@@ -78,6 +78,12 @@ public class CallService extends Service {
     }
 
     @Override
+    public void onDestroy() {
+        super.onDestroy();
+        AppUpdateJob.retryWhenQuiet(this);
+    }
+
+    @Override
     public IBinder onBind(Intent intent) {
         return null;
     }

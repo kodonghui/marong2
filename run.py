@@ -23,6 +23,7 @@ from marong.knowledge import knowledge_files
 from marong.llm import LLM, brief
 from marong.memory import MemoryWorker
 from marong.proactive import QUIET_HOURS, Proactive
+from marong.work_loops import loops_home, run_locked
 from marong.store import SCHEMA_VERSION, Store
 
 # 설정 오류·토큰 오류·다른 연결로 대체됨(4004)은 '정상 종료(0)'로 끝낸다.
@@ -206,13 +207,16 @@ async def main(mode: str, args: list[str] | None = None) -> int:
             # DB 가 아직 안 떠 있어도 봇은 켜지고, 연결은 뒤에서 계속 시도(그동안은 기억 없이 답함)
             await store.open(wait=False)
             emb.start()
-            tasks.append(asyncio.create_task(worker.run()))
             if mode == "chat":
+                tasks.append(asyncio.create_task(worker.run()))
                 await chat(agent)
                 return 0
             app = BotApp(s, agent, http)
-            if s.proactive:
-                tasks.append(asyncio.create_task(Proactive(s, store, agent, http, app.room_lock).run()))
+            if loops_home(os.environ.get("MARONG_LOOPS_HOME", "bot")) == "bot":
+                tasks.append(asyncio.create_task(run_locked(s.database_url, "memory", worker.run)))
+                if s.proactive:
+                    proactive = Proactive(s, store, agent, http, app.room_lock)
+                    tasks.append(asyncio.create_task(run_locked(s.database_url, "legacy_proactive", proactive.run)))
             gateway = Gateway(s.gateway_url, s.bot_token, app.on_dispatch)
             try:
                 await gateway.run_forever()

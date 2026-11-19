@@ -18,6 +18,7 @@ from memory_tools import TranscriptRecorder,execute_tool
 from hangup import Consent
 from call_search import queries as search_queries
 from quiet_mic import QuietMic, level
+from tool_trace import step as trace_step
 
 BUILD='20261117-hello'
 FRAME=struct.Struct('!4sIIIII')
@@ -346,10 +347,14 @@ class LiveSession:
                 if friend_instruction:options['friend_instruction']=friend_instruction
             except Exception:
                 print('card_read_error',flush=True)
-        await upstream.send_json(self.setup(handle,seed,memory,**options))
-        first=await upstream.receive(timeout=timeout)
-        if first.type not in (WSMsgType.TEXT,WSMsgType.BINARY) or 'setupComplete' not in json.loads(first.data):
-            raise ConnectionError('setup_rejected')
+        surface = 'discord_voice' if self.entry_transport == 'discord' else 'web_voice'
+        with trace_step('voice_setup', surface=surface) as trace:
+            await upstream.send_json(self.setup(handle,seed,memory,**options))
+            first=await upstream.receive(timeout=timeout)
+            if first.type not in (WSMsgType.TEXT,WSMsgType.BINARY) or 'setupComplete' not in json.loads(first.data):
+                raise ConnectionError('setup_rejected')
+            if trace:
+                trace.record(result='ok')
         return upstream
 
     def configure_mic(self,tuning):
@@ -543,6 +548,7 @@ class LiveSession:
         sequence=0;last_audio=None;tool_tasks={};speaking=False;go_away=False;audio_finished=False;turn_queries=set()
         threshold=self.tuning['handoff_tokens'] if self.tuning and self.tuning['text_handoff'] else None
         last_input=0
+        surface = 'discord_voice' if self.entry_transport == 'discord' else 'web_voice'
         async def send(payload,remember=True):
             nonlocal sequence
             sequence+=1
@@ -578,16 +584,33 @@ class LiveSession:
 
         async def tool(call):
             name=call.get('name','');identifier=str(call.get('id',''))[:200]
-            if name=='end_call':
-                result=await self.end_call_requested()
-                await send({'toolResponse':{'functionResponses':[{'id':identifier,'name':name,'response':result}]}})
-                if result['result']=='ending' and self.hangup_answered is None:self.hangup_answered=time.monotonic()
-                return
-            try:
-                result=await asyncio.wait_for(execute_tool(self.store,self.p,self.call_id,self.segment,name,call.get('args',{}),self.segment+':'+identifier if self.segment else identifier,self.recorder),6)
-            except asyncio.CancelledError:raise
-            except Exception:result={'result':'not_saved','reason':'temporary_error'}
-            await send({'toolResponse':{'functionResponses':[{'id':identifier,'name':name,'response':result}]}})
+            with trace_step('voice_tool', surface=surface, tool=name) as trace:
+                try:
+                    with trace_step('tool_dispatch', trace) as dispatch:
+                        if name == 'end_call':
+                            result = await self.end_call_requested()
+                        else:
+                            result = await asyncio.wait_for(execute_tool(
+                                self.store, self.p, self.call_id, self.segment, name, call.get('args', {}),
+                                self.segment + ':' + identifier if self.segment else identifier, self.recorder), 6)
+                        if dispatch:
+                            if isinstance(result, dict):
+                                outcome = result.get('result')
+                                dispatch.record(result=result.get('reason', outcome) if outcome == 'not_saved' else outcome)
+                            else:
+                                dispatch.record(result='invalid_result')
+                except Exception:
+                    if name == 'end_call':
+                        raise
+                    result = {'result': 'not_saved', 'reason': 'temporary_error'}
+                    if trace:
+                        trace.record(result='temporary_error')
+                with trace_step('provider_send', trace) as delivery:
+                    await send({'toolResponse':{'functionResponses':[{'id':identifier,'name':name,'response':result}]}})
+                    if delivery:
+                        delivery.record(results_sent=1)
+                if name == 'end_call' and result['result'] == 'ending' and self.hangup_answered is None:
+                    self.hangup_answered = time.monotonic()
 
         async def receiver():
             nonlocal last_audio,speaking,go_away,audio_finished,last_input
@@ -632,7 +655,10 @@ class LiveSession:
                 if content.get('modelTurn') or data.get('toolCall') or content.get('turnComplete'):
                     self.recorder.boundary('user')
                 fresh=[q for q in search_queries(content) if q not in turn_queries]
-                if fresh:turn_queries.update(fresh);self.searched(len(fresh))
+                if fresh:
+                    turn_queries.update(fresh);self.searched(len(fresh))
+                    with trace_step('voice_search', surface=surface, web_searches=len(fresh)):
+                        pass
                 if received:
                     turn=meter.receive(usage,self.searches,received)
                     if turn and threshold:
