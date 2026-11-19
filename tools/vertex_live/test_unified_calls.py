@@ -39,6 +39,17 @@ async def main():
     with tempfile.TemporaryDirectory() as directory, patch.object(Path, "home", return_value=Path(directory)):
         import server
 
+    base = "Fixture common\n<!-- adult:start -->\nFixture adult\n<!-- adult:end -->\n"
+    profile = {"bot_name": "보리", "kind": "dog", "tone": "짧게", "traits": {"coatColors": ["크림"]},
+               "has_friends": True}
+    with patch.object(server, "instruction", return_value=base):
+        parts = server.setup(character=profile)["setup"]["systemInstruction"]["parts"]
+        assert parts[0]["text"].startswith("Fixture common\n")
+        assert "Fixture adult" not in parts[0]["text"]
+        assert all(word in parts[1]["text"] for word in ("보리", "강아지", "짧게", "크림"))
+        parts = server.setup(character=dict(profile, kind=None))["setup"]["systemInstruction"]["parts"]
+        assert parts[0]["text"].startswith("Fixture common\nFixture adult\n")
+
     voices = {1: "Aoede", 2: "Sulafat", 3: "Removed"}
 
     async def identify(req):
