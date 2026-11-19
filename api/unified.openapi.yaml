@@ -1743,7 +1743,7 @@ paths:
     post:
       operationId: adminCreateInvite
       summary: 초대 링크 만들기
-      description: 한 사람이 한 번 쓰는 초대 링크를 만들어요. 7일(`MARONG_INVITE_DAYS`) 뒤에 끝나요. `join`은 새 사람 가입이라 `friendId`를 보내지 않고, `link`(기존 친구 행 연결)는 프로필이 아직 없는 친구를, `relogin`(다시 로그인)은 프로필이 있는 친구를 `friendId`로 꼭 받아요. 종류와 프로필 유무가 안 맞으면 400이에요. 이메일이 같다고 자동으로 잇지 않아요. 링크 주소는 이 응답에만 있고 서버에는 토큰의 SHA-256만 남아요(TBL-164). `note`는 동희님만 보는 메모예요.
+      description: 한 사람이 한 번 쓰는 초대 링크를 만들어요. 7일(`MARONG_INVITE_DAYS`) 뒤에 끝나요. `join`은 새 사람 가입이라 `friendId`를 보내지 않고, `link`(기존 친구 행 연결)는 기존 친구를(프로필이 있어도 없어도 돼요. 쓸 때 빠진 행만 만들어요), `relogin`(다시 로그인)은 프로필이 있는 친구를 `friendId`로 꼭 받아요. `join`에 `friendId`가 있거나, `link`·`relogin`에 `friendId`가 없거나, `relogin`의 친구에게 프로필이 없으면 400이에요. 이메일이 같다고 자동으로 잇지 않아요. 링크 주소는 이 응답에만 있고 서버에는 토큰의 SHA-256만 남아요(TBL-164). `note`는 동희님만 보는 메모예요.
       security:
       - cfAccess: []
       x-corthex:

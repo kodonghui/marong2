@@ -122,9 +122,14 @@
           "level": "info",
           "message": "검토 뒤 계약을 다시 만듦: 작업 32개, 예시 292개, 오류 코드 28개. 생성기 검사(check-unified-api.js) 모두 통과. Profile에 features·google·pendingRing, MemberList에 unlinked, 오류 check_unavailable 추가. 계약 시험은 아직 없음(구현 PR에서)",
           "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "API-235의 설명을 SPEC-370에 맞춤(link는 기존 친구면 되고 프로필 유무를 보지 않음). GPT의 설계 질문(PR #55, #64)에 대한 답. 계약 검사 통과",
+          "at": "2026-11-19"
         }
       ],
-      "updated": "2026-11-19T05:43:22+00:00"
+      "updated": "2026-11-19T08:16:39+00:00"
     },
     "07-sitemap": {
       "state": "in_progress",
@@ -209,9 +214,14 @@
           "level": "info",
           "message": "검토 뒤 GPT 인계와 작업 표를 고침: 시작 전 확인 세 가지, 코드 위치, 순서(TASK-410 → 395 → 394 → 401), 시험 명령, 검토에서 고친 것 절 추가. 새 제안 일곱 가지는 측정·확인 전이라 구현 PR에서 확인",
           "at": "2026-11-19"
+        },
+        {
+          "level": "info",
+          "message": "GPT의 설계 질문 넷에 답함(docs/10-wbs/unified.md의 설계 질문 답). 구현 PR #53, #55~#64, #41, #46이 2026-11-19 17시대 KST에 main에 합쳐짐(동희님 \"PR 너가 다 합쳐\"). 운영 반영은 아직 안 됨",
+          "at": "2026-11-19"
         }
       ],
-      "updated": "2026-11-19T05:43:22+00:00"
+      "updated": "2026-11-19T08:16:39+00:00"
     },
     "12-qa": {
       "state": "in_progress",
