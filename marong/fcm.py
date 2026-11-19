@@ -55,10 +55,11 @@ def preview(text: str, limit: int = PREVIEW_MAX) -> str:
     return flat if len(flat) <= limit else flat[:limit - 1] + "…"
 
 
-def notice(fid: str, kind: str, text: str, *, channel: str, ttl_s: int, open_path: str = "/chat/") -> dict:
+def notice(fid: str, kind: str, text: str, *, channel: str, ttl_s: int, open_path: str = "/chat/",
+           title: str = TITLE) -> dict:
     """A visible notification (proactive, reminder, reply, missed_call). PRIVATE hides the text on a locked screen
     when the phone's settings say so (REQ-118)."""
-    return {"fid": fid, "notification": {"title": TITLE, "body": preview(text)},
+    return {"fid": fid, "notification": {"title": title, "body": preview(text)},
             "data": {"kind": kind, "open": open_path},
             "android": {"priority": "HIGH", "ttl": f"{max(1, int(ttl_s))}s",
                         "notification": {"channel_id": channel, "visibility": "PRIVATE"}}}

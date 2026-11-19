@@ -1,0 +1,126 @@
+"""Read and update the signed-in friend's profile (API-216 and API-217)."""
+
+from datetime import timedelta
+import os
+import re
+
+from aiohttp import web
+
+from .app_chat import Problem
+from .app_session import SessionError
+
+
+VOICE_NAME = re.compile(r"[A-Za-z]{2,24}")
+
+
+def call_voices(env=os.environ):
+    configured = tuple(dict.fromkeys(v.strip() for v in env.get("MARONG_CALL_VOICES", "Sulafat").split(",")
+                                      if VOICE_NAME.fullmatch(v.strip())))
+    return configured or ("Sulafat",)
+
+
+def voice_default(voices):
+    return "Sulafat" if "Sulafat" in voices else voices[0]
+
+
+def usage_day(now, tz):
+    return (now.astimezone(tz) - timedelta(hours=4)).date()
+
+
+class AppProfile:
+    def __init__(self, chat, *, character=None, friends=None, google=False, voices=None, daily_limit=None):
+        self.chat = chat
+        self.features = {"character": bool(character), "friends": bool(friends)}
+        self.google = google
+        self.voices = voices or call_voices()
+        self.daily_limit = daily_limit
+
+    async def who(self, req, *, write=False):
+        who = await self.chat._who(req, write=write)
+        if who["profile_id"] is None:
+            await self.chat.sessions.ensure_profile(who["friend_id"])
+        return who
+
+    async def read(self, friend):
+        day = usage_day(self.chat.sessions.now(), self.chat.tz)
+        record = await self.chat.store._one("""
+            SELECT f.name,f.share,p.bot_name,p.voice,p.friend_code,p.tickets,c.id AS character_id,
+                   c.name AS character_name,c.kind,coalesce(u.chat_turns,0) AS chat_turns,
+                   coalesce(u.call_seconds,0) AS call_seconds,coalesce(u.images,0) AS images,
+                   coalesce(u.units,0) AS units,r.id AS ring_id,r.answer_until
+            FROM marong.friends f JOIN marong.friend_profiles p ON p.friend_id=f.id
+            LEFT JOIN marong.characters c ON c.id=p.character_id AND c.friend_id=f.id AND c.status='ready'
+            LEFT JOIN marong.usage_daily u ON u.friend_id=f.id AND u.day=%s
+            LEFT JOIN LATERAL (
+                SELECT id,answer_until FROM marong.app_rings
+                WHERE friend_id=f.id AND reason='promise' AND status='ringing' AND answer_until>now()
+                ORDER BY created_at DESC LIMIT 1
+            ) r ON true
+            WHERE f.id=%s
+        """, (day, friend))
+        google = "off"
+        if self.google:
+            link = await self.chat.store._one(
+                "SELECT status FROM marong.google_links WHERE friend_id=%s", (friend,))
+            google = "connected" if link and link["status"] == "connected" else "not_connected"
+        character = None
+        if record["character_id"] is not None:
+            character = {"id": record["character_id"], "name": record["character_name"], "kind": record["kind"],
+                         "faceUrl": f"/chat/api/characters/{record['character_id']}/images/front"}
+        ringing = None
+        if record["ring_id"] is not None:
+            ringing = {"ringId": str(record["ring_id"]), "until": record["answer_until"].isoformat()}
+        return {"friendName": record["name"], "botName": record["bot_name"], "character": character,
+                "voice": record["voice"], "friendCode": record["friend_code"], "share": record["share"],
+                "features": self.features, "google": google, "pendingRing": ringing,
+                "usageToday": {"day": day.isoformat(), "chatTurns": record["chat_turns"],
+                               "callSeconds": record["call_seconds"], "images": record["images"],
+                               "units": record["units"], "tickets": record["tickets"], "limit": self.daily_limit}}
+
+    async def get(self, req):
+        who = await self.who(req)
+        return self.chat._json(200, await self.read(who["friend_id"]))
+
+    async def patch(self, req):
+        who = await self.who(req, write=True)
+        try:
+            data = await self.chat._body(req)
+        except Problem as e:
+            raise Problem("invalid_input", e.errors) from None
+        if not data or data.keys() - {"botName", "voice", "share"}:
+            raise Problem("invalid_input")
+        if "botName" in data:
+            name = data["botName"]
+            if not isinstance(name, str) or not 1 <= len(name.strip()) <= 12:
+                raise Problem("invalid_input", [{"field": "botName", "reason": "bad_length"}])
+            data["botName"] = name.strip()
+        if "voice" in data and data["voice"] is not None and data["voice"] not in self.voices:
+            raise Problem("voice_unknown")
+        if "share" in data and type(data["share"]) is not bool:
+            raise Problem("invalid_input")
+        changes = [(col, data[field]) for field, col in (("botName", "bot_name"), ("voice", "voice")) if field in data]
+        friend = who["friend_id"]
+        async with self.chat.store.pool.connection() as conn, conn.transaction():
+            for column, value in changes:
+                await conn.execute(f"""
+                    UPDATE marong.friend_profiles SET {column}=%s,updated_at=now()
+                    WHERE friend_id=%s AND {column} IS DISTINCT FROM %s
+                """, (value, friend, value))
+            if "share" in data:
+                await conn.execute("UPDATE marong.friends SET share=%s WHERE id=%s AND share IS DISTINCT FROM %s",
+                                   (data["share"], friend, data["share"]))
+        return self.chat._json(200, await self.read(friend))
+
+    async def page(self, req):
+        try:
+            await self.chat._who(req)
+        except (Problem, SessionError) as error:
+            if error.code not in {"login_required", "unauthenticated"}:
+                raise
+            raise web.HTTPFound("/chat/login")
+        return self.chat.unified_page("profile")
+
+    def register(self, router):
+        router.add_get("/chat/me", self.page)
+        router.add_get("/chat/api/profile", self.get)
+        router.add_patch("/chat/api/profile", self.patch)

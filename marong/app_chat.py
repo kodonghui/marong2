@@ -46,7 +46,8 @@ STATIC = Path(__file__).with_name("app_chat_static")
 FILES = {"": ("index.html", "text/html"), "chat.js": ("chat.js", "text/javascript"),
          "chat.css": ("chat.css", "text/css")}
 UNIFIED_FILES = {"account.html": "text/html", "admin.html": "text/html", "unified.css": "text/css",
-                 "unified.js": "text/javascript", "account.js": "text/javascript", "admin.js": "text/javascript"}
+                 "unified.js": "text/javascript", "account.js": "text/javascript", "admin.js": "text/javascript",
+                 "profile.html": "text/html", "profile.js": "text/javascript"}
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 FID = re.compile(r"[A-Za-z0-9_-]{16,200}\Z")
 VERSION = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\Z")
@@ -54,6 +55,7 @@ RELEASE_CHECK_PATH = "/chat/api/app/release"
 NUMBER = re.compile(r"[0-9]{1,18}\Z")
 PROBLEMS = {
     "invalid_input": (400, "요청 모양이 틀림"),
+    "voice_unknown": (400, "고를 수 있는 목소리가 아님"),
     "login_required": (401, "로그인이 필요함"),
     "code_wrong": (401, "코드가 맞지 않음"),
     "invite_not_found": (404, "없는 초대 링크"),
@@ -139,7 +141,9 @@ class AppChat:
         from .app_persona import AppPersona
         self.persona = AppPersona(self)
         from .app_admin import AppAdmin
+        from .app_profile import AppProfile
         self.admin = AppAdmin(self, admin_email_hash)
+        self.profile = AppProfile(self)
         if sessions is not None:
             self.files.update({name: ((STATIC / name).read_bytes(), mime) for name, mime in UNIFIED_FILES.items()})
 
@@ -673,13 +677,14 @@ class AppChat:
         if self.sessions is not None:
             app.router.add_get("/chat/join/{token}", self.account_page)
             app.router.add_get("/chat/login", self.account_page)
-            app.router.add_get("/chat/{name:unified\\.(?:css|js)|account\\.js|admin\\.js}", self.page)
+            app.router.add_get("/chat/{name:unified\\.(?:css|js)|(?:account|admin|profile)\\.js}", self.page)
             app.router.add_get("/chat/api/invites/{token}", self.check_invite)
             app.router.add_post("/chat/api/join", self.join_with_invite)
             app.router.add_post("/chat/api/login/code", self.login_with_device_code)
             app.router.add_post("/chat/api/device-codes", self.create_device_code)
             app.router.add_post("/chat/api/logout", self.logout)
             self.admin.register(app.router)
+            self.profile.register(app.router)
         app.router.add_get("/chat", self.home)
         app.router.add_get("/chat/", self.page)
         app.router.add_get("/chat/{name:chat\\.(?:js|css)}", self.page)
