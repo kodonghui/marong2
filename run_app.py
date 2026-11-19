@@ -39,6 +39,7 @@ log = logging.getLogger("marong.runtime")
 
 class AppAgent(PrivateChatAgent):
     schedule_source = "app"
+    friend_context_limit = 20
 
     async def _friend_system(self, system, friend, room, *, private):
         if private and friend:

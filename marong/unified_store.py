@@ -1,8 +1,11 @@
 """The app store uses an account's owned room keys for its reply context."""
 
+import asyncio
+import os
 from psycopg.types.json import Jsonb
 
 from .discord_store import DiscordStore
+from .friend_scope import ACCEPTED_CIRCLE
 from .room_scope import writing_room, writing_room_key, writing_user_key
 from .store import PROACTIVE_MESSAGE
 
@@ -30,6 +33,15 @@ CROSS JOIN LATERAL (
 
 
 class UnifiedStore(DiscordStore):
+    async def friend_circle(self, user_key, limit):
+        if os.getenv("MARONG_FRIENDS") != "1":
+            return []
+        async with asyncio.timeout(.7):
+            person = await self._one("SELECT friend_id FROM marong.people WHERE user_key=%s", (user_key,))
+            if not person or person["friend_id"] is None:
+                return []
+            return await self._all(ACCEPTED_CIRCLE, {"friend": person["friend_id"], "limit": min(20, limit)})
+
     async def character_prompt(self, friend_id, friends_enabled):
         return await self._one("""
             SELECT p.bot_name,c.kind,c.traits,c.tone, %s AND EXISTS (

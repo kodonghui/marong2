@@ -1,6 +1,7 @@
 """Caller-scoped PostgreSQL memory. Never used synchronously in the PCM loop."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -9,6 +10,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from psycopg import Error
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
@@ -16,6 +18,7 @@ from call_usage import Ledger
 from call_cost import MonthlyCost
 from call_tuning import BASE
 from marong.room_scope import writing_room
+from marong.friend_scope import ACCEPTED_CIRCLE
 
 
 @dataclass(frozen=True)
@@ -203,9 +206,17 @@ class MemoryStore:
           FROM marong.friendships fs JOIN marong.friends f
             ON f.id=CASE WHEN fs.friend_a=%s THEN fs.friend_b ELSE fs.friend_a END
           LEFT JOIN LATERAL(SELECT content,close_content FROM marong.shared_notes WHERE friend_id=f.id ORDER BY id DESC LIMIT 1) s ON true
-          WHERE %s IN(fs.friend_a,fs.friend_b) AND f.share ORDER BY f.id LIMIT 8""", (p.friend_id,p.friend_id))
+          WHERE %s IN(fs.friend_a,fs.friend_b) AND f.share AND coalesce(to_jsonb(fs)->>'state','accepted')='accepted'
+          ORDER BY f.id LIMIT 8""", (p.friend_id,p.friend_id))
         for row in friends:
             row['content'] = (row['content'] or '') + '\n' + (row.pop('close_content') or '')
+        if p.unified and os.getenv("MARONG_FRIENDS") == "1":
+            try:
+                circle = await asyncio.wait_for(self.all(ACCEPTED_CIRCLE, {"friend": p.friend_id, "limit": 20}), .7)
+            except (Error, TimeoutError):
+                circle = []
+            friends = [{"name": row["name"], "label": row["label"],
+                        "content": "\n".join(filter(None, (row["shared"], row["shared_close"])))} for row in circle]
         memories = await self.all("""SELECT m.id,m.content,m.created_at,'call_memory' AS source FROM call.memories m
           JOIN call.calls c ON c.id=m.call_id WHERE m.caller_id=%s AND m.status='active' AND c.deleted_at IS NULL
           ORDER BY m.created_at DESC LIMIT %s""", (p.caller_id,memory_limit))
