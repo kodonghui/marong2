@@ -12,29 +12,6 @@ public class AppUrlsTest {
     private static final String APP = "https://marong.corthex-hq.com";
 
     @Test
-    public void accessSignInPagesStayInTheApp() {
-        assertTrue(AppUrls.isAccessLogin("https://team.cloudflareaccess.com/cdn-cgi/access/login/marong.corthex-hq.com?kid=1"));
-        assertTrue(AppUrls.isAccessLogin("https://TEAM.CloudflareAccess.com/cdn-cgi/access/callback"));
-        assertTrue(AppUrls.isAccessLogin("https://team.cloudflareaccess.com:443/"));
-    }
-
-    @Test
-    public void lookalikeAccessAddressesDoNot() {
-        assertFalse(AppUrls.isAccessLogin("http://team.cloudflareaccess.com/"));
-        assertFalse(AppUrls.isAccessLogin("https://cloudflareaccess.com/"));
-        assertFalse(AppUrls.isAccessLogin("https://a.b.cloudflareaccess.com/"));
-        assertFalse(AppUrls.isAccessLogin("https://teamcloudflareaccess.com/"));
-        assertFalse(AppUrls.isAccessLogin("https://team.cloudflareaccess.com.example.org/"));
-        assertFalse(AppUrls.isAccessLogin("https://example.org/team.cloudflareaccess.com"));
-        assertFalse(AppUrls.isAccessLogin("https://team.cloudflareaccess.com@example.org/"));
-        assertFalse(AppUrls.isAccessLogin("https://user@team.cloudflareaccess.com/"));
-        assertFalse(AppUrls.isAccessLogin("https://team.cloudflareaccess.com:8443/"));
-        assertFalse(AppUrls.isAccessLogin("javascript:alert(1)"));
-        assertFalse(AppUrls.isAccessLogin("not a url"));
-        assertFalse(AppUrls.isAccessLogin(null));
-    }
-
-    @Test
     public void appPagesMatchOnlyTheCallSiteOrigin() {
         assertTrue(AppUrls.isAppPage("https://marong.corthex-hq.com/", APP));
         assertTrue(AppUrls.isAppPage("https://MARONG.corthex-hq.com/status?x=1", APP));

@@ -31,9 +31,9 @@ public class CallService extends Service {
      * startForegroundService, so a failure can never become a "did not call startForeground"
      * crash. Returns false when Android refuses (for example from the background).
      */
-    static boolean show(Context context) {
+    static boolean show(Context context, String name) {
         try {
-            context.startService(new Intent(context, CallService.class).setAction(ACTION_SHOW));
+            context.startService(new Intent(context, CallService.class).setAction(ACTION_SHOW).putExtra(Ring.EXTRA_NAME, name));
             return true;
         } catch (RuntimeException e) {
             Logger.warn("MarongCall", "Call service not started: " + e.getClass().getSimpleName());
@@ -59,7 +59,7 @@ public class CallService extends Service {
             ServiceCompat.startForeground(
                 this,
                 NOTIFICATION_ID,
-                buildNotification(),
+                buildNotification(intent == null ? null : intent.getStringExtra(Ring.EXTRA_NAME)),
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ? ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE : 0
             );
         } catch (RuntimeException e) {
@@ -88,7 +88,7 @@ public class CallService extends Service {
         return null;
     }
 
-    private Notification buildNotification() {
+    private Notification buildNotification(String name) {
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && manager != null) {
             NotificationChannel channel = new NotificationChannel(
@@ -117,7 +117,7 @@ public class CallService extends Service {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_call)
             .setColor(ContextCompat.getColor(this, R.color.marong_accent))
-            .setContentTitle(getString(R.string.call_notification_title))
+            .setContentTitle(getString(R.string.call_notification_title, name == null ? getString(R.string.ring_caller) : name))
             .setContentText(getString(R.string.call_notification_text))
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)

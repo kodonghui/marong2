@@ -37,10 +37,15 @@ public class RingActivity extends AppCompatActivity {
         }
         showOverLockScreen();
         setContentView(R.layout.activity_ring);
+        String name = getIntent().getStringExtra(Ring.EXTRA_NAME);
+        if (name == null) {
+            name = getString(R.string.ring_caller);
+        }
+        ((TextView) findViewById(R.id.ring_name)).setText(name);
         String reason = getIntent().getStringExtra(Ring.EXTRA_REASON);
         String line = PushLinks.ringLine(reason, getIntent().getStringExtra(Ring.EXTRA_LINE));
         if (PushLinks.isHello(reason)) {
-            ((TextView) findViewById(R.id.ring_kind)).setText(R.string.ring_hello_text);
+            ((TextView) findViewById(R.id.ring_kind)).setText(getString(R.string.ring_hello_named, name));
         }
         TextView lineView = findViewById(R.id.ring_line);
         lineView.setText(line == null ? "" : line);

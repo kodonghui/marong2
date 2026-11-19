@@ -48,7 +48,8 @@
     const next = hasLiveMicrophone();
     if (next === active) return;
     active = next;
-    send('MarongCall', next ? 'callStarted' : 'callEnded');
+    const name = document.querySelector('.brand')?.firstChild?.textContent?.trim();
+    send('MarongCall', next ? 'callStarted' : 'callEnded', next && name ? {name} : undefined);
     syncKeepAudible();
   };
 

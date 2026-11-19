@@ -7,7 +7,7 @@
 
     <string name="call_channel_name">통화 중 표시</string>
     <string name="call_channel_description">마롱이와 통화하는 동안 화면을 꺼도 통화가 이어지게 보여 주는 알림이에요.</string>
-    <string name="call_notification_title">마롱이와 통화 중</string>
+    <string name="call_notification_title">%1$s · 통화 중</string>
     <string name="call_notification_text">누르면 통화 화면으로 돌아가요.</string>
     <string name="call_notification_hang_up">끊기</string>
 
@@ -24,7 +24,7 @@
     <string name="ring_channel_description">마롱이가 거는 전화예요(약속한 전화와 먼저 거는 전화). 폰 벨소리로 울려요.</string>
     <string name="ring_caller">마롱이</string>
     <string name="ring_text">약속한 전화예요</string>
-    <string name="ring_hello_text">마롱이가 먼저 걸었어요</string>
+    <string name="ring_hello_named">%1$s 님이 먼저 걸었어요</string>
     <string name="ring_answer">받기</string>
     <string name="ring_decline">거절</string>
     <string name="update_channel_name">앱 업데이트</string>

@@ -10,26 +10,7 @@ import java.util.Locale;
  */
 final class AppUrls {
 
-    private static final String ACCESS_SUFFIX = ".cloudflareaccess.com";
-
     private AppUrls() {}
-
-    /**
-     * True for the Cloudflare Access sign-in pages ("team.cloudflareaccess.com"), where the
-     * email one-time code is entered. Exactly one label before the suffix, HTTPS, default port.
-     */
-    static boolean isAccessLogin(String url) {
-        URI uri = parse(url);
-        if (uri == null || !isHttpsDefaultPort(uri) || uri.getRawUserInfo() != null) {
-            return false;
-        }
-        String host = lowerHost(uri);
-        if (host == null || !host.endsWith(ACCESS_SUFFIX)) {
-            return false;
-        }
-        String team = host.substring(0, host.length() - ACCESS_SUFFIX.length());
-        return !team.isEmpty() && team.indexOf('.') < 0;
-    }
 
     /** True when url is a page on the same origin (scheme, host, port) as appUrl. */
     static boolean isAppPage(String url, String appUrl) {
@@ -61,10 +42,6 @@ final class AppUrls {
     /** Server outages that should swap in the app's own "can't connect" page. */
     static boolean isServerOutage(int statusCode) {
         return statusCode >= 500 && statusCode <= 599;
-    }
-
-    private static boolean isHttpsDefaultPort(URI uri) {
-        return "https".equals(schemeOf(uri)) && (uri.getPort() == -1 || uri.getPort() == 443);
     }
 
     private static int portOf(URI uri) {

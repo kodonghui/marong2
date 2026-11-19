@@ -78,6 +78,7 @@ function setup({ capacitorAtStart = true, deny = false, theme = 'night', rootAtS
     readyState: 'loading', // the app adds the script at document start
     get documentElement() { return currentRoot; },
     getElementById: (id) => (id === 'stop' ? stopButton : null),
+    querySelector: (selector) => selector === '.brand' ? { firstChild: { textContent: '군밤이' } } : null,
     addEventListener: (type, fn) => { (docListeners[type] ||= []).push(fn); },
   };
   if (adoptedSheets) document.adoptedStyleSheets = sheets;
@@ -140,6 +141,7 @@ test('TC-101: a live microphone track reports the call start once, and its stop 
   const t = setup();
   const stream = await t.getUserMedia();
   assert.deepEqual(t.names().filter((n) => n.startsWith('MarongCall')), ['MarongCall.callStarted']);
+  assert.deepEqual(t.calls.find(([, method]) => method === 'callStarted')[2], {name: '군밤이'});
   assert.equal(t.window.__marongApp.isCallActive(), true);
   stream.track.stop();
   assert.deepEqual(t.names().filter((n) => n.startsWith('MarongCall')), ['MarongCall.callStarted', 'MarongCall.callEnded']);

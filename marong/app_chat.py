@@ -458,6 +458,11 @@ class AppChat:
         req["cache"] = "public, max-age=31536000, immutable"
         return web.Response(body=body, content_type="image/webp")
 
+    async def web_asset(self, req):
+        name = req.match_info["asset"]
+        mime = "application/manifest+json" if name == "manifest.webmanifest" else "image/png"
+        return web.FileResponse(STATIC / name, headers={"Content-Type": mime})
+
     async def page(self, req):
         if self.sessions is not None and self.authentication != "access" and not req.match_info.get("name"):
             try:
@@ -728,6 +733,7 @@ class AppChat:
         app.router.add_get("/chat", self.home)
         app.router.add_get("/chat/", self.page)
         app.router.add_get("/chat/{name:chat\\.(?:js|css)}", self.page)
+        app.router.add_get("/chat/{asset:manifest\\.webmanifest|icon-(?:180|192|512)\\.png}", self.web_asset)
         app.router.add_get("/chat/api/me", self.me)
         app.router.add_get("/chat/api/messages", self.messages)
         app.router.add_post("/chat/api/messages", self.send)

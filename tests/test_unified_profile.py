@@ -48,6 +48,19 @@ class ProfileTests(unittest.IsolatedAsyncioTestCase):
             cookie = {"Cookie": f"{COOKIE}={auth.token}"}
             headers = {**cookie, "Origin": ORIGIN}
             self.assertEqual((await client.get(PROFILE)).status, 401)
+            manifest = await client.get("/chat/manifest.webmanifest")
+            self.assertEqual(manifest.content_type, "application/manifest+json")
+            metadata = await manifest.json(content_type="application/manifest+json")
+            self.assertEqual((metadata["start_url"], metadata["display"]), ("/chat/", "standalone"))
+            self.assertEqual([icon["sizes"] for icon in metadata["icons"]], ["192x192", "512x512"])
+            for icon in ("/chat/icon-180.png", *(item["src"] for item in metadata["icons"])):
+                asset = await client.get(icon)
+                self.assertEqual(asset.content_type, "image/png")
+                self.assertTrue((await asset.read()).startswith(b"\x89PNG"))
+            homepage = await client.get("/chat/", headers=cookie)
+            markup = await homepage.text()
+            self.assertIn('rel="apple-touch-icon"', markup)
+            self.assertNotIn("serviceWorker", markup)
             self.assertEqual((await client.get("/chat/me", allow_redirects=False)).status, 302)
             self.assertEqual((await client.get("/chat/me", headers=cookie)).status, 200)
             initial = await (await client.get(PROFILE, headers=cookie)).json()
