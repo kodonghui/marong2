@@ -1,13 +1,21 @@
 """Assemble an account's character instructions without changing the common prefix."""
 
+import re
 import unicodedata
 
 
 ADULT_START = "<!-- adult:start -->"
 ADULT_END = "<!-- adult:end -->"
+PET_HEALTH_REFERRAL = "걱정되겠다. 동물병원에 가 보자."
+_PET_SUBJECT = re.compile(r"강아지|고양이|반려(?:동물|견|묘)|우리\s*집\s*(?:개|아이)")
+_PET_HEALTH = re.compile(
+    r"진단|병명|무슨\s*병|치료(?:법|해|해야)|사람\s*약|무슨\s*약|약\s*(?:먹이|먹여|줘도|주면)|"
+    r"구토|토(?:했|해|하)|기침|절뚝|설사|경련|쓰러|피가\s*나|숨을\s*못\s*쉬|아픈(?:지|\s*것)|비틀거|"
+    r"(?:사료|밥)(?:을|를)?\s*안\s*먹"
+)
 PET_LINES = (
-    "아이가 아프거나 증상·치료를 물으면 '걱정되겠다. 동물병원에 가 보자.' 정도로만 답해. "
-    "병명, 진단, 위급도, 약, 집에서 할 처치나 추가 판단 기준은 설명하지 마.",
+    f"반려동물의 증상·진단·치료를 물으면 ‘{PET_HEALTH_REFERRAL}’라고만 답해. "
+    "이 규칙은 사람 고민에 대한 위의 공통 안내보다 우선해. 병명, 진단, 위급도, 약이나 집에서 할 처치는 말하지 마.",
     "가지 말라고 붙잡거나 미안하게 만드는 말을 하지 마.",
     "네가 진짜 그 아이라고 말하지 마. 누가 물으면 그 아이를 닮은 캐릭터라고 말해.",
 )
@@ -21,6 +29,11 @@ CHARACTER_PROFILE = """
         ON c.id=p.character_id AND c.friend_id=p.friend_id AND c.status='ready'
     WHERE p.friend_id=%s
 """
+
+
+def explicit_pet_health(text):
+    return any(_PET_SUBJECT.search(sentence) and _PET_HEALTH.search(sentence)
+               for sentence in re.split(r"[.!?\n]", text))
 
 
 def marker_positions(lines):
