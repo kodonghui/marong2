@@ -154,7 +154,7 @@ class AppSessions:
                 """, (friend_id,))
                 if friend is None:
                     raise SessionError("not_found")
-                if (kind == "link") == (friend["profile_id"] is not None):
+                if kind == "relogin" and friend["profile_id"] is None:
                     raise SessionError("invalid_input")
             for _ in range(5):
                 token = secrets.token_urlsafe(32)

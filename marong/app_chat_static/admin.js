@@ -74,7 +74,7 @@
       const empty = node('option', '사람 고르기');
       empty.value = '';
       people.append(empty);
-      const source = kind.value === 'link' ? data.unlinked : data.members;
+      const source = kind.value === 'link' ? [...data.unlinked, ...data.members] : data.members;
       for (const item of source) {
         const option = node('option', item.name);
         option.value = item.friendId;

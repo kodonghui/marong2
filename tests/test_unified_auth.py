@@ -95,7 +95,7 @@ class UnifiedAuthTest(unittest.IsolatedAsyncioTestCase):
         path = base + "/api/invites"
         await self.problem(await self.client.post(path, json={"kind": "join"}, headers={
             **admin, "Origin": "https://other.invalid"}), 403, "cross_site")
-        for payload in ({"kind": "join", "friendId": None}, {"kind": "link", "friendId": owner},
+        for payload in ({"kind": "join", "friendId": None}, {"kind": "link", "friendId": 0},
                         {"kind": "join", "note": "x" * 41}):
             await self.problem(await self.client.post(path, json=payload, headers=admin), 400, "invalid_input")
         unknown = 100_000
@@ -124,6 +124,17 @@ class UnifiedAuthTest(unittest.IsolatedAsyncioTestCase):
         for expected, add in ((3, 3), (8, 5)):
             response = await self.client.post(ticket, json={"add": add}, headers=admin)
             self.assertEqual((response.status, await response.json()), (200, {"tickets": expected}))
+        profile_query = "SELECT bot_name, friend_code, tickets FROM marong.friend_profiles WHERE friend_id=%s"
+        before = self.db.admin(profile_query, (owner,))
+        linked = await self.client.post(path, json={"kind": "link", "friendId": owner}, headers=admin)
+        self.assertEqual(linked.status, 201)
+        link_token = (await linked.json())["url"].rsplit("/", 1)[1]
+        redemption = await self.post(JOIN, {"token": link_token})
+        self.assertEqual(redemption.status, 201)
+        new_session = await self.sessions.find_session(redemption.cookies[COOKIE].value)
+        self.assertEqual(new_session["friend_id"], owner)
+        self.assertEqual(self.db.admin(profile_query, (owner,)), before)
+        await self.problem(await self.post(JOIN, {"token": link_token}), 410, "invite_used")
         await self.problem(await self.client.post(base + f"/api/members/{unknown}/tickets", json={"add": 1},
                                                  headers=admin), 404, "not_found")
         code, _ = await self.sessions.create_device_code(owner)
