@@ -39,10 +39,15 @@ def clean(value, limit):
                    not unicodedata.category(char).startswith("C") and char not in "\u2028\u2029").strip()[:limit]
 
 
+def particle(name):
+    last = ord(name[-1])
+    return "이야" if 0xAC00 <= last <= 0xD7A3 and (last - 0xAC00) % 28 else "야"
+
+
 def character_section(profile):
     kind = profile["kind"]
     name = clean(profile["bot_name"], 12) or "마롱이"
-    header = ["# 지금 네 모습", f"네 이름은 {name}이야. 위에서 '마롱이'라고 적힌 곳은 모두 너를 가리켜.",
+    header = ["# 지금 네 모습", f"네 이름은 {name}{particle(name)}. 위에서 '마롱이'라고 적힌 곳은 모두 너를 가리켜.",
               KIND_LABELS[kind]]
     tail = []
     tone = clean(profile.get("tone"), 60)
