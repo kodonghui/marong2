@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from marong.app_chat import AppChat
 from marong.app_push import AppPush
 from marong.app_session import AppSessions, COOKIE
-from marong.character.graphics import EXPRESSIONS, TEMPLATE_IDS, Templates, alpha, fit_score, head_in_box
+from marong.character.graphics import EXPRESSIONS, TEMPLATE_IDS, InvalidArtwork, Templates, alpha, fit_score, head_in_box
 from marong.character.http import CharacterAPI
 from marong.character.traits import MAX_COAT_COLORS, TEXT_LIMITS, output_schema, valid_result
 from marong.character.worker import CharacterWorker
@@ -37,6 +37,14 @@ OBSERVED = {
 
 
 class TestCharacter(unittest.IsolatedAsyncioTestCase):
+    async def test_retries_a_returned_image_without_transparency(self):
+        templates = Templates()
+        front = templates.front("dog_small")
+        draw = AsyncMock(side_effect=[InvalidArtwork("unexpected_alpha"), front])
+        result = await CharacterWorker.fitted(None, draw, templates.mask("dog_small"), .75)
+        self.assertEqual(result, front)
+        self.assertEqual(draw.await_count, 2)
+
     def test_vision_schema_explains_limits_enforced_after_parsing(self):
         fields = output_schema()["properties"]
         for field, max_length in TEXT_LIMITS.items():
