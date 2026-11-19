@@ -1546,7 +1546,8 @@ class Agent:
                     text = text[:PROACTIVE_LINE_CHARS - 1] + "…"
                 lines.append(f"- ({short_time(r['created_at'], tz)}) {who}: {text}")
         guide = PROACTIVE_GROUP_GUIDE if group else PROACTIVE_GUIDE
-        _, per_day = proactive_schedule(None, None, room.get("per_day"), default_per_day=self.s.proactive_per_day)
+        _, per_day = proactive_schedule(None, None, room.get("per_day"), default_per_day=self.s.proactive_per_day,
+                                        fixed=room.get("fixed_proactive", False))
         guide = guide.format(per_day=per_day)
         extra = ([LINKED_GUARD] if linked else [])
         if topic is not None:  # a picture topic (AI-20): the set's own words, reviewed by people
