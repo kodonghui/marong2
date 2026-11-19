@@ -7,7 +7,8 @@ writes into their own Discord DM room, so Marong answers with the same memory, l
 Logs carry result names and counts only: no text, FID, install id, email or token (SPEC-126).
 """
 import asyncio
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
+from contextlib import AsyncExitStack
 import json
 import logging
 import math
@@ -19,6 +20,8 @@ from zoneinfo import ZoneInfo
 
 from aiohttp import web
 import psycopg
+
+from tools.vertex_live.tool_trace import app_delivery, app_step, step as trace_step
 
 from .app_release import AppReleases
 from .app_store import APP_KEY
@@ -98,6 +101,7 @@ class AppChat:
         self.clock = clock
         self.releases = releases if releases is not None else AppReleases()
         self.tick = asyncio.Event()          # set and replaced whenever a message is saved in this process
+        self.reply_traces = OrderedDict()
         self.waiters = defaultdict(list)     # friend id -> events of their waits, oldest first
         self.sent = defaultdict(deque)       # friend id -> when their last messages came (rate limit)
         self.read = {}                       # DM room -> the friend's newest message an answer here took up (SPEC-148)
@@ -328,9 +332,11 @@ class AppChat:
         limit = self._number(req.query.get("limit"), "limit", minimum=1, maximum=PAGE_MAX) or PAGE_DEFAULT
         rows = await self.store.app_messages(who["room_key"], before, limit)
         marks = await self._marks(who["room_key"])
-        return self._json(200, {"messages": await self.persona.messages(who, rows[:limit][::-1]),
+        response = self._json(200, {"messages": await self.persona.messages(who, rows[:limit][::-1]),
                                 "hasMore": len(rows) > limit, "readUpTo": marks["readUpTo"],
                                 "answeredUpTo": marks["answeredUpTo"]})
+        self._note_http_delivery(rows[:limit], "history")
+        return response
 
     async def send(self, req):
         """API-103: store at once (202), answer in the background under the room lock (SPEC-112)."""
@@ -372,33 +378,73 @@ class AppChat:
         return self._json(202, {"message": self.message(row)})
 
     async def _delivered(self, text: str) -> bool:
-        return True  # the reply reaches the screen through the wait (API-104), or a notification
+        with app_step("reply_prepare", result="queued") as prepared:
+            if prepared:
+                prepared.io(inputs={"reply": text})
+            return True  # the wait endpoint or a push handles delivery
 
     async def _answer(self, who: dict, saved_id: int, text: str, key: str, preference) -> None:
-        room = who["room_key"]
-        reply = None
-        try:
-            link = await self.store.link(who["discord_user_id"])
-            msg = DiscordIncoming(room, who["user_key"], text, kakao_id=key, proactive_preference=preference,
-                                  google_command=google_command(text), topic_command=topic_phrase(text),
-                                  friend_id=who["friend_id"], dm_link=link, via="app", presaved_id=saved_id)
-            async with self.client.room_lock(room):
-                self._took_up(room, saved_id)
-                self.pulse()  # '읽음' and '대답 중' once this answer holds the room (SPEC-148, SPEC-149)
-                reply = await self.agent.handle(msg, self._delivered)
-        except Exception as e:
-            log.error("app_chat_reply_failed %s", type(e).__name__)
-        finally:
-            self.pulse()
-        if reply is None:
-            return
-        log.info("app_chat_replied")
-        # The friend closed the chat before the answer came: tell their phone (SPEC-120). Never Discord.
-        if not self.waiters.get(who["friend_id"]) and self.push.enabled:
+        with trace_step("app_turn", surface="app_chat") as trace:
+            if trace:
+                trace.app_message(who["friend_id"], text, room_key=who["room_key"], user_key=who["user_key"])
+                self.reply_traces[saved_id] = (time.monotonic(), trace)
+                if len(self.reply_traces) > 256:
+                    self.reply_traces.popitem(last=False)
+            room = who["room_key"]
+            reply = None
             try:
-                await self.push.notify(who["friend_id"], "reply", reply, ttl_s=REPLY_TTL_S)
+                with app_step("account_lookup", storage=True):
+                    link = await self.store.link(who["discord_user_id"])
+                msg = DiscordIncoming(room, who["user_key"], text, kakao_id=key, proactive_preference=preference,
+                                      google_command=google_command(text), topic_command=topic_phrase(text),
+                                      friend_id=who["friend_id"], dm_link=link, via="app", presaved_id=saved_id)
+                async with AsyncExitStack() as resources:
+                    with app_step("room_queue"):
+                        await resources.enter_async_context(self.client.room_lock(room))
+                    self._took_up(room, saved_id)
+                    self.pulse()  # '읽음' and '대답 중' once this answer holds the room (SPEC-148, SPEC-149)
+                    reply = await self.agent.handle(msg, self._delivered)
             except Exception as e:
-                log.warning("app_reply_notify_failed %s", type(e).__name__)
+                if trace:
+                    trace.capture(e)
+                log.error("app_chat_reply_failed %s", type(e).__name__)
+            finally:
+                with app_step("reply_publish", result="queued" if reply is not None else "skipped"):
+                    self.pulse()
+            if reply is None:
+                if trace:
+                    self.reply_traces.pop(saved_id, None)
+                    trace.record(result="no_reply")
+                return
+            if trace:
+                trace.record(result="ok")
+                trace.app_reply(reply)
+            log.info("app_chat_replied")
+            # The friend closed the chat before the answer came: tell their phone (SPEC-120). Never Discord.
+            if not self.waiters.get(who["friend_id"]) and self.push.enabled:
+                try:
+                    with app_step("reply_push", delivery="push") as push:
+                        if push:
+                            push.io(inputs={"message": {"role": "assistant", "content": reply}})
+                        outcome = await self.push.notify(who["friend_id"], "reply", reply, ttl_s=REPLY_TTL_S)
+                        if push and isinstance(outcome, tuple) and len(outcome) == 2:
+                            accepted, available = outcome
+                            push.record(result="ok" if accepted else "rejected" if available else "no_device",
+                                        reason="no_ack" if available and not accepted else None,
+                                        count=accepted, available=available)
+                except Exception as e:
+                    log.warning("app_reply_notify_failed %s", type(e).__name__)
+            else:
+                with app_step("reply_push", result="skipped",
+                              reason="waiter_active" if self.waiters.get(who["friend_id"]) else "disabled"):
+                    pass
+
+    def _note_http_delivery(self, rows, transport):
+        for row in rows:
+            if row.get("role") == "assistant":
+                pending = self.reply_traces.pop(row.get("reply_to"), None)
+                if pending and time.monotonic() - pending[0] <= 600:
+                    app_delivery(pending[1], transport, row.get("content"))
 
     async def wait(self, req):
         """API-104: new messages at once, else after up to 25 s an empty list (SPEC-114). `typing` and `read` are what
@@ -443,7 +489,9 @@ class AppChat:
                 self.waiters.pop(friend, None)
         if mine.is_set() and not fresh:
             rows = []
-        return self._json(200, {"messages": await self.persona.messages(who, rows), **marks})
+        response = self._json(200, {"messages": await self.persona.messages(who, rows), **marks})
+        self._note_http_delivery(rows, "poll")
+        return response
 
     async def device(self, req):
         """API-105: this phone's notification state (SPEC-115, SPEC-139)."""

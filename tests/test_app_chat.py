@@ -19,6 +19,7 @@ from pathlib import Path
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import parse_qsl
 import uuid
@@ -33,7 +34,7 @@ import psycopg
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "tests"), str(ROOT / "tools/vertex_live")]
-from fakes import FakeEmbeddings, ScriptedLLM, message, text  # noqa: E402
+from fakes import FakeEmbeddings, ScriptedLLM, message, ns, text, tool_use  # noqa: E402
 from marong import app_chat as chat_module, fcm as fcm_module  # noqa: E402
 from marong.access import AccessConfig, AccessVerifier, email_hash  # noqa: E402
 from marong.app_chat import AppChat  # noqa: E402
@@ -42,9 +43,11 @@ from marong.config import load_settings  # noqa: E402
 from marong.discord_dm import APP_GOOGLE_TEXT, DiscordAgent, DiscordProactive, DiscordReminders  # noqa: E402
 from marong.discord_store import DiscordStore  # noqa: E402
 from marong.google_calendar import LINK_MARK  # noqa: E402
+from marong.llm import LLM  # noqa: E402
 from pg import TestDB  # noqa: E402
 from test_discord_dm import DH, DM_DH, DM_HK, HK, Client, event, prepare as prepare_dm  # noqa: E402
 import run_discord  # noqa: E402
+from tools.vertex_live import tool_trace  # noqa: E402
 
 TZ = ZoneInfo("Asia/Seoul")
 TEAM = "fixture.cloudflareaccess.com"
@@ -312,6 +315,7 @@ async def main(db):
                                     headers=auth(write=True))
             ok(reply.status == 202 and (await store.link(HK))["unanswered"] == 0,
                "W2 an app reply clears unanswered")
+            await trace_checks(http, chat)
         await settle(chat)
         await own_runner_checks(store, agent, client, access, push, logs)
     finally:
@@ -326,6 +330,72 @@ async def main(db):
     ok(not leaked, f"logs carry no text, FID, installId, email or token: {leaked}")
     ok("app_chat_sent" in text_logs and "fcm_send kind=reply" in text_logs, "result names are logged")
     print("PASS TC-131 logs: result names and counts only")
+
+
+async def trace_checks(http, chat):
+    await settle(chat)
+    marker = "APP_TRACE_PRIVATE_MARKER"
+    submitted = []
+    requests = 0
+    fixture_usage = {"input_tokens": 44, "output_tokens": 6, "cache_read_input_tokens": 111,
+                     "cache_creation_input_tokens": 20,
+                     "cache_creation": SimpleNamespace(ephemeral_5m_input_tokens=5,
+                                                       ephemeral_1h_input_tokens=15)}
+
+    async def provider(**body):
+        nonlocal requests
+        requests += 1
+        if requests == 1:
+            return ns(message([tool_use("schedule_list", {"start": "2026-11-26", "end": "2026-11-29"},
+                                        marker)], "tool_use", usage=fixture_usage))
+        assert body["messages"][-1]["content"][0]["tool_use_id"] == marker
+        return ns(message([text(marker)], usage=fixture_usage))
+
+    async def traced_create(body, timeout):
+        return await LLM._once(SimpleNamespace(messages=SimpleNamespace(create=provider)), body, timeout)
+
+    chat.sent.clear()
+    with patch.object(tool_trace, "_sink", return_value=SimpleNamespace(submit=submitted.append)), \
+            patch.object(chat.agent, "llm", SimpleNamespace(create=traced_create)):
+        post = await http.post("/chat/api/messages", json={"clientId": str(uuid.uuid4()), "text": marker},
+                               headers=auth(write=True))
+        origin = (await post.json())["message"]
+        ok(post.status == 202, "observed message accepted")
+        await settle(chat)
+        reply = await http.get(f"/chat/api/messages/wait?after={origin['id']}", headers=auth())
+        payload = await reply.json()
+        ok(any(row["text"] == marker for row in payload["messages"]), "app HTTP response contains reply")
+
+    runs = [run for batch in submitted for run in batch]
+    stages = {run["name"]: run for run in runs}
+    root = stages["app_turn"]
+    expected = {"context", "schedules_context", "recent_memory", "model_attempt", "tool_dispatch",
+                "schedule_storage", "reply_save", "reply_publish", "app_http_delivery"}
+    ok(expected <= stages.keys() and len({run["trace_id"] for run in runs}) == 1,
+       f"all request phases share one trace, missing {sorted(expected - stages.keys())}, "
+       f"trace count {len({run['trace_id'] for run in runs})}")
+    ok(stages["app_http_delivery"]["parent_run_id"] == root["id"], "late HTTP delivery references the app turn")
+    ok(requests == 2 and stages["model_request"]["outputs"]["results_sent"] == 1,
+       "schedule tool result is returned to the model")
+    attempt = stages["model_attempt"]
+    usage = attempt["outputs"]["usage_metadata"]
+    ok(attempt["run_type"] == "llm" and attempt["total_tokens"] == 181 and usage["input_tokens"] == 175
+       and usage["input_token_details"] == {"cache_read": 111, "cache_creation": 20}
+       and attempt["outputs"]["cache_write_1h"] == 15, "native usage, including split cache writes")
+    masked = tool_trace.MASKED
+    ok(all(run["inputs"]["operation"] == run["name"] for run in runs), "all app spans show their inputs")
+    ok(root["inputs"]["message"] == {"role": "user", "content": masked}, "app input message is masked")
+    dispatch = stages["tool_dispatch"]
+    ok(dispatch["inputs"]["tool"] == "schedule_list"
+       and dispatch["inputs"]["arguments"] == {"start": masked, "end": masked}
+       and dispatch["outputs"]["response"]["tool_use_id"] == masked, "tool shape without values or IDs")
+    ok(stages["app_http_delivery"]["outputs"]["response"]["messages"] == [{"role": "assistant", "content": masked}],
+       "app response shape without message text")
+    serialized = json.dumps(runs)
+    ok(marker not in serialized and "2026-11-26" not in serialized and "2026-11-29" not in serialized,
+       "no dialogue, scheduling data, or call IDs in trace")
+    print("PASS app trace captures memory, schedules, model usage, tool round trip, reply save, and HTTP delivery")
+    return runs
 
 
 async def sign_in_checks(db, http, chat, client, certs, access):
