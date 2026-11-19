@@ -304,7 +304,7 @@ describe('chat page', { skip }, () => {
   it('TC-132: sign-in and permission states (SCR-107)', async () => {
     reset();
     for (const [code, title, link] of [['not_allowed', '이 계정으로는 마롱이랑 이야기할 수 없어', '/'],
-      ['no_dm', '디스코드 DM에서 마롱이한테 먼저 말 걸어 줘', '/']]) {
+      ['no_dm', '이 계정으로는 마롱이랑 이야기할 수 없어', '/']]) {
       site.state.me = { status: 403, code };
       const { context, page } = await openChat();
       await page.waitForFunction((t) => document.getElementById('state-title').textContent === t, title);
@@ -447,10 +447,10 @@ describe('chat page', { skip }, () => {
     await ready(plain.page);
     await plain.page.click('#menu-button');
     await plain.page.waitForSelector('#menu:not([hidden])');
-    assert.equal(await plain.page.textContent('#menu-delivery'), '알림이 꺼져 있어서 디스코드 DM으로 받고 있어.');
+    assert.equal(await plain.page.textContent('#menu-delivery'), '알림이 꺼져 있어. 먼저 한 말은 여기 남겨 둘게.');
     assert.equal(await plain.page.isHidden('#menu-settings'), true, 'no button without the app');
     // SPEC-140: a browser cannot ring, whatever the friend's phone does.
-    assert.equal(await plain.page.textContent('#menu-ring'), '약속 전화 벨은 마롱이 앱에서 울려. 앱이 없으면 디스코드로 알려 줄게.');
+    assert.equal(await plain.page.textContent('#menu-ring'), '약속 전화 벨은 안드로이드 앱에서 울려. 여기서는 글 대화를 열면 받을 수 있어.');
     for (const id of ['#menu-ring-settings', '#menu-full-screen', '#menu-samsung']) {
       assert.equal(await plain.page.isHidden(id), true, `${id} only in the app`);
     }
@@ -472,7 +472,7 @@ describe('chat page', { skip }, () => {
     await off.page.click('#menu-button');
     await off.page.waitForSelector('#menu:not([hidden])');
     assert.equal(await off.page.isHidden('#menu-ring'), true, 'no ring line while rings are off on the server');
-    assert.equal(await off.page.textContent('#menu-delivery'), '디스코드 DM으로 받고 있어. 알림은 마롱이 앱에서 받을 수 있어.');
+    assert.equal(await off.page.textContent('#menu-delivery'), '알림은 안드로이드 앱에서 받을 수 있어. 여기서는 열었을 때 밀린 말을 보여 줄게.');
     await off.context.close();
   });
 
@@ -507,7 +507,7 @@ describe('chat page', { skip }, () => {
     await ready(channelOff.page);
     await channelOff.page.click('#menu-button');
     await channelOff.page.waitForSelector('#menu-ring-settings:not([hidden])');
-    assert.equal(await channelOff.page.textContent('#menu-ring'), '전화 알림이 꺼져 있어서 약속 전화는 디스코드 DM으로 통화하자고 보내.');
+    assert.equal(await channelOff.page.textContent('#menu-ring'), '전화 알림이 꺼져 있어. 글 대화를 열면 약속 전화를 받을 수 있어.');
     assert.equal(await channelOff.page.isHidden('#menu-settings'), true, '선톡 still reach the phone');
     assert.equal(await channelOff.page.isHidden('#menu-samsung'), true, 'no ring on the phone, no Samsung note');
     await channelOff.page.click('#menu-ring-settings');
@@ -528,7 +528,7 @@ describe('chat page', { skip }, () => {
     await ready(noDevice.page);
     await noDevice.page.click('#menu-button');
     await noDevice.page.waitForSelector('#menu:not([hidden])');
-    assert.equal(await noDevice.page.textContent('#menu-ring'), '약속 전화는 디스코드 DM으로 통화하자고 보내.');
+    assert.equal(await noDevice.page.textContent('#menu-ring'), '글 대화를 열면 약속 전화를 받을 수 있어.');
     for (const id of ['#menu-ring-settings', '#menu-full-screen', '#menu-samsung']) {
       assert.equal(await noDevice.page.isHidden(id), true, `${id} hidden`);
     }

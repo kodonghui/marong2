@@ -126,7 +126,7 @@ HOME_HTML = DOC.replace("@TITLE@", "마롱이 · 구글 캘린더 연결").repla
 <p style="margin-top:24px"><a href="/google/privacy">개인정보 처리방침</a></p>""")
 PRIVACY_HTML = DOC.replace("@TITLE@", "마롱이 · 개인정보 처리방침").replace("@BODY@", """<h1>마롱이 개인정보 처리방침 (구글 캘린더)</h1>
 <p>시행일: 2026년 11월 15일</p>
-<p>마롱이(동희가 친구들과 쓰려고 만든 개인용 디스코드 봇)가 구글 캘린더를 연결한 사람의 구글 사용자 데이터를 어떻게 다루는지
+<p>마롱이(동희가 친구들과 쓰려고 만든 개인용 앱)가 구글 캘린더를 연결한 사람의 구글 사용자 데이터를 어떻게 다루는지
 적었어요.</p>
 <h2>받는 정보</h2>
 <ul><li><b>내 캘린더 일정 보기</b>(<code>calendar.events.readonly</code>): 기본 캘린더에서 오늘부터 14일 동안의 일정 제목,
@@ -135,7 +135,7 @@ PRIVACY_HTML = DOC.replace("@TITLE@", "마롱이 · 개인정보 처리방침").
 지워요.</li>
 <li>구글이 주는 연결 토큰과 내가 허용한 권한.</li></ul>
 <h2>쓰는 곳</h2>
-<ul><li>디스코드 DM에서 마롱이가 답할 때 내 일정을 참고해요.</li>
+<ul><li>마롱이가 앱이나 웹에서 답할 때 내 일정을 참고해요.</li>
 <li>마롱이에게 말한 날짜 있는 일정을 '마롱이' 캘린더에 넣고, 취소하면 빼요.</li>
 <li>광고, 판매, AI 모델 학습 같은 다른 목적으로는 쓰지 않아요.</li></ul>
 <h2>넘기는 곳</h2>
@@ -148,18 +148,18 @@ PRIVACY_HTML = DOC.replace("@TITLE@", "마롱이 · 개인정보 처리방침").
 <li>마롱이와 나눈 대화는 다른 대화처럼 대화 기록에 남아요. 마롱이가 답에서 일정을 말하면 그 대화도 남고, 이 기록은 마롱이를
 관리하는 동희가 볼 수 있어요(기록 시트 포함).</li></ul>
 <h2>지우기와 그만두기</h2>
-<ul><li>디스코드 DM에서 "구글 캘린더 끊기"라고 보내면 구글에 허용 취소를 보내고 저장한 토큰을 지워요.</li>
+<ul><li>내 마롱이의 구글 캘린더에서 연결을 끊으면 구글에 허용 취소를 보내고 저장한 토큰을 지워요.</li>
 <li>구글 계정 설정의 보안에 있는 '서드 파티 앱 및 서비스 연결'에서도 언제든 마롱이의 허용을 지울 수 있어요.</li>
 <li>'마롱이' 캘린더는 내 구글 계정에 남아요. 필요 없으면 구글 캘린더에서 직접 지우면 돼요.</li></ul>
 <h2>보호</h2>
-<p>연결 화면은 마롱이 통화와 같은 로그인(Cloudflare Access) 뒤에 있고, 마롱이 서버는 구글과 암호화된 연결(HTTPS)로만
+<p>연결 화면은 마롱이 계정에 로그인해야 열려요. 마롱이 서버는 구글과 암호화된 연결(HTTPS)로만
 이야기해요. 연결 토큰과 일회용 코드는 로그와 대화 기록에 남기지 않아요.</p>
 <h2>구글 정책</h2>
 <p>마롱이가 구글 API에서 받은 정보를 쓰고 다른 앱에 넘기는 방식은 제한적 사용(Limited Use) 요건을 포함한
 <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API 서비스 사용자 데이터 정책</a>을
 따라요.</p>
 <h2>문의</h2>
-<p>궁금한 점은 디스코드에서 동희에게 물어봐 주세요. 이 방침을 바꾸면 이 페이지의 시행일을 고쳐요.</p>""")
+<p>궁금한 점은 마롱이를 관리하는 동희에게 물어봐 주세요. 이 방침을 바꾸면 이 페이지의 시행일을 고쳐요.</p>""")
 HEADERS = {
     "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
@@ -302,11 +302,15 @@ def event_line(ev: dict, tz: ZoneInfo, now: datetime) -> str:
     return f'{when} "{ev["title"]}"'
 
 
-def calendar_lines(link: dict | None, events: list | None, more: bool, tz: ZoneInfo, now: datetime) -> list[str]:
+def calendar_lines(link: dict | None, events: list | None, more: bool, tz: ZoneInfo, now: datetime, *,
+                   surface="discord") -> list[str]:
     """'지금 상황'에 붙이는 구글 캘린더 줄. link: google_links 줄(None: 연결한 적 없음, status unknown: 못 읽음).
     events None: 일정을 못 읽음."""
     if link and link["status"] == "unknown":
         return ["", "## 구글 캘린더", "- 지금은 구글 캘린더 연결 상태를 못 읽었어. 물으면 지금은 확인이 안 된다고 말해."]
+    if surface == "app" and (not link or link["status"] in ("disconnected", "broken")):
+        return ["", "## 구글 캘린더",
+                "- 구글 캘린더는 연결돼 있지 않아. 연결하고 싶어 하면 내 마롱이에서 구글 캘린더를 열도록 알려 줘."]
     if not link or link["status"] == "disconnected":
         return ["", "## 구글 캘린더",
                 "- 이 친구 구글 캘린더는 연결 안 돼 있어. 친구가 자기 구글 캘린더를 봐 달라거나 거기에 일정을 넣어 달라고 "
@@ -342,7 +346,7 @@ def event_body(row: dict, tz: ZoneInfo) -> dict:
     """마롱이 일정 한 줄 → 구글 일정. id 는 일정 번호로 정해서(base32hex: a-v, 0-9) 다시 보내도 두 번 생기지 않는다."""
     start = row["event_at"].astimezone(tz)
     body = {"id": f"marong{row['id']:010d}", "summary": row["title"],
-            "description": "마롱이가 디스코드 DM에서 저장한 일정이에요."}
+            "description": "마롱이에게 말해 준 일정이에요."}
     if row["all_day"]:
         body["start"] = {"date": start.date().isoformat()}
         body["end"] = {"date": (start.date() + timedelta(days=1)).isoformat()}
@@ -602,7 +606,7 @@ class GoogleCalendar:
 
     async def _make_calendar(self, friend_id: int, token: str) -> str:
         r = await self._api(friend_id, token, "POST", "/calendars", json={
-            "summary": CALENDAR_NAME, "description": "마롱이가 디스코드 DM에서 저장한 일정이에요.", "timeZone": self.tz.key})
+            "summary": CALENDAR_NAME, "description": "마롱이에게 말해 준 일정이에요.", "timeZone": self.tz.key})
         calendar_id = _json(r).get("id") if r.status_code == 200 else None
         if not isinstance(calendar_id, str) or not calendar_id:
             raise GoogleError("calendar", r.status_code)
