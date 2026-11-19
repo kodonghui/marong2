@@ -15,6 +15,7 @@ from psycopg_pool import AsyncConnectionPool
 from call_usage import Ledger
 from call_cost import MonthlyCost
 from call_tuning import BASE
+from marong.room_scope import writing_room
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,7 @@ class Principal:
     name: str
     revision: int = 0
     private_rooms: tuple[str, str] | None = None
+    unified: bool = False
 
 
 class CallBusy(Exception):
@@ -52,6 +54,32 @@ PRIVATE_SCOPE = """WITH roots AS (
    WHERE m.room_key=r.room_key AND m.role='user' AND p.friend_id IS DISTINCT FROM %(friend)s
  )
 ), rooms AS (SELECT room_key FROM roots) """
+
+OWNED_SCOPE = f"""WITH roots AS (
+ SELECT r.room_key FROM marong.rooms r
+ WHERE r.owner_friend_id=%(friend)s AND r.is_channel AND r.memory_room IS NULL
+ AND (
+   {writing_room('r')}
+   OR NOT EXISTS (
+     SELECT 1 FROM marong.messages m LEFT JOIN marong.people p USING (user_key)
+     WHERE m.room_key=r.room_key AND m.role='user' AND p.friend_id IS DISTINCT FROM %(friend)s
+   )
+ )
+), rooms AS (SELECT room_key FROM roots)
+"""
+
+
+def memory_scope(p):
+    if p.unified:
+        return OWNED_SCOPE
+    return PRIVATE_SCOPE if p.private_rooms is not None else SCOPE
+
+
+def summary_visibility(p, alias):
+    if p.unified:
+        return (f"EXISTS (SELECT 1 FROM marong.rooms owned WHERE owned.room_key={alias}.room_key"
+                f" AND {writing_room('owned')})")
+    return "true" if p.private_rooms is None else "false"
 
 
 def normalized(text):
@@ -148,19 +176,19 @@ class MemoryStore:
 
     async def seed(self, p, call_id=None, *, memory_limit=30, history_chars=4000):
         params = self.params(p)
-        scope = PRIVATE_SCOPE if p.private_rooms is not None else SCOPE
-        params['allow_legacy_summaries'] = p.private_rooms is None
-        notes = await self.all(scope + """SELECT * FROM (
+        scope = memory_scope(p)
+        notes = await self.all(scope + f"""SELECT * FROM (
           SELECT DISTINCT ON(n.user_key) n.id,n.content,n.created_at,'kakao_note' AS source
           FROM marong.notes n JOIN marong.people p ON p.user_key=n.user_key
           WHERE n.room_key IN (SELECT room_key FROM rooms) AND p.friend_id=%(friend)s
-          AND (%(allow_legacy_summaries)s OR n.summary_id IS NULL)
+          AND ({summary_visibility(p, 'n')} OR n.summary_id IS NULL)
           AND NOT call.kakao_hidden('note',n.id,n.room_key)
           AND NOT EXISTS(SELECT 1 FROM call.source_exclusions x WHERE x.caller_id=%(caller)s AND x.source_type='kakao_note' AND x.source_id=n.id::text)
           ORDER BY n.user_key,(n.room_key IN (SELECT room_key FROM roots)) DESC,n.id DESC
         ) n ORDER BY id DESC LIMIT 4""", params)
-        summaries = [] if p.private_rooms is not None else await self.all(scope + """SELECT id,content,created_at,'kakao_summary' AS source
+        summaries = await self.all(scope + f"""SELECT id,content,created_at,'kakao_summary' AS source
           FROM marong.summaries s WHERE room_key IN (SELECT room_key FROM rooms) AND content<>''
+          AND {summary_visibility(p, 's')}
           AND NOT call.kakao_hidden('summary',id,room_key)
           AND NOT EXISTS(SELECT 1 FROM call.source_exclusions x WHERE x.caller_id=%(caller)s AND x.source_type='kakao_summary' AND x.source_id=s.id::text)
           ORDER BY last_id DESC LIMIT 3""", params)
@@ -170,7 +198,7 @@ class MemoryStore:
           AND NOT EXISTS(SELECT 1 FROM call.source_exclusions x WHERE x.caller_id=%(caller)s AND x.source_type='kakao_message' AND x.source_id=m.id::text)
           ORDER BY id DESC LIMIT 10""", params)
         # Other people contribute only the existing, explicitly shared notes.
-        friends = [] if p.private_rooms is not None else await self.all("""SELECT f.name,fs.label,s.content,
+        friends = [] if p.unified or p.private_rooms is not None else await self.all("""SELECT f.name,fs.label,s.content,
           CASE WHEN fs.close THEN s.close_content ELSE '' END AS close_content
           FROM marong.friendships fs JOIN marong.friends f
             ON f.id=CASE WHEN fs.friend_a=%s THEN fs.friend_b ELSE fs.friend_a END
@@ -201,18 +229,17 @@ class MemoryStore:
         if len(query)<2:return {'result':'ask_which','items':[]}
         q='%'+query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
         params=self.params(p)|{'q':q}
-        scope = PRIVATE_SCOPE if p.private_rooms is not None else SCOPE
-        params['allow_legacy_summaries'] = p.private_rooms is None
-        rows=await self.all(scope+"""SELECT * FROM (
+        scope = memory_scope(p)
+        rows=await self.all(scope+f"""SELECT * FROM (
           SELECT 'kakao_message' AS source,m.id::text AS id,m.content,m.created_at FROM marong.messages m
           WHERE m.room_key IN(SELECT room_key FROM rooms) AND m.content ILIKE %(q)s
           AND m.meta->>'delivered' IS DISTINCT FROM 'false' AND NOT call.kakao_hidden('message',m.id,m.room_key)
           UNION ALL SELECT 'kakao_note',n.id::text,n.content,n.created_at FROM marong.notes n JOIN marong.people p USING(user_key)
           WHERE n.room_key IN(SELECT room_key FROM rooms) AND p.friend_id=%(friend)s AND n.content ILIKE %(q)s
-          AND (%(allow_legacy_summaries)s OR n.summary_id IS NULL)
+          AND ({summary_visibility(p, 'n')} OR n.summary_id IS NULL)
           AND NOT call.kakao_hidden('note',n.id,n.room_key)
           UNION ALL SELECT 'kakao_summary',s.id::text,s.content,s.created_at FROM marong.summaries s
-          WHERE %(allow_legacy_summaries)s AND s.room_key IN(SELECT room_key FROM rooms) AND s.content ILIKE %(q)s
+          WHERE {summary_visibility(p, 's')} AND s.room_key IN(SELECT room_key FROM rooms) AND s.content ILIKE %(q)s
           AND NOT call.kakao_hidden('summary',s.id,s.room_key)
           UNION ALL SELECT 'call_memory',m.id::text,m.content,m.created_at FROM call.memories m
           JOIN call.calls c ON c.id=m.call_id WHERE m.caller_id=%(caller)s AND m.status='active'
@@ -416,7 +443,7 @@ class MemoryStore:
             return result
 
     async def _invalidate(self,c,p,calls,reason,source_ids):
-        cur=await c.execute(SCOPE+'SELECT room_key FROM rooms ORDER BY room_key',self.params(p))
+        cur=await c.execute(memory_scope(p)+'SELECT room_key FROM rooms ORDER BY room_key',self.params(p))
         for row in await cur.fetchall():
             await c.execute("SELECT pg_advisory_xact_lock(hashtextextended('call.kakao:'||%s,0))",(row['room_key'],))
         await c.execute('UPDATE call.callers SET context_revision=context_revision+1 WHERE id=%s',(p.caller_id,))

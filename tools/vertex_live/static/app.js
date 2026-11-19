@@ -113,7 +113,7 @@ function callView(active){
   document.body.classList.toggle('in-call',active);
   $('start').hidden=active;$('stop').hidden=!active;$('mute').hidden=!active||!micMode;
   $('eyebrow').textContent=active?'지금, 우리 이야기':'너의 이야기 곁에';
-  $('headline').textContent=active?'마롱이':'마롱이한테 전화할래?';
+  $('headline').textContent=active?botName:botName+'한테 전화할래?';
   $('control-caption').textContent=active?(micMode?'마이크 끄기 · 통화 끝내기':'통화 끝내기'):'편하게 전화해';
 }
 function clearAudio(nextEpoch=epoch){epoch=nextEpoch;player?.port.postMessage({type:'clear',epoch});speaking=false;outputTurnOpen=false;}
@@ -256,7 +256,8 @@ function connect(){
       if(rtcClient&&message.audioTransport==='pcm')fallbackToPCM('server_pcm');
       if(fallbackPending)requestPCM();
     }else if(message.type==='budget_exhausted'){budgetBlocked=true;void end(BUDGET_MESSAGE);}
-    else if(message.type==='call_busy'){void end('디스코드 통화가 진행 중이야. 거기서 통화를 마치면 여기서 다시 걸 수 있어.');}
+    else if(message.type==='call_busy'){void end('다른 기기에서 '+botParticle('이랑','랑')+' 통화 중이야. 그 통화를 끝내고 다시 걸어 줘');}
+    else if(message.type==='calls_full'){void end('지금은 전화가 꽉 찼어. 조금 있다가 다시 걸어 줘');}
     else if(message.type==='hangup'){hangUpAfterPlayback(message.pendingMs);}
     else if(message.type==='transcript'){transcript(message.who,message.text,message.key,message.replace);}
     else if(message.type==='audio_transport'&&message.mode==='pcm'){

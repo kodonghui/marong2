@@ -156,7 +156,8 @@
     image.src = data.character?.faceUrl || '/face/v1/01-neutral.webp';
     image.alt = '';
     face.replaceChildren(image);
-    groups.replaceChildren(nameGroup(), codes(), usage());
+    groups.replaceChildren(nameGroup(), link('통화 목소리 · ' + (data.voiceLabel || data.voice || '기본'),
+      '/chat/me/voice', 'btn2'), codes(), usage());
     if (data.features.friends) groups.append(link('친구', '/chat/friends', 'btn2'));
     actions.replaceChildren(button('로그아웃', logout, 'btnt danger'));
   }
@@ -165,7 +166,18 @@
     const reply = await request('/chat/api/profile');
     area.setAttribute('aria-busy', 'false');
     if (reply.status === 200) {
-      if (!editing) { data = reply.body; render(); }
+      if (!editing) {
+        data = reply.body;
+        render();
+        const voices = await request('/chat/api/voices');
+        const selected = voices.body?.voices?.find((voice) => voice.name === data.voice)
+          || voices.body?.voices?.find((voice) => voice.default);
+        if (selected && !editing) {
+          data.voiceLabel = selected.label;
+          const row = groups.querySelector('a[href="/chat/me/voice"]');
+          if (row) row.textContent = '통화 목소리 · ' + selected.label;
+        }
+      }
     } else {
       problem(reply);
       if (!data && reply.status !== 401) actions.replaceChildren(button('다시 해 볼게', load, 'btn2'));

@@ -123,6 +123,7 @@ async def serve(settings, credentials, options, secret, authentication, home, st
                        admin_email_hash=os.getenv("MARONG_ADMIN_EMAIL_SHA256"), diary_models=diary_models)
         chat.profile = AppProfile(chat, character=os.getenv("MARONG_CHARACTER") == "1",
                                   friends=os.getenv("MARONG_FRIENDS") == "1", google=google is not None,
+                                  voice_samples=os.getenv("MARONG_VOICE_SAMPLES_DIR"),
                                   daily_limit=int(os.environ["MARONG_DAILY_UNITS"]) if os.getenv("MARONG_DAILY_UNITS") else None)
         saved = agent.on_saved
 

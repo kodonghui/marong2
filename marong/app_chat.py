@@ -47,7 +47,8 @@ FILES = {"": ("index.html", "text/html"), "chat.js": ("chat.js", "text/javascrip
          "chat.css": ("chat.css", "text/css")}
 UNIFIED_FILES = {"account.html": "text/html", "admin.html": "text/html", "unified.css": "text/css",
                  "unified.js": "text/javascript", "account.js": "text/javascript", "admin.js": "text/javascript",
-                 "profile.html": "text/html", "profile.js": "text/javascript"}
+                 "profile.html": "text/html", "profile.js": "text/javascript",
+                 "voice.html": "text/html", "voice.js": "text/javascript"}
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 FID = re.compile(r"[A-Za-z0-9_-]{16,200}\Z")
 VERSION = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\Z")
@@ -677,7 +678,7 @@ class AppChat:
         if self.sessions is not None:
             app.router.add_get("/chat/join/{token}", self.account_page)
             app.router.add_get("/chat/login", self.account_page)
-            app.router.add_get("/chat/{name:unified\\.(?:css|js)|(?:account|admin|profile)\\.js}", self.page)
+            app.router.add_get("/chat/{name:unified\\.(?:css|js)|(?:account|admin|profile|voice)\\.js}", self.page)
             app.router.add_get("/chat/api/invites/{token}", self.check_invite)
             app.router.add_post("/chat/api/join", self.join_with_invite)
             app.router.add_post("/chat/api/login/code", self.login_with_device_code)

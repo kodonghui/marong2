@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko" data-theme="night">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#121729">
+  <title>목소리 고르기</title>
+  <link rel="stylesheet" href="/chat/chat.css">
+  <link rel="stylesheet" href="/chat/unified.css">
+  <script src="/chat/unified.js" defer></script>
+  <script src="/chat/voice.js" defer></script>
+</head>
+<body>
+  <main class="unified">
+    <header class="profile-header">
+      <a class="btnt" href="/chat/me">내 마롱이</a><h1>목소리 고르기</h1>
+    </header>
+    <section class="stack" id="voice-screen" aria-busy="true">
+      <p class="title" id="voice-title"></p>
+      <p class="caption" id="voice-notice" role="status" hidden></p>
+      <p class="err" id="voice-error" role="status" hidden></p>
+      <div class="stack" id="voice-choices" role="radiogroup" aria-labelledby="voice-title"></div>
+      <p class="caption" id="voice-count" hidden>지금은 목소리가 하나야. 더 생기면 여기서 고를 수 있어</p>
+      <div id="voice-retry"></div>
+    </section>
+  </main>
+</body>
+</html>

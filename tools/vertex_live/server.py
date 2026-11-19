@@ -127,7 +127,8 @@ async def identity(req):
             req["session_refresh"] = token
         return {
             "owner": f"friend:{row['friend_id']}",
-            "principal": Principal(row["caller_id"], row["friend_id"], row["name"], row["context_revision"]),
+            "principal": Principal(row["caller_id"], row["friend_id"], row["name"], row["context_revision"],
+                                   unified=True),
             "voice": row["voice"],
             "bot_name": row["bot_name"],
         }
