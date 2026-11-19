@@ -329,7 +329,9 @@ async def run_tool(store, name: str, inp: dict, *, friend_id: int, room_key: str
         done = f"저장했어: {describe(row, tz, now)}."
         if item.action == "call":
             done += " 그때 마롱이가 전화를 걸어."
-            if source != "app":
+            if source == "app":
+                done += " 웹에서는 글 대화를 열면 받을 수 있어."
+            else:
                 done += " 앱이 없으면 디스코드 DM으로 통화하자고 보내."
         elif row["remind_at"] is not None:
             done += " 그때 글 대화에 알려 줄게." if source == "app" else " 그때 이 DM으로 먼저 말할게."

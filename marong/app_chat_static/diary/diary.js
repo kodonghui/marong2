@@ -494,9 +494,7 @@ function draw() {
     }
     view.replaceChildren(placeholder, actions);
   } else if (loadedState === "permission") {
-    const noDM = lastTrouble?.code === "no_dm";
-    drawEmpty("13-concerned", noDM ? "디스코드 DM에서 마롱이한테 먼저 말 걸어 줘" : "이 계정으로는 일기장을 열 수 없어",
-      noDM ? null : button("다른 계정으로 들어가기", () => location.assign("/cdn-cgi/access/logout")));
+    drawEmpty("13-concerned", "이 계정으로는 일기장을 열 수 없어");
   } else if (loadedState === "error") {
     drawEmpty("06-sad", RETRY, button("다시 해 볼게", () => void load(false)), lastTrouble?.trace);
   } else if (loadedState === "reconnecting") {

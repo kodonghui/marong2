@@ -65,8 +65,7 @@ function permission(error) {
   }
   if (error.status === 403 && error.code !== "cross_site") {
     status("");
-    state("13-concerned", error.code === "no_dm"
-      ? "디스코드 DM에서 마롱이한테 먼저 말 걸어 줘" : "이 계정으로는 시험을 볼 수 없어");
+    state("13-concerned", "이 계정으로는 시험을 볼 수 없어");
     return true;
   }
   return false;

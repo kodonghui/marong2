@@ -105,7 +105,11 @@ def character_settings(settings):
 async def serve(settings, credentials, options, secret, authentication, home, stop):
     server_config = google_settings(credentials)
     web, shop, warm = model_tools(settings)
-    store = UnifiedStore(settings.database_url, call_bridge=True)
+    try:
+        fixed_proactive_friends = tuple(int(friend) for friend in os.getenv("MARONG_PROACTIVE_FIXED_FRIENDS", "").split())
+    except ValueError:
+        raise SystemExit("Invalid MARONG_PROACTIVE_FIXED_FRIENDS") from None
+    store = UnifiedStore(settings.database_url, call_bridge=True, fixed_proactive_friends=fixed_proactive_friends)
     store.discord_context_enabled = False
     llm = LLM(settings)
     route = deepseek_route(os.environ, credentials, llm, settings.anthropic_model)

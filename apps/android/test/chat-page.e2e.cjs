@@ -62,10 +62,11 @@ describe('chat page', { skip }, () => {
     await site?.close();
   });
 
-  async function openChat({ at = null, init = null, device = {} } = {}) {
+  async function openChat({ at = null, init = null, device = {}, routes = null } = {}) {
     const context = await browser.newContext({ ...PHONE, ...device });
     contexts.push(context);
     if (init) await context.addInitScript(init);
+    if (routes) await routes(context);
     const page = await context.newPage();
     const outside = [];
     page.on('request', (request) => { if (!request.url().startsWith(site.url)) outside.push(request.url()); });
@@ -90,6 +91,69 @@ describe('chat page', { skip }, () => {
       waits: [], postDelayMs: 0, read: 0, answered: 0, marks: true, pictures: {}, pictureDelayMs: 0 });
     history(site);
   }
+
+  it('TC-447: identifies missed app notes and remembers the bottom separately for each account', async () => {
+    reset();
+    site.state.read = 32;
+    site.state.messages.find(message => message.id === 34).from = 'marong';
+    site.state.messages.find(message => message.id === 34).kind = 'proactive';
+    let friendCode = 'ABCDEF';
+    const { page } = await openChat({routes: context => context.route('**/chat/api/profile', route => route.fulfill({
+      json: { botName: '마롱이', friendCode, features: { friends: false }, pendingRing: null },
+    }))});
+    await ready(page);
+    const marker = page.locator('li[data-id="35"] .unread');
+    await marker.waitFor();
+    assert.match(await marker.innerText(), /여기부터 안 읽은 말이야/);
+    assert.equal(await page.locator('li[data-id="34"] .unread').count(), 0, 'skip old Discord deliveries');
+    await marker.getByRole('button', {name: '맨 아래로'}).click();
+    await page.waitForFunction(() => {
+      const log = document.getElementById('log');
+      return log.scrollHeight - log.scrollTop - log.clientHeight < 2;
+    });
+    await page.reload();
+    await ready(page);
+    await page.waitForSelector('#menu-profile', {state: 'attached'});
+    await page.waitForFunction(() => !document.getElementById('menu-profile').hidden);
+    assert.equal(await marker.count(), 0, 'already seen in this browser');
+    friendCode = 'BCDEFG';
+    await page.reload();
+    await marker.waitFor();
+    await marker.getByRole('button', {name: '맨 아래로'}).click();
+    await page.goto('about:blank');
+    const later = site.add('marong', '새 합성 선톡', {kind: 'proactive'});
+    await page.goto(site.url + '/chat/');
+    await page.locator('li[data-id="' + later.id + '"] .unread').waitFor();
+    assert.equal(await marker.count(), 0);
+  });
+
+  it('TC-489: a newly available ticket unlocks sending without losing the draft', async () => {
+    reset();
+    let tickets = 0;
+    const { page } = await openChat({routes: async context => {
+      await context.route('**/chat/api/profile', route => route.fulfill({
+        json: { botName: '마롱이', features: {friends: false}, usageToday: {tickets, units: 1, limit: 1} },
+      }));
+      await context.route('**/chat/api/messages', route => {
+        if (route.request().method() === 'POST' && !tickets) {
+          return route.fulfill({status: 429, json: {code: 'daily_limit'}});
+        }
+        return route.continue();
+      });
+    }});
+    await ready(page);
+    await page.locator('#text').fill('남겨 둘 합성 글');
+    await page.locator('#send').click();
+    await page.getByText('오늘 쓸 수 있는 양을 다 썼어.', {exact: false}).waitFor();
+    assert.equal(await page.locator('#text').inputValue(), '남겨 둘 합성 글');
+    assert.equal(await page.locator('#send').isDisabled(), true);
+    tickets = 1;
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.waitForFunction(() => !document.getElementById('send').disabled);
+    await page.locator('#send').click();
+    await page.waitForFunction(() => document.getElementById('text').value === '');
+    assert.equal(site.state.posted.at(-1).text, '남겨 둘 합성 글');
+  });
 
   it('TC-132: the last 30 at the bottom, day lines, tags, text only as text, links, older ones on scroll', async () => {
     reset();
@@ -304,7 +368,7 @@ describe('chat page', { skip }, () => {
   it('TC-132: sign-in and permission states (SCR-107)', async () => {
     reset();
     for (const [code, title, link] of [['not_allowed', '이 계정으로는 마롱이랑 이야기할 수 없어', '/'],
-      ['no_dm', '디스코드 DM에서 마롱이한테 먼저 말 걸어 줘', '/']]) {
+      ['no_dm', '이 계정으로는 마롱이랑 이야기할 수 없어', '/']]) {
       site.state.me = { status: 403, code };
       const { context, page } = await openChat();
       await page.waitForFunction((t) => document.getElementById('state-title').textContent === t, title);
@@ -447,10 +511,10 @@ describe('chat page', { skip }, () => {
     await ready(plain.page);
     await plain.page.click('#menu-button');
     await plain.page.waitForSelector('#menu:not([hidden])');
-    assert.equal(await plain.page.textContent('#menu-delivery'), '알림이 꺼져 있어서 디스코드 DM으로 받고 있어.');
+    assert.equal(await plain.page.textContent('#menu-delivery'), '알림이 꺼져 있어. 먼저 한 말은 여기 남겨 둘게.');
     assert.equal(await plain.page.isHidden('#menu-settings'), true, 'no button without the app');
     // SPEC-140: a browser cannot ring, whatever the friend's phone does.
-    assert.equal(await plain.page.textContent('#menu-ring'), '약속 전화 벨은 마롱이 앱에서 울려. 앱이 없으면 디스코드로 알려 줄게.');
+    assert.equal(await plain.page.textContent('#menu-ring'), '약속 전화 벨은 안드로이드 앱에서 울려. 여기서는 글 대화를 열면 받을 수 있어.');
     for (const id of ['#menu-ring-settings', '#menu-full-screen', '#menu-samsung']) {
       assert.equal(await plain.page.isHidden(id), true, `${id} only in the app`);
     }
@@ -472,7 +536,7 @@ describe('chat page', { skip }, () => {
     await off.page.click('#menu-button');
     await off.page.waitForSelector('#menu:not([hidden])');
     assert.equal(await off.page.isHidden('#menu-ring'), true, 'no ring line while rings are off on the server');
-    assert.equal(await off.page.textContent('#menu-delivery'), '디스코드 DM으로 받고 있어. 알림은 마롱이 앱에서 받을 수 있어.');
+    assert.equal(await off.page.textContent('#menu-delivery'), '알림은 안드로이드 앱에서 받을 수 있어. 여기서는 열었을 때 밀린 말을 보여 줄게.');
     await off.context.close();
   });
 
@@ -507,7 +571,7 @@ describe('chat page', { skip }, () => {
     await ready(channelOff.page);
     await channelOff.page.click('#menu-button');
     await channelOff.page.waitForSelector('#menu-ring-settings:not([hidden])');
-    assert.equal(await channelOff.page.textContent('#menu-ring'), '전화 알림이 꺼져 있어서 약속 전화는 디스코드 DM으로 통화하자고 보내.');
+    assert.equal(await channelOff.page.textContent('#menu-ring'), '전화 알림이 꺼져 있어. 글 대화를 열면 약속 전화를 받을 수 있어.');
     assert.equal(await channelOff.page.isHidden('#menu-settings'), true, '선톡 still reach the phone');
     assert.equal(await channelOff.page.isHidden('#menu-samsung'), true, 'no ring on the phone, no Samsung note');
     await channelOff.page.click('#menu-ring-settings');
@@ -528,7 +592,7 @@ describe('chat page', { skip }, () => {
     await ready(noDevice.page);
     await noDevice.page.click('#menu-button');
     await noDevice.page.waitForSelector('#menu:not([hidden])');
-    assert.equal(await noDevice.page.textContent('#menu-ring'), '약속 전화는 디스코드 DM으로 통화하자고 보내.');
+    assert.equal(await noDevice.page.textContent('#menu-ring'), '글 대화를 열면 약속 전화를 받을 수 있어.');
     for (const id of ['#menu-ring-settings', '#menu-full-screen', '#menu-samsung']) {
       assert.equal(await noDevice.page.isHidden(id), true, `${id} hidden`);
     }

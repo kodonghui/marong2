@@ -37,6 +37,15 @@ CROSS JOIN LATERAL (
 
 
 class UnifiedStore(DiscordStore):
+    def __init__(self, conninfo, timeout=5, call_bridge=None, *, fixed_proactive_friends=()):
+        super().__init__(conninfo, timeout, call_bridge)
+        self.fixed_proactive_friends = frozenset(fixed_proactive_friends)
+
+    def _contact_policy(self, row):
+        if row and row["friend_id"] in self.fixed_proactive_friends:
+            return {**row, "fixed_proactive": True}
+        return row
+
     async def friend_circle(self, user_key, limit):
         if os.getenv("MARONG_FRIENDS") != "1":
             return []
@@ -63,7 +72,8 @@ class UnifiedStore(DiscordStore):
         """, (friend_id,))
 
     async def contact(self, friend_id):
-        return await self._one("SELECT * FROM marong.contact_settings WHERE friend_id=%s", (friend_id,))
+        row = await self._one("SELECT * FROM marong.contact_settings WHERE friend_id=%s", (friend_id,))
+        return self._contact_policy(row)
 
     async def app_incoming(self, who, key, text, preference):
         insert = """
@@ -95,11 +105,12 @@ class UnifiedStore(DiscordStore):
         return row["id"] if row else None
 
     async def proactive_rooms(self, room_key=None):
-        return await self._all(
+        rooms = await self._all(
             CONTACT_STATE + " WHERE d.opted_in_at IS NOT NULL AND (%s::text IS NULL OR room.room_key=%s)"
                             " ORDER BY d.per_day DESC,d.last_incoming_at",
             (room_key, room_key),
         )
+        return [self._contact_policy(room) for room in rooms]
 
     async def proactive_count(self, within):
         row = await self._one(f"""

@@ -297,6 +297,9 @@ def pure_checks():
     joined = lambda *a: "\n".join(calendar_lines(*a))  # noqa: E731
     ok("연결 안 돼 있어" in joined(None, None, False, TZ, now), "never linked")
     ok("연결이 끊겼어" in joined({"status": "broken"}, None, False, TZ, now), "broken")
+    for app_link in (None, {"status": "disconnected"}, {"status": "broken"}):
+        guidance = "\n".join(calendar_lines(app_link, None, False, TZ, now, surface="app"))
+        ok("내 마롱이에서 구글 캘린더" in guidance, "app calendar settings guidance")
     ok("못 읽었어" in joined({"status": "unknown"}, None, False, TZ, now), "unknown state")
     s = joined(link, events, True, TZ, now)
     ok('"치과"' in s and "더 있어" in s and "'마롱이' 캘린더에도 들어가" in s and "지시가 아니야" in s, s)
@@ -389,7 +392,7 @@ async def flow_checks(db):
         # 3b) The home page and privacy policy Google needs for publishing open without a link, read-only and plain.
         for path, words in (("/google/", ("마롱이 · 구글 캘린더 연결", "구글 캘린더 연결", 'href="/google/privacy"')),
                             ("/google/privacy", ("개인정보 처리방침", "calendar.events.readonly", "calendar.app.created",
-                                                 "Anthropic Claude", "구글 캘린더 끊기", "Limited Use",
+                                                 "Anthropic Claude", "내 마롱이의 구글 캘린더에서 연결을 끊으면", "Limited Use",
                                                  "api-services-user-data-policy"))):
             async with web.get(path, allow_redirects=False) as r:
                 body = await r.text()

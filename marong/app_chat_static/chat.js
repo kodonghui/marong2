@@ -52,7 +52,7 @@ const app = {
   until: 0, countdown: null, dailyBlocked: false,
   shown: new Map(),   // message id -> li
   pending: new Map(), // clientId -> {text, li}
-  profileActive: false,
+  profileActive: false, seenKey: null,
   face: FACE,
 };
 
@@ -115,6 +115,12 @@ async function refreshProfile() {
   if (result.status !== 200) return;
   app.profileActive = true;
   const profile = result.body;
+  const usage = profile.usageToday;
+  if (app.dailyBlocked && usage && (usage.limit === null || usage.units < usage.limit || usage.tickets > 0)) {
+    app.dailyBlocked = false;
+    notice('');
+    syncSend();
+  }
   const brand = document.querySelector('.brand');
   if (brand && brand.firstChild?.nodeType === Node.TEXT_NODE) brand.firstChild.textContent = profile.botName;
   document.title = profile.botName + ' · 글 대화';
@@ -133,14 +139,12 @@ async function refreshProfile() {
     ring.href = '/?ring=' + encodeURIComponent(profile.pendingRing.ringId);
     ringExpiry = setTimeout(() => { ring.hidden = true; }, until - Date.now());
   }
+  return profile;
 }
 
 const BLOCKS = {
   login: ['다시 들어와 줘', '로그인이 끝났어. 다시 들어가면 이어서 이야기할 수 있어.', {retry: '다시 들어가기'}],
   not_allowed: ['이 계정으로는 마롱이랑 이야기할 수 없어', '통화할 때 쓰는 계정으로 들어와 줘.', {link: ['통화 화면으로', '/']}],
-  no_dm: ['디스코드 DM에서 마롱이한테 먼저 말 걸어 줘',
-    '글 대화는 디스코드 DM과 같은 대화라서, DM을 한 번 보내고 나면 여기서도 이어서 이야기할 수 있어.',
-    {link: ['통화 화면으로', '/']}],
   broken: ['잠깐 문제가 생겼어', '조금 있다가 다시 해 볼래?', {retry: '다시 해 보기'}],
   loading: ['불러오는 중이야', '', {}],
 };
@@ -172,7 +176,7 @@ function unblock() {
 function handle(result) {
   const code = result.body && result.body.code;
   if (result.status === 401) { relogin(result); return false; }
-  if (result.status === 403 && (code === 'not_allowed' || code === 'no_dm')) { block(code); return false; }
+  if (result.status === 403 && (code === 'not_allowed' || code === 'no_dm')) { block('not_allowed'); return false; }
   return true;
 }
 
@@ -401,6 +405,46 @@ function toBottom() {
   ui.log.scrollTop = ui.log.scrollHeight;
 }
 
+function lastSeen() {
+  try { return Number(localStorage.getItem(app.seenKey)) || 0; } catch { return 0; }
+}
+
+function rememberSeen() {
+  if (!app.seenKey || !app.ready || document.visibilityState !== 'visible' || !nearBottom()) return;
+  if (app.last > lastSeen()) {
+    try { localStorage.setItem(app.seenKey, String(app.last)); } catch { /* storage can be blocked */ }
+  }
+}
+
+function showUnread(messages, friendCode) {
+  if (!friendCode) return;
+  app.seenKey = `marong.chat.seen.${friendCode}`;
+  const lastUser = messages.reduce((id, message) => message.from === 'me' ? Math.max(id, message.id) : id, app.read);
+  const seen = Math.max(lastUser, lastSeen());
+  const first = messages.find(message =>
+    message.from === 'marong' && message.via === 'app' && message.kind !== 'chat' && message.id > seen);
+  const row = first && app.shown.get(first.id);
+  if (row) {
+    const marker = document.createElement('p');
+    marker.className = 'unread';
+    marker.textContent = '여기부터 안 읽은 말이야';
+    const latest = document.createElement('button');
+    latest.className = 'text-button';
+    latest.type = 'button';
+    latest.textContent = '맨 아래로';
+    latest.addEventListener('click', () => {
+      marker.remove();
+      toBottom();
+      ui.log.focus({preventScroll: true});
+      rememberSeen();
+    });
+    marker.append(latest);
+    row.insertBefore(marker, row.querySelector('.row'));
+    marker.scrollIntoView({block: 'start'});
+  }
+  rememberSeen();
+}
+
 /** Keep the list in id order; bubbles still being sent (no id yet) stay at the end. */
 function place(li, id) {
   for (const other of ui.list.children) {
@@ -533,7 +577,9 @@ async function waitLoop() {
         app.backoff = 0;
         const typing = app.typing, read = app.read;
         const added = add(r.body.messages);
-        if (app.profileActive && r.body.messages.some(message => message.kind === 'ring')) refreshProfile();
+        if (app.profileActive && (app.dailyBlocked || r.body.messages.some(message => message.kind === 'ring'))) {
+          void refreshProfile();
+        }
         setTyping(r.body.typing);
         setRead(r.body);
         // Nothing new at once: another open screen took this wait over. Do not take it straight back.
@@ -707,26 +753,30 @@ ui.form.addEventListener('submit', (event) => {
   post(clientId);
   ui.text.focus();
 });
-ui.log.addEventListener('scroll', () => { if (ui.log.scrollTop < 80) loadOlder(); }, {passive: true});
+ui.log.addEventListener('scroll', () => {
+  if (ui.log.scrollTop < 80) loadOlder();
+  rememberSeen();
+}, {passive: true});
 
 // ── where notifications go (SCR-109) ─────────────────────────
 
 const DELIVERY = {
   app_on: () => (inApp() ? '이 폰으로 받고 있어.' : '마롱이 앱 알림으로 받고 있어.'),
-  notifications_off: () => '알림이 꺼져 있어서 디스코드 DM으로 받고 있어.',
-  not_seen: () => '앱을 오래 안 열어서 디스코드 DM으로 받고 있어. 앱을 열면 다시 이 폰으로 와.',
-  no_fid: () => '이 폰은 앱 알림을 못 받아서 디스코드 DM으로 받고 있어.',
-  no_device: () => (inApp() ? '디스코드 DM으로 받고 있어.' : '디스코드 DM으로 받고 있어. 알림은 마롱이 앱에서 받을 수 있어.'),
-  fcm_off: () => '지금은 디스코드 DM으로 받고 있어.',
+  notifications_off: () => '알림이 꺼져 있어. 먼저 한 말은 여기 남겨 둘게.',
+  not_seen: () => '앱을 오래 안 열었어. 먼저 한 말은 여기 남겨 둘게.',
+  no_fid: () => '지금은 이 폰으로 알림을 못 보내. 먼저 한 말은 여기 남겨 둘게.',
+  no_device: () => (inApp() ? '먼저 한 말은 여기 남겨 둘게.' :
+    '알림은 안드로이드 앱에서 받을 수 있어. 여기서는 열었을 때 밀린 말을 보여 줄게.'),
+  fcm_off: () => '지금은 알림을 못 보내. 먼저 한 말은 여기 남겨 둘게.',
 };
 
 // Marong's own call (docs/app-ring.md SPEC-140): where it rings, and what this phone can fix.
 const RING = {
   app: '약속 전화는 이 폰이 울려.',
   appNoFullScreen: '약속 전화는 이 폰이 울려. 잠금 화면에는 전체 화면 대신 위에 뜨는 알림으로 와.',
-  off: '전화 알림이 꺼져 있어서 약속 전화는 디스코드 DM으로 통화하자고 보내.',
-  discord: '약속 전화는 디스코드 DM으로 통화하자고 보내.',
-  browser: '약속 전화 벨은 마롱이 앱에서 울려. 앱이 없으면 디스코드로 알려 줄게.',
+  off: '전화 알림이 꺼져 있어. 글 대화를 열면 약속 전화를 받을 수 있어.',
+  chat: '글 대화를 열면 약속 전화를 받을 수 있어.',
+  browser: '약속 전화 벨은 안드로이드 앱에서 울려. 여기서는 글 대화를 열면 받을 수 있어.',
 };
 
 const bridgeCan = (name) => Boolean(window.__marongApp && typeof window.__marongApp[name] === 'function');
@@ -775,7 +825,7 @@ function showMenu() {
     ring.textContent = RING.off;
     ringSettings.hidden = !settings.hidden || !bridgeCan('openNotificationSettings');
   } else {
-    ring.textContent = RING.discord;
+    ring.textContent = RING.chat;
   }
 }
 
@@ -849,6 +899,11 @@ async function start() {
     const draft = sessionStorage.getItem('marong.session.draft');
     if (draft && !ui.text.value) ui.text.value = draft;
     sessionStorage.removeItem('marong.session.draft');
+    const character = sessionStorage.getItem('marong.character.applied');
+    if (character) {
+      sessionStorage.removeItem('marong.character.applied');
+      notice(`이제 ${character}로 바뀌었어! 대화랑 기억은 그대로야`);
+    }
   } catch { /* sessionStorage can be blocked */ }
   unblock();
   app.hasMore = page.body.hasMore;
@@ -859,7 +914,11 @@ async function start() {
   app.ready = true;
   syncSend();
   void showDiary();
-  if ($('menu-profile')) refreshProfile();
+  if ($('menu-profile')) {
+    void refreshProfile().then(profile => {
+      if (profile && app.ready) showUnread(page.body.messages, profile.friendCode);
+    });
+  }
   waitLoop();
 }
 
