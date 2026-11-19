@@ -67,7 +67,7 @@ def plan_turn(text, recent, tools, now):
     schedule = bool(SCHEDULE.search(text))
     context = bool(re.match(r"\s*(?:그럼|그러면|그날|이번엔|그리고)", text) and
                    any(SCHEDULE.search(line) for line in recent[-6:]))
-    reminder = bool(re.search(r"깨워|알람|때\s*알려|뒤에\s*알려|때\s*연락", text))
+    reminder = bool(re.search(r"깨워|알람|때\s*알려|뒤에\s*알려|(?:때|시에|뒤에)\s*연락", text))
     if schedule or context or reminder:
         if "schedule_add" in tools and (WRITE.search(text) or reminder):
             return TurnPlan(("schedule_write",), reasons=("schedule_write",), confidence=.9)
