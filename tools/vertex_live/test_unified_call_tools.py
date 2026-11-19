@@ -1,17 +1,57 @@
 """Verify the internal shopping contract and its call quota with local fakes."""
 
 import asyncio
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from aiohttp import web
+from aiohttp import WSMsgType, web
 from aiohttp.test_utils import TestClient, TestServer
 from call_shop import FAILED, LIMIT, configured_reader, fetch_product
 from live_session import LiveSession
 from marong.internal_shop import InternalShop, LOOKUP_PATH
 from marong.shopping import ShopFetch
 from fakes import ScriptedLLM, message, text
+
+
+async def verify_wait_during_tool_turn():
+    started, release, replied = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    live = LiveSession(None, "fixture", None, None, None, None, {}, {}, "fixture", "fixture", "fixture", "fixture")
+    live.wait_enabled = True
+    live.recorder = SimpleNamespace(boundary=lambda *_: None, feed=lambda *_, **__: None)
+
+    async def shop(_query):
+        started.set()
+        await release.wait()
+        return {"ok": True}
+
+    class Upstream:
+        async def __aiter__(self):
+            call = {"id": "fixture", "name": "shop_read", "args": {"query": "Fixture product"}}
+            yield SimpleNamespace(type=WSMsgType.TEXT, data=json.dumps({"toolCall": {"functionCalls": [call]}}))
+            await started.wait()
+            yield SimpleNamespace(type=WSMsgType.TEXT, data='{"serverContent":{"turnComplete":true}}')
+            await replied.wait()
+
+        async def send_json(self, payload):
+            assert payload["toolResponse"]["functionResponses"][0]["response"]["ok"]
+            replied.set()
+
+    live.shop = shop
+    task = asyncio.create_task(live.provider(Upstream()))
+    try:
+        async with asyncio.timeout(2):
+            assert (await live.output.get())[1] == {"type": "wait", "on": True, "reason": "tool"}
+            assert (await live.output.get())[1] == {"type": "turn"}
+            assert live.waiting
+            release.set()
+            await task
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
 
 async def main():
@@ -59,6 +99,7 @@ async def main():
     assert (await live.output.get())[1] == {"type": "wait", "on": True, "reason": "tool"}
     await live.wait_signal()
     assert (await live.output.get())[1] == {"type": "wait", "on": False}
+    await verify_wait_during_tool_turn()
     print("PASS TC-477 and TC-479 local route, secret, quota, result and audio control")
 
 
