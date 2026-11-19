@@ -177,7 +177,7 @@ class AppReminders(PrivateReminders):
         accepted = 0
         if devices:
             try:
-                accepted = await self.app.ring(devices, ring["id"])
+                accepted = await self.app.ring(devices, ring["id"], friend_id=row["friend_id"])
             except Exception as e:
                 log.warning("app_ring_push_failed error=%s", type(e).__name__)
             if not accepted:

@@ -235,6 +235,10 @@
     groups.replaceChildren(nameGroup(), link('통화 목소리 · ' + (data.voiceLabel || data.voice || '기본'),
       '/chat/me/voice', 'btn2'), codes(), usage());
     if (data.features.character) groups.insertBefore(wardrobe(), groups.children[1]);
+    if (data.google !== 'off') {
+      const connected = data.google === 'connected' ? '연결됨' : '연결 안 됨';
+      groups.append(link('구글 캘린더 · ' + connected, '/google/', 'btn2'));
+    }
     if (data.features.friends) groups.append(link('친구', '/chat/friends', 'btn2'));
     actions.replaceChildren(button('로그아웃', logout, 'btnt danger'));
   }

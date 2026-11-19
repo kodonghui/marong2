@@ -1,6 +1,5 @@
 package com.corthexhq.marong;
 
-import android.net.Uri;
 import android.webkit.WebView;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
@@ -15,7 +14,7 @@ import java.util.Collections;
 
 /**
  * What both app windows share (SPEC-102, SPEC-106, SPEC-108; D20, docs/app-chat.md SPEC-143,
- * SPEC-144 and SPEC-147): the web view client (Access sign-in inside the app, the "can't connect"
+ * SPEC-144 and SPEC-147): the web view client (same-site session login, the "can't connect"
  * page only for server outages, moving between the call window and the chat window), the
  * microphone rule and the page script (assets/marong_page.js), injected only into the call site's
  * origin. Each window registers it first, so all of it is in place before its first page loads.
@@ -39,12 +38,6 @@ public class MarongWindowPlugin extends Plugin {
         } else {
             Logger.error(TAG, "Page script not installed", null);
         }
-    }
-
-    /** Keeps the Access email-code sign-in in the app window; null leaves the decision to Capacitor. */
-    @Override
-    public Boolean shouldOverrideLoad(Uri url) {
-        return AppUrls.isAccessLogin(url.toString()) ? Boolean.FALSE : null;
     }
 
     /** Capacitor has no setter for its chrome client; replacing it on the WebView keeps all its behaviour. */

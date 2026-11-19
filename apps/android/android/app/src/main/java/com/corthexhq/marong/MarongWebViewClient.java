@@ -1,5 +1,6 @@
 package com.corthexhq.marong;
 
+import android.webkit.CookieManager;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
@@ -11,7 +12,7 @@ import com.getcapacitor.BridgeWebViewClient;
  *
  * <ul>
  *   <li>Only a server outage (HTTP 5xx) swaps in the app's "can't connect" page (SPEC-108).
- *       Capacitor would also swap it in for 4xx pages, which would hide the Access sign-in
+ *       Capacitor would also swap it in for 4xx pages, which would hide the session login
  *       messages, such as a wrong code or an email that is not allowed. Network failures (no
  *       internet) still show the page through Capacitor's onReceivedError.
  *   <li>A page that belongs in the other app window opens that window instead (D20,
@@ -48,9 +49,17 @@ class MarongWebViewClient extends BridgeWebViewClient {
     }
 
     @Override
+    public void onPageFinished(WebView view, String url) {
+        super.onPageFinished(view, url);
+        if (AppUrls.isAppPage(url, bridge.getServerUrl())) {
+            CookieManager.getInstance().flush();
+        }
+    }
+
+    @Override
     public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse errorResponse) {
         if (request.isForMainFrame() && !AppUrls.isServerOutage(errorResponse.getStatusCode())) {
-            return; // Keep the page the server or Access sent, with its own explanation.
+            return; // Keep the page the server sent, with its own explanation.
         }
         super.onReceivedHttpError(view, request, errorResponse);
     }

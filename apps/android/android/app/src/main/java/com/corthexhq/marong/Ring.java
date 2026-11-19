@@ -31,6 +31,7 @@ final class Ring {
     static final String EXTRA_SHOWN_AT = "shownAt";
     static final String EXTRA_REASON = "reason";
     static final String EXTRA_LINE = "line";
+    static final String EXTRA_NAME = "botName";
     /** How long the phone rings; the server's answer window is 5 minutes. */
     static final long RING_MS = 45_000L;
 
@@ -40,7 +41,7 @@ final class Ring {
     private Ring() {}
 
     /** A ring message from FCM (data only: kind "ring", ringId, v, reason, line). Returns quickly (SPEC-132). */
-    static void receive(Context context, String ringId, long sentTimeMs, String reason, String line) {
+    static void receive(Context context, String ringId, long sentTimeMs, String reason, String line, String name) {
         if (!PushLinks.isRingId(ringId)) {
             Logger.info(TAG, "ring_dropped reason=bad_id");
             return;
@@ -58,7 +59,9 @@ final class Ring {
             return;
         }
         String kind = PushLinks.isHello(reason) ? "hello" : "promise";
-        show(context, ringId, kind, PushLinks.ringLine(kind, line));
+        String shownName = name == null || name.trim().isEmpty() || name.length() > 24
+            ? context.getString(R.string.ring_caller) : name.trim();
+        show(context, ringId, kind, PushLinks.ringLine(kind, line), shownName);
     }
 
     /** The phone or another app is in a call (SPEC-132). */
@@ -71,7 +74,7 @@ final class Ring {
         return mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION;
     }
 
-    private static void show(Context context, String ringId, String reason, String line) {
+    private static void show(Context context, String ringId, String reason, String line, String name) {
         Channels.ensure(context);
         long shownAt = System.currentTimeMillis();
         int code = ringId.hashCode();
@@ -89,11 +92,12 @@ final class Ring {
             .putExtra(EXTRA_SHOWN_AT, shownAt)
             .putExtra(EXTRA_REASON, reason)
             .putExtra(EXTRA_LINE, line)
+            .putExtra(EXTRA_NAME, name)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_USER_ACTION);
         PendingIntent fullScreen = PendingIntent.getActivity(context, code, screen, immutable);
 
         Person marong = new Person.Builder()
-            .setName(context.getString(R.string.ring_caller))
+            .setName(name)
             .setIcon(IconCompat.createWithResource(context, R.drawable.splash_face))
             .setImportant(true)
             .build();
@@ -104,7 +108,7 @@ final class Ring {
             .setSmallIcon(R.drawable.ic_stat_marong)
             .setColor(ContextCompat.getColor(context, R.color.marong_accent))
             .setContentText(
-                PushLinks.ringText(reason, line, context.getString(R.string.ring_text), context.getString(R.string.ring_hello_text))
+                PushLinks.ringText(reason, line, context.getString(R.string.ring_text), context.getString(R.string.ring_hello_named, name))
             )
             .setStyle(NotificationCompat.CallStyle.forIncomingCall(marong, decline, answer))
             .addPerson(marong)

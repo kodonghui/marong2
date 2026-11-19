@@ -28,6 +28,8 @@ from urllib.parse import quote, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 from aiohttp import web
+
+from .app_session import COOKIE, SessionError
 import httpx
 
 from .fmt import WEEKDAYS
@@ -41,7 +43,8 @@ API = "https://www.googleapis.com/calendar/v3"
 READ_SCOPE = "https://www.googleapis.com/auth/calendar.events.readonly"   # 친구 캘린더 일정 보기
 WRITE_SCOPE = "https://www.googleapis.com/auth/calendar.app.created"      # 마롱이가 만든 캘린더와 그 일정만
 START_PATH, CALLBACK_PATH, HEALTH_PATH = "/google/start", "/google/callback", "/google/healthz"
-HOME_PATH, PRIVACY_PATH = "/google/", "/google/privacy"  # 구글 앱 게시에 필요한 소개·개인정보 처리방침
+HOME_PATH, PRIVACY_PATH = "/google/", "/google/privacy"
+DISCONNECT_PATH = "/google/disconnect"  # 구글 앱 게시에 필요한 소개·개인정보 처리방침
 DEFAULT_PORT = 8795
 LINK_TTL_S = 15 * 60          # 링크를 받고 구글 허용을 마칠 때까지
 LINK_MARK = "[구글 캘린더 연결 링크]"
@@ -375,13 +378,17 @@ class GoogleCalendar:
         self.planned_cache.pop(friend_id, None)
 
     # 연결과 끊기
-    def new_link(self, friend_id: int) -> str:
-        """친구 한 명에 살아 있는 링크는 하나(새로 받으면 앞의 것은 안 열림)."""
+    def new_state(self, friend_id: int) -> str:
         now = self.clock()
-        self.pending = {k: p for k, p in self.pending.items() if p.expires > now and p.friend_id != friend_id}
+        self.pending = {key: pending for key, pending in self.pending.items()
+                        if pending.expires > now and pending.friend_id != friend_id}
         state = secrets.token_urlsafe(32)
         self.pending[_digest(state)] = _Pending(friend_id, secrets.token_urlsafe(64), now + LINK_TTL_S)
-        return f"{self.c.base}{START_PATH}?{urlencode({'s': state})}"
+        return state
+
+    def new_link(self, friend_id: int) -> str:
+        """Issue a fresh one-time state for a legacy link."""
+        return f"{self.c.base}{START_PATH}?{urlencode({'s': self.new_state(friend_id)})}"
 
     def consent_url(self, state: str) -> str | None:
         """링크를 누르면 넘길 구글 허용 화면 주소. 만료됐거나 모르는 링크면 None."""
@@ -610,14 +617,42 @@ def page(outcome: str) -> web.Response:
     return web.Response(status=status, text=text, content_type="text/html", charset="utf-8", headers=HEADERS)
 
 
-def web_app(google: GoogleCalendar) -> web.Application:
-    """/google/start(구글 허용 화면으로), /google/callback(구글이 돌려보내는 곳), /google/healthz,
-    /google/(소개)·/google/privacy(개인정보 처리방침): 구글 콘솔의 앱 홈페이지·개인정보처리방침 주소."""
+def web_app(google: GoogleCalendar, sessions=None, *, authentication="access", origin=None) -> web.Application:
+    async def account(request):
+        token = request.cookies.get(COOKIE)
+        try:
+            who = await sessions.find_session(token) if sessions and token else None
+        except SessionError:
+            who = None
+        if who is None or not who["room_key"]:
+            raise web.HTTPFound("/chat/login", headers=HEADERS)
+        return who["friend_id"]
+
     async def start(request):
-        target = google.consent_url(request.query.get("s", ""))
+        state = request.query.get("s", "") if authentication != "session" else ""
+        if sessions and not state:
+            friend = await account(request)
+            link = await google.store.google_link(friend)
+            if link and link["status"] == "connected":
+                raise web.HTTPSeeOther(HOME_PATH, headers=HEADERS)
+            state = google.new_state(friend)
+        target = google.consent_url(state)
         if target is None:
             return page("expired")
         return web.Response(status=302, headers={**HEADERS, "Location": target})
+
+    async def disconnect(request):
+        if request.headers.get("Origin") != origin:
+            raise web.HTTPForbidden(headers=HEADERS)
+        friend = await account(request)
+        changed, revoked = await google.disconnect(friend)
+        if changed and google.notify:
+            try:
+                await google.notify(friend, DISCONNECTED_TEXT + ("" if revoked else REVOKE_FAILED_TEXT),
+                                    {"google": "disconnected"})
+            except Exception as error:
+                log.warning("google_notify_failed %s", type(error).__name__)
+        raise web.HTTPSeeOther(HOME_PATH, headers=HEADERS)
 
     async def callback(request):
         q = request.query
@@ -626,12 +661,38 @@ def web_app(google: GoogleCalendar) -> web.Application:
         except Exception as e:
             log.error("google_callback_error %s", type(e).__name__)
             outcome = "failed"
+        if sessions:
+            copy = {
+                "connected": ("연결됐어! 🌰", "내 마롱이에서 연결을 확인해."),
+                "denied": ("연결하지 않았어요", "다시 연결하려면 내 마롱이에서 구글 캘린더를 열어 줘."),
+                "expired": ("링크가 만료됐어", "내 마롱이에서 구글 캘린더를 다시 열어 줘."),
+                "failed": ("연결하다가 문제가 생겼어", "조금 있다가 다시 해 줘."),
+            }
+            title, body = copy[outcome]
+            text = PAGE.replace("@TITLE@", html.escape(title)).replace("@BODY@", html.escape(body))
+            text = text.replace("</main>", '<p><a href="/chat/me">내 마롱이</a></p></main>')
+            return web.Response(status=PAGES[outcome][0], text=text, content_type="text/html", charset="utf-8",
+                                headers=HEADERS)
         return page(outcome)
 
     async def health(request):
         return web.Response(text="ok", headers=HEADERS)
 
     async def home(request):
+        if sessions:
+            friend = await account(request)
+            link = await google.store.google_link(friend)
+            connected = bool(link and link["status"] == "connected")
+            body = "연결됨" if connected else "연결 안 됨"
+            action = (
+                '<form method="post" action="/google/disconnect"><button>연결 끊기</button></form>'
+                if connected else '<a href="/google/start">연결하기</a>'
+            )
+            text = PAGE.replace("@TITLE@", "구글 캘린더").replace("@BODY@", body)
+            text = text.replace("</main>", action + '<p><a href="/chat/me">내 마롱이</a></p></main>')
+            headers = {**HEADERS, "Content-Security-Policy":
+                       HEADERS["Content-Security-Policy"].replace("form-action 'none'", "form-action 'self'")}
+            return web.Response(text=text, content_type="text/html", charset="utf-8", headers=headers)
         return web.Response(text=HOME_HTML, content_type="text/html", charset="utf-8", headers=HEADERS)
 
     async def privacy(request):
@@ -643,12 +704,14 @@ def web_app(google: GoogleCalendar) -> web.Application:
     app.router.add_get(HEALTH_PATH, health)
     app.router.add_get(HOME_PATH, home)
     app.router.add_get(PRIVACY_PATH, privacy)
+    if sessions and origin:
+        app.router.add_post(DISCONNECT_PATH, disconnect)
     return app
 
 
-async def serve(google: GoogleCalendar, host: str = "127.0.0.1") -> web.AppRunner:
+async def serve(google: GoogleCalendar, host: str = "127.0.0.1", **options) -> web.AppRunner:
     """127.0.0.1 에서만 듣는다. 접속 기록(주소창의 code·state 가 들어감)은 남기지 않는다."""
-    runner = web.AppRunner(web_app(google), access_log=None, handle_signals=False)
+    runner = web.AppRunner(web_app(google, **options), access_log=None, handle_signals=False)
     await runner.setup()
     await web.TCPSite(runner, host, google.c.port).start()
     log.info("google_web_on port=%d", google.c.port)

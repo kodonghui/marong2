@@ -207,7 +207,8 @@ async def serve(settings, credentials, options, secret, authentication, home, st
                 jobs["cache"] = agent.warmer.run
             if google:
                 google.notify = delivery.tell
-                google_web = await serve_google(google)
+                google_web = await serve_google(google, sessions=sessions, authentication=authentication,
+                                                origin=options["origin"])
                 jobs["google"] = google.sync_loop
         tasks = [asyncio.create_task(run_locked(settings.database_url, name, job)) for name, job in jobs.items()]
         log.info("app_runtime_on loops_home=%s authentication=%s", home, authentication)

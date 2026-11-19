@@ -28,6 +28,7 @@
             android:src="@drawable/splash_face" />
 
         <TextView
+            android:id="@+id/ring_name"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"

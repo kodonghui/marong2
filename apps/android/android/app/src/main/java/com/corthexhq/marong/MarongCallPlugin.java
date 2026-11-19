@@ -37,6 +37,7 @@ public class MarongCallPlugin extends Plugin {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Runnable releaseAfterHangUp = () -> setCallActive(false);
     private boolean callActive;
+    private String callName;
 
     @Override
     public void load() {
@@ -45,7 +46,12 @@ public class MarongCallPlugin extends Plugin {
 
     @PluginMethod
     public void callStarted(PluginCall call) {
-        main.post(() -> setCallActive(true));
+        String name = call.getString("name");
+        main.post(() -> {
+            callName = name == null || name.trim().isEmpty() || name.length() > 24
+                ? getContext().getString(R.string.ring_caller) : name.trim();
+            setCallActive(true);
+        });
         call.resolve();
     }
 
@@ -99,7 +105,7 @@ public class MarongCallPlugin extends Plugin {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && webView != null) {
                 webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
             }
-            CallService.show(getContext());
+            CallService.show(getContext(), callName);
         } else {
             activity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && webView != null) {
