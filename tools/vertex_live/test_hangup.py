@@ -249,7 +249,7 @@ async def check_http(server):
                     if not server.active_calls:break
                     await asyncio.sleep(.01)
             page=await (await c.get('/')).text()
-            assert '/app.js?v=20261117-topic1' in page
+            assert '/app.js?v=20261119-call-wait1' in page
 
 
 async def main():
