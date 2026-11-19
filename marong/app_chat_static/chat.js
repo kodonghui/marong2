@@ -52,7 +52,7 @@ const app = {
   until: 0, countdown: null, dailyBlocked: false,
   shown: new Map(),   // message id -> li
   pending: new Map(), // clientId -> {text, li}
-  profileActive: false,
+  profileActive: false, seenKey: null,
   face: FACE,
 };
 
@@ -133,6 +133,7 @@ async function refreshProfile() {
     ring.href = '/?ring=' + encodeURIComponent(profile.pendingRing.ringId);
     ringExpiry = setTimeout(() => { ring.hidden = true; }, until - Date.now());
   }
+  return profile;
 }
 
 const BLOCKS = {
@@ -396,6 +397,46 @@ function nearBottom() {
 
 function toBottom() {
   ui.log.scrollTop = ui.log.scrollHeight;
+}
+
+function lastSeen() {
+  try { return Number(localStorage.getItem(app.seenKey)) || 0; } catch { return 0; }
+}
+
+function rememberSeen() {
+  if (!app.seenKey || !app.ready || document.visibilityState !== 'visible' || !nearBottom()) return;
+  if (app.last > lastSeen()) {
+    try { localStorage.setItem(app.seenKey, String(app.last)); } catch { /* storage can be blocked */ }
+  }
+}
+
+function showUnread(messages, friendCode) {
+  if (!friendCode) return;
+  app.seenKey = `marong.chat.seen.${friendCode}`;
+  const lastUser = messages.reduce((id, message) => message.from === 'me' ? Math.max(id, message.id) : id, app.read);
+  const seen = Math.max(lastUser, lastSeen());
+  const first = messages.find(message =>
+    message.from === 'marong' && message.via === 'app' && message.kind !== 'chat' && message.id > seen);
+  const row = first && app.shown.get(first.id);
+  if (row) {
+    const marker = document.createElement('p');
+    marker.className = 'unread';
+    marker.textContent = '여기부터 안 읽은 말이야';
+    const latest = document.createElement('button');
+    latest.className = 'text-button';
+    latest.type = 'button';
+    latest.textContent = '맨 아래로';
+    latest.addEventListener('click', () => {
+      marker.remove();
+      toBottom();
+      ui.log.focus({preventScroll: true});
+      rememberSeen();
+    });
+    marker.append(latest);
+    row.insertBefore(marker, row.querySelector('.row'));
+    marker.scrollIntoView({block: 'start'});
+  }
+  rememberSeen();
 }
 
 /** Keep the list in id order; bubbles still being sent (no id yet) stay at the end. */
@@ -704,7 +745,10 @@ ui.form.addEventListener('submit', (event) => {
   post(clientId);
   ui.text.focus();
 });
-ui.log.addEventListener('scroll', () => { if (ui.log.scrollTop < 80) loadOlder(); }, {passive: true});
+ui.log.addEventListener('scroll', () => {
+  if (ui.log.scrollTop < 80) loadOlder();
+  rememberSeen();
+}, {passive: true});
 
 // ── where notifications go (SCR-109) ─────────────────────────
 
@@ -857,7 +901,11 @@ async function start() {
   app.ready = true;
   syncSend();
   void showDiary();
-  if ($('menu-profile')) refreshProfile();
+  if ($('menu-profile')) {
+    void refreshProfile().then(profile => {
+      if (profile && app.ready) showUnread(page.body.messages, profile.friendCode);
+    });
+  }
   waitLoop();
 }
 

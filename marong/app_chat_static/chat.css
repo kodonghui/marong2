@@ -82,6 +82,8 @@ button:disabled {cursor: default; opacity: .45}
 .messages {list-style: none; margin: 0; padding: 0}
 .day {text-align: center; margin: 18px 0 10px; font-size: 12px; color: var(--muted)}
 .day span {padding: 3px 12px; border-radius: 12px; background: var(--surface)}
+.unread {display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px;
+  margin: 10px 0; padding: 4px 8px; border-radius: 12px; background: var(--surface); color: var(--muted); font-size: 12px}
 .message {margin: 6px 0}
 .persona-options {margin: 6px 0 0}
 .persona-card-note {margin: 4px 0; color: var(--muted); font-size: 12px}
