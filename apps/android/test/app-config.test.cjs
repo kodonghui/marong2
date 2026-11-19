@@ -93,7 +93,7 @@ test('TC-118: no plain HTTP, mixed content or backup (SPEC-101, SPEC-109)', () =
 test('TC-118, TC-133, TC-149: build.gradle, the user agent and package.json name the same version, 0.2.1 or later', () => {
   const gradle = read('android', 'app', 'build.gradle');
   const versionName = gradle.match(/versionName "([^"]+)"/)[1];
-  assert.match(gradle, /versionCode [1-9]\d*\n/);
+  assert.match(gradle, /versionCode [1-9]\d*\r?\n/);
   assert.equal(config.android.appendUserAgent, `MarongApp/${versionName}`);
   assert.equal(JSON.parse(read('package.json')).version, versionName);
   const lock = JSON.parse(read('package-lock.json'));
