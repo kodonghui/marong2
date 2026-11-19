@@ -1,0 +1,60 @@
+/* Primitives from design/unified-mockup.css and the conversation theme. */
+.unified {
+  margin: 0 auto; max-width: 430px; min-height: 100dvh; background: var(--page);
+  line-height: 1.5; word-break: keep-all;
+}
+.unified header {
+  min-height: 48px; display: grid; place-items: center; border-bottom: 1px solid var(--line);
+}
+.unified h1, .unified h2, .unified p {margin: 0}
+.unified h1, .unified h2 {font-size: 16px}
+.unified section {padding: 16px}
+.unified .stack {display: grid; gap: 8px; min-width: 0}
+.unified section.stack {gap: 16px}
+.unified .centered {text-align: center; justify-items: center}
+.unified #actions {width: 100%}
+.unified .title {font-size: 22px; font-weight: 700; line-height: 1.3; text-wrap: balance}
+.unified .caption, .unified .err {font-size: 13px; overflow-wrap: anywhere}
+.unified .caption {color: var(--muted)}
+.unified .err {color: var(--danger)}
+.unified .account-face {
+  display: grid; place-items: center; width: 152px; height: 152px; border-radius: 50%;
+  background: var(--face-base); overflow: hidden;
+}
+.unified .account-face img {width: 90%; height: 90%; object-fit: contain}
+.unified .btn, .unified .btn2, .unified .btnt {
+  display: flex; align-items: center; justify-content: center; width: 100%; min-height: 48px;
+  padding: 8px 16px; border-radius: 8px; text-align: center; text-decoration: none; font-weight: 700;
+}
+.unified .btn {min-height: 52px; border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent)}
+.unified .btn2, .unified .btnt {border: 1px solid var(--accent); background: transparent; color: var(--accent)}
+.unified .btnt {border-color: transparent}
+.unified .danger {color: var(--danger)}
+.unified input, .unified select {
+  width: 100%; min-height: 48px; padding: 8px 12px; border: 1px solid var(--input-border);
+  border-radius: 8px; background: var(--surface); color: var(--text); font: inherit;
+}
+.unified .field-label {text-align: left; font-weight: 700; display: grid; gap: 4px}
+.unified .card {
+  display: grid; gap: 8px; padding: 16px; border: 1px solid var(--line);
+  border-radius: 16px; background: var(--surface); min-width: 0;
+}
+.unified .row {display: flex; flex-wrap: wrap; gap: 8px}
+.unified .row > * {width: auto}
+.unified .code-field {position: relative; display: block}
+.unified .code-field input {position: absolute; inset: 0; opacity: 0}
+.unified .digits {display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; font-variant-numeric: tabular-nums}
+.unified .digits span {
+  display: grid; place-items: center; min-height: 48px; border: 1px solid var(--input-border);
+  border-radius: 8px; background: var(--surface); font-size: 22px; font-weight: 700;
+}
+.unified .code-field:focus-within .digits {outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px}
+.unified .code {font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .12em}
+.unified .code.expired {opacity: .45}
+.unified details summary {cursor: pointer; min-height: 48px; padding: 12px}
+.unified .records {margin: 0; padding: 0; list-style: none}
+.unified .invite-url {overflow-wrap: anywhere}
+@media (min-width: 500px) {
+  body:has(.unified) {background: var(--backdrop)}
+  .unified {box-shadow: 0 0 32px var(--panel-shadow)}
+}

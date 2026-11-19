@@ -423,6 +423,10 @@ class ScheduleStore:
             "AND repeat = 'none' AND remind_at IS NULL AND event_at < now() - interval '1 day' RETURNING id")
         return len(rows)
 
+    def _reminder_destination(self):
+        return ("(SELECT d.channel_id FROM marong.discord_dm_links d WHERE d.friend_id = s.friend_id) AS channel_id, "
+                "(SELECT d.room_key FROM marong.discord_dm_links d WHERE d.friend_id = s.friend_id) AS dm_room")
+
     async def claim_due_reminders(self, limit: int = 10) -> list[dict]:
         """때가 된 알림을 집는다(claimed_until 임대). 줄마다 late(늦은 길이)와 그 친구 DM 의 channel_id·dm_room."""
         return await self._all(
@@ -430,9 +434,7 @@ class ScheduleStore:
             "  AND (s.claimed_until IS NULL OR s.claimed_until < now()) ORDER BY s.remind_at LIMIT %(n)s "
             "  FOR UPDATE SKIP LOCKED) "
             "UPDATE marong.schedules s SET claimed_until = now() + %(lease)s FROM due WHERE s.id = due.id "
-            "RETURNING s.*, now() - s.remind_at AS late, "
-            "  (SELECT d.channel_id FROM marong.discord_dm_links d WHERE d.friend_id = s.friend_id) AS channel_id, "
-            "  (SELECT d.room_key FROM marong.discord_dm_links d WHERE d.friend_id = s.friend_id) AS dm_room",
+            "RETURNING s.*, now() - s.remind_at AS late, " + self._reminder_destination(),
             {"n": limit, "lease": LEASE})
 
     async def release_reminder(self, row: dict) -> None:

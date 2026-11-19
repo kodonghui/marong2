@@ -1,5 +1,8 @@
 -- 마롱이 저장소(Postgres 16 + pgvector). 슈퍼유저로 marong DB 에서 실행한다. 여러 번 실행해도 안전하다.
 --   sudo -u postgres psql -v ON_ERROR_STOP=1 -d marong -f marong/schema.sql
+-- 통합 앱 설치에는 이 기본 스키마 뒤에 통화 스키마와 기존 마이그레이션을 적용한다.
+-- 통합 앱의 추가 표와 방 주인 이관은 marong/migrations/020_unified.sql에 있다.
+-- 통화 계정 권한은 마지막에 marong/call/migrations/008_unified.sql을 적용한다.
 -- 역할: marong_owner(로그인 불가, 표 주인) / marong(봇이 쓰는 계정. 같은 이름의 리눅스 계정으로 비밀번호 없이 접속).
 -- 봇 계정에는 지우기(DELETE)와, 대화 원문·요약·메모를 고치는(UPDATE) 권한을 주지 않는다.
 -- 그래서 채팅으로 무슨 말을 해도 기록은 지워지지 않는다. 지우기는 서버 관리자가 postgres 계정으로만 한다.
