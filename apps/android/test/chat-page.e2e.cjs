@@ -127,6 +127,34 @@ describe('chat page', { skip }, () => {
     assert.equal(await marker.count(), 0);
   });
 
+  it('TC-489: a newly available ticket unlocks sending without losing the draft', async () => {
+    reset();
+    let tickets = 0;
+    const { page } = await openChat({routes: async context => {
+      await context.route('**/chat/api/profile', route => route.fulfill({
+        json: { botName: '마롱이', features: {friends: false}, usageToday: {tickets, units: 1, limit: 1} },
+      }));
+      await context.route('**/chat/api/messages', route => {
+        if (route.request().method() === 'POST' && !tickets) {
+          return route.fulfill({status: 429, json: {code: 'daily_limit'}});
+        }
+        return route.continue();
+      });
+    }});
+    await ready(page);
+    await page.locator('#text').fill('남겨 둘 합성 글');
+    await page.locator('#send').click();
+    await page.getByText('오늘 쓸 수 있는 양을 다 썼어.', {exact: false}).waitFor();
+    assert.equal(await page.locator('#text').inputValue(), '남겨 둘 합성 글');
+    assert.equal(await page.locator('#send').isDisabled(), true);
+    tickets = 1;
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.waitForFunction(() => !document.getElementById('send').disabled);
+    await page.locator('#send').click();
+    await page.waitForFunction(() => document.getElementById('text').value === '');
+    assert.equal(site.state.posted.at(-1).text, '남겨 둘 합성 글');
+  });
+
   it('TC-132: the last 30 at the bottom, day lines, tags, text only as text, links, older ones on scroll', async () => {
     reset();
     const { context, page, outside } = await openChat();

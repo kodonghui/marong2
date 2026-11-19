@@ -115,6 +115,12 @@ async function refreshProfile() {
   if (result.status !== 200) return;
   app.profileActive = true;
   const profile = result.body;
+  const usage = profile.usageToday;
+  if (app.dailyBlocked && usage && (usage.limit === null || usage.units < usage.limit || usage.tickets > 0)) {
+    app.dailyBlocked = false;
+    notice('');
+    syncSend();
+  }
   const brand = document.querySelector('.brand');
   if (brand && brand.firstChild?.nodeType === Node.TEXT_NODE) brand.firstChild.textContent = profile.botName;
   document.title = profile.botName + ' · 글 대화';
@@ -571,7 +577,9 @@ async function waitLoop() {
         app.backoff = 0;
         const typing = app.typing, read = app.read;
         const added = add(r.body.messages);
-        if (app.profileActive && r.body.messages.some(message => message.kind === 'ring')) refreshProfile();
+        if (app.profileActive && (app.dailyBlocked || r.body.messages.some(message => message.kind === 'ring'))) {
+          void refreshProfile();
+        }
         setTyping(r.body.typing);
         setRead(r.body);
         // Nothing new at once: another open screen took this wait over. Do not take it straight back.
