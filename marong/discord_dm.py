@@ -114,6 +114,9 @@ class DiscordIncoming(Incoming):
     saved_id: int | None = None           # stored message id of this text
     schedule_rows: list | None = None     # upcoming schedules shown to the model (None: not read)
     schedule_total: int = 0
+    shown_schedule_ids: set = field(default_factory=set)
+    turn_budget: dict | None = None
+    turn_plan: object | None = None
     actions: list = field(default_factory=list)  # schedule tool results, kept in the reply meta
     google_command: str | None = None     # connect | disconnect, from the exact phrases only
     topic_command: tuple | None = None    # (hello_call | pictures, on) from the exact phrases only (topics.PHRASES)
@@ -385,28 +388,57 @@ class PrivateChatAgent(Agent):
                          "그때 이 DM으로 먼저 말할 수 있어.")
         return lines
 
+    async def _schedule_context(self, msg, tz, window):
+        async def read():
+            if window:
+                lower, upper = window
+                start = datetime.combine(lower, datetime.min.time(), tz)
+                end = datetime.combine(upper + timedelta(days=1), datetime.min.time(), tz)
+                rows = await self.store.schedules_between(msg.friend_id, start, end, 50)
+                return rows, len(rows)
+            return await self.store.upcoming_schedules(msg.friend_id, datetime.now(tz), tz)
+
+        try:
+            with app_step("schedules_context", storage=True) as trace:
+                if trace:
+                    trace.io(inputs={"friend_id": msg.friend_id, "days": (window[1] - window[0]).days + 1 if window else None})
+                msg.schedule_rows, msg.schedule_total = await asyncio.wait_for(read(), 1)
+                if trace:
+                    trace.record(result="ok", count=len(msg.schedule_rows), available=msg.schedule_total)
+                    trace.io(outputs={"records": msg.schedule_rows})
+        except Exception as error:
+            log.warning("schedule_context_error %s", type(error).__name__)
+            return "schedules"
+        return None
+
+    async def _surface_context(self, msg):
+        if not isinstance(msg, DiscordIncoming) or not msg.friend_id:
+            return []
+        tz = ZoneInfo(self.s.timezone)
+        window = getattr(msg.turn_plan, "window", None)
+        reads = [self._schedule_context(msg, tz, window)]
+        if self.google:
+            reads.append(self._bounded_google_context(msg, tz, window))
+        return [name for name in await asyncio.gather(*reads) if name]
+
+    async def _bounded_google_context(self, msg, tz, window):
+        try:
+            async with asyncio.timeout(GOOGLE_CONTEXT_S):
+                await self._google_context(msg, tz, window)
+        except TimeoutError:
+            return "calendar"
+        link = msg.google_link or {}
+        if link == UNKNOWN_LINK or (link.get("status") == "connected" and link.get("can_read") and msg.google_events is None):
+            return "calendar"
+        return None
+
     async def _context(self, msg, person, user_id, text, held=None):
-        if isinstance(msg, DiscordIncoming) and msg.friend_id:
-            tz = ZoneInfo(self.s.timezone)
-            try:
-                with app_step("schedules_context", storage=True) as schedules:
-                    if schedules:
-                        schedules.io(inputs={"friend_id": msg.friend_id})
-                    msg.schedule_rows, msg.schedule_total = await asyncio.wait_for(
-                        self.store.upcoming_schedules(msg.friend_id, datetime.now(tz), tz), 2)
-                    if schedules:
-                        schedules.record(result="ok", count=len(msg.schedule_rows), available=msg.schedule_total)
-                        schedules.io(outputs={"records": msg.schedule_rows})
-            except Exception as e:  # Answer without the list; the model is told it could not be read.
-                log.warning("schedule_context_error %s", type(e).__name__)
-            if self.google:
-                await self._google_context(msg, tz)
         system, messages, memory = await super()._context(msg, person, user_id, text, held)
         if isinstance(msg, DiscordIncoming) and msg.schedule_rows is not None:
             memory["schedules"] = [row["id"] for row in msg.schedule_rows]
         return system, messages, memory
 
-    async def _google_context(self, msg, tz):
+    async def _google_context(self, msg, tz, window=None):
         """The friend's Google link and upcoming events. A slow or failing Google never blocks the answer."""
         try:
             with app_step("calendar_link", storage=True) as lookup:
@@ -430,7 +462,10 @@ class PrivateChatAgent(Agent):
             return
         try:
             with app_step("calendar_context") as calendar:
-                got = await asyncio.wait_for(self.google.upcoming(msg.friend_id, datetime.now(tz)), GOOGLE_CONTEXT_S)
+                if window:
+                    got = await self.google.planned_events(msg.friend_id, *window)
+                else:
+                    got = await asyncio.wait_for(self.google.upcoming(msg.friend_id, datetime.now(tz)), GOOGLE_CONTEXT_S)
                 if calendar:
                     if got is None:
                         calendar.record(result="rejected", reason="provider_auth")
@@ -491,6 +526,8 @@ class PrivateChatAgent(Agent):
             msg.sources += [s for s in sources_of(resp.content) if s["url"] not in known]
 
     async def ask(self, system, messages, msg, end, tools=None):
+        if getattr(msg, "via", None) == "app":
+            msg.turn_budget = {"calls": 0, "tools": 0}
         off = {}
         while True:
             try:
@@ -534,8 +571,10 @@ class PrivateChatAgent(Agent):
             msg.actions.append({"tool": block.name, "result": "db_error"})
             return {**result, "is_error": True,
                     "content": "저장소 오류로 못 했어. 맞춰 뒀다고 하지 말고, 지금은 저장이 안 된다고 솔직하게 말해."}
-        if block.name == "schedule_list" and action["result"] == "ok" and self.google:
-            content += await self._google_list(friend_id, block.input or {})
+        if block.name == "schedule_list" and action["result"] == "ok":
+            msg.shown_schedule_ids.update(action.pop("shown_ids", ()))
+            if self.google:
+                content += await self._google_list(friend_id, block.input or {})
         msg.actions.append(action)
         log.info("schedule_tool name=%s result=%s", block.name, action["result"])
         out = {**result, "content": content}

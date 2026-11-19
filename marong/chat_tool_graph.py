@@ -14,6 +14,8 @@ from tools.vertex_live.tool_trace import app_parent, step as trace_step
 from .llm import text_of
 
 log = logging.getLogger("agent")
+MODEL_LIMIT = 6
+TOOL_LIMIT = 8
 
 
 class Route(TypedDict):
@@ -39,14 +41,26 @@ class Turn:
         self.assistant_blocks = []
         self.results_waiting = 0
         self.answer = self.fallback
+        self.quota = getattr(msg, "turn_budget", None)
+        if self.quota is None and getattr(msg, "via", None) == "app":
+            self.quota = {"calls": 0, "tools": 0}
+        self.offered = set()
 
     async def model(self) -> Route:
         round_number = self.meta["calls"] + 1
         remaining = self.deadline - self.loop.time()
         if remaining <= 0:
             raise TimeoutError("chat deadline reached")
-        body = self.agent._body(self.system, self.messages, self.tools)
-        with trace_step("model_request", self.trace, round=round_number, offered=len(self.tools),
+        tools = self.tools
+        if self.quota is not None:
+            if self.quota["calls"] >= MODEL_LIMIT:
+                return {"next": "finish"}
+            self.quota["calls"] += 1
+            if self.quota["calls"] == MODEL_LIMIT or self.quota["tools"] >= TOOL_LIMIT:
+                tools = []
+        self.offered = {tool["name"] for tool in tools}
+        body = self.agent._body(self.system, self.messages, tools)
+        with trace_step("model_request", self.trace, round=round_number, offered=len(tools),
                         results_attempted=self.results_waiting) as request:
             if request:
                 request.io(inputs={"request": body})
@@ -88,6 +102,9 @@ class Turn:
             return {"next": "finish"}
 
         text = text_of(response)
+        if self.quota is not None and self.quota["calls"] >= MODEL_LIMIT:
+            self.answer = "\n\n".join([t for t, keep in self.said if keep or not text] + ([text] if text else [])) or self.fallback
+            return {"next": "finish"}
         if response.stop_reason == "pause_turn" and self.server_counts:
             if text:
                 self.said.append((text, True))
@@ -114,6 +131,21 @@ class Turn:
                 return {"next": "model"}
         return {"next": "finish"}
 
+    def rejection(self, block):
+        if self.quota is None:
+            return None
+        if self.quota["tools"] >= TOOL_LIMIT:
+            return "turn_limit"
+        if block.name not in self.offered:
+            return "unknown_tool"
+        if block.name == "schedule_cancel":
+            number = (block.input or {}).get("id")
+            shown = {row["id"] for row in (getattr(self.msg, "schedule_rows", None) or ())}
+            shown.update(getattr(self.msg, "shown_schedule_ids", ()))
+            if type(number) is not int or number not in shown:
+                return "not_shown"
+        return None
+
     async def tools_node(self):
         round_number = self.meta["calls"]
         with trace_step("tool_node", self.trace, round=round_number, requested=len(self.pending)) as node:
@@ -124,13 +156,22 @@ class Turn:
                 with trace_step("tool_dispatch", node, round=round_number, tool=block.name) as dispatch:
                     if dispatch:
                         dispatch.io(inputs={"arguments": block.input})
-                    outcome = await self.agent._run_tool(block, self.msg)
+                    rejection = self.rejection(block)
+                    if rejection is None:
+                        if self.quota is not None:
+                            self.quota["tools"] += 1
+                        outcome = await self.agent._run_tool(block, self.msg)
+                    else:
+                        outcome = {"type": "tool_result", "tool_use_id": block.id,
+                                   "content": rejection, "is_error": True}
+                        if dispatch:
+                            dispatch.record(reason=rejection)
                     if dispatch:
                         dispatch.io(outputs={"response": outcome})
                         dispatch.record(
                             result=("rejected" if outcome.get("is_error") else "ok") if isinstance(outcome, dict)
                             else "invalid_result",
-                            offered=int(any(tool.get("name") == block.name for tool in self.tools)),
+                            offered=int(block.name in self.offered),
                         )
                     results.append(outcome)
             # Keep every original assistant block, including provider-signed thinking.
