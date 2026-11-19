@@ -362,6 +362,7 @@ class GoogleCalendar:
         self.clock = clock
         self.pending: dict[str, _Pending] = {}               # sha256(state) → 기다리는 연결
         self.tokens: dict[int, tuple[str, float]] = {}       # friend_id → (access token, 만료)
+        self.planned_cache = {}
         self.cache: dict[int, tuple[float, list, bool]] = {}  # friend_id → (만료, 다가오는 일정, 더 있음)
         self.notify = None  # async (friend_id, text, meta) → bool: 친구 DM 으로 알림(run_discord.py 가 넣음)
 
@@ -371,6 +372,7 @@ class GoogleCalendar:
     def _forget(self, friend_id: int):
         self.tokens.pop(friend_id, None)
         self.cache.pop(friend_id, None)
+        self.planned_cache.pop(friend_id, None)
 
     # 연결과 끊기
     def new_link(self, friend_id: int) -> str:
@@ -511,6 +513,17 @@ class GoogleCalendar:
         if got is not None:
             self.cache[friend_id] = (self.clock() + CACHE_S, *got)
         return got
+
+    async def planned_events(self, friend_id, first, last):
+        hit = self.planned_cache.get(friend_id)
+        if hit and hit[0] == (first, last) and hit[1] > self.clock():
+            return hit[2]
+        start = datetime.combine(first, datetime.min.time(), self.tz)
+        end = datetime.combine(last + timedelta(days=1), datetime.min.time(), self.tz)
+        found = await self.events(friend_id, start, end, SHOWN)
+        if found is not None:
+            self.planned_cache[friend_id] = ((first, last), self.clock() + CACHE_S, found)
+        return found
 
     async def list_text(self, friend_id: int, start: datetime, end: datetime, now: datetime) -> str:
         """schedule_list 결과 뒤에 붙이는 그 기간 구글 일정. 볼 수 없으면 빈 글."""

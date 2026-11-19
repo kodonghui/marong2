@@ -42,6 +42,7 @@ from .photo import Photo
 from .store import Store, keyword_terms, speaker_label
 from .style import EMPTY_FALLBACK, GENTLE_COUNSEL, REPEAT_SIMILARITY, check as style_check, fallback as style_fallback, repeat_similarity, tidy
 from .topics import TOPIC_GUIDE, topic_text
+from .turn_plan import TurnPlan, plan_turn
 from .unified_prompt import common_prompt
 
 log = logging.getLogger("agent")
@@ -557,6 +558,8 @@ class Agent:
         if use_memory:  # 방금 저장소가 고장 났으면 기억 모으기를 건너뜀(연결을 또 기다리지 않게)
             try:
                 if getattr(self.store,'call_bridge',False):revision=await self.store.private_revision(msg.room_key)
+                if getattr(msg, "via", None) == "app":
+                    await self._plan_turn(msg, text)
                 with app_step("context") as context:
                     if context:
                         context.io(inputs={"message": {"role": "user", "content": text}})
@@ -626,15 +629,46 @@ class Agent:
 
     # ── 기억 모으기 ──────────────────────────────────────────
 
-    async def _context(self, msg: Incoming, person: dict | None, user_id: int | None,
-                       text: str, held: int | None = None) -> tuple[list[dict], list[dict], dict]:
-        """(system, messages, 넣은 기억 기록). 기억 기록은 답의 meta.memory 로 저장된다."""
-        # held: 묶어 답할 첫 말. 몇 마디든 그 말부터는 최근 대화에 다 넣음(빠지면 답 없이 묻힘)
-        rows = await app_read("recent_memory", self.store.recent_turns, msg.room_key, self.s.reply_turns,
-                              self.s.reply_max_rows, since_id=held)
-        summaries = await app_read("memory_summaries", self.store.summaries, msg.room_key, REPLY_SUMMARIES)
-        notes = await app_read("memory_notes", self.store.notes, msg.room_key)
-        shown = [s for s in summaries if s["content"]]  # 요약에 실패한 구간은 빈 요약으로 남아 있음
+    async def _plan_turn(self, msg, text):
+        mode = os.getenv("MARONG_TURN_PLAN", "off")
+        msg.turn_plan = None
+        if mode not in {"shadow", "prefetch"}:
+            return
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        try:
+            async with asyncio.timeout(.05):
+                recent = []
+                if re.match(r"\s*(?:그럼|그러면|그날|이번엔|그리고)", text):
+                    recent = [row["content"] for row in await self.store.recent(msg.room_key, 6)]
+                plan = plan_turn(text, recent, {tool["name"] for tool in self._tools(msg)}, datetime.now(KST))
+            if loop.time() - started > .05:
+                plan = TurnPlan(fallback=True, reasons=("time_limit",))
+        except Exception:
+            plan = TurnPlan(fallback=True, reasons=("plan_unavailable",))
+        days = (plan.window[1] - plan.window[0]).days + 1 if plan.window else None
+        elapsed = round((loop.time() - started) * 1000, 2)
+        with app_step("turn_plan", mode=mode, intents=plan.intents, prefetch="schedules" if days else None,
+                      days=days, reasons=plan.reasons, confidence=plan.confidence,
+                      fallback=plan.fallback, elapsed_ms=elapsed):
+            pass
+        log.info("turn_plan mode=%s intents=%s days=%s reasons=%s confidence=%s fallback=%s elapsed_ms=%s",
+                 mode, plan.intents, days, plan.reasons, plan.confidence, plan.fallback, elapsed)
+        if mode == "prefetch" and plan.confidence >= .7 and not plan.fallback:
+            msg.turn_plan = plan
+
+    async def _surface_context(self, msg):
+        return []
+
+    async def _recent_context(self, msg, held):
+        return await asyncio.gather(
+            app_read("recent_memory", self.store.recent_turns, msg.room_key, self.s.reply_turns,
+                     self.s.reply_max_rows, since_id=held),
+            app_read("memory_summaries", self.store.summaries, msg.room_key, REPLY_SUMMARIES),
+            app_read("memory_notes", self.store.notes, msg.room_key),
+        )
+
+    async def _recall_context(self, msg, person, user_id, text, rows, summaries):
         hits, recalled, recall = [], [], "ok"
         if not rows or len(text) < RECALL_MIN_CHARS:
             recall = "short"
@@ -657,14 +691,43 @@ class Agent:
                         search.record(result="ok", candidates=len(hits), recalled=len(recalled), recall=recall)
                         search.io(outputs={"records": hits, "recalled": recalled})
             except Exception as e:
-                recall = "error"
-                log.warning("recall_error %s", brief(e))
-        circle = []
+                raise RuntimeError("memory_search_failed") from e
+        return hits, recalled, recall
+
+    async def _memory_context(self, msg, person, user_id, text, held):
+        rows, summaries, notes = await asyncio.wait_for(self._recent_context(msg, held), 2)
         try:
-            circle = await app_read("friend_context", self.store.friend_circle, msg.user_key,
-                                    FRIENDS_SHOWN + OTHERS_SHOWN)
-        except Exception as e:  # 친구들을 못 모아도 이 방 기억으로 답함
-            log.warning("friends_error %s", brief(e))
+            hits, recalled, recall = await asyncio.wait_for(
+                self._recall_context(msg, person, user_id, text, rows, summaries), 2)
+        except Exception as error:
+            log.warning("recall_error %s", type(error).__name__)
+            hits, recalled, recall = [], [], "error"
+        return rows, summaries, notes, hits, recalled, recall
+
+    async def _friend_context(self, msg):
+        try:
+            circle = await asyncio.wait_for(
+                app_read("friend_context", self.store.friend_circle, msg.user_key, FRIENDS_SHOWN + OTHERS_SHOWN), 1)
+            return circle, None
+        except Exception as error:
+            log.warning("friends_error %s", type(error).__name__)
+            return [], "friends"
+
+    async def _context(self, msg: Incoming, person: dict | None, user_id: int | None,
+                       text: str, held: int | None = None) -> tuple[list[dict], list[dict], dict]:
+        """Return the assembled prompt, messages and records used for this turn."""
+        results, (circle, friend_failure), failed = await asyncio.gather(
+            self._memory_context(msg, person, user_id, text, held),
+            self._friend_context(msg),
+            self._surface_context(msg),
+        )
+        rows, summaries, notes, hits, recalled, recall = results
+        shown = [record for record in summaries if record["content"]]
+        failed = [*failed, *([friend_failure] if friend_failure else []), *(["memory_search"] if recall == "error" else [])]
+        if failed:
+            log.info("prefetch_failed %s", failed)
+            with app_step("prefetch_failed", kinds=failed):
+                pass
         photos = self._shown_photos(msg.room_key, held or user_id)
         messages = self._messages(rows, group=not msg.is_channel or self._merged(person), photos=photos)
         if not rows or rows[-1]["id"] != user_id:  # 저장이 안 됐어도 지금 말은 꼭 넣음

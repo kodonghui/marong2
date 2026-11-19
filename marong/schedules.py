@@ -46,7 +46,8 @@ SCHEDULE_ADD_TOOL = {
         "디스코드 DM으로 say 를 먼저 보낸다. 시각은 '지금 상황'의 지금 시각(한국 시간)을 기준으로 계산해 "
         "'2026-11-16T15:00:00+09:00'처럼 쓴다. 날짜나 시각이 애매하면('저녁에', '나중에', '그쯤') 저장하지 말고 하나만 짧게 "
         "물어본다. 시각이 있는 일정에서 알림을 부탁하지 않았으면 remind_at 없이 기억만 한다. 날짜만 있는 종일 일정은 "
-        "그날 아침 9시에 먼저 말을 건다. '이 친구 일정'에 이미 같은 게 있으면 저장하지 않는다."
+        "그날 아침 9시에 먼저 말을 건다. '이 친구 일정'에 이미 같은 게 있으면 저장하지 않는다. "
+        "저장 성공 응답을 받은 뒤에만 저장했다고 확인한다. 알림을 권해도 모호한 때는 한 번만 묻는다."
     ),
     "input_schema": {
         "type": "object",
@@ -127,9 +128,6 @@ def schedule_guide(ring: bool = False) -> str:
 
 # 답할 때 '지금 상황'에 붙이는 안내(목록은 schedule_lines)
 GUIDE = """# 일정과 알림
-- 친구가 일정을 알려 주거나 정한 때 알려 달라고, 깨워 달라고, 연락해 달라고 하면 schedule_add 로 저장해. 그때가 되면 마롱이가 이 DM으로 먼저 말해.
-- schedule_add 가 저장했다고 돌려줬을 때만 '응 내일 3시에 톡할게!'처럼 짧게 확인해. 도구를 안 불렀거나 실패했으면 맞춰 뒀다고 하지 마.
-- 날짜나 시각이 애매하면 저장하기 전에 하나만 짧게 물어봐. 시각이 있는 일정만 말했으면 알림 없이 기억만 하고, 알림이 있으면 좋겠다 싶으면 '전날 밤에 알려 줄까?'처럼 한 번만 물어봐. 날짜만 있는 종일 일정은 그날 아침 9시에 마롱이가 먼저 말을 걸어(say 에 그날 아침 말을 써).
 - 깨워 달라는 부탁이면 디스코드 알림이라 휴대폰 소리를 켜 둬야 들린다고 한 번만 말해 줘. 휴대폰 알람이나 다른 앱을 맞춰 준다고 하지 마."""
 
 
@@ -354,7 +352,7 @@ async def run_tool(store, name: str, inp: dict, *, friend_id: int, room_key: str
         if not rows:
             return "그 기간에는 저장된 일정이 없어.", {"tool": name, "result": "ok", "count": 0}
         return ("그 기간 일정(반복 알림 포함):\n" + "\n".join("- " + describe(r, tz, now) for r in rows),
-                {"tool": name, "result": "ok", "count": len(rows)})
+                {"tool": name, "result": "ok", "count": len(rows), "shown_ids": [row["id"] for row in rows]})
     return f"{name} 도구는 없어.", {"tool": name, "result": "error"}
 
 
