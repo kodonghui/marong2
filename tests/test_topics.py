@@ -366,7 +366,10 @@ async def proactive_checks(db, store, settings, folder, logs):
     client = Client(agent, store)
     channel = client.channels[DM_HK] = FileChannel(DM_HK, HK)
     sender = FakeFCM()
-    push = AppPush(store, sender, ring_enabled=True)
+    async def name_for(friend_id):
+        return "합성밤이" if friend_id == 2 else None
+
+    push = AppPush(store, sender, ring_enabled=True, title_for=name_for)
     pictures = topics.load_set(folder)
     chooser = topics.Topics(settings, store, push, pictures=pictures, rng=lambda: 0)
 
@@ -508,7 +511,7 @@ async def proactive_checks(db, store, settings, folder, logs):
     ok(rows[0][2:6] == ("call", "sent", "app", ring[0][0]), rows)
     bell = sender.sent[before:]
     ok(len(bell) == 1 and bell[0]["data"] == {"kind": "ring", "ringId": ring[0][0], "v": "1", "reason": "hello",
-                                              "line": picture.preview} and "notification" not in bell[0]
+                                              "line": picture.preview, "title": "합성밤이"} and "notification" not in bell[0]
        and len(channel.sent) == sent, bell)
     ok(await turn_plan(now).daily_count(timedelta(hours=24)) == await store.proactive_count(timedelta(hours=24)) + 1,
        "SPEC-276: the hello call is one turn of the daily maximum")

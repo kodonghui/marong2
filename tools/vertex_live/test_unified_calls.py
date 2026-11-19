@@ -27,7 +27,9 @@ class FixtureLive:
 
     async def run(self):
         self.d["fixtureOwner"] = self.owner
-        voice = self.setup()["setup"]["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]
+        setup = self.setup()["setup"]
+        assert any("네 이름은 합성밤이야" in part["text"] for part in setup["systemInstruction"]["parts"])
+        voice = setup["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]
         await self.ws.send_json({"type": "ready", "voice": voice["voiceName"]})
         async for frame in self.ws:
             if frame.type == WSMsgType.TEXT and frame.json().get("type") == "stop":
@@ -47,7 +49,7 @@ async def main():
             return None
         index = int(friend)
         return {"owner": f"fixture:{friend}", "principal": server.Principal(index, index, "Fixture"),
-                "voice": voices.get(index), "bot_name": "Fixture"}
+                "voice": voices.get(index), "bot_name": "합성밤이"}
 
     with patch.object(server, "identity", identify), patch.object(server, "LiveSession", FixtureLive), (
         patch.dict("os.environ", {"MARONG_CALL_VOICES": "Sulafat,Aoede,Charon"})

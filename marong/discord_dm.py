@@ -1319,7 +1319,8 @@ class PrivateProactive(Proactive):
         if ring is None:  # another ring of this friend is ringing right now
             log.info("hello_ring devices=0 reason=ringing")
             return False
-        accepted = await self.app.ring(choice.call["devices"], ring["id"], reason="hello", line=p.preview)
+        accepted = await self.app.ring(choice.call["devices"], ring["id"], reason="hello", line=p.preview,
+                                       friend_id=room["friend_id"])
         if not accepted:
             await self.store.ring_update(ring["id"], failed=True)
             log.info("hello_ring devices=0 reason=fcm")
