@@ -1,6 +1,5 @@
 """Friendship state, consent and model context with isolated synthetic accounts."""
 
-import asyncio
 import json
 from pathlib import Path
 import secrets
@@ -113,7 +112,7 @@ class FriendTests(unittest.IsolatedAsyncioTestCase):
                 for index in range(6):
                     _, newcomer = await create(f"Fixture {index}")
                     self.assertEqual((await send(await code(newcomer), aa)).status, 201)
-                _, newcomer = await create("Fixture extra")
+                _, newcomer = await create("Fixture X")
                 await problem(await send(await code(newcomer), aa), 429, "request_limit")
 
 
