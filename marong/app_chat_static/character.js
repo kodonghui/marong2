@@ -18,6 +18,9 @@
                  name: '이름 짓기', try: '입혀 보기', new: '캐릭터 만들기'};
   const templateNames = {dog_small: '작은 강아지', dog_large: '큰 강아지', dog_long: '몸이 긴 강아지',
                          cat: '고양이', cat_round: '동그란 고양이'};
+  const expressions = {
+    smile: '웃음', excited: '신남', sleepy: '졸림', surprised: '놀람', sad: '슬픔', pout: '삐침',
+  };
   let saving = false, workTimer, workStarted = 0, selectedPhotoURLs = [];
   title.textContent = names[wanted] || '캐릭터';
 
@@ -35,6 +38,7 @@
     const texts = {
       invalid_input: '다시 한번 확인해 줄래?',
       wrong_stage: '지금 단계에서 다시 해 줘',
+      not_ready: '아직 다 만들지 못한 캐릭터야. 이어서 만들어 줄래?',
       not_found: '찾지 못했어',
       photo_invalid: '사진 형식이나 크기를 확인해 줘',
       check_unavailable: '지금은 사진을 확인할 수 없어. 조금 있다가 다시 해 줘',
@@ -46,7 +50,8 @@
     };
     signal(error, texts[code] || '잠깐 문제가 생겼어. 다시 해 볼래?', reply);
     retry.replaceChildren();
-    if (reply.status === 404) retry.append(link('내 마롱이로', '/chat/me', 'btn2'));
+    if (code === 'not_ready') retry.append(link('이어서 만들기', path + 'photos', 'btn2'));
+    else if (reply.status === 404) retry.append(link('내 마롱이로', '/chat/me', 'btn2'));
     else if (again) retry.append(button('다시 해 볼게', again, 'btnt'));
   }
 
@@ -254,31 +259,109 @@
     }
   }
 
-  function naming(card) {
-    root.append(picture(card.images.front), node('p', '뭐라고 부르면 돼?', 'title'));
-    const input = field('이름', card.name, 24);
-    const submit = button('이 이름으로 할게', () => {
-      const name = input.value.trim();
-      if (Array.from(name).length < 1 || Array.from(name).length > 12) {
-        signal(error, '이름은 1~12자로 적어 줘');
-        return;
+  function expressionRow(faces, choose) {
+    const row = node('div', '', 'character-expressions');
+    for (const [slot, label] of Object.entries(expressions)) {
+      if (!faces[slot]) continue;
+      const photo = picture(faces[slot]);
+      if (choose) {
+        const option = button('', () => {
+          row.querySelector('[aria-pressed="true"]')?.setAttribute('aria-pressed', 'false');
+          option.setAttribute('aria-pressed', 'true');
+          choose(slot);
+        }, 'picture-choice');
+        option.setAttribute('aria-label', label);
+        option.setAttribute('aria-pressed', String(slot === 'smile'));
+        option.append(photo);
+        row.append(option);
+      } else {
+        photo.alt = label;
+        row.append(photo);
       }
-      save(submit, () => request(detail, {name}, 'PATCH'), () => go('try'));
-    });
-    root.append(submit);
+    }
+    return row;
   }
 
-  function tryOn(data) {
-    const group = node('div', '', 'card');
-    group.append(node('p', data.botName, 'title'), picture(data.faces.front));
-    for (const line of data.chatSample) {
-      group.append(node('p', line.text, line.from === 'me' ? 'caption' : ''));
+  function naming(card) {
+    root.append(picture(card.images.front), expressionRow(card.images), node('p', '이름을 지어 줘', 'title'));
+    const input = field('이름', card.name, 24);
+    const count = node('p', '', 'caption');
+    const submit = button('다 됐어', async () => {
+      submit.textContent = '마무리하는 중이야…';
+      await save(submit, () => request(detail, {name: input.value.trim()}, 'PATCH'), () => go('try'));
+      submit.textContent = '다 됐어';
+      update();
+    });
+    function update() {
+      const length = Array.from(input.value.trim()).length;
+      count.textContent = length + ' / 12';
+      submit.disabled = saving || length < 1 || length > 12;
+      if (length > 12) signal(error, '이름은 1~12자로 적어 줘');
+      else if (error.textContent === '이름은 1~12자로 적어 줘') signal(error);
     }
-    root.append(group, node('p', data.callLine, 'card'));
-    const apply = button('이 모습으로 지내기', () => save(apply,
-      () => request('/chat/api/profile/character', {characterId: Number(parts[3])}, 'PATCH'),
-      () => location.replace('/chat/me')));
-    root.append(apply, link('내 마롱이로', '/chat/me', 'btn2'));
+    input.addEventListener('input', update);
+    update();
+    root.append(count, node('p', '적용하면 이 이름이 마롱이 이름이 돼', 'caption'), submit);
+  }
+
+  function tryOn(data, profile) {
+    const tabs = node('div', '', 'character-tabs');
+    tabs.setAttribute('role', 'tablist');
+    const chat = node('div', '', 'card');
+    const header = node('div', '', 'character-preview-header');
+    header.append(picture(data.faces.front, 'wardrobe-image'), node('p', data.botName, 'title'));
+    chat.append(header);
+    for (const line of data.chatSample) {
+      chat.append(node('p', line.text, 'bubble ' + (line.from === 'me' ? 'character-preview-me' : '')));
+    }
+    const call = node('div', '', 'card centered');
+    const face = node('div', '', 'account-face');
+    function showFace(slot) { face.replaceChildren(picture(data.faces[slot] || data.faces.front)); }
+    showFace('smile');
+    call.append(face, node('p', data.callLine),
+      expressionRow(data.faces, showFace), node('p', '목소리는 통화 목소리에서 골라', 'caption'));
+    const panels = [chat, call];
+    const controls = ['대화', '통화'].map((label, index) => {
+      const tab = button(label, () => select(index), 'btn2');
+      tab.id = 'character-tab-' + index;
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-controls', 'character-panel-' + index);
+      tab.addEventListener('keydown', event => {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+        event.preventDefault();
+        select(1 - index);
+        controls[1 - index].focus();
+      });
+      panels[index].id = 'character-panel-' + index;
+      panels[index].setAttribute('role', 'tabpanel');
+      panels[index].setAttribute('aria-labelledby', tab.id);
+      return tab;
+    });
+    function select(index) {
+      controls.forEach((tab, current) => {
+        tab.setAttribute('aria-selected', String(current === index));
+        tab.tabIndex = current === index ? 0 : -1;
+        panels[current].hidden = current !== index;
+      });
+    }
+    select(0);
+    tabs.append(...controls);
+    root.append(node('p', '미리 보기야. 아직 바뀐 건 없어', 'caption'), tabs, ...panels);
+    if (profile.character?.id === Number(parts[3])) {
+      root.append(node('p', '지금 쓰는 중이야', 'caption'), link('내 마롱이로', '/chat/me', 'btn2'));
+    } else {
+      const apply = button('이 모습으로 할래', async () => {
+        apply.textContent = '바꾸는 중이야…';
+        await save(apply, () => request('/chat/api/profile/character', {characterId: Number(parts[3])}, 'PATCH'),
+          updated => {
+            try { sessionStorage.setItem('marong.character.applied', updated.botName); } catch {}
+            location.replace('/chat/');
+          });
+        apply.textContent = '이 모습으로 할래';
+      });
+      root.append(apply, link('나중에 할래', '/chat/me', 'btn2'),
+        node('p', '바꿔도 대화랑 기억은 그대로야. 먼저 보내는 그림 얘기는 글로만 와', 'caption'));
+    }
   }
 
   function render(card) {
@@ -321,8 +404,11 @@
     signal(error);
     retry.replaceChildren();
     root.replaceChildren();
-    if (wanted === 'try') tryOn(response.body);
-    else render(response.body.character);
+    if (wanted === 'try') {
+      const profile = await request('/chat/api/profile');
+      if (profile.status !== 200) { failure(profile, load); return; }
+      tryOn(response.body, profile.body);
+    } else render(response.body.character);
   }
 
   document.addEventListener('visibilitychange', () => {
