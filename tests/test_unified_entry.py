@@ -242,5 +242,54 @@ class WorkLoopsTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(row["meta"]["transport"] == "app" and row["meta"]["delivered"] for row in items))
 
 
+    async def test_fixed_app_schedule_continues_without_replies_and_ends_at_midnight(self):
+        db = self.database()
+        store = UnifiedStore(db.app_url, call_bridge=True)
+        await store.open(wait=True)
+        self.addAsyncCleanup(store.close)
+        sessions = AppSessions(store.pool, b"z" * 32, contact_schedule=(36, 7, 24))
+        friends = []
+        for name in ("Fixture A", "Fixture B"):
+            link, _ = await sessions.create_invite("join")
+            session = await sessions.join(link, name, "웹")
+            friends.append((await sessions.find_session(session.token))["friend_id"])
+        enabled, unchanged = friends
+        store.fixed_proactive_friends = frozenset({enabled})
+        for friend in friends:
+            db.admin("""UPDATE marong.contact_settings SET opted_in_at=now()-interval '3 days',
+                         last_incoming_at=now()-interval '2 days',last_attempt_at=now()-interval '40 minutes'
+                        WHERE friend_id=%s""", (friend,))
+            db.admin("""INSERT INTO marong.messages(room_key,role,content,created_at,meta)
+                        SELECT %s,'assistant','Older synthetic message',now()-i*interval '40 minutes',
+                               '{"delivered":true,"proactive":true,"transport":"app"}'
+                        FROM generate_series(1,5) i""", (f"app:{friend}",))
+        fcm = AsyncMock()
+        fcm.send.return_value = "ok"
+        await store.app_device_put("256369f0-36a6-4d30-9c19-345e352a9839", enabled, "fixture-fcm-id-not-real",
+                                   "granted", "0.3.0", "enabled", "granted")
+        push = AppPush(store, fcm)
+        settings = replace(load_settings(), database_url=db.app_url, timezone="Asia/Seoul", proactive=True)
+        agent = run_app.AppAgent(settings, store, FakeEmbeddings(), FakeLLM(lambda _: message([text("오늘 본 하늘이 예뻤어")])))
+        delivery = UnifiedDelivery(store, push, "session", agent.on_saved)
+        now = datetime.now(ZoneInfo(settings.timezone)).replace(hour=23, minute=50, second=0, microsecond=0)
+        proactive = AppProactive(settings, store, agent, run_app.RoomLocks(), delivery, clock=lambda: now, rng=lambda: 0)
+        fixed = (await store.proactive_rooms(f"app:{enabled}"))[0]
+        normal = (await store.proactive_rooms(f"app:{unchanged}"))[0]
+        self.assertEqual(fixed["unanswered"], 5)
+        self.assertEqual(normal["unanswered"], 5)
+        self.assertIsNotNone(proactive.plan(fixed, now.replace(hour=7, minute=12)))
+        self.assertIsNone(proactive.plan(normal, now.replace(hour=12)))
+        self.assertIsNone(proactive.plan(fixed, now.replace(hour=6)))
+        self.assertIsNone(proactive.plan(fixed, now.replace(hour=0, minute=0) + timedelta(days=1)))
+        self.assertIn("7~24시에 하루 36번", "\n".join(agent._dm_lines(await store.contact(enabled))))
+        self.assertIn("8~22시에 하루 3번", "\n".join(agent._dm_lines(await store.contact(unchanged))))
+        self.assertEqual(await proactive.step(now), 1)
+        self.assertEqual(await proactive.step(now), 0)
+        fcm.send.assert_awaited_once()
+        self.assertEqual(fcm.send.await_args.args[0]["data"]["kind"], "proactive")
+        self.assertEqual(len(await store.app_messages(f"app:{enabled}", before=None, limit=20)), 6)
+        self.assertEqual(len(await store.app_messages(f"app:{unchanged}", before=None, limit=20)), 5)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -67,7 +67,7 @@ def slot(now: datetime, hours: tuple[int, int], per_day: int) -> tuple[datetime,
 def schedule(room: dict, s: Settings) -> tuple[tuple[int, int], int]:
     """방별 일정이나 .env 기본값에 하루 횟수·시간 상한을 적용한다."""
     return proactive_schedule(room.get("start_hour"), room.get("end_hour"), room.get("per_day"),
-                              s.proactive_hours, s.proactive_per_day)
+                              s.proactive_hours, s.proactive_per_day, fixed=room.get("fixed_proactive", False))
 
 
 def parts(text: str) -> list[str]:
@@ -117,9 +117,10 @@ class Proactive:
             return None
         if room["failures"] >= 2:
             return None
-        wait = backoff(room.get("unanswered") or 0)
-        if wait is None or (sent_ago is not None and sent_ago < wait):
-            return None
+        if not room.get("fixed_proactive"):
+            wait = backoff(room.get("unanswered") or 0)
+            if wait is None or (sent_ago is not None and sent_ago < wait):
+                return None
         # 칸에 남은 확인 횟수로 나눈 확률: 보내는 시각이 칸 안에 고루 퍼지고, 칸 마지막 확인에선 꼭 보냄
         return begin, 1 / max(1, math.ceil((end - now) / timedelta(seconds=CHECK_S)))
 
@@ -141,7 +142,7 @@ class Proactive:
                 if not fresh or self.plan(fresh[0], now) is None:
                     continue
                 (_, end_hour), _ = schedule(fresh[0], self.s)
-                end = now.replace(hour=end_hour, minute=0, second=0, microsecond=0)
+                end = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(hours=end_hour)
                 result = await self.deliver(fresh[0], send_until=checked_at + (end - now).total_seconds())
             if result["text"] is None or result.get("saved") is False:
                 self._skip[room["room_key"]] = planned[0]

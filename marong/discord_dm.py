@@ -375,7 +375,8 @@ class PrivateChatAgent(Agent):
     def _dm_lines(link, private=False):
         lines = []
         if link and link.get("opted_in_at"):
-            (start, end), per_day = proactive_schedule(link["start_hour"], link["end_hour"], link["per_day"])
+            (start, end), per_day = proactive_schedule(link["start_hour"], link["end_hour"], link["per_day"],
+                                                        fixed=link.get("fixed_proactive", False))
             lines.append(f"- 마롱이는 이 친구에게 이 DM으로 한국 시간 {start}~{end}시에 하루 "
                          f"{per_day}번까지 먼저 말을 걸어(선톡). 그만 받고 싶어 하면 '선톡 끄기'라고 그대로 보내면 "
                          "바로 멈춘다고 알려 줘.")

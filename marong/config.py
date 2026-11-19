@@ -12,11 +12,14 @@ PROACTIVE_AWAKE = (8, 22)  # 한국 시각 22시부터 다음 날 8시까지 쉼
 
 def proactive_schedule(start: int | None, end: int | None, per_day: int | None,
                        default_hours: tuple[int, int] = PROACTIVE_AWAKE,
-                       default_per_day: int = PROACTIVE_CAP) -> tuple[tuple[int, int], int]:
+                       default_per_day: int = PROACTIVE_CAP, *,
+                       fixed: bool = False) -> tuple[tuple[int, int], int]:
     """실제로 쓰는 ((시작 시, 끝 시), 하루 횟수)."""
     hours = (default_hours[0] if start is None else start, default_hours[1] if end is None else end)
     if not 0 <= hours[0] < hours[1] <= 24:
         hours = default_hours
+    if fixed:
+        return hours, max(1, min(per_day or default_per_day, PER_DAY_MAX))
     hours = (max(hours[0], PROACTIVE_AWAKE[0]), min(hours[1], PROACTIVE_AWAKE[1]))
     if hours[0] >= hours[1]:
         hours = PROACTIVE_AWAKE
