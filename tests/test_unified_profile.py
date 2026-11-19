@@ -109,8 +109,8 @@ class ProfileTests(unittest.IsolatedAsyncioTestCase):
         who = await sessions.find_session(auth.token)
         friend_id = who["friend_id"]
         character_id = db.admin("""
-            INSERT INTO marong.characters(friend_id,kind,name,template,status,stage,ready_at)
-            VALUES(%s,'dog','Fixture pet','dog_small','ready','done',now()) RETURNING id
+            INSERT INTO marong.characters(friend_id,kind,name,template,traits,status,stage,ready_at)
+            VALUES(%s,'dog','Fixture pet','dog_small','{}','ready','done',now()) RETURNING id
         """, (friend_id,))[0][0]
         db.admin("UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s", (character_id, friend_id))
 
