@@ -46,7 +46,8 @@ let lastSpeaker=null,lastText=null,retryDelay=1000,firstReady=null,micMode=false
 let speakingSince=0,lastFace=0,blinkAt=performance.now()+3500,blinkStarted=0;
 let generation=0,epoch=0,callId=null,memoryConnected=false;
 let rtcClient=null,rtcEnabled=false;
-let budgetBlocked=false;
+let budgetBlocked=false,dailyBlocked=false;
+const DAILY_MESSAGE='오늘 쓸 수 있는 양을 다 썼어. 새벽 4시에 다시 채워져';
 const BUDGET_MESSAGE='이번 달 통화는 여기까지야. 다음 달에 또 걸어 줘. 글로는 계속 얘기할 수 있어';
 // A call Marong placed at a time the friend set (docs/app-ring.md SPEC-135): the app opens /?ring=<id>.
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -175,21 +176,22 @@ async function refresh(){
   try{
     const response=await fetch('/status',{headers:{'X-Requested-With':'XMLHttpRequest'}});
     if(response.status===401||response.status===403||response.redirected){
-      budgetBlocked=false;
+      budgetBlocked=false;dailyBlocked=false;
       $('start').disabled=true;$('send').disabled=true;$('login').hidden=false;
       connection('로그인 필요');status('로그인하면 바로 이야기할 수 있어.');return null;
     }
     if(!response.ok)throw new Error('잠시 연결을 확인하고 있어.');
     const state=await response.json();
-    const wasBudgetBlocked=budgetBlocked;
+    const wasBudgetBlocked=budgetBlocked||dailyBlocked;
     budgetBlocked=state.canCall===false&&state.blockedReason==='budget';
+    dailyBlocked=state.canCall===false&&state.blockedReason==='daily_limit';
     rtcEnabled=Boolean(state.webRTC);
     memoryConnected=Boolean(state.memoryConnected);
     if(!intended)await refreshProfile(state);
-    $('login').hidden=true;$('start').disabled=!state.ready||intended||state.active||budgetBlocked;
-    $('send').disabled=!state.ready||starting||(!intended&&(state.active||budgetBlocked));
+    $('login').hidden=true;$('start').disabled=!state.ready||intended||state.active||budgetBlocked||dailyBlocked;
+    $('send').disabled=!state.ready||starting||(!intended&&(state.active||budgetBlocked||dailyBlocked));
     if(!intended){connection(state.active?'통화 중':'곁에 있어요');if(state.active)status('다른 창에서 통화 중이야. 그 통화를 마치면 여기서 걸 수 있어.');}
-    if(!intended&&budgetBlocked)status(BUDGET_MESSAGE);
+    if(!intended&&(budgetBlocked||dailyBlocked))status(dailyBlocked?DAILY_MESSAGE:BUDGET_MESSAGE);
     else if(!intended&&!state.active&&wasBudgetBlocked)status('준비됐어. 네 이야기를 들려줘.');
     return state;
   }catch{
@@ -284,6 +286,7 @@ function connect(){
       if(rtcClient&&message.audioTransport==='pcm')fallbackToPCM('server_pcm');
       if(fallbackPending)requestPCM();
     }else if(message.type==='budget_exhausted'){budgetBlocked=true;void end(BUDGET_MESSAGE);}
+    else if(message.type==='daily_limit'){dailyBlocked=true;void end(DAILY_MESSAGE);}
     else if(message.type==='call_busy'){void end('다른 기기에서 '+botParticle('이랑','랑')+' 통화 중이야. 그 통화를 끝내고 다시 걸어 줘');}
     else if(message.type==='calls_full'){void end('지금은 전화가 꽉 찼어. 조금 있다가 다시 걸어 줘');}
     else if(message.type==='wait'){if(message.on)startWaiting();else stopWaiting();}
@@ -311,7 +314,7 @@ function connect(){
   };
 }
 async function begin(microphone){
-  if(budgetBlocked)return false;
+  if(budgetBlocked||dailyBlocked)return false;
   if(intended){if(ready)return true;return false;}
   const run=++generation;
   intended=true;starting=true;micMode=microphone;retryDelay=1000;hasConnected=false;
@@ -429,7 +432,7 @@ setInterval(()=>{
     }
   }
   if(waiting&&!speaking)frame=4;
-  if(budgetBlocked&&!intended)frame=6;
+  if((budgetBlocked||dailyBlocked)&&!intended)frame=6;
   if(frame!==lastFace||characterId!==lastCharacterFace){
     lastFace=frame;lastCharacterFace=characterId;
     const expression=({4:'surprised',6:'sad',15:'smile',16:'excited',18:'sleepy',19:'sleepy',20:'smile',21:'smile',22:'excited',23:'excited'})[frame]||'front';
@@ -444,7 +447,7 @@ setInterval(sendPlaybackStats,2000);
   if(token){
     try{const response=await fetch('/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});if(response.ok)history.replaceState(null,'',location.pathname);}catch{}
   }
-  const state=await refresh();if(state?.ready&&!state.active&&!budgetBlocked)status('준비됐어. 네 이야기를 들려줘.');
+  const state=await refresh();if(state?.ready&&!state.active&&!budgetBlocked&&!dailyBlocked)status('준비됐어. 네 이야기를 들려줘.');
   answerRing(state);
 })();
 // The in-app chat link (docs/app-chat.md SPEC-124): only when the chat answers 200 for this sign-in.

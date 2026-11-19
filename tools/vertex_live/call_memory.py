@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import uuid
@@ -19,6 +20,7 @@ from call_cost import MonthlyCost
 from call_tuning import BASE
 from marong.room_scope import writing_room
 from marong.friend_scope import ACCEPTED_CIRCLE
+from marong.usage import Usage, configured_limit
 
 
 @dataclass(frozen=True)
@@ -115,6 +117,7 @@ class MemoryStore:
             kwargs={'autocommit': True, 'row_factory': dict_row, 'options': '-c statement_timeout=2500'})
         self.live_usage = Ledger(self)
         self.monthly_cost = MonthlyCost(self)
+        self.daily_usage = Usage(self.pool, configured_limit())
 
     async def open(self):
         await self.pool.open(wait=True, timeout=5)
@@ -279,6 +282,8 @@ class MemoryStore:
                 if row['status'] == 'live':
                     raise CallBusy()
                 # A disconnected call from another entry point keeps its own history and memory scope.
+                if p.unified and row["entrypoint"] == "web":
+                    await self.meter_closed(c, p, row["id"])
                 await c.execute("""UPDATE call.calls SET status='ended',ended_at=now(),
                     end_reason='beat_lost',organize_status='pending',organize_next_at=now() WHERE id=%s""",
                     (row['id'],))
@@ -377,6 +382,18 @@ class MemoryStore:
                 VALUES(%s,%s,%s,%s,%s,now(),now(),%s,%s,%s) RETURNING id""",(call_id,segment,seq,role,content,key,finalized,interrupted))
             return (await cur.fetchone())['id']
 
+    async def meter_closed(self, conn, p, call_id):
+        try:
+            async with conn.transaction():
+                cursor = await conn.execute("""
+                    SELECT coalesce(floor(sum(extract(epoch FROM (closed_at-opened_at)))),0)::integer AS seconds
+                    FROM call.segments WHERE call_id=%s AND closed_at IS NOT NULL
+                """, (call_id,))
+                row = await cursor.fetchone()
+                await self.daily_usage.record(p.friend_id, conn=conn, seconds=row["seconds"])
+        except Exception as error:
+            logging.getLogger(__name__).warning("usage_failed duration %s", type(error).__name__)
+
     async def finish(self,p,call_id,explicit,*,entrypoint=None,client_id=None,reason=None):
         # reason 'close_requested': Marong ended the call because the friend asked.
         async with self.pool.connection() as c,c.transaction():
@@ -389,6 +406,8 @@ class MemoryStore:
             close=reason if explicit and reason in ('close_requested','budget_hard_stop') else 'user_hangup' if explicit else 'connection_lost'
             await c.execute("UPDATE call.segments SET state='closed',closed_at=now(),close_reason=%s WHERE call_id=%s AND state<>'closed'",(close,call_id))
             if explicit:
+                if p.unified and row["entrypoint"] == "web":
+                    await self.meter_closed(c, p, call_id)
                 end_reason='budget_hard_stop' if close=='budget_hard_stop' else 'hangup'
                 await c.execute("UPDATE call.calls SET status='ended',ended_at=now(),end_reason=%s,organize_status='pending',organize_next_at=now() WHERE id=%s",(end_reason,call_id))
             else:await c.execute("UPDATE call.calls SET status='resting',last_beat_at=now() WHERE id=%s",(call_id,))

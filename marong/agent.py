@@ -211,6 +211,7 @@ class Agent:
         self.store = store
         self.emb = embeddings
         self.llm = llm
+        self.usage = None
         self.on_saved = on_saved or (lambda: None)  # 메시지가 쌓일 때마다 뒤 작업(임베딩·요약)을 깨움
         self.friend_cards = FriendCards(store) if os.getenv("MARONG_FRIEND_CARD") == "on" else None
         self.friend_prompt = FriendPrompt()
@@ -356,6 +357,9 @@ class Agent:
                                                                meta={**meta, "delivered": ok})
                     if write:
                         write.record(result="ok")
+                if (self.usage is not None and saved_reply and ok and not meta.get("error")
+                        and getattr(msg, "via", None) == "app" and getattr(msg, "friend_id", None)):
+                    await self.usage.record(msg.friend_id, chat=1)
                 if ok and question and saved_reply:
                     await self.friend_cards.attach_question(msg.card_actor, question["id"], saved_reply)
             except Exception as e:

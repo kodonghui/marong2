@@ -94,6 +94,9 @@ class Turn:
         server = any(block.type in self.server_blocks for block in response.content)
         if server or searches or fetches:
             self.agent._server_tools_used(self.msg, response, searches, fetches)
+            meter = getattr(self.agent, "usage", None)
+            if meter is not None and getattr(self.msg, "friend_id", None):
+                await meter.record(self.msg.friend_id, searches=searches, shop_reads=fetches)
 
         if response.stop_reason == "refusal":
             self.meta["refusal"] = getattr(getattr(response, "stop_details", None), "category", None)

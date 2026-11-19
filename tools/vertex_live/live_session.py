@@ -175,7 +175,10 @@ class LiveSession:
         self.shop_reads += 1
         self.resume.update(shop_reads=self.shop_reads,owner=self.owner,call_id=self.call_id,updated=time.time(),
                            revision=self.revision)
-        return await self.shop(query.strip())
+        result = await self.shop(query.strip())
+        if result.get("ok") and self.p and self.p.unified and self.store:
+            await self.store.daily_usage.record(self.p.friend_id, shop_reads=1)
+        return result
 
     def background(self,coro):
         task=asyncio.create_task(coro);self.tasks.add(task)
@@ -694,6 +697,8 @@ class LiveSession:
                 fresh=[q for q in search_queries(content) if q not in turn_queries]
                 if fresh:
                     turn_queries.update(fresh);self.searched(len(fresh))
+                    if self.p and self.p.unified and self.store:
+                        self.background(self.store.daily_usage.record(self.p.friend_id, searches=len(fresh)))
                     with trace_step('voice_search', surface=surface, web_searches=len(fresh)):
                         pass
                 if received:

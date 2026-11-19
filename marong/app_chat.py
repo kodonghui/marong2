@@ -85,6 +85,7 @@ PROBLEMS = {
     "not_allowed": (403, "허용 목록에 없는 계정이거나 통화하는 친구가 꺼짐"),
     "cross_site": (403, "다른 사이트에서 온 쓰기 요청"),
     "no_dm": (403, "이 친구의 디스코드 DM 연결이 없거나 아직 DM을 한 번도 보내지 않음"),
+    "daily_limit": (429, "오늘 쓸 수 있는 양을 다 씀"),
     "too_many_messages": (429, "1분에 20번 넘게 보냄"),
     "no_picture": (404, "그 이름의 그림이 없음"),
     "not_ready": (409, "아직 준비되지 않음"),
@@ -144,6 +145,10 @@ class AppChat:
         self.authentication = auth_mode(authentication)
         self.delivery = None
         self.internal_shop = None
+        from .usage import Usage, configured_limit
+        self.usage = Usage(store.pool, configured_limit(), sessions.now) if sessions else None
+        if self.usage is not None and hasattr(agent, "usage"):
+            agent.usage = self.usage
         self.tick = asyncio.Event()          # set and replaced whenever a message is saved in this process
         self.reply_traces = OrderedDict()
         self.waiters = defaultdict(list)     # friend id -> events of their waits, oldest first
@@ -517,6 +522,8 @@ class AppChat:
         old = await self.store.app_message(room, key)
         if old:
             return self._json(200, {"message": self.message(old)})
+        if self.usage is not None and await self.usage.blocked(who["friend_id"]):
+            raise Problem("daily_limit")
         preference = proactive_preference(text)
         if self.sessions is None:
             await self.store.incoming(who["discord_user_id"], who["channel_id"], key, preference)
@@ -715,6 +722,7 @@ class AppChat:
             app.router.add_post("/chat/api/logout", self.logout)
             self.admin.register(app.router)
             self.profile.register(app.router)
+            app.router.add_get("/chat/api/usage", self.profile.usage)
             self.friends.register(app.router)
             self.characters.register(app.router)
         app.router.add_get("/chat", self.home)
