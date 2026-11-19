@@ -115,7 +115,7 @@ Purpose: 로그인이 없는 기기에서 기기 추가 코드를 넣어 로그�
 | SCR-164#signed-in | 화면을 보이지 않고 남겨 둔 주소(없으면 SCR-107)로 감 | API-216#200 |
 | SCR-164#error | 공통 규칙 | API-213#403(`cross_site`), API-213#default, API-216#default |
 
-비어 있음과 오래된 데이터는 없어요. 틀린 횟수는 화면에 보이지 않아요(5번째에 #blocked).
+비어 있음과 오래된 데이터는 없어요. 틀린 횟수는 화면에 보이지 않아요(다섯 번 틀린 뒤의 시도부터 #blocked).
 
 ## SCR-165 내 마롱이
 
@@ -140,7 +140,7 @@ Purpose: 자기 마롱이의 이름, 쓰는 캐릭터, 보관한 캐릭터, 통�
 | 기본 마롱이로 돌아가기(캐릭터를 쓰는 중일 때) | 확인 줄 '기본 마롱이로 돌아갈까? 대화랑 기억은 그대로야' → API-228 `{characterId: null}` → 200 → #reverted | 공통 규칙 |
 | 캐릭터 지우기(카드의 ⋯) | 확인 줄 '지우면 되돌릴 수 없어. 지울까?' → API-238 → 204. 쓰던 캐릭터면 기본 마롱이로 돌아감 | 409 → #delete-busy |
 | 기기 추가 코드 만들기 | API-214 → 201 → #code | 429 → #code-limit |
-| 구글 캘린더 줄 | 있는 `/google/` 연결 페이지로 감(SPEC-384). 끝나면 글 대화 방에 한 줄이 남음 | 그 페이지의 규칙 |
+| 구글 캘린더 줄 | 연결 안 됨이면 `/google/start`로 가요(로그인 쿠키로 열림, SPEC-384). 연결됨이면 '끊기'를 누르고 확인 줄에서 한 번 더 눌러 `POST /google/disconnect`를 보내요. 끝나면 글 대화 방에 한 줄이 남음 | 그 페이지의 규칙. 끊기 실패는 그 줄 옆에 공통 오류 말 |
 | 친구 줄 | SCR-168 | 없음 |
 | 로그아웃 | 확인 줄 '이 기기에서 나갈까?' → API-215 → 204 → SCR-164 | 공통 규칙 |
 
@@ -281,13 +281,14 @@ Purpose: 동희님이 초대 링크를 만들고, 가입한 사람과 로그인 
 | Data | Source |
 | --- | --- |
 | 초대 링크 목록(종류, 메모, 상태, 끝나는 때, 쓴 사람). 토큰과 주소는 없음 | API-240 |
-| 가입한 사람 목록(이름, 마롱이 이름, 로그인 수, 마지막으로 쓴 때, 티켓, 오늘 쓴 양) | API-236 |
+| 가입한 사람 목록(이름, 마롱이 이름, 로그인 수, 마지막으로 쓴 때, 티켓, 오늘 쓴 양) | API-236(`members`) |
+| 아직 연결하지 않은 기존 계정(이름만, `link` 링크를 만들 때 고르는 목록) | API-236(`unlinked`) |
 | 새 링크의 주소와 끝나는 때(한 번만) | API-235 |
 | 티켓 잔액 | API-237 |
 
 | Action | Result | Failure |
 | --- | --- | --- |
-| 초대 링크 만들기 | 종류 칩(`join` 새 사람 · `link` 기존 계정 연결 · `relogin` 다시 로그인), `link`·`relogin`은 가입한 사람 고르기, 메모(40자, 선택) → API-235 → 201 → #created | 400 → #invite-invalid, 404 → #member-missing |
+| 초대 링크 만들기 | 종류 칩(`join` 새 사람 · `link` 기존 계정 연결 · `relogin` 다시 로그인), `link`는 아직 연결하지 않은 기존 계정(`unlinked`)과 가입한 사람(`members`)에서, `relogin`은 가입한 사람(`members`)에서 고르기, 메모(40자, 선택) → API-235 → 201 → #created | 400 → #invite-invalid, 404 → #member-missing |
 | 주소 복사 | 클립보드에 넣고 '복사했어요' | 복사 실패 → 주소 글자를 골라 둠 |
 | 로그인 끊기(사람 줄) | 확인 줄(#revoke-confirm) → API-241 → 204 → #revoked | 공통 규칙 |
 | 티켓 넣기(사람 줄, 1\~1000) | API-237 `{add}` → 200 → #ticket-added | 400 → #ticket-invalid |
@@ -335,7 +336,8 @@ Purpose: 강아지인지 고양이인지 고르고 사진 1\~3장을 올려 캐�
 | SCR-170#in-progress | #normal 맨 위에 카드 '만들던 캐릭터가 있어. 이어서 할래?' | API-229#200(`status=draft`) |
 | SCR-170#selected | 고른 사진이 칸에 들어가고 ×가 붙음 | |
 | SCR-170#uploading | 올리는 막대와 '사진을 올리는 중이야', 버튼 꺼짐 | |
-| SCR-170#photo-error | 그 사진 칸에 `danger` 테두리와 '2번째 사진을 열 수 없어. JPEG나 PNG, 8MB 이하로 다시 골라 줄래?' 다른 사진은 남음 | API-220#400(`photo_invalid`) |
+| SCR-170#photo-error | 그 사진 칸에 `danger` 테두리와 '2번째 사진을 열 수 없어. JPEG·PNG·WebP, 8MB 이하로 다시 골라 줄래?' 다른 사진은 남음 | API-220#400(`photo_invalid`) |
+| SCR-170#check-down | '지금은 사진을 살펴볼 수가 없어. 조금 있다가 다시 올려 줘'와 '다시 올리기'. 고른 사진은 남음 | API-220#503(`check_unavailable`) |
 | SCR-170#too-large | '사진이 너무 커. 다른 사진으로 골라 줄래?' | API-220#413 |
 | SCR-170#limit | 사진 칸 대신 '캐릭터는 3개까지 둘 수 있어. 하나를 지우면 새로 만들 수 있어'와 '내 마롱이로' | API-229#200(`characters` 3개), API-219#409(`too_many_characters`) |
 | SCR-170#budget | '이번 달 그림은 여기까지야. 다음 달에 다시 만들 수 있어', '올리기' 꺼짐 | API-219#409(`image_budget`) |
@@ -365,13 +367,13 @@ Purpose: 서버가 사진에서 만든 특징표(종·털 색·무늬·귀·눈�
 | --- | --- | --- |
 | SCR-171#analyzing | '사진을 살펴보는 중이야. 30초쯤 걸려'와 작은 움직임. 2초마다 API-221 | API-220#202, API-221#200(`stage=photos`, `job.step=traits`, `job.state` `queued`·`running`), API-222#409(`job_running`) |
 | SCR-171#loading | 칸 제목 열한 줄과 칩 자리에 회색 | |
-| SCR-171#normal | 칸마다 이름과 값: 종(강아지·고양이), 품종 추정(30자), 털 색 1\~3개(칩 8개), 무늬(칩 7개)와 무늬 설명(60자, '사진에서 보는 방향으로 적어 줘'), 귀 모양, 눈 색, 체격, 털 길이, 특징(60자), 몸 템플릿, 말투 한 줄. 아래 '이대로 그려 줘' | API-221#200(`stage=traits`) |
+| SCR-171#normal | 칸마다 이름과 값: 종(강아지·고양이), 품종 추정(30자), 털 색 1\~3개(칩 8개), 무늬(칩 7개)와 무늬 설명(60자, '사진에서 보는 방향으로 적어 줘'), 귀 모양, 눈 색, 체격, 털 길이, 특징(60자), 몸 템플릿, 말투 한 줄. 아래 '이대로 그려 줘' | API-221#200(`stage=traits`, 또는 `stage=preview`이고 주소에 `edit=1`) |
 | SCR-171#saving | 버튼 꺼짐과 '저장하는 중이야…' | |
 | SCR-171#invalid | 그 칸 아래 '다시 한번 확인해 줄래?'와 그 칸의 규칙, 쓴 값 남김 | API-222#400(`invalid_input`) |
 | SCR-171#refused | '강아지나 고양이를 찾지 못했어. 한 아이만 잘 보이는 사진으로 다시 골라 줄래?'와 '사진 다시 고르기' | API-221#200(`job.state=failed`, `job.error` `model_refused`·`check_failed`) |
 | SCR-171#failed | '사진을 살펴보다가 멈췄어. 조금 있다가 다시 해 볼래?'와 '사진 다시 고르기' | API-221#200(`job.state=failed`, `job.error` `model_error`·`timeout`) |
 | SCR-171#budget | '이번 달 그림은 여기까지야. 다음 달에 이어서 만들 수 있어. 지금까지 한 건 그대로 둘게' | API-221#200(`job.state=failed`, `job.error=budget`) |
-| SCR-171#stale | 다른 단계면 그 단계 화면으로 감 | API-221#200(`stage`가 `photos`·`traits`가 아님), API-222#409(`wrong_stage`) |
+| SCR-171#stale | 다른 단계면 그 단계 화면으로 감. 미리 보기 단계에서 '특징표 다시 고칠래'로 온 경우(`edit=1`)는 #normal이에요 | API-221#200(`stage`가 `photos`·`traits`가 아니고, `preview`이면서 `edit=1`인 경우도 아님), API-222#409(`wrong_stage`) |
 | SCR-171#error | 공통 규칙. 고친 값은 화면에 남김 | API-221#404(`not_found`), API-221#default, API-222#403(`cross_site`), API-222#404(`not_found`), API-222#default |
 
 비어 있음은 #analyzing이 맡아요(특징표가 아직 없음).
@@ -388,7 +390,7 @@ Purpose: 미리 보기 한 장으로 닮았는지 보고, 마음에 들면 후�
 | Action | Result | Failure |
 | --- | --- | --- |
 | 미리 보기 그려 줘 · 다시 그려 줘 | API-223 → 202 → #drawing | 409 `image_budget` → #budget, `job_running` → #drawing, `wrong_stage` → #stale |
-| 특징표 다시 고칠래 | SCR-171 | 없음 |
+| 특징표 다시 고칠래 | SCR-171(주소에 `edit=1`) | 없음 |
 | 후보 그려 줘(미리 보기가 있을 때) | API-224 → 202 → SCR-173#drawing | 409 `image_budget` → #budget, `job_running` → SCR-173#drawing, `wrong_stage` → #stale |
 
 | State | What the user sees and can do | From responses |
@@ -492,7 +494,7 @@ Purpose: 다 그린 캐릭터의 정면 그림과 표정 여섯 장을 보고 �
 | SCR-109 알림 상태(글 대화 메뉴) | 줄 '내 마롱이'(SCR-165)와 '친구'(SCR-168)가 늘어요. 머리 버튼은 지금 네 개(전화·알림·일기장·나)로 360px 한 줄이 차서 메뉴에 둬요. 알림이 꺼졌거나 오래 안 연 폰의 글은 '디스코드로 받는 중' 대신 '알림이 꺼져 있어. 먼저 한 말은 여기 남겨 둘게'이고, 브라우저는 '알림은 안드로이드 앱에서 받을 수 있어. 여기서는 열었을 때 밀린 말을 보여 줄게'예요 | FL-176, SPEC-383, D92 |
 | SCR-112 글 대화 창(앱) | 화면은 웹 소유라 SCR-107을 그대로 따라요. 창 안의 Access 로그인 화면 대신 로그인(SCR-164)이 창 안에 떠요(앱 0.3.0) | TASK-408 |
 | SCR-108·111 앱 알림·전화 알림 | 제목 '마롱이'가 그 사람의 `botName`이에요. 알림 채널 이름('마롱이 톡', '마롱이 전화')과 앱 이름은 그대로예요 | REQ-441 |
-| SCR-001 통화 홈([SCR-001.md](SCR-001.md)) | 인사 줄이 '{내 이름}, {이름}한테 전화할래?', 얼굴이 쓰는 캐릭터의 정면 그림(없으면 지금 얼굴)이에요. 상태가 늘어요: #call-busy, #calls-full, #daily-limit(아래 표). #permission의 403 '이 계정으로는 마롱이랑 통화할 수 없어'는 없어져요 | SPEC-386, SPEC-394 |
+| SCR-001 통화 홈([SCR-001.md](SCR-001.md)) | 인사 줄이 '{내 이름}, {이름}한테 전화할래?', 얼굴이 쓰는 캐릭터의 정면 그림(없으면 지금 얼굴)이에요. 상태가 늘어요: #call-busy, #calls-full, #daily-limit(아래 표). #permission의 403 '이 계정으로는 마롱이랑 통화할 수 없어'는 그대로 있어요(통화 계정이 꺼진 사람, SPEC-374) | SPEC-386, SPEC-394 |
 | SCR-002 통화 중([SCR-002.md](SCR-002.md)) | 글의 '마롱이'가 `botName`이에요('{이름}한테 거는 중…'). 캐릭터를 쓰면 얼굴이 그 캐릭터의 표정 여섯 장이고(아래 표정 표), 기본 마롱이는 지금 21장 그대로예요. 상태 #waiting이 늘어요(아래 표) | FL-178, SPEC-389, 제안 7절 |
 | SCR-113 일기장 한 날, SCR-119 듣기 시험 | #permission의 `no_dm` 안내('디스코드 DM에서 마롱이한테 먼저 말 걸어 줘')와 403 `not_allowed` 안내가 없어져요. 401은 SCR-164로 가요. 아침 일기 말의 주소는 글 대화에만 붙어요(디스코드 DM 없음) | REQ-439, TASK-410 |
 | SCR-120\~122 성향 맞춤 | 문 규칙의 Access 확인과 `call.callers`로 친구를 찾는 부분이 로그인 확인 공통 함수(SPEC-374)로 바뀌어요. 403 `not_allowed` 안내가 없어지고 401은 SCR-164로 가요. SCR-122의 들은 곳 글(`discord_dm`, `kakao_dm` 등)은 지난 기억에 남아 있어서 그대로 보여요 | REQ-439, TASK-410 |
@@ -502,11 +504,11 @@ Purpose: 다 그린 캐릭터의 정면 그림과 표정 여섯 장을 보고 �
 | State | What the user sees and can do | From responses |
 | --- | --- | --- |
 | SCR-107#unread | 앱 기기가 없는 동안 방에 남은 말 위에 줄 '여기부터 안 읽은 말이야'가 보이고 그 줄로 스크롤돼요. 맨 아래로 가는 버튼이 있어요 | API-102#200(`readUpTo` 뒤에 마롱이 말이 있음) |
-| SCR-107#ring-pending | 웹에서 약속 전화 시각 앞뒤에 열면 머리 아래 띠 '{이름}가 전화하기로 한 시간이야'와 '받기'(SCR-002). 시각이 지나면 띠가 사라져요 | API-102#200, API-104#200(약속 전화 안내 메시지 `ring`) |
+| SCR-107#ring-pending | 웹에서 약속 전화 시각 앞뒤에 열면 머리 아래 띠 '{이름}가 전화하기로 한 시간이야'와 '받기'(통화 화면을 `ring` 값과 함께 열어요, SCR-002). `pendingRing.until`이 지나면 띠가 사라져요 | API-216#200(`pendingRing`이 있음) |
 | SCR-107#daily-limit | 입력 칸 위 띠 '오늘 쓸 수 있는 양을 다 썼어. 새벽 4시에 다시 채워져'와 '내 마롱이에서 보기'(SCR-165). 쓴 글은 칸에 남고 보내기는 꺼져요. 한도 설정이 없으면 이 상태는 나오지 않아요 | API-103#429(`daily_limit`) |
-| SCR-001#call-busy | 얼굴 01, '다른 기기에서 {이름}랑 통화 중이야. 그 통화를 끝내고 다시 걸어 줘'와 '다시 해 볼게' | API-107#409(`call_busy`) |
-| SCR-001#calls-full | 걱정하는 얼굴(13), '지금은 전화가 꽉 찼어. 조금 있다가 다시 걸어 줘'와 '다시 해 볼게' | API-107#503(`calls_full`) |
-| SCR-001#daily-limit | 슬픈 얼굴(06), '오늘 쓸 수 있는 양을 다 썼어. 새벽 4시에 다시 채워져'. 통화 버튼 막힘 | API-107#429(`daily_limit`) |
+| SCR-001#call-busy | 얼굴 01, '다른 기기에서 {이름}랑 통화 중이야. 그 통화를 끝내고 다시 걸어 줘'와 '다시 해 볼게' | API-107#101(메시지 `call_busy`) |
+| SCR-001#calls-full | 걱정하는 얼굴(13), '지금은 전화가 꽉 찼어. 조금 있다가 다시 걸어 줘'와 '다시 해 볼게' | API-107#101(메시지 `calls_full`) |
+| SCR-001#daily-limit | 슬픈 얼굴(06), '오늘 쓸 수 있는 양을 다 썼어. 새벽 4시에 다시 채워져'. 통화 버튼 막힘 | API-124#200(`blockedReason=daily_limit`), API-107#101(메시지 `daily_limit`) |
 | SCR-002#waiting | 도구가 돌거나 답을 기다린 지 0.8초가 지나면 작은 효과음이 되풀이되고, 얼굴은 생각하는 얼굴(04, 캐릭터는 `surprised`), 얼굴 아래 '찾아보는 중…'과 점 세 개가 보여요. 마롱이 목소리가 시작되면 소리가 바로 멈추고 #talking이 돼요. 목소리와 겹치지 않아요. 못 찾으면 마롱이가 말로 알려 주고 화면 글은 없어요. 끊기는 늘 눌러요 | (통화 연결의 도구 시작·끝 신호, SPEC-389) |
 
 SCR-002의 표정 표(캐릭터를 쓸 때, 새 제안): 거는 중·말하는 중·듣는 중은 `smile`, 기쁜 느낌은 `excited`, 쉬는 중은 `sleepy`, 생각·대기·다시 잇는 중은 `surprised`, 슬픈 느낌과 오류는 `sad`, 토라진 느낌은 `pout`이에요. 캐릭터는 입 움직임 그림이 없어서 말할 때는 얼굴 둘레의 링만 움직여요. 선 전화의 그림 카드(SCR-002#topic-card)는 기본 마롱이 그림이라 캐릭터를 쓰는 사람에게는 뜨지 않아요(제안 7절).
@@ -533,8 +535,8 @@ SCR-002의 표정 표(캐릭터를 쓸 때, 새 제안): 거는 중·말하는 �
 ## 17. 열린 것과 정한 것
 
 - 09 목업은 2026-11-19에 대지 17장을 그렸어요([목업 기록](../../design/unified-mockup.md)). 새 토큰 없이 지금 글 대화 화면과 반려동물 A안의 부품만 써요. 와이어프레임은 그리지 않았고, 목업에 없는 상태는 이 정의대로 만들어 구현된 화면(TC-449, TC-463)에서 봐요.
-- 통화 시작의 새 오류(`call_busy`, `calls_full`, `daily_limit`)는 지금 통화의 시작 API-107에 붙어요. 계약 [unified.openapi.yaml](../../api/unified.openapi.yaml)의 머리말이 그렇게 적었고, 통화 계약 파일의 고침은 구현 PR(TASK-395, TASK-406)에서 해요.
-- SCR-002#waiting은 통화 서버가 지금 상태를 보내는 연결로 주는 `{type: "wait", on: true|false}`를 따라요(기능 명세 3.10). SCR-107#ring-pending은 통화 서버의 상태 응답에 지금도 실리는 약속(`ring`) 값을 따르고, 유효 시간은 지금 벨의 값 그대로예요(기능 명세 3.8).
+- 통화 시작(API-107)은 웹소켓이라 브라우저가 HTTP 상태 번호를 읽지 못해요. 그래서 통화 시작의 거절(`call_busy`, `calls_full`, `daily_limit`, `budget_exhausted`)은 연결을 받은 뒤 오는 메시지 `{type: "<코드>"}`이고, 화면은 그 메시지를 받으면 통화 홈으로 돌아가 위 상태를 그려요. `daily_limit`은 통화 홈 상태 응답(API-124)의 `blockedReason`으로도 와서 걸기 전에 버튼을 막아요. 계약 [unified.openapi.yaml](../../api/unified.openapi.yaml)의 머리말이 그렇게 적었고, 통화 계약 파일의 고침은 구현 PR(TASK-395, TASK-406)에서 해요.
+- SCR-002#waiting은 통화 서버가 지금 상태를 보내는 연결로 주는 `{type: "wait", on: true|false}`를 따라요(기능 명세 3.10). SCR-107#ring-pending은 앱 서버의 프로필 응답(API-216)의 `pendingRing`을 따라요(기능 명세 3.8). 통화 서버의 상태 응답에는 벨 값이 없어요.
 - 캐릭터 그룹과 친구 줄을 숨길 값은 프로필 응답(API-216)의 `features.character`·`features.friends`예요. `features.character`가 꺼져 있어도 쓰는 캐릭터의 얼굴과 이름은 그대로 그려요.
 - 미리 보기 단계에서 특징표를 다시 고치는 경로(SCR-172 '특징표 다시 고칠래')는 API-222가 `traits`와 `preview` 단계에서 모두 받아요.
 - 구글 캘린더 줄(SCR-165)은 프로필 응답의 `google`(`connected`·`not_connected`·`off`)을 따라요. `off`면 줄을 그리지 않아요.

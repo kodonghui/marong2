@@ -65,6 +65,8 @@ CREATE TABLE IF NOT EXISTS marong.device_codes (
   used_at    timestamptz
 );
 CREATE UNIQUE INDEX IF NOT EXISTS device_codes_live_idx ON marong.device_codes (code_hash) WHERE used_at IS NULL;
+-- One unused code per friend (SPEC-372): making a new code stamps used_at on the one before, in the same transaction.
+CREATE UNIQUE INDEX IF NOT EXISTS device_codes_one_per_friend_idx ON marong.device_codes (friend_id) WHERE used_at IS NULL;
 
 -- TBL-169 characters (CTX-027) ← SPEC-378, SPEC-379, SPEC-380 | terms: TERM-179, TERM-185
 -- A pet character a friend made from photos. stage is where the making stands; status says whether it can be worn.
@@ -178,7 +180,8 @@ CREATE TABLE IF NOT EXISTS marong.usage_daily (
   PRIMARY KEY (friend_id, day)
 );
 
--- rooms: the owner of a 1:1 room (REQ-452). Group and channel rooms keep NULL.
+-- rooms: the owner of a 1:1 room (REQ-452). Kakao group rooms and Discord server-channel rooms (discord-ch:) keep NULL.
+-- Not the is_channel column: is_channel is true for 1:1 rooms, so every owned room has is_channel = true.
 ALTER TABLE marong.rooms ADD COLUMN IF NOT EXISTS owner_friend_id bigint REFERENCES marong.friends (id);
 CREATE INDEX IF NOT EXISTS rooms_owner_idx ON marong.rooms (owner_friend_id) WHERE owner_friend_id IS NOT NULL;
 
@@ -187,14 +190,19 @@ CREATE INDEX IF NOT EXISTS rooms_owner_idx ON marong.rooms (owner_friend_id) WHE
 ALTER TABLE marong.friendships ADD COLUMN IF NOT EXISTS state text NOT NULL DEFAULT 'accepted'
   CHECK (state IN ('pending', 'accepted', 'declined', 'ended'));
 ALTER TABLE marong.friendships ADD COLUMN IF NOT EXISTS requested_by bigint REFERENCES marong.friends (id);
+ALTER TABLE marong.friendships ADD COLUMN IF NOT EXISTS requested_at timestamptz;  -- when the open or last request was sent
 ALTER TABLE marong.friendships ADD COLUMN IF NOT EXISTS responded_at timestamptz;
 ALTER TABLE marong.friendships ADD COLUMN IF NOT EXISTS close_a boolean NOT NULL DEFAULT false;  -- friend_a's wish
 ALTER TABLE marong.friendships ADD COLUMN IF NOT EXISTS close_b boolean NOT NULL DEFAULT false;  -- friend_b's wish
 -- A request names who sent it, and the sender is one of the two. Rows made before this migration have no sender.
 ALTER TABLE marong.friendships DROP CONSTRAINT IF EXISTS friendships_request_check;
 ALTER TABLE marong.friendships ADD CONSTRAINT friendships_request_check
-  CHECK ((state <> 'pending' OR requested_by IS NOT NULL)
+  CHECK ((state <> 'pending' OR (requested_by IS NOT NULL AND requested_at IS NOT NULL))
          AND (requested_by IS NULL OR requested_by IN (friend_a, friend_b)));
+
+-- schedules: a schedule made in the app chat (SPEC-383). The source was fixed to 'discord' or 'call' (012).
+ALTER TABLE marong.schedules DROP CONSTRAINT IF EXISTS schedules_source_check;
+ALTER TABLE marong.schedules ADD CONSTRAINT schedules_source_check CHECK (source IN ('discord', 'call', 'app'));
 
 -- Backfill 1: owners of the 1:1 rooms the two linked accounts already have (their Discord DM room and the Kakao
 -- 1:1 room that holds their older history). Rows are only stamped, never copied.
