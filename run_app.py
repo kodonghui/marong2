@@ -51,6 +51,19 @@ log = logging.getLogger("marong.runtime")
 
 class AppAgent(PrivateChatAgent):
     schedule_source = "app"
+    direct_system = (
+        "지금은 앱과 웹에서 마롱이와 하는 개인 대화야. 다른 친구의 기록을 찾아 주겠다고 말하지 마. "
+        "친구처럼 바로 이야기하고, 사용법이나 먼저 연락하는 설정을 먼저 설명하지 마. "
+        "먼저 거는 말은 잠금 화면에도 보일 수 있어. 몸·연애·성·돈·비밀처럼 남이 보면 곤란한 얘기는 먼저 꺼내지 마."
+    )
+    app_line = "- 이번 말은 앱이나 웹에서 왔어. 같은 사람과 앞서 나눈 이야기를 이어 가."
+    app_calendar_text = "내 마롱이에서 ‘구글 캘린더’를 열면 연결 상태를 보고 연결하거나 끊을 수 있어."
+
+    @staticmethod
+    def _dm_lines(link, private=False):
+        lines = PrivateChatAgent._dm_lines(link, private=private)
+        return [line.replace("이 DM으로", "앱 글 대화로").replace("이 DM에서는", "이 대화에서는")
+                for line in lines]
     friend_context_limit = 20
 
     async def _friend_system(self, system, friend, room, *, private):

@@ -236,6 +236,9 @@ class PrivateChatAgent(Agent):
     ring = False  # MARONG_APP_RING=1: schedule_add takes call promises (docs/app-ring.md SPEC-128)
     topics = False  # MARONG_TOPICS=1: the phrases that turn hello calls and pictures on or off (SPEC-277)
     schedule_source = "discord"
+    direct_system = DM_SYSTEM
+    app_line = APP_LINE
+    app_calendar_text = APP_GOOGLE_TEXT
 
     def __init__(self, settings, store, embeddings, llm, on_saved=None, *, first_replies=None, google=None, shop=None,
                  web=None, clock=time.monotonic):
@@ -250,7 +253,7 @@ class PrivateChatAgent(Agent):
 
     def _tools(self, msg):
         # Identity and opt-in never change on model output. Only the friend's own schedule does.
-        tools = list(schedule_tools(self.ring)) if getattr(msg, "friend_id", None) else []
+        tools = list(schedule_tools(self.ring, surface=self.schedule_source)) if getattr(msg, "friend_id", None) else []
         # Mall product pages only (web_fetch). None once today's reads are used up or the API refused the tool.
         fetch = self.shop.tool() if self.shop is not None else None
         tools += [fetch] if fetch else []
@@ -290,7 +293,7 @@ class PrivateChatAgent(Agent):
         # reference sections, which may quote friends, come after it).
         head = situation.split("\n\n", 1)[0].split("\n")
         channel = any(line.startswith(CHANNEL_HEAD) for line in head)
-        return super()._system(situation + "\n\n" + (CHANNEL_SYSTEM if channel else DM_SYSTEM))
+        return super()._system(situation + "\n\n" + (CHANNEL_SYSTEM if channel else self.direct_system))
 
     def _situation(self, msg, person, notes, summaries, recalled, circle=None):
         text = super()._situation(msg, person, notes, summaries, recalled, circle)
@@ -304,11 +307,11 @@ class PrivateChatAgent(Agent):
         at = next((i + 1 for i, line in enumerate(lines) if line.startswith("- 지금 말 건 친구")), 2)
         lines[at:at] = self._dm_lines(msg.dm_link, private=(person or {}).get("share") is False)
         if msg.via == "app":
-            lines.insert(at, APP_LINE)
+            lines.insert(at, self.app_line)
         if msg.friend_id:
             tz = ZoneInfo(self.s.timezone)
             now = datetime.now(tz)
-            lines += ["", schedule_guide(self.ring)] + schedule_lines(msg.schedule_rows, msg.schedule_total, tz, now)
+            lines += ["", schedule_guide(self.ring, surface=self.schedule_source)] + schedule_lines(msg.schedule_rows, msg.schedule_total, tz, now)
             if self.google:
                 lines += calendar_lines(msg.google_link, msg.google_events, msg.google_more, tz, now)
         guides = self._web_guides(msg)
@@ -497,7 +500,7 @@ class PrivateChatAgent(Agent):
     async def _google_command(self, msg):
         """'구글 캘린더 연결·끊기': the link goes out only in the sent text, the history keeps LINK_MARK."""
         if msg.via == "app":  # a one-time link is given in the Discord DM only (SPEC-112)
-            return APP_GOOGLE_TEXT, {"google": "app"}
+            return self.app_calendar_text, {"google": "app"}
         if msg.google_command == "connect":
             if not self.google or not msg.friend_id:
                 return UNAVAILABLE_TEXT, {"google": "unavailable"}
