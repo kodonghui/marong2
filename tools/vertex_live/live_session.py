@@ -732,7 +732,8 @@ class LiveSession:
                 if content.get('generationComplete') and self.in_turn and not audio_finished:
                     audio_finished=True;await self.emit({'type':'audio_end','epoch':self.epoch,'turn':self.turn})
                 if content.get('turnComplete'):
-                    await self.wait_signal()
+                    if all(task.done() for task in tool_tasks.values()):
+                        await self.wait_signal()
                     self.recorder.feed('assistant',finished=True)
                     turn_queries.clear();self.turn_done_at=now
                     self.playback_end=max(now,self.turn_started_at+self.offset/OUTPUT_RATE)+SEARCH_CUT_SLACK_S
