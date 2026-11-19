@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import sys
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -19,6 +20,9 @@ sys.path[:0] = [str(ROOT), str(ROOT / "tools" / "vertex_live")]
 from fakes import ScriptedLLM, message, text, thinking, tool_use
 from live_session import LiveSession
 from marong.agent import Agent, Incoming
+from marong.deepseek import DeepSeekError, DeepSeekLLM
+from marong.discord_dm import DiscordAgent
+from marong.schedules import SCHEDULE_LIST_TOOL
 from tools.vertex_live import tool_trace as text_trace
 import tool_trace as voice_trace
 
@@ -77,6 +81,87 @@ class ToolTraceTest(unittest.IsolatedAsyncioTestCase):
         deadline = asyncio.get_running_loop().time() + 2
         incoming = Incoming(PRIVATE_FIXTURE, PRIVATE_FIXTURE, PRIVATE_FIXTURE)
         return await agent.ask([], [{"role": "user", "content": PRIVATE_FIXTURE}], incoming, deadline)
+
+    def test_owner_app_message_and_reply_are_visible_only_for_configured_account(self):
+        with TemporaryDirectory() as directory:
+            config = Path(directory) / "owner-app-io"
+            with patch.object(text_trace, "OWNER_APP_IO_FILE", config):
+                def send(friend_id, *, mixed=False):
+                    with text_trace.step("app_turn", surface="app_chat") as span:
+                        span.app_message(friend_id, "Show this exact test message", room_key="own", user_key="my-user")
+                        with text_trace.app_step("recent_memory") as history:
+                            rows = [{"room_key": "own", "user_key": "my-user", "role": "user",
+                                     "content": "An earlier owner message"}]
+                            if mixed:
+                                rows.append({"room_key": "linked", "role": "assistant", "content": PRIVATE_FIXTURE})
+                            history.io(outputs={"records": rows})
+                        with text_trace.step("tool_dispatch", span, tool="schedule_list") as tool:
+                            tool.io(inputs={"arguments": {"start": "2026-11-26", "calendar": "Personal", "limit": 12}})
+                            tool.io(outputs={"response": {"type": "tool_result", "tool_use_id": "toolu_abc",
+                                                          "content": "No events found", "is_error": False}})
+                        with text_trace.app_step("model_request") as model:
+                            model.io(inputs={"request": {"system": PRIVATE_FIXTURE, "messages": [
+                                {"role": "user", "content": "(11/19) Show this exact test message"},
+                                {"role": "assistant", "content": PRIVATE_FIXTURE if mixed else "Earlier owner reply"},
+                                {"role": "user", "content": [{"type": "tool_result", "content": "No events found"}]},
+                            ], "max_tokens": 123, "api_key": PRIVATE_FIXTURE,
+                                "tools": [{"name": "schedule_list", "input_schema": {"properties": {"range": {
+                                    "type": ["string", "null"], "description": "Requested date range"}}}}]}})
+                        span.app_reply("Exact test reply. Bearer " + PRIVATE_FIXTURE)
+                    return self.capture.traces[-1]
+
+                config.write_text("1\n", encoding="utf-8")
+                other, _, other_tool, _ = send(2)
+                self.assertEqual(other["inputs"]["message"]["content"], text_trace.MASKED)
+                self.assertEqual(other_tool["outputs"]["response"]["content"], text_trace.MASKED)
+                owner, history, tool, model = send(1)
+                self.assertEqual(owner["inputs"]["message"]["content"], "Show this exact test message")
+                self.assertEqual(owner["outputs"]["reply"]["content"], "Exact test reply. [인증정보 제외]")
+                self.assertEqual(owner["tags"], ["owner-app-io"])
+                self.assertEqual(history["outputs"]["records"][0]["content"], "An earlier owner message")
+                self.assertEqual(tool["inputs"]["arguments"], {"start": "2026-11-26", "calendar": "Personal", "limit": 12})
+                self.assertEqual(tool["outputs"]["response"]["content"], "No events found")
+                self.assertEqual(tool["outputs"]["response"]["tool_use_id"], "toolu_abc")
+                self.assertIs(tool["outputs"]["response"]["is_error"], False)
+                request = model["inputs"]["request"]
+                self.assertIn("excluded", request["system"])
+                self.assertNotIn("api_key", request)
+                self.assertEqual(request["max_tokens"], 123)
+                self.assertEqual(request["messages"][0]["content"], "(11/19) Show this exact test message")
+                self.assertEqual(request["messages"][1]["content"], "Earlier owner reply")
+                self.assertEqual(request["messages"][2]["content"][0]["content"], "No events found")
+                self.assertEqual(request["tools"][0]["input_schema"]["properties"]["range"]["type"], ["string", "null"])
+                _, mixed_history, _, mixed_model = send(1, mixed=True)
+                self.assertEqual(mixed_history["outputs"]["excluded_other_rooms"], 1)
+                self.assertEqual(mixed_model["inputs"]["request"]["messages"][0]["content"], "Show this exact test message")
+                self.assertIn("excluded", mixed_model["inputs"]["request"]["messages"][1]["content"])
+                following, *_ = send(1)
+                self.assertEqual(following["outputs"]["reply"], owner["outputs"]["reply"])
+                config.write_text("", encoding="utf-8")
+                disabled, *_ = send(1)
+                self.assertEqual(disabled["inputs"]["message"]["content"], text_trace.MASKED)
+
+    def test_masked_app_payload_keeps_only_known_shape(self):
+        fixture = {
+            "messages": [{"role": "user", "content": PRIVATE_FIXTURE}],
+            "tools": [{"type": "function", "function": {"name": "schedule_list",
+                                                        "arguments": '{"start":"2026-11-26"}'}}],
+            PRIVATE_FIXTURE: "unrecognized key",
+            "account": {"id": 7654321, "authorization": PRIVATE_FIXTURE},
+            "records": [PRIVATE_FIXTURE] * 119 + [{"role": "tool", "content": PRIVATE_FIXTURE}],
+        }
+        with text_trace.step("app_turn", surface="app_chat") as span:
+            span.io(inputs={"request": fixture})
+        request = self.capture.traces[0][0]["inputs"]["request"]
+        mask = text_trace.MASKED
+        self.assertEqual(request["messages"], [{"role": "user", "content": mask}])
+        self.assertEqual(request["tools"][0]["function"], {"name": "schedule_list", "arguments": {"start": mask}})
+        self.assertEqual(request["account"], {"id": mask, "_masked_fields": 1})
+        self.assertEqual(request["_masked_fields"], 1)
+        self.assertEqual(request["records"][50], {"_omitted_items": 20})
+        self.assertEqual(request["records"][-1], {"role": "tool", "content": mask})
+        self.assertNotIn("7654321", json.dumps(request))
+        self.assertNotIn("2026-11-26", json.dumps(request))
 
     async def test_text_dispatch_then_confirm_result_return(self):
         def respond(body):
@@ -184,6 +269,61 @@ class ToolTraceTest(unittest.IsolatedAsyncioTestCase):
             await self.ask(agent)
         _, request = self.capture.traces[0]
         self.assertEqual(request["error"], "timeout")
+
+    async def test_app_schedule_failures_keep_distinct_reasons(self):
+        agent = DiscordAgent.__new__(DiscordAgent)
+        agent.s = SimpleNamespace(anthropic_model="fixture", llm_max_tokens=100, anthropic_effort=None,
+                                  timezone="Asia/Seoul")
+        agent.store = SimpleNamespace(schedules_between=AsyncMock(side_effect=RuntimeError(PRIVATE_FIXTURE)))
+        agent.friend_cards = agent.google = agent.route = agent.warmer = None
+        agent.ring = False
+        scenarios = [
+            (None, {}, "permission_denied"),
+            (1, {}, "invalid_input"),
+            (1, {"start": "2026-11-19", "end": "2026-11-20"}, "storage_error"),
+        ]
+        for friend, args, reason in scenarios:
+            with self.subTest(reason=reason), text_trace.step("app_turn", surface="app_chat"):
+                def respond(body):
+                    if len(body["messages"]) == 1:
+                        return message([tool_use("schedule_list", args)], "tool_use")
+                    self.assertTrue(body["messages"][-1]["content"][0]["is_error"])
+                    return message([text("실패했어")])
+
+                agent.llm = ScriptedLLM(respond)
+                incoming = SimpleNamespace(friend_id=friend, via="app", room_key=PRIVATE_FIXTURE,
+                                           user_key=PRIVATE_FIXTURE, saved_id=None, actions=[])
+                end = asyncio.get_running_loop().time() + 2
+                await agent.ask([], [{"role": "user", "content": PRIVATE_FIXTURE}], incoming, end,
+                                tools=[SCHEDULE_LIST_TOOL])
+            trace = self.capture.traces[-1]
+            dispatch = next(run for run in trace if run["name"] == "tool_dispatch")
+            self.assertEqual(dispatch["outputs"]["reason"], reason)
+            if reason == "storage_error":
+                storage = next(run for run in trace if run["name"] == "schedule_storage")
+                self.assertEqual(storage["error"], "storage_error")
+
+    async def test_alternate_provider_tokens_do_not_count_cache_twice(self):
+        replies = iter([
+            httpx.Response(403, json={"error": PRIVATE_FIXTURE}),
+            httpx.Response(200, json={"choices": [{"message": {"content": PRIVATE_FIXTURE}}],
+                                      "usage": {"prompt_tokens": 90, "completion_tokens": 7,
+                                                "prompt_tokens_details": {"cached_tokens": 60}}}),
+        ])
+        llm = DeepSeekLLM(PRIVATE_FIXTURE, model="fixture-alternate", hedge_s=0,
+                          transport=httpx.MockTransport(lambda request: next(replies)))
+        self.addAsyncCleanup(llm.close)
+        payload = {"messages": [{"role": "user", "content": PRIVATE_FIXTURE}]}
+        with text_trace.step("app_turn", surface="app_chat"):
+            with self.assertRaises(DeepSeekError):
+                await llm._post(payload, asyncio.get_running_loop().time() + 2)
+            await llm._post(payload, asyncio.get_running_loop().time() + 2)
+        _, failure, success = self.capture.traces[0]
+        self.assertEqual(failure["outputs"]["reason"], "provider_auth")
+        self.assertEqual(success["extra"]["metadata"]["ls_model_name"], "fixture-alternate")
+        self.assertEqual(success["prompt_tokens"], 90)
+        self.assertEqual(success["total_tokens"], 97)
+        self.assertEqual(success["outputs"]["usage_metadata"]["input_token_details"]["cache_read"], 60)
 
     async def run_voice(self, execute, disconnect=False):
         upstream = Upstream([{"name": "recall", "id": PRIVATE_FIXTURE,

@@ -252,7 +252,7 @@ class Store:
                            unanswered: int = 3) -> list[dict]:
         """답할 때 넣는 최근 대화(오래된 것부터). 고르는 법은 pick_recent. 친구에게 전달되지 못한 마롱이 답은 뺀다."""
         rows = await self._all(
-            "SELECT m.id, m.role, m.user_key, p.name, m.content, m.created_at, "
+            "SELECT m.id, m.role, m.user_key, p.name, m.content, m.created_at, m.room_key, "
             "  coalesce(m.meta->>'proactive' = 'true', false) AS proactive FROM marong.messages m "
             "LEFT JOIN marong.people p ON p.user_key = m.user_key "
             "WHERE m.room_key IN " + self._reply_rooms("%(room)s") + " AND m.meta->>'delivered' IS DISTINCT FROM 'false' "
