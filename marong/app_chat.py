@@ -25,6 +25,7 @@ from tools.vertex_live.tool_trace import app_delivery, app_step, step as trace_s
 
 from .app_release import AppReleases
 from .app_session import COOKIE, SessionError, auth_mode, device_label, identify_request
+from .character.records import CharacterError
 from .app_store import APP_KEY
 from .discord_dm import DEFAULT_ORIGIN, DiscordIncoming, proactive_preference
 from .google_calendar import LINK_MARK, command as google_command
@@ -49,7 +50,8 @@ UNIFIED_FILES = {"account.html": "text/html", "admin.html": "text/html", "unifie
                  "unified.js": "text/javascript", "account.js": "text/javascript", "admin.js": "text/javascript",
                  "profile.html": "text/html", "profile.js": "text/javascript",
                  "voice.html": "text/html", "voice.js": "text/javascript", "friends.html": "text/html",
-                 "friends.js": "text/javascript"}
+                 "friends.js": "text/javascript",
+                 "character.html": "text/html", "character.js": "text/javascript"}
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 FID = re.compile(r"[A-Za-z0-9_-]{16,200}\Z")
 VERSION = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\Z")
@@ -63,6 +65,14 @@ PROBLEMS = {
     "already_friends": (409, "이미 친구 관계임"),
     "request_exists": (409, "기다리는 친구 요청이 있음"),
     "request_limit": (429, "오늘 친구 요청 수를 다 씀"),
+    "photo_invalid": (400, "사진 형식이나 크기가 맞지 않음"),
+    "too_large": (413, "사진 요청 크기 초과"),
+    "check_unavailable": (503, "사진 검사 준비 중"),
+    "too_many_characters": (409, "캐릭터를 이미 세 개 보관함"),
+    "image_budget": (409, "이번 달 그림 예산에 도달함"),
+    "job_running": (409, "그 캐릭터의 작업이 진행 중"),
+    "wrong_stage": (409, "현재 만들기 단계에서 할 수 없음"),
+    "no_regen_left": (409, "후보 다시 만들기를 다 씀"),
     "login_required": (401, "로그인이 필요함"),
     "code_wrong": (401, "코드가 맞지 않음"),
     "invite_not_found": (404, "없는 초대 링크"),
@@ -77,7 +87,7 @@ PROBLEMS = {
     "no_dm": (403, "이 친구의 디스코드 DM 연결이 없거나 아직 DM을 한 번도 보내지 않음"),
     "too_many_messages": (429, "1분에 20번 넘게 보냄"),
     "no_picture": (404, "그 이름의 그림이 없음"),
-    "not_ready": (409, "준비된 일기가 아님"),
+    "not_ready": (409, "아직 준비되지 않음"),
     "stale_revision": (409, "보낸 판 번호가 지금 판과 다름"),
     "busy": (409, "이 일기를 고치거나 다시 그리는 중"),
     "fix_limit": (409, "고치기 다섯 번을 다 씀"),
@@ -100,7 +110,7 @@ HEADERS = {
     "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY", "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
     "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; "
-                               "img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; "
+                               "img-src 'self' data: blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; "
                                "form-action 'none'",
 }
 
@@ -151,6 +161,10 @@ class AppChat:
         from .app_profile import AppProfile
         self.admin = AppAdmin(self, admin_email_hash)
         self.profile = AppProfile(self)
+        self.characters = None
+        if sessions is not None:
+            from .character.http import CharacterAPI
+            self.characters = CharacterAPI(self)
         if sessions is not None:
             from .app_friends import AppFriends
             self.friends = AppFriends(self)
@@ -194,6 +208,8 @@ class AppChat:
         except SessionError as p:
             headers = {"Retry-After": str(p.retry_after)} if p.retry_after is not None else None
             res = self._problem(Problem(p.code, headers=headers), trace)
+        except CharacterError as p:
+            res = self._problem(Problem(p.code, p.errors), trace)
         except web.HTTPException as e:
             res = e
         except (psycopg.OperationalError, TimeoutError) as e:  # includes the pool timeout
@@ -687,7 +703,7 @@ class AppChat:
         if self.sessions is not None:
             app.router.add_get("/chat/join/{token}", self.account_page)
             app.router.add_get("/chat/login", self.account_page)
-            app.router.add_get("/chat/{name:unified\\.(?:css|js)|(?:account|admin|profile|voice|friends)\\.js}", self.page)
+            app.router.add_get("/chat/{name:unified\\.(?:css|js)|(?:account|admin|profile|voice|friends|character)\\.js}", self.page)
             app.router.add_get("/chat/api/invites/{token}", self.check_invite)
             app.router.add_post("/chat/api/join", self.join_with_invite)
             app.router.add_post("/chat/api/login/code", self.login_with_device_code)
@@ -696,6 +712,7 @@ class AppChat:
             self.admin.register(app.router)
             self.profile.register(app.router)
             self.friends.register(app.router)
+            self.characters.register(app.router)
         app.router.add_get("/chat", self.home)
         app.router.add_get("/chat/", self.page)
         app.router.add_get("/chat/{name:chat\\.(?:js|css)}", self.page)

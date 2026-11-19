@@ -2,12 +2,16 @@
 
 import asyncio
 from dataclasses import replace
+from decimal import Decimal, InvalidOperation
 import logging
 import os
 from pathlib import Path
 import signal
+from types import SimpleNamespace
 from weakref import WeakValueDictionary
 from zoneinfo import ZoneInfo
+
+from aiohttp import ClientSession
 
 from marong.access import AccessVerifier
 from marong.app_chat import AppChat
@@ -16,6 +20,12 @@ from marong.app_push import AppPush
 from marong.app_runtime import app_settings, app_tables, google_settings, greeting_settings, model_tools, topic_tables
 from marong.app_session import AppSessions, auth_mode
 from marong.cache_warm import CacheWarmer
+from marong.character.artwork import ImageEditor
+from marong.character.graphics import ROOT, Templates
+from marong.character.http import CharacterAPI
+from marong.character.photos import load_detector
+from marong.character.vision import VisionExtractor
+from marong.character.worker import CharacterWorker, WorkerBudget
 from marong.config import load_dotenv, load_settings
 from marong.deepseek import from_env as deepseek_route
 from marong.diary import image_budget
@@ -26,6 +36,7 @@ from marong.embed import Embeddings
 from marong.google_calendar import GoogleCalendar, serve as serve_google
 from marong.llm import LLM
 from marong.memory import MemoryWorker
+from marong.pet.settings import PriceBook
 from marong.store import Store
 from marong.topics import Topics
 from marong.unified_delivery import AppProactive, AppReminders, UnifiedDelivery
@@ -87,7 +98,7 @@ async def serve(settings, credentials, options, secret, authentication, home, st
     memory_enabled = home == "app" and os.getenv("MARONG_DISCORD_MEMORY_WORKER") == "1"
     memory_store = Store(settings.database_url, call_bridge=True) if memory_enabled else None
     tasks = []
-    google = google_web = chat = diary_models = None
+    google = google_web = chat = diary_models = character_http = None
     fcm = options["fcm"]
     try:
         await store.open(wait=True)
@@ -135,6 +146,37 @@ async def serve(settings, credentials, options, secret, authentication, home, st
         agent.on_saved = on_saved
         delivery = UnifiedDelivery(store, push, authentication, on_saved, origin=options["origin"])
         chat.delivery = delivery
+        if os.getenv("MARONG_CHARACTER_DIR"):
+            try:
+                budget = Decimal(os.getenv("MARONG_IMAGE_MONTHLY_USD", "20"))
+                if not budget.is_finite() or budget < 0:
+                    raise InvalidOperation()
+            except InvalidOperation:
+                raise SystemExit("Invalid MARONG_IMAGE_MONTHLY_USD") from None
+            detector = (await asyncio.to_thread(load_detector, os.getenv("MARONG_FACE_DETECTOR"))
+                        if chat.profile.features["character"] else None)
+            chat.characters = CharacterAPI(chat, os.getenv("MARONG_CHARACTER_DIR"), detector, budget,
+                                           enabled=chat.profile.features["character"])
+        jobs = {}
+        if chat.profile.features["character"]:
+            character_http = ClientSession()
+            templates = await asyncio.to_thread(Templates)
+            prices = await asyncio.to_thread(PriceBook.read, ROOT / "marong" / "pet" / "prices.json")
+            metering = WorkerBudget(store, prices)
+            model_settings = SimpleNamespace(vision_model=os.getenv("MARONG_CHARACTER_VISION", "claude-sonnet-5-5"),
+                                             image_model=os.getenv("MARONG_CHARACTER_IMAGE", "gpt-image-2.5-flare"))
+            vision = VisionExtractor(character_http, settings.anthropic_api_key, model_settings, metering)
+            editor = ImageEditor(character_http, os.getenv("OPENAI_API_KEY", ""), templates, metering)
+
+            async def notify_character(friend, step, ident):
+                if await delivery.notifications_allowed(friend):
+                    notice = ("그림 후보가 나왔어" if step == "candidates" else "표정 그림이 준비됐어")
+                    page = "candidates" if step == "candidates" else "name"
+                    await push.notify(friend, "character", notice, open_path=f"/chat/character/{ident}/{page}")
+
+            character_worker = CharacterWorker(chat.characters, templates, vision, editor, model_settings, prices,
+                                               on_complete=notify_character)
+            jobs["character"] = character_worker.run
         topics = None
         if os.getenv("MARONG_TOPICS") == "1" and await topic_tables(store):
             candidate = Topics(settings, store, push)
@@ -144,7 +186,7 @@ async def serve(settings, credentials, options, secret, authentication, home, st
         if home == "app":
             proactive = AppProactive(settings, store, agent, locks, delivery, topics=topics)
             reminders = AppReminders(settings, store, agent, delivery, origin=options["origin"])
-            jobs = {"proactive": proactive.run, "reminders": reminders.run}
+            jobs.update(proactive=proactive.run, reminders=reminders.run)
             if diary_enabled:
                 diary = DiaryWorker(store, diary_models, delivery, image_budget(os.getenv("MARONG_DIARY_IMAGE_BUDGET_USD")),
                                     unified=True)
@@ -163,7 +205,7 @@ async def serve(settings, credentials, options, secret, authentication, home, st
                 google.notify = delivery.tell
                 google_web = await serve_google(google)
                 jobs["google"] = google.sync_loop
-            tasks = [asyncio.create_task(run_locked(settings.database_url, name, job)) for name, job in jobs.items()]
+        tasks = [asyncio.create_task(run_locked(settings.database_url, name, job)) for name, job in jobs.items()]
         log.info("app_runtime_on loops_home=%s authentication=%s", home, authentication)
         await stop.wait()
     finally:
@@ -180,6 +222,8 @@ async def serve(settings, credentials, options, secret, authentication, home, st
             await fcm.close()
         if diary_models:
             await diary_models.close()
+        if character_http:
+            await character_http.close()
         if memory_store:
             await memory_store.close()
         await store.close()

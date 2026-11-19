@@ -8,7 +8,8 @@ import psycopg
 
 log = logging.getLogger(__name__)
 LOCK_NAMESPACE = 20261119
-LOCKS = {"memory": 1, "cache": 2, "proactive": 3, "reminders": 4, "google": 5, "legacy_proactive": 6, "call_text": 7, "diary": 8}
+LOCKS = {"memory": 1, "cache": 2, "proactive": 3, "reminders": 4, "google": 5, "legacy_proactive": 6, "call_text": 7, "diary": 8,
+         "character": 9}
 
 
 def loops_home(value):

@@ -53,6 +53,7 @@ const app = {
   shown: new Map(),   // message id -> li
   pending: new Map(), // clientId -> {text, li}
   profileActive: false,
+  face: FACE,
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -117,6 +118,11 @@ async function refreshProfile() {
   const brand = document.querySelector('.brand');
   if (brand && brand.firstChild?.nodeType === Node.TEXT_NODE) brand.firstChild.textContent = profile.botName;
   document.title = profile.botName + ' · 글 대화';
+  const nextFace = profile.character?.faceUrl || FACE;
+  if (nextFace !== app.face) {
+    app.face = nextFace;
+    for (const image of document.querySelectorAll('.message.marong .face img, #typing .face img')) image.src = app.face;
+  }
   $('menu-profile').hidden = false;
   $('menu-friends').hidden = !profile.features.friends;
   const ring = $('ring-accept');
@@ -221,7 +227,7 @@ function item(message) {
   const face = document.createElement('span');
   face.className = 'face';
   const img = document.createElement('img');
-  img.src = FACE; img.alt = ''; img.width = 30; img.height = 30;
+  img.src = me ? FACE : app.face; img.alt = ''; img.width = 30; img.height = 30;
   face.append(img);
   const body = document.createElement('div');
   body.className = 'body';

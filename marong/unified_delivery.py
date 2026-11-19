@@ -1,6 +1,7 @@
 """Deliver app messages and scheduled calls to an account's writing room."""
 
 import asyncio
+from dataclasses import replace
 from datetime import timedelta
 import logging
 
@@ -120,6 +121,9 @@ class AppProactive(PrivateProactive):
     async def _send(self, room, begin, text, meta, *, app_text=None, picture=None):
         result = None
         if await self.still_current(room, begin):
+            if room.get("wearing_character"):
+                meta = {key: value for key, value in meta.items() if key != "topic"}
+                app_text = None
             result = await self.delivery.say(room["friend_id"], text, kind="proactive", ttl_s=PROACTIVE_APP_TTL_S,
                                              app_text=app_text, meta={**meta, "proactive": True},
                                              key=f"app-proactive:{begin.isoformat()}")
@@ -129,6 +133,8 @@ class AppProactive(PrivateProactive):
     async def _hello(self, room, choice):
         if not await self.delivery.notifications_allowed(room["friend_id"]):
             return False
+        if room.get("wearing_character"):
+            choice = replace(choice, prefs={**choice.prefs, "pictures": False})
         return await super()._hello(room, choice)
 
 

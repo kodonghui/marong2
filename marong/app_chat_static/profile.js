@@ -135,6 +135,82 @@
     return card;
   }
 
+  function wardrobe() {
+    const section = node('div', '', 'card');
+    section.append(node('h2', '캐릭터'));
+    const update = async () => {
+      const result = await request('/chat/api/characters');
+      if (result.status !== 200) {
+        if (result.status === 401) relogin();
+        else section.append(node('p', '캐릭터를 못 불러왔어', 'caption'),
+          button('다시 해 볼게', () => { section.replaceChildren(node('h2', '캐릭터')); update(); }, 'btnt'));
+        return;
+      }
+      const items = result.body.characters;
+      const base = node('div', '', 'card');
+      base.append(node('p', '기본 마롱이' + (data.character ? '' : ' · 쓰는 중')));
+      if (data.character) {
+        const reset = button('기본 마롱이로 돌아가기', () => {
+          const box = node('div', '', 'stack');
+          const confirm = button('기본 마롱이로 돌아가기', async () => {
+            confirm.disabled = true;
+            const response = await request('/chat/api/profile/character', {characterId: null}, 'PATCH');
+            confirm.disabled = false;
+            if (response.status === 200) {
+              data = response.body;
+              render();
+              signal(notice, '기본 마롱이로 돌아왔어');
+            } else problem(response);
+          }, 'btn2');
+          box.append(node('p', '기본 마롱이로 돌아갈까?'), confirm, button('그만두기', () => box.replaceWith(reset), 'btnt'));
+          reset.replaceWith(box);
+        }, 'btnt');
+        base.append(reset);
+      }
+      section.append(base);
+      if (!items.length) section.append(node('p', '사진으로 강아지나 고양이 캐릭터를 만들 수 있어', 'caption'));
+      for (const character of items) {
+        const row = node('div', '', 'card');
+        const avatar = new Image();
+        avatar.src = character.images.front || character.images.preview || '/face/v1/01-neutral.webp';
+        avatar.className = 'wardrobe-image';
+        avatar.alt = '';
+        const worn = data.character?.id === character.id;
+        row.append(avatar, node('p', (character.name || '만드는 중이야') + (worn ? ' · 쓰는 중' : '')));
+        const path = '/chat/character/' + character.id + '/';
+        if (character.status === 'ready') row.append(link('입혀 보기', path + 'try', 'btn2'));
+        else row.append(link('이어서 하기', path + (character.stage === 'sheet' ? 'candidates' : character.stage), 'btn2'));
+        const remove = button('지우기', () => {
+          const box = node('div', '', 'stack');
+          const confirm = button('지우기', async () => {
+            confirm.disabled = true;
+            const reply = await request('/chat/api/characters/' + character.id, undefined, 'DELETE');
+            confirm.disabled = false;
+            if (reply.status === 204) {
+              await load();
+              signal(notice, '지웠어');
+            } else if (reply.body?.code === 'job_running') {
+              signal(error, '지금 그리는 중이라 지울 수 없어. 끝나고 다시 해 줘');
+            } else problem(reply);
+          }, 'btn2 danger');
+          box.append(node('p', '지우면 되돌릴 수 없어. 지울까?'), confirm,
+            button('그만두기', () => box.replaceWith(remove), 'btnt'));
+          remove.replaceWith(box);
+        }, 'btnt danger');
+        row.append(remove);
+        section.append(row);
+      }
+      if (items.length < result.body.limit) section.append(link('새 캐릭터 만들기', '/chat/character/new', 'btn2'));
+      else {
+        const disabled = button('새 캐릭터 만들기', () => {}, 'btn2');
+        disabled.disabled = true;
+        section.append(disabled, node('p', '캐릭터는 3개까지 둘 수 있어. 하나를 지우면 새로 만들 수 있어', 'caption'));
+      }
+    };
+    update();
+    return section;
+  }
+
   function logout() {
     const box = node('div', '', 'card');
     const quit = button('로그아웃', async () => {
@@ -158,6 +234,7 @@
     face.replaceChildren(image);
     groups.replaceChildren(nameGroup(), link('통화 목소리 · ' + (data.voiceLabel || data.voice || '기본'),
       '/chat/me/voice', 'btn2'), codes(), usage());
+    if (data.features.character) groups.insertBefore(wardrobe(), groups.children[1]);
     if (data.features.friends) groups.append(link('친구', '/chat/friends', 'btn2'));
     actions.replaceChildren(button('로그아웃', logout, 'btnt danger'));
   }
