@@ -1,6 +1,15 @@
 # 마롱이 통합 앱(MVP) 설계 제안
 
-상태: 제안(2026-11-19, Claude). 동희님 체크포인트 전이에요. 통과하면 이 문서의 ID를 그대로 써서 CORTHEX 02~12단계 문서(`docs/02-prd/unified.md` 등, part 이름 `unified`)로 옮기고, 구현은 GPT가 해요.
+상태: 승인(2026-11-19 10:15:45 KST, 이 설계 스레드, 동희님 "승인", D104). 승인 뒤 이 문서의 ID를 그대로 써서 CORTHEX 단계 문서(part 이름 `unified`)로 옮겼어요: [01 도메인](01-domain/unified.md), [02 요구사항](02-prd/unified.md), 03 흐름(`03-user-flow/FL-169`~`FL-178`), [04 기능 명세](04-functional-spec/unified.md), 05 표([020_unified.sql](../marong/migrations/020_unified.sql), [그림](05-erd/unified.md)), [06 계약](../api/unified.openapi.yaml), [07 사이트맵](07-sitemap/sitemap.md), [08 화면 상태](08-screens/unified.md), [10 작업 목록과 GPT 인계](10-wbs/unified.md), [12 시험 계획](12-qa/unified.md). 이 문서는 배경과 이유를 한곳에서 읽는 용도이고, 이 문서와 단계 문서가 다르면 단계 문서가 맞아요. 구현은 GPT가 해요.
+
+단계 문서를 쓰면서 고친 곳(아래 본문에도 반영했어요):
+
+- 마이그레이션 번호는 020이에요(019는 성향 맞춤이 이미 씀). 통화 스키마에는 권한만 주는 008이 하나 더 있어요.
+- 새 화면과 API는 모두 지금 앱 서버의 경로 접두부 `/chat/` 아래에 둬요. 프로필은 `/chat/api/profile`이에요(`/chat/api/me`는 이미 있음).
+- 캐릭터 만들기 화면은 반려동물 part의 SCR-142~146을 고치지 않고 새 번호 SCR-170~174로 써요. 반려동물 part의 화면·흐름·표는 그대로 보류예요.
+- API는 동작 하나에 번호 하나로 나눠 API-238~242를 더했어요.
+- 친구 관계(`friendships`)에 상태(요청·수락·거절·끊김)와 양쪽의 '가까운 사이' 뜻(`close_a`·`close_b`) 칸을 더했어요.
+- 프로필 행은 미리 채우지 않고 가입하거나 연결할 때 만들어요.
 
 기준 코드: `main` `0953b86`(2026-11-19 01:39 KST, PR #52 합침). 운영 서버의 봇 코드는 `main`과 꼭 같지 않아요(15절).
 
@@ -36,6 +45,7 @@ D73~D89는 비워 둬요(진행 중인 구현 PR과 번호가 겹치지 않게).
 | D101 | 10:02 | (지인의 글 답 모델 질문에) "2" | 지인도 지금의 글 답 경로(무료 중계 우선, 실패하면 Claude)를 그대로 써요 |
 | D102 | 10:02 | "비즈니스 모델을 '피클 에이전트' 처럼 하루에 일정한 양 만큼 대화를 얼마든지 할 수 있게 할거야. 그리고 그 이상은 티켓이나 뭐 이런걸 사야 되는걸로. (근데 지금은 기능만 만들어놓고 추천처럼 150달러로 해)" | 지금은 하루 사용량을 세고 막을 수 있는 기능과 티켓 잔액 자리만 만들어요. 판매는 없어요. 통화 예산은 전체 월 150달러 + 한 사람당 상한(설정값) |
 | D103 | 10:02 | "일단 MVP를 내는거지 지금 서비스를 내는게 아니잔아", "내 주위 사람들만 하고 다 안다고 이거 개발하는거 이거 같이 개발하는 사람들이라고" | 이번 범위는 MVP. 공개 서비스용 장치는 넣지 않아요 |
+| D104 | 10:15 | "승인" | 이 설계 제안(PR #54)을 승인해요. 단계 문서로 옮기고 GPT 인계 절을 써요 |
 
 앞선 결정 가운데 그대로 쓰는 것: 11/18 "사람마다 자기 마롱이… 이름도 바꿀 수 있게", 웹 알림은 필요 없음, 통화 도구 대기 소리(1안), 통화에도 쇼핑 도구, 비동기를 기본으로(모두 Notion 11/18 인계 문서), D62(Gemini Live 유지), D9(월 150달러와 80·100·120% 규칙), D65(APK 빌드·서명은 GPT).
 
@@ -170,7 +180,7 @@ erDiagram
   rooms ||--o{ messages : "기존 그대로"
 ```
 
-새 표(모두 `marong` 스키마, 마이그레이션 019부터):
+새 표(모두 `marong` 스키마, 마이그레이션 020부터):
 
 | ID | 표 | 칸(요약) | 쓰임 |
 | --- | --- | --- | --- |
@@ -258,7 +268,7 @@ erDiagram
 
 ## 14. 변경안(ID)
 
-새 번호는 REQ-430, SPEC-370, FL-169, TBL-164, API-211, SCR-163, TASK-379, TC-430부터예요(`main`과 열린 PR 8개에서 가장 큰 번호 다음).
+새 번호는 REQ-430~483, SPEC-370~396, FL-169~178, TBL-164~172, API-211~242, SCR-163~174, TASK-379~410, TC-430~495예요(`main`과 열린 PR 8개에서 가장 큰 번호 다음).
 
 ### 14-1. 요구사항
 
@@ -389,37 +399,42 @@ erDiagram
 
 ### 14-4. API
 
-새 계약 파일 `api/unified.openapi.yaml`.
+새 계약 파일 `api/unified.openapi.yaml`. 로그인이 필요한 경로는 로그인 쿠키로, 관리자 경로는 Cloudflare Access로 확인해요.
 
 | ID | 경로 | 하는 일 |
 | --- | --- | --- |
-| API-211 | `GET /join/{token}` | 가입 화면(링크 상태 확인) |
-| API-212 | `POST /api/join` | 이름 넣고 가입 또는 연결, 로그인 쿠키 |
-| API-213 | `POST /api/login/code` | 기기 추가 코드로 로그인 |
-| API-214 | `POST /api/me/device-codes` | 기기 추가 코드 만들기 |
-| API-215 | `POST /api/logout` | 이 기기 로그아웃 |
-| API-216 | `GET /api/me` | 프로필, 쓰는 캐릭터, 오늘 사용량 |
-| API-217 | `PATCH /api/me/profile` | 마롱이 이름, 목소리, 공유 켬·끔 |
-| API-218 | `GET /api/voices` | 목소리 목록과 견본 주소 |
-| API-219 | `POST /api/characters` | 캐릭터 만들기 시작 |
-| API-220 | `PUT /api/characters/{id}/photos` | 사진 올리기 |
-| API-221 | `GET /api/characters/{id}` | 상태, 특징표, 그림 |
-| API-222 | `PATCH /api/characters/{id}/traits` | 특징표와 템플릿 고치기 |
-| API-223 | `POST /api/characters/{id}/preview` | 미리 보기 1장(202) |
-| API-224 | `POST /api/characters/{id}/candidates` | 후보 4장(202) |
-| API-225 | `POST /api/characters/{id}/pick` | 후보 고르기와 표정 만들기(202) |
-| API-226 | `PATCH /api/characters/{id}` | 이름 짓기 |
-| API-227 | `GET /api/characters/{id}/try` | 입혀 보기 |
-| API-228 | `POST /api/me/character` | 적용(캐릭터 id 또는 기본) |
-| API-229 | `GET /api/characters` · `DELETE /api/characters/{id}` | 보관 목록, 지우기 |
-| API-230 | `GET /api/friends` | 친구와 요청 목록 |
-| API-231 | `POST /api/friends/requests` | 친구 코드로 요청 |
-| API-232 | `POST /api/friends/requests/{id}` | 수락·거절 |
-| API-233 | `PATCH /api/friends/{id}` · `DELETE /api/friends/{id}` | 가까운 사이, 끊기 |
-| API-234 | `GET /api/me/usage` | 사용량 |
-| API-235 | `POST /admin/api/invites` · `GET /admin/api/invites` | 초대 링크 |
-| API-236 | `GET /admin/api/members` · `POST /admin/api/members/{id}/revoke` | 회원, 로그인 끊기 |
-| API-237 | `POST /admin/api/members/{id}/tickets` | 티켓 넣기 |
+| API-211 | `GET /chat/api/invites/{token}` | 초대 링크 상태 확인(가입 화면이 부름) |
+| API-212 | `POST /chat/api/join` | 이름 넣고 가입 또는 연결, 로그인 쿠키 |
+| API-213 | `POST /chat/api/login/code` | 기기 추가 코드로 로그인 |
+| API-214 | `POST /chat/api/device-codes` | 기기 추가 코드 만들기 |
+| API-215 | `POST /chat/api/logout` | 이 기기 로그아웃 |
+| API-216 | `GET /chat/api/profile` | 프로필, 쓰는 캐릭터, 오늘 사용량 |
+| API-217 | `PATCH /chat/api/profile` | 마롱이 이름, 목소리, 공유 켬·끔 |
+| API-218 | `GET /chat/api/voices` | 목소리 목록과 견본 주소 |
+| API-219 | `POST /chat/api/characters` | 캐릭터 만들기 시작 |
+| API-220 | `PUT /chat/api/characters/{id}/photos` | 사진 올리기 |
+| API-221 | `GET /chat/api/characters/{id}` | 상태, 특징표, 그림 |
+| API-222 | `PATCH /chat/api/characters/{id}/traits` | 특징표와 템플릿 고치기 |
+| API-223 | `POST /chat/api/characters/{id}/preview` | 미리 보기 1장(202) |
+| API-224 | `POST /chat/api/characters/{id}/candidates` | 후보 4장(202) |
+| API-225 | `POST /chat/api/characters/{id}/pick` | 후보 고르기와 표정 만들기(202) |
+| API-226 | `PATCH /chat/api/characters/{id}` | 이름 짓기 |
+| API-227 | `GET /chat/api/characters/{id}/try` | 입혀 보기 |
+| API-228 | `PUT /chat/api/profile/character` | 적용(캐릭터 id 또는 기본) |
+| API-229 | `GET /chat/api/characters` | 보관 목록 |
+| API-238 | `DELETE /chat/api/characters/{id}` | 캐릭터 지우기(쓰던 것이면 기본으로) |
+| API-242 | `GET /chat/api/characters/{id}/images/{slot}` | 캐릭터 그림 내려주기 |
+| API-230 | `GET /chat/api/friends` | 친구와 요청 목록 |
+| API-231 | `POST /chat/api/friends/requests` | 친구 코드로 요청 |
+| API-232 | `POST /chat/api/friends/requests/{friendId}` | 수락·거절 |
+| API-233 | `PATCH /chat/api/friends/{friendId}` | 가까운 사이(내 뜻) |
+| API-239 | `DELETE /chat/api/friends/{friendId}` | 끊기 |
+| API-234 | `GET /chat/api/usage` | 사용량 |
+| API-235 | `POST /chat/admin/api/invites` | 초대 링크 만들기 |
+| API-240 | `GET /chat/admin/api/invites` | 초대 링크 목록 |
+| API-236 | `GET /chat/admin/api/members` | 회원 목록 |
+| API-241 | `POST /chat/admin/api/members/{friendId}/revoke` | 로그인 끊기 |
+| API-237 | `POST /chat/admin/api/members/{friendId}/tickets` | 티켓 넣기 |
 
 바꿈: API-101~106(글 대화)과 통화 서버 API는 인증만 로그인 쿠키로 바뀌고 응답은 그대로예요. `no_dm` 오류는 없어져요. API-150 이후 반려동물 계약(61개)은 만들기에 해당하는 것만 API-219~229가 대신하고 나머지는 보류예요. 폐기: API-125·126(디스코드 음성 중계)과 디스코드 음성 설계 문서의 계약.
 
@@ -427,15 +442,20 @@ erDiagram
 
 | ID | 화면 | 경로 | 상태 |
 | --- | --- | --- | --- |
-| SCR-163 | 가입 | `/join/:token` | 정상, 이미 쓴 링크, 지난 링크, 이름 오류, 가입 뒤(앱 받기·기기 추가 코드) |
-| SCR-164 | 로그인 | `/login` | 코드 넣기, 틀림, 막힘, 초대 링크가 필요하다는 안내 |
+| SCR-163 | 가입 | `/chat/join/:token` | 정상, 이미 쓴 링크, 지난 링크, 이름 오류, 가입 뒤(앱 받기·기기 추가 코드) |
+| SCR-164 | 로그인 | `/chat/login` | 코드 넣기, 틀림, 막힘, 초대 링크가 필요하다는 안내 |
 | SCR-165 | 내 마롱이 | `/chat/me` | 이름, 쓰는 캐릭터, 보관한 캐릭터, 목소리, 기기 추가, 사용량 |
 | SCR-166 | 입혀 보기 | `/chat/character/:id/try` | 대화 미리 보기, 통화 미리 보기, 적용, 나중에 |
 | SCR-167 | 목소리 고르기 | `/chat/me/voice` | 목록, 재생 중, 견본 없음 |
 | SCR-168 | 친구 | `/chat/friends` | 목록, 받은 요청, 보낸 요청, 내 코드, 코드 오류 |
-| SCR-169 | 관리자 | `/admin/` | 초대 링크, 회원, 티켓 |
+| SCR-169 | 관리자 | `/chat/admin/` | 초대 링크, 회원, 티켓 |
+| SCR-170 | 캐릭터 만들기(사진) | `/chat/character/new` | SCR-142에서 옴 |
+| SCR-171 | 특징표 고치기 | `/chat/character/:id/traits` | SCR-143에서 옴 |
+| SCR-172 | 미리 보기 | `/chat/character/:id/preview` | SCR-144에서 옴(결제 상태 없음) |
+| SCR-173 | 후보 고르기 | `/chat/character/:id/candidates` | SCR-145에서 옴 |
+| SCR-174 | 이름 짓기 | `/chat/character/:id/name` | SCR-146에서 옴 |
 
-바꿈: SCR-142(만들기)·143(특징표)·144(미리 보기, 결제 상태 삭제)·145(후보)·146(이름 짓기)은 경로를 `/chat/character/...`로 옮기고 주인을 로그인한 사람으로 바꿔요. SCR-107·109(글 대화와 메뉴)에 '내 마롱이'·'친구' 들어가는 곳과 머리말의 이름·얼굴을 더해요. SCR-002(통화 중)에 대기 소리 상태와 캐릭터 얼굴을 더해요. SCR-113·119·120~122의 "디스코드 DM 연결 필요" 상태를 지워요. 보류: SCR-140·141·147~162. 화면 토큰은 얼려 둔 103개만 써요.
+바꿈: SCR-107·109(글 대화와 메뉴)에 '내 마롱이'·'친구' 들어가는 곳과 머리말의 이름·얼굴을 더해요. SCR-002(통화 중)에 대기 소리 상태와 캐릭터 얼굴을 더해요. SCR-113·119·120~122의 "디스코드 DM 연결 필요" 상태를 지워요. 보류: SCR-140~162(반려동물 part의 화면은 고치지 않아요). 화면 토큰은 얼려 둔 103개만 써요.
 
 ### 14-6. 작업
 
@@ -443,7 +463,7 @@ erDiagram
 
 | 패키지 | TASK | 내용 | 끝 조건 |
 | --- | --- | --- | --- |
-| U1 계정과 방 | TASK-379 | 마이그레이션 019(새 표, 새 칸)와 기존 데이터 채우기 | 채우기 뒤 기존 두 계정의 방 주인·프로필·설정이 맞음, 옛 코드 시험 통과 |
+| U1 계정과 방 | TASK-379 | 마이그레이션 020(새 표, 새 칸)와 기존 데이터 채우기 | 채우기 뒤 기존 방의 주인·먼저 연락 설정·가까운 사이 값이 맞음, 옛 코드 시험 통과 |
 | | TASK-380 | 초대 링크·로그인 쿠키·기기 코드(SPEC-370~372) | TC-430~437 |
 | | TASK-381 | 가입 때 만드는 것(SPEC-373) | TC-438 |
 | | TASK-382 | 로그인 확인 공통 함수, 앱 서버·통화 서버 적용(SPEC-374) | TC-439~441 |
@@ -454,9 +474,9 @@ erDiagram
 | U2 내 마롱이 | TASK-387 | 프로필 API와 화면(SCR-165), 이름 반영(SPEC-377) | TC-450~452 |
 | | TASK-388 | 19금 절 표시와 캐릭터별 제외 | TC-453 |
 | U3 캐릭터 | TASK-389 | PR #47의 계산 함수·어댑터를 `marong/character/`로 옮기고 주인 키를 바꿈 | 옮긴 함수의 기존 시험 통과 |
-| | TASK-390 | 만들기 작업과 API(SPEC-378, API-219~226·229) | TC-454~459 |
+| | TASK-390 | 만들기 작업과 API(SPEC-378, API-219~226·229·242) | TC-454~459 |
 | | TASK-391 | 입혀 보기·적용·되돌리기(SPEC-379) | TC-460~462 |
-| | TASK-392 | 화면(SCR-142~146 바꿈, SCR-166) | TC-463 |
+| | TASK-392 | 화면(SCR-170~174, SCR-166) | TC-463 |
 | | TASK-393 | 그림 예산(SPEC-380) | TC-464 |
 | U4 목소리와 동시 통화 | TASK-394 | 사람별 목소리, 목록, 견본, 화면(SPEC-385) | TC-465~467 |
 | | TASK-395 | 동시 통화(SPEC-386) | TC-468 |
@@ -509,7 +529,7 @@ erDiagram
 | 순서 | 하는 일 | 되돌리기 |
 | --- | --- | --- |
 | 1 | DB와 파일 백업 | |
-| 2 | 마이그레이션 019(더하기만)와 기존 데이터 채우기 | 새 표와 칸은 옛 코드가 읽지 않아서 그대로 둬도 됨 |
+| 2 | 마이그레이션 020(더하기만)와 기존 데이터 채우기 | 새 표와 칸은 옛 코드가 읽지 않아서 그대로 둬도 됨 |
 | 3 | 앱 서버를 새 서비스로 띄움. 로그인은 Access와 로그인 쿠키를 모두 인정. 작업 루프는 아직 봇(`MARONG_LOOPS_HOME=bot`) | 새 서비스 끔 |
 | 4 | 동희님이 `link` 링크로 자기 계정을 잇고 아이폰 웹에서 확인(16절 가) | |
 | 5 | 현경님 계정을 `link` 링크로 잇고 앱에서 확인(16절 나) | |

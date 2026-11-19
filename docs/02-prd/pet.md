@@ -115,7 +115,7 @@ ID 번호: REQ-330\~429(01 단계 머리말의 범위를 이 단계에서 429까
 | REQ-388 | 통화 중에는, 서비스는 통화 1분마다 하루 한도를 써야 한다. | functional | Must | CTX-024 | 기본값 Q3 | active |
 | REQ-389 | 통화 중 하루 한도를 다 쓰면, 아이는 졸려서 자러 간다는 말로 30초 안에 통화를 마쳐야 한다. | functional | Must | CTX-002 | 기본값 Q3 | active |
 | REQ-390 | 통화가 시작되면, 서비스는 AI가 만든 목소리라는 음성 안내를 먼저 들려줘야 한다. | functional | Must | CTX-002, CTX-025 | 연구 7.2 | active |
-| REQ-391 | 회원은 아이마다 목소리를 고를 수 있어야 한다. | functional | Could | CTX-002 | 새 제안 | deferred(통화 엔진 측정 결론 뒤) |
+| REQ-391 | 회원은 아이마다 목소리를 고를 수 있어야 한다. | functional | Could | CTX-002 | 새 제안 | changed(→ REQ-466\~468, D96) |
 
 ### 꾸미기(CTX-023)
 
@@ -157,7 +157,7 @@ ID 번호: REQ-330\~429(01 단계 머리말의 범위를 이 단계에서 429까
 
 | ID | Requirement | Type | Priority | Context | Source | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| REQ-418 | 공개 서비스는 회원 데이터를 지금 친구용 마롱이와 다른 DB에 둬야 한다. | non-functional | Must | CTX-025 | 01 질문 1, D63 | active |
+| REQ-418 | 공개 서비스는 회원 데이터를 지금 친구용 마롱이와 다른 DB에 둬야 한다. | non-functional | Must | CTX-025 | 01 질문 1, D63 | changed(→ REQ-444, D90) |
 | REQ-419 | 서비스는 다른 회원의 아이·그림·대화·주문을 찾는 요청에 그것이 없을 때와 같은 답을 해야 한다. | non-functional | Must | CTX-025 | 기존(일기 REQ-163과 같은 규칙) | active |
 | REQ-420 | 서비스는 다른 사이트에서 보낸 쓰기 요청을 거절해야 한다. | non-functional | Must | CTX-025 | 기존(REQ-164와 같은 규칙) | active |
 | REQ-421 | 서비스는 로그에 사진, 대화 글, 아이 이름, 회원 이메일을 남기지 않고 개수와 결과만 남겨야 한다. | non-functional | Must | CTX-025 | 기존(REQ-312와 같은 규칙) | active |
