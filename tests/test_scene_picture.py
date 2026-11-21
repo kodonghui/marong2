@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+from datetime import timedelta
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
@@ -9,7 +10,7 @@ import secrets
 import sys
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 from aiohttp.test_utils import TestClient, TestServer
@@ -21,6 +22,7 @@ from marong.app_push import AppPush
 from marong.app_session import AppSessions, COOKIE
 from marong.diary import drawing_allowed_in, image_budget
 from marong.diary_models import ModelResult, parse_picture
+from marong.pet_app_settings import PetAppSettings
 from marong.scene_picture import ScenePictures, SceneResult, subject
 from marong.scene_worker import SceneWorker
 from marong.unified_store import UnifiedStore
@@ -104,7 +106,9 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         owner, friend, ident = await account()
         outsider, other, other_ident = await account()
         chat = AppChat(store, SimpleNamespace(friend_cards=None), RoomLocks(), None, AppPush(store),
-                       sessions=sessions, authentication="session")
+                       sessions=sessions, authentication="session", admin_email_hash="a" * 64,
+                       pet_app_settings=PetAppSettings(diary_image_budget=None))
+        chat.access = SimpleNamespace(check=AsyncMock(return_value=("ok", "a" * 64)))
         worker = SceneWorker(store, None, chat.usage)
 
         def queue(who, character, count):
@@ -135,6 +139,24 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(*(worker.finish(job, result) for job, result in zip(jobs, (success, failure))))
         self.assertFalse(await worker.finish(jobs[0], success))
         self.assertEqual((await chat.usage.get(friend))["images"], 1)
+        db.admin("UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s", (ident, friend))
+        future = sessions.now() + timedelta(hours=1)
+        prefetch = await worker.topic_job(friend, "v1/snow", future)
+        self.assertEqual(await worker.topic_job(friend, "v1/snow", future), prefetch)
+        self.assertEqual(db.admin("SELECT not_before FROM marong.scene_pictures WHERE id=%s", (prefetch["id"],))[0][0],
+                         future - timedelta(minutes=30))
+        db.admin("UPDATE marong.scene_pictures SET cost_usd=.25 WHERE id=%s", (jobs[0]["id"],))
+        db.admin("UPDATE marong.scene_pictures SET cost_usd=.25 WHERE id=%s", (jobs[1]["id"],))
+        diary_id = db.admin("INSERT INTO marong.diaries(friend_id,diary_date) VALUES (%s,current_date) RETURNING id",
+                            (friend,))[0][0]
+        db.admin("""
+            INSERT INTO marong.diary_ai_runs(diary_id,kind,origin,trace_id,model,prompt_version,sent_at,cost_usd,outcome)
+            VALUES (%s,'draw','night','fixture','fixture','diary-v1',now(),2,'ok')
+        """, (diary_id,))
+        db.admin("""
+            INSERT INTO marong.character_jobs(character_id,step,state,finished_at,cost_usd)
+            VALUES (%s,'sheet','done',now(),3)
+        """, (ident,))
 
         async with TestClient(TestServer(chat.web_app())) as client:
             api = "/chat/api/scenes/"
@@ -149,6 +171,14 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
             for key, headers in attempts:
                 found = await client.get(api + str(key), headers=headers)
                 self.assertEqual((found.status, (await found.json())["code"]), (404, "not_found"))
+            costs = "/chat/admin/api/image-costs"
+            self.assertEqual((await client.get(costs, headers=owner)).status, 403)
+            response = await client.get(costs, headers={"Cf-Access-Jwt-Assertion": "fixture"})
+            self.assertEqual(response.status, 200)
+            costs = await response.json()
+            self.assertEqual(costs["byKind"], {"diary": 2, "topic": .5, "reaction": 0, "character": 3})
+            self.assertIsNone(costs["budgets"]["diary"])
+            self.assertEqual(costs["budgets"]["character"]["ratio"], .15)
         conn = SimpleNamespace(execute=AsyncMock())
         self.assertTrue(await drawing_allowed_in(conn, image_budget(" UNLIMITED "), sessions.now()))
         conn.execute.assert_not_called()
