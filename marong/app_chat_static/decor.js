@@ -10,11 +10,11 @@
   const diary = location.pathname === '/chat/diary/decor';
   const kinds = {hat: '모자', top: '옷', scarf: '목도리', background: '배경', paper: '속지', font: '글꼴', sticker: '스티커'};
   const slots = {head: '머리', body: '몸', neck: '목'};
-  let inventory, profile, tab = 'wear', diaryStyle;
+  let inventory, profile, tab = 'wear', diaryStyle, diaryExample;
 
   function problem(reply) {
     if (reply.status === 401) { location.replace('/chat/login'); return; }
-    const codes = {not_found: '지금은 받을 수 없는 아이템이야', not_owned: '보관함에 없는 아이템이야',
+    const codes = {not_found: '지금은 받을 수 없는 아이템이야', not_owned: diary ? '아직 안 받은 거야' : '보관함에 없는 아이템이야',
                    not_ready: '캐릭터를 먼저 완성해 줘'};
     signal(error, codes[reply.body?.code] || '잠깐 문제가 생겼어. 다시 해 볼래?', reply);
   }
@@ -132,29 +132,72 @@
   }
 
   function diaryEditor() {
+    const preview = node('div', '', 'decor-book-preview');
+    target.append(preview);
     const controls = ['background', 'paper', 'font'].map(kind => {
       const wrap = node('label', kinds[kind], 'field-label');
       const select = node('select');
+      select.setAttribute('aria-label', kinds[kind]);
       for (const item of inventory.items.filter(item => item.kind === kind)) {
         const option = node('option', item.name);
         option.value = item.id;
         select.append(option);
       }
       select.value = diaryStyle[kind].id;
+      select.addEventListener('change', paint);
       wrap.append(select);
       target.append(wrap);
-      return [kind + 'Id', select];
+      return [kind, select];
     });
-    const save = button('이렇게 꾸밀래', async () => {
+    async function paint() {
+      const paper = node('article', diaryExample?.body || '오늘은 산책을 했다…', 'decor-paper-preview');
+      if (diaryExample?.drawing?.kind === 'ai') {
+        const picture = node('img');
+        picture.alt = '';
+        picture.src = '/chat/diary/api/drawings/' + diaryExample.drawing.id;
+        paper.prepend(picture);
+      }
+      const fontStatus = node('p', '글꼴 받는 중…', 'caption');
+      const frame = node('div', '', 'decor-book-preview-frame');
+      frame.append(paper);
+      preview.replaceChildren(frame, fontStatus);
+      const files = {background: 'bg.webp', paper: 'paper.webp', font: 'font.woff2'};
+      const values = Object.fromEntries(controls.map(([kind, control]) => {
+        const item = inventory.items.find(row => row.id === control.value);
+        const url = item && !item.starter ? item.thumbUrl.replace(/thumb\.webp$/, files[kind]) : null;
+        return [kind, {[kind === 'font' ? 'fontUrl' : 'imageUrl']: url}];
+      }));
+      fontStatus.hidden = !values.font.fontUrl;
+      try {
+        const {paintDecor} = await import('/chat/diary/decor.js');
+        await paintDecor(paper, frame, values);
+      } catch {
+        // The preview still works with the default style.
+      } finally {
+        fontStatus.hidden = true;
+      }
+    }
+    const save = button('이걸로 할래', async () => {
       if (controls.some(([, control]) => !control.value)) return;
       save.disabled = true;
-      const body = Object.fromEntries(controls.map(([key, control]) => [key, control.value]));
+      const body = Object.fromEntries(controls.map(([key, control]) => [key + 'Id', control.value]));
       const reply = await request('/chat/diary/api/decor', body, 'PUT');
-      if (reply.status === 200) location.replace('/chat/diary/');
+      if (reply.status === 200) {
+        sessionStorage.setItem('diary-decor-saved', '1');
+        location.replace('/chat/diary/');
+      }
       else { save.disabled = false; problem(reply); }
     });
     save.disabled = controls.some(([, control]) => !control.value);
-    target.append(save, link('일기장으로', '/chat/diary/', 'btnt'));
+    const reset = button('처음 모습으로', () => {
+      for (const [kind, control] of controls) {
+        const starter = inventory.items.find(item => item.starter && item.kind === kind);
+        if (starter) control.value = starter.id;
+      }
+      paint();
+    }, 'btn2');
+    target.append(save, reset, link('일기장으로', '/chat/diary/', 'btnt'));
+    paint();
   }
 
   function render() {
@@ -176,6 +219,12 @@
     if (diary) {
       if (decor.status !== 200) { problem(decor); return; }
       diaryStyle = decor.body;
+      diaryExample = null;
+      const recent = await request('/chat/diary/api/latest');
+      if (recent.status === 200 && recent.body.date) {
+        const day = await request('/chat/diary/api/days/' + recent.body.date);
+        if (day.status === 200) diaryExample = day.body.diary;
+      }
     }
     render();
   }

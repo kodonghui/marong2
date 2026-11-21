@@ -21,7 +21,7 @@ export function paintDecor(paper, book, decor) {
     loaded = next.load().then(() => { document.fonts.add(next); return family; }).catch(() => null);
     fonts.set(url, loaded);
   }
-  loaded.then(family => { if (family) paper.style.setProperty('--font-diary', family); });
+  return loaded.then(family => { if (family) paper.style.setProperty('--font-diary', family); });
 }
 
 export function styleSticker(image, entry) {

@@ -131,10 +131,64 @@ test('TC-535/551/553: diary writer and sticker editing at 360 px', {skip: !chrom
     assert.equal(await page.getByRole('button', {name: /다시 그리기/}).count(), 0);
     await page.getByRole('button', {name: '스티커', exact: true}).click();
     await page.getByRole('button', {name: '별', exact: true}).click();
-    await page.getByRole('button', {name: '저장', exact: true}).click();
+    await page.getByRole('button', {name: '다 했어', exact: true}).click();
     await page.locator('.paper .diary-sticker').waitFor();
     assert.deepEqual(saved, [{itemId: 'star-sticker', x: 500, y: 500, scale: 100, rotation: 0}]);
+    await page.getByRole('button', {name: '스티커', exact: true}).click();
+    await page.getByRole('button', {name: '별', exact: true}).click();
+    page.once('dialog', async dialog => {
+      assert.equal(dialog.message(), '안 남기고 나갈까?');
+      await dialog.accept();
+    });
+    await page.getByRole('button', {name: '그만둘래'}).click();
+    await page.getByRole('heading', {name: '스티커 붙이기'}).waitFor({state: 'hidden'});
+    assert.equal(saved.length, 1);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 360);
+  } finally {
+    await browser.close();
+  }
+});
+
+test('TC-551: preview a new background, then restore and explicitly save defaults', {skip: !chromium}, async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage({viewport: {width: 360, height: 780}, isMobile: true});
+    const defaults = ['background', 'paper', 'font'].map(kind => ({
+      id: 'starter-' + kind, kind, name: '처음 ' + kind, starter: true,
+    }));
+    const blue = {id: 'blue-background', kind: 'background', name: '파란 배경',
+                  thumbUrl: '/chat/decor/v1/blue-background/thumb.webp'};
+    let saved;
+    await page.route('**/*', async route => {
+      const address = new URL(route.request().url()).pathname;
+      if (address === '/chat/api/profile') return route.fulfill({json: {character: null}});
+      if (address === '/chat/api/closet') return route.fulfill({json: {items: [...defaults, blue]}});
+      if (address === '/chat/diary/api/latest') return route.fulfill({json: {date: null}});
+      if (address === '/chat/diary/api/decor') {
+        if (route.request().method() === 'PUT') saved = route.request().postDataJSON();
+        return route.fulfill({json: Object.fromEntries(defaults.map(item => [item.kind, {id: item.id}]))});
+      }
+      if (address.startsWith('/chat/decor/')) return route.fulfill({contentType: 'image/png', body: BLANK});
+      if (address === '/chat/diary/') return route.fulfill({contentType: 'text/html', body: '<p>Diary</p>'});
+      const files = {'/chat/diary/decor': 'decor.html', '/chat/diary/decor.js': 'diary/decor.js',
+        '/chat/decor.js': 'decor.js', '/chat/unified.js': 'unified.js', '/chat/chat.css': 'chat.css',
+        '/chat/unified.css': 'unified.css'};
+      const file = files[address];
+      if (!file) return route.fulfill({status: 404});
+      const type = file.endsWith('.css') ? 'text/css' : file.endsWith('.js') ? 'application/javascript' : 'text/html';
+      return route.fulfill({contentType: type + '; charset=utf-8', body: await readFile(path.join(STATIC, file))});
+    });
+
+    await page.goto(BASE + '/chat/diary/decor');
+    await page.getByText('오늘은 산책을 했다…', {exact: true}).waitFor();
+    await page.getByLabel('배경', {exact: true}).selectOption(blue.id);
+    await page.locator('.decor-book-preview-frame[style*="blue-background/bg.webp"]').waitFor();
+    await page.getByRole('button', {name: '처음 모습으로'}).click();
+    assert.equal(await page.getByLabel('배경', {exact: true}).inputValue(), 'starter-background');
+    assert.equal(saved, undefined);
+    await page.getByRole('button', {name: '이걸로 할래'}).click();
+    await page.waitForURL(BASE + '/chat/diary/');
+    assert.deepEqual(saved, {backgroundId: 'starter-background', paperId: 'starter-paper', fontId: 'starter-font'});
   } finally {
     await browser.close();
   }

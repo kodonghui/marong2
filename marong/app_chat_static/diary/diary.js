@@ -290,7 +290,7 @@ async function openStickers() {
 function renderStickerEditor(paper) {
   const panel = element("section", "sticker-editor");
   const label = element("h2", "", "스티커 붙이기");
-  const count = element("p", "caption", `${editingStickers.length} / 10`);
+  const count = element("p", "caption", `${editingStickers.length}/10`);
   panel.append(label, count);
   for (const item of stickerInventory) {
     const add = button(item.name, () => {
@@ -301,7 +301,12 @@ function renderStickerEditor(paper) {
     add.disabled = editingStickers.length >= 10;
     panel.append(add);
   }
-  if (!stickerInventory.length) panel.append(element("p", "caption", "받은 스티커가 없어"));
+  if (editingStickers.length === 10) panel.append(element("p", "caption", "한 장에 10개까지야"));
+  if (!stickerInventory.length) {
+    const shop = element("a", "text-button", "상점 가기");
+    shop.href = "/chat/shop";
+    panel.append(element("p", "caption", "스티커는 상점에서 받을 수 있어"), shop);
+  }
   for (const [index, sticker] of editingStickers.entries()) {
     const url = imageSource(sticker.imageUrl);
     if (!url) continue;
@@ -338,19 +343,28 @@ function renderStickerEditor(paper) {
     history.replaceState(history.state, "", location.pathname);
     draw();
   }
-  const save = button("저장", async () => {
+  const payload = items => items.map(({itemId, x, y, scale, rotation}) => ({itemId, x, y, scale, rotation}));
+  const cancel = button("그만둘래", () => {
+    if (JSON.stringify(payload(editingStickers)) === JSON.stringify(payload(stickers)) ||
+        window.confirm("안 남기고 나갈까?")) close();
+  }, "text-button");
+  const save = button("다 했어", async () => {
     save.disabled = true;
+    cancel.disabled = true;
+    save.textContent = "붙이는 중이야…";
     try {
       const result = await api(`/days/${date}/stickers`, {method: "PUT",
-        body: {stickers: editingStickers.map(({itemId, x, y, scale, rotation}) => ({itemId, x, y, scale, rotation}))}});
+        body: {stickers: payload(editingStickers)}});
       stickers = result.stickers;
       close();
     } catch {
       save.disabled = false;
+      cancel.disabled = false;
+      save.textContent = "다시 해 볼게";
       showBanner("스티커를 저장하지 못했어");
     }
   });
-  panel.append(save, button("그만두기", close, "text-button"));
+  panel.append(save, cancel);
   return panel;
 }
 
@@ -698,4 +712,10 @@ function updateThemeOnMinute() {
   setTimeout(updateThemeOnMinute, 60000 - Date.now() % 60000);
 }
 updateThemeOnMinute();
-void load(true).then(() => sheets.show(location.hash.slice(1)));
+void load(true).then(() => {
+  if (sessionStorage.getItem("diary-decor-saved")) {
+    sessionStorage.removeItem("diary-decor-saved");
+    showBanner("일기장을 새로 꾸몄어");
+  }
+  sheets.show(location.hash.slice(1));
+});
