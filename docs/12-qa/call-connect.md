@@ -155,7 +155,7 @@
 | TC-570 | 시각 기록 저장 | SPEC-400, REQ-492 | api | 시험 계정, 가짜 Gemini | `/live`를 열고 `timing` 메시지(3.1의 칸 모두)를 보냄 → 통화 끝 | `call.segments.connect_timing`에 칸이 그대로, 서버 칸(`wsOpen`, `providerReady`, `firstAudioOut`)이 더해짐 | 돌리기 전 |
 | TC-571 | 틀린 시각 기록 | SPEC-400 | api | 같음 | 모르는 칸, 음수, 10분 넘는 값, 4KB 넘는 메시지, 문자열 값을 보냄 | 모르는 칸·틀린 값만 버리고 통화는 그대로. 4KB 넘으면 메시지 전체를 버림. 로그에 값 없이 `timing_rejected` | 돌리기 전 |
 | TC-572 | 준비 시각과 구간 종류 | SPEC-400, BUG-110 | api | 가짜 Gemini(`setupComplete`를 1.5초 늦춤) | 새 통화 → 다시 연결 → 글로 갈아타기 | 첫 구간 `start`, `provider_ready_at` − `opened_at` ≥ 1.5초. 다시 연결은 `reconnect`, 갈아타기는 `handoff`. Gemini 연결 실패면 `start_failed`로 닫힘 | 돌리기 전 |
-| TC-573 | 정적 파일 캐시 머리 | SPEC-401, REQ-495 | api | 없음 | 버전이 붙은 정적 파일, 버전 없는 정적 파일, `/`, `/status`, `/api/rtc`, `/live` 거절 응답을 부름 | 버전이 맞는 정적 파일만 `public, max-age=31536000, immutable`. 나머지는 지금처럼 `no-store` | 돌리기 전 |
+| TC-573 | 정적 파일 캐시 머리 | SPEC-401, REQ-495 | api | 없음 | 버전이 붙은 정적 파일, 버전 없는 정적 파일, `/`, `/status`, `/api/rtc`, `/live` 거절 응답을 부름 | 버전이 맞는 정적 파일만 `private, max-age=31536000, immutable`(SPEC-401 ③, API-246과 같음). 나머지는 지금처럼 `no-store` | 돌리기 전 |
 | TC-574 | 버전은 파일 내용 해시 | SPEC-401 | unit | 정적 파일 | 파일 한 바이트를 바꿈 | 그 파일의 버전 문자열이 바뀌고, `index.html`이 새 버전을 가리킴. 버전이 틀린 요청은 `no-store` | 돌리기 전 |
 | TC-575 | 화면 코드가 LiveKit을 기다리지 않음 | SPEC-401 | e2e | `livekit-client.js` 응답을 5초 늦춤 | 통화 화면을 엶 | 0.5초 안에 테마와 상태 글이 바뀌고(기본 글이 아님), 걸기 버튼이 보임. LiveKit이 늦어도 `/live`는 열림 | 돌리기 전 |
 | TC-576 | 동시 시작 | SPEC-402, REQ-491 | e2e | 마이크 1초, LiveKit 연결 3초로 늦춤 | 벨 받기 주소로 통화 시작 | `/live` 연결 시작이 `begin`에서 0.3초 안. 마이크·LiveKit·`/live`가 겹쳐 돎(시각 기록으로 확인) | 돌리기 전 |
