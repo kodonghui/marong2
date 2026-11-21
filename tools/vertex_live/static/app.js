@@ -54,7 +54,7 @@ let rtcCandidate=null,rtcPreparing=false,rtcPlaybackReady=false,audioReadySocket
 let currentAudioPath='pcm',lastPlaybackMessage='',lastPlaybackReport=-Infinity,rtcSilentMs=0;
 let fallbackNoticeTimer=null;
 let callTiming=null,timingTimer=null,statusReadyAt=null,callAttempts=0;
-let nativeAnswerAt=null,nativeRoute={device:'unknown',ringer:'unknown'},preparedCall=false;
+let nativeAnswerAt=null,coldNativeAnswer=false,nativeRoute={device:'unknown',ringer:'unknown'},preparedCall=false;
 
 function startTiming(){
   clearTimeout(timingTimer);
@@ -63,11 +63,13 @@ function startTiming(){
   const origin=nativeAnswerAt??(ringId?performance.timeOrigin:time);
   callTiming={
     origin,sent:false,expired:false,fields:{
-      base,entry:ringId?'ring':callAttempts?'redial':'button',reloaded:Boolean(ringId&&nativeAnswerAt===null),
+      base,entry:ringId?'ring':callAttempts?'redial':'button',
+      reloaded:Boolean(ringId&&(nativeAnswerAt===null||coldNativeAnswer)),
     },
   };
   callAttempts++;
   nativeAnswerAt=null;
+  coldNativeAnswer=false;
   markTiming('pageStart',performance.timeOrigin);
   markTiming('appStart',appStartedAt);
   if(statusReadyAt!==null)markTiming('statusReady',statusReadyAt);
@@ -112,7 +114,12 @@ let ringId=null,ringShown=false,botName='마롱이',characterId=null,lastCharact
     let value='';try{value=decodeURIComponent(found[1]).toLowerCase();}catch{}
     const rest=search.replace(/([?&])ring=[^&#]*&?/,'$1').replace(/[?&]$/,'');
     history.replaceState(null,'',location.pathname+rest+(location.hash||''));
-    if(UUID_RE.test(value))ringId=value;
+    if(UUID_RE.test(value)){
+      ringId=value;
+      if(Number.isFinite(window.__marongColdAnswerAt)&&window.__marongColdAnswerAt>0){
+        nativeAnswerAt=window.__marongColdAnswerAt;coldNativeAnswer=true;
+      }
+    }
   }
 }
 // The picture of a hello call (docs/04-functional-spec/call-first.md SPEC-269): the first 'ready' of the call that
