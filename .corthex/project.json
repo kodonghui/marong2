@@ -12,7 +12,8 @@
     "persona",
     "pet",
     "unified",
-    "usage-limit"
+    "usage-limit",
+    "call-connect"
   ],
   "records": {
     "kind": "notion",
