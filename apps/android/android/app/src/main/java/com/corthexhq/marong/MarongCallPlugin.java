@@ -90,6 +90,19 @@ public class MarongCallPlugin extends Plugin {
         });
     }
 
+    void prepareForRing() {
+        main.post(() -> {
+            Activity activity = getActivity();
+            if (destroyed || CallControl.isActive() || activity == null || activity.isFinishing()) {
+                return;
+            }
+            WebView web = bridge.getWebView();
+            if (web != null && web.getProgress() == 100 && AppUrls.isCallPage(web.getUrl(), bridge.getServerUrl())) {
+                web.evaluateJavascript(RingAnswer.PREPARE_JS, null);
+            }
+        });
+    }
+
     private void setCallActive(boolean active) {
         main.removeCallbacks(releaseAfterHangUp);
         if (destroyed) {
