@@ -180,7 +180,22 @@
   async function refresh() {
     if (loading) return;
     loading = true;
-    const [inviteReply, memberReply] = await Promise.all([request(base + '/invites'), request(base + '/members')]);
+    const [inviteReply, memberReply, costReply] = await Promise.all([
+      request(base + '/invites'), request(base + '/members'), request(base + '/image-costs'),
+    ]);
+    const costs = document.getElementById('image-costs');
+    if (costReply.status === 200 && costs) {
+      const {byKind, budgets} = costReply.body;
+      costs.hidden = false;
+      costs.replaceChildren(node('h2', '이번 달 그림 비용'));
+      for (const [key, label] of [['diary', '일기'], ['topic', '화두'], ['reaction', '반응'], ['character', '캐릭터']]) {
+        const budget = budgets[key];
+        const amount = byKind[key].toFixed(2) + '달러';
+        const share = budget && budget.limitUsd > 0 ? ' · ' + Math.round(100 * budget.ratio) + '%' : '';
+        costs.append(node('p', label + ' ' + amount + share, 'caption' +
+          (key === 'character' && budget?.ratio >= .8 ? ' danger' : '')));
+      }
+    }
     screen.setAttribute('aria-busy', 'false');
     loading = false;
     if (inviteReply.status !== 200 || memberReply.status !== 200) {

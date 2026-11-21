@@ -19,6 +19,8 @@ class AppProfile:
                  voice_samples=None):
         self.chat = chat
         self.features = {"character": bool(character), "friends": bool(friends), "decor": chat.pet_app_settings.decor}
+        if chat.pet_app_settings.scene_pictures:
+            self.features["scenePictures"] = True
         self.google = google
         self.voices = voices or configured_voices()
         self.daily_limit = chat.usage.limit if chat.usage else daily_limit

@@ -481,7 +481,8 @@
         apply.textContent = '이 모습으로 할래';
       });
       root.append(apply, link('나중에 할래', '/chat/me', 'btn2'),
-        node('p', '바꿔도 대화랑 기억은 그대로야. 먼저 보내는 그림 얘기는 글로만 와', 'caption'));
+        node('p', '바꿔도 대화랑 기억은 그대로야' +
+          (profile.features.scenePictures ? '' : '. 먼저 보내는 그림 얘기는 글로만 와'), 'caption'));
     }
   }
 

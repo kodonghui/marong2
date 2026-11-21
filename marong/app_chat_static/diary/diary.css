@@ -157,6 +157,9 @@ svg { width: var(--size-icon); height: var(--size-icon); fill: none; stroke: cur
 }
 .placeholder img { width: min(50%, var(--size-face-small)); height: auto; }
 .placeholder span { color: var(--diary-stamp); font-size: var(--font-size-diary-title); }
+.writer-placeholder { border: 1px dashed currentColor; }
+.diary-writer { display: flex; align-items: center; gap: var(--space-sm); }
+.diary-writer img { width: 2.5rem; height: 2.5rem; object-fit: contain; }
 .over-picture {
   position: absolute; inset: 0; margin: 0;
   display: grid; place-items: center; padding: var(--space-md);

@@ -197,7 +197,8 @@ class AppDiary:
         redraws = 2 - row["redraws_used"]
         fix_block = "fix_limit" if not fixes else "busy" if busy else None
         redraw_block = "redraw_limit" if not redraws else "busy" if busy else None
-        if redraw_block is None and not await drawing_allowed(self.store, self.draw_budget, now):
+        scene_redraw = self.chat.diary_scenes is not None and row.get("writer_id") is not None
+        if redraw_block is None and not scene_redraw and not await drawing_allowed(self.store, self.draw_budget, now):
             redraw_block = "drawing_budget"
         drawing_id = row["drawing_id"]
         writer = None

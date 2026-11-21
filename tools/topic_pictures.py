@@ -73,8 +73,10 @@ def candidates(path: Path) -> list[dict]:
     seen, bad = set(), []
     for i, item in enumerate(items):
         try:
-            if not isinstance(item, dict) or set(item) - set(FIELDS):
+            if not isinstance(item, dict) or set(item) - {*FIELDS, "petScene"}:
                 raise ValueError("fields")
+            if type(item.get("petScene", True)) is not bool:
+                raise ValueError("petScene")
             check(item)
             if item["name"] in seen:
                 raise ValueError("name")
@@ -244,6 +246,9 @@ def pack(args) -> int:
             (folder / f"{name}.webp").write_bytes(body)
             entry = {**{k: items[name][k] for k in FIELDS}, "status": "reviewed",
                      "added": pictures.get(name, {}).get("added", today)}
+            pet_scene = items[name].get("petScene", pictures.get(name, {}).get("petScene"))
+            if pet_scene is not None:
+                entry["petScene"] = pet_scene
             check(entry, folder)
         except (ValueError, OSError) as e:
             failed.append(f"{name} ({e})")

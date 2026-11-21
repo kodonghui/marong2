@@ -162,6 +162,7 @@
   },
   {
    "name": "tangerines",
+   "petScene": false,
    "title": "귤",
    "scene": "Marong peeling a tangerine with a small pile of tangerines beside it",
    "line": "귤 까먹는 중인데 손이 노래졌어 🍊",
@@ -183,6 +184,7 @@
   },
   {
    "name": "ramen-night",
+   "petScene": false,
    "title": "라면",
    "scene": "Marong eating a steaming bowl of ramen with chopsticks",
    "line": "야식으로 라면 끓였어 🍜",
@@ -434,6 +436,7 @@
   },
   {
    "name": "new-pajamas",
+   "petScene": false,
    "title": "잠옷",
    "scene": "Marong in cozy pajamas and a nightcap, hugging a pillow",
    "line": "새 잠옷 입었어! 폭신해 🌙",
@@ -450,6 +453,7 @@
   },
   {
    "name": "tteokbokki",
+   "petScene": false,
    "title": "떡볶이",
    "scene": "Marong eating red tteokbokki rice cakes with a fork, cheeks flushed from the spice",
    "line": "떡볶이 먹는데 좀 맵다 🔥",
@@ -488,6 +492,7 @@
   },
   {
    "name": "knitting",
+   "petScene": false,
    "title": "뜨개질",
    "scene": "Marong knitting with yarn and needles while a ball of yarn rolls away",
    "line": "뜨개질 배우는데 실이 자꾸 엉켜 🧶",
@@ -510,6 +515,7 @@
   },
   {
    "name": "headphones",
+   "petScene": false,
    "title": "노래",
    "scene": "Marong wearing big headphones with eyes happily closed, swaying to music",
    "line": "좋은 노래 찾았어 🎧 계속 듣는 중",

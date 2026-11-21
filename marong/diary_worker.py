@@ -14,6 +14,7 @@ from .app_push import TALK
 from .diary import KST, STOP_AT, WRITE_FROM, drawing_allowed, read_day_bundle, scene_error
 from .diary_models import ModelResult, PET_PROMPT_VERSION, PROMPT_VERSION, validate_draft
 from .room_scope import writing_room_key
+from .scene_picture import VERSION as SCENE_PROMPT_VERSION
 
 log = logging.getLogger("marong.diary")
 NOTICE_FROM = time(8, 30)
@@ -67,7 +68,7 @@ async def insert_picture(conn, row, revision, origin, run_id, picture):
 
 class DiaryWorker:
     def __init__(self, store, models, delivery, budget, *, now=None, rng=None, on_saved=None, unified=False,
-                 pet_voice=False):
+                 pet_voice=False, scenes=None):
         self.store = store
         self.models = models
         self.delivery = delivery
@@ -78,6 +79,7 @@ class DiaryWorker:
         self.running = False
         self.unified = unified
         self.pet_voice = pet_voice
+        self.scenes = scenes
 
     def destination(self, friend):
         if self.unified:
@@ -299,13 +301,15 @@ class DiaryWorker:
 
     async def _draw(self, row, deadline, trace):
         context = await self.store._one(
-            """SELECT r.scene,l.hair,l.glasses,l.top FROM marong.diary_revisions r
+            """SELECT r.scene,r.weather,f.name AS friend_name,l.hair,l.glasses,l.top FROM marong.diary_revisions r
             JOIN marong.diaries d ON d.id=r.diary_id
+            JOIN marong.friends f ON f.id=d.friend_id
             LEFT JOIN marong.diary_looks l ON l.friend_id=d.friend_id
             WHERE r.diary_id=%s AND r.revision=%s""", (row["id"], row["revision"]),
         )
         look = context if context["hair"] else None
         scene = context["scene"]
+        pet_scene = self.scenes is not None and row.get("character_id") is not None
         now = self.now()
         placeholder = None
         if now >= deadline:
@@ -314,7 +318,7 @@ class DiaryWorker:
             placeholder = "scene_rejected"
         elif not self.models.image_key:
             placeholder = "draw_unavailable"
-        elif not await drawing_allowed(self.store, self.budget, now):
+        elif not pet_scene and not await drawing_allowed(self.store, self.budget, now):
             placeholder = "drawing_budget"
         if placeholder:
             async with self.store.pool.connection() as conn, conn.transaction():
@@ -333,12 +337,17 @@ class DiaryWorker:
             return
         try:
             async with asyncio.timeout((deadline - sent).total_seconds()):
-                result = await self.models.draw(scene, look)
+                if pet_scene:
+                    result = await self.scenes.diary_art(row, scene, look, context["weather"], context["friend_name"])
+                else:
+                    result = await self.models.draw(scene, look)
         except TimeoutError:
             result = ModelResult(outcome="timeout", error="deadline")
         async with self.store.pool.connection() as conn:
-            run_id = await record_run(conn, row["id"], "draw", origin, attempt, trace, self.models.image_model,
-                                      "low", sent, result)
+            model = self.scenes.model if pet_scene else self.models.image_model
+            version = SCENE_PROMPT_VERSION if pet_scene else PROMPT_VERSION
+            run_id = await record_run(conn, row["id"], "draw", origin, attempt, trace, model,
+                                      "low", sent, result, prompt_version=version)
         async with self.store.pool.connection() as conn, conn.transaction():
             if not await self._owned(conn, row):
                 return

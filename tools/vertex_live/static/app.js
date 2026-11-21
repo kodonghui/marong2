@@ -64,7 +64,7 @@ let ringId=null,ringShown=false,botName='마롱이',characterId=null,lastCharact
 }
 // The picture of a hello call (docs/04-functional-spec/call-first.md SPEC-269): the first 'ready' of the call that
 // answered it carries {picture, title}; the face circle shows the picture for 15 seconds, once per picture.
-const TOPIC_RE=/^\/chat\/topics\/v[0-9]{1,3}\/[a-z0-9-]{1,40}\.webp$/,TOPIC_MS=15000;
+const TOPIC_RE=/^\/chat\/(?:topics\/v[0-9]{1,3}\/[a-z0-9-]{1,40}\.webp|api\/scenes\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/,TOPIC_MS=15000;
 const topicSeen=new Set();let topicTimer=null,topicOn=false;
 function topicCard(topic){
   const picture=topic?.picture,title=typeof topic?.title==='string'?topic.title.trim():'';
