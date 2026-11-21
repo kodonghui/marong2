@@ -1,6 +1,6 @@
 {
   "name": "marong-android",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "마롱이 안드로이드 앱: 웹 통화 주소를 Capacitor로 감싼 APK",
   "scripts": {
