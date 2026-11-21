@@ -55,6 +55,10 @@ usage_unlimited가 참   → (None, None)
 - `SECURITY DEFINER`, `STABLE`, `SET search_path = pg_catalog, call`. `PUBLIC`의 실행 권한은 빼고 `marong`(앱 서버)과 `marong_call`(통화 서버)에만 줘요. 앱 서버 역할은 통화 비용 표를 직접 읽지 못하는 채로 이 합만 받아요[새 제안].
 - 달 경계는 지금처럼 UTC 달(`call_cost.bounds`)이에요. 부르는 쪽이 `p_start`·`p_end`를 넘겨요.
 - 시험: 지금 `tools/vertex_live/test_call_cost.py`의 개인 상한 시험 자료(합 0.036)로 함수 값이 같은지 봐요.
+- 통화 사용량 기록 설정(`call.settings`의 `usage_mode`)이 없으면 `call.live_usage` 줄이 쌓이지 않아요. 그때 함수는 닫힌 구간을 길이(분) × `usd_per_minute`(설정이 없으면 분당 0.05달러)로 어림해 더해요(`call.segment_costs`의 `estimated`, 통화 007). 진행 중인 구간은 닫힐 때까지 0이에요. 그래서 그동안 친구에게 보이는 비율과 통화 월 한도의 막기는 어림값이에요. 전체 월 예산(`call_cost.py`의 `MONTH`)도 같은 어림값을 써요.
+  - 관찰(2026-11-21 KST, 통화 연결 고치기 스레드의 운영 DB 읽기, 값 출력 없음): `usage_mode` 줄이 없고 그날 15:28 KST 통화 두 건의 `live_usage`가 0줄이었어요.
+  - 확인(2026-11-21 KST, Claude, 버리는 pgserver DB, 합성 행): `usage_mode` 없이 닫힌 2분 구간 하나 → `live_usage` 0줄, `segment_costs.estimated` 참, `call.friend_month_usd` = 0.100000, `personal_budget_blocked`가 0.10에서 막고 0.11에서 막지 않음.
+  - 정확한 토큰 값으로 세려면 명세 7.1의 실계정 확인(일기·통화 비용 TASK-137) 뒤 `usage_mode`를 켜요. 이 기능은 `usage_mode`를 켜거나 바꾸지 않아요.
 
 ### 3.3 '내 사용량' 카드 문구(SCR-165)
 
