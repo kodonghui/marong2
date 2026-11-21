@@ -41,11 +41,13 @@ ALTER TABLE marong.characters ADD CONSTRAINT characters_intro_check CHECK (
 ALTER TABLE marong.characters ADD COLUMN IF NOT EXISTS photo_pick jsonb;
 ALTER TABLE marong.characters DROP CONSTRAINT IF EXISTS characters_photo_pick_check;
 ALTER TABLE marong.characters ADD CONSTRAINT characters_photo_pick_check CHECK (
-  photo_pick IS NULL OR (
-    jsonb_typeof(photo_pick) = 'object'
-    AND photo_pick ->> 'photo' IN ('photo_1', 'photo_2', 'photo_3')
-    AND jsonb_typeof(photo_pick -> 'box') = 'array' AND jsonb_array_length(photo_pick -> 'box') = 4
-  )
+  CASE
+    WHEN photo_pick IS NULL THEN true
+    WHEN jsonb_typeof(photo_pick -> 'box') = 'array' THEN
+      coalesce(photo_pick ->> 'photo' IN ('photo_1', 'photo_2', 'photo_3'), false)
+      AND jsonb_array_length(photo_pick -> 'box') = 4
+    ELSE false
+  END
 );
 
 -- Changes to friend_profiles (TBL-167 in 020) ← SPEC-407 | terms: TERM-217
