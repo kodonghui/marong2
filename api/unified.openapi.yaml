@@ -3177,6 +3177,21 @@ components:
           type: string
           format: uri-reference
           description: 정면 그림(API-242)
+        template:
+          type: string
+          enum:
+          - dog_small
+          - dog_large
+          - dog_long
+          - cat
+          - cat_round
+          description: 몸 템플릿. 차림 레이어 파일을 고를 때 써요(pet-app SPEC-421). 반려동물 part가 더한 칸이라 그 전 서버는 보내지 않아요
+        outfit:
+          $ref: 'pet-app.openapi.yaml#/components/schemas/WornOutfit'
+          description: 지금 입은 아이템과 그 템플릿의 레이어 주소(pet-app SPEC-421, API-255). MARONG_DECOR가 꺼져 있으면 세 자리가 모두 null
+        introMissing:
+          type: boolean
+          description: 아이 소개를 아직 저장하지 않았으면 true(pet-app SPEC-405). 내 마롱이 화면이 안내 줄을 보여요
     Profile:
       type: object
       additionalProperties: false
@@ -3233,6 +3248,9 @@ components:
             friends:
               type: boolean
               description: MARONG_FRIENDS가 켜져 있으면 true
+            decor:
+              type: boolean
+              description: MARONG_DECOR가 켜져 있으면 true(pet-app SPEC-417~424). 반려동물 part가 더한 칸이라 그 전 서버는 보내지 않아요. 없으면 false로 봐요
           description: 서버에서 켜진 기능. 화면은 꺼진 기능의 메뉴를 그리지 않아요(명세 공통 규칙 9)
         google:
           type: string

@@ -119,7 +119,10 @@
 | SCR-131\~139 | 앱 업데이트 몫으로 남김 | | | CTX-021 |
 | SCR-140\~162 | 반려동물 서비스: 홈, 가입, 아이 만들기 다섯(사진·특징표·미리 보기와 결제·후보·이름), 아이 화면, 통화, 일기장, 일기 한 장, 다시 그리기, 옷 입히기, 아이 설정, 작별 의식, 충전, 신고, 상점, 아이템 보기, 내 정보, 한도와 구독, 주문 내역, 결제 확인 | `docs/08-screens/pet.md` | 공통 캔버스 '반려동물' A(D72로 A, [pet-candidates.md](pet-candidates.md)) | 반려동물 서비스(CTX-022\~025, 다른 도메인의 공개 서비스) |
 | SCR-163\~174 | 통합 앱(MVP): 가입, 로그인, 내 마롱이, 입혀 보기, 목소리 고르기, 친구, 관리자, 캐릭터 만들기 다섯(사진·특징표·미리 보기·후보·이름). SCR-163\~169는 반려동물 서비스 몫이던 번호를 넘겨받았어요 | `docs/08-screens/unified.md` | 캔버스 [마롱이 통합 앱 목업](https://claude.ai/artifact/GXVep4QepAUdFhH6gDmLb3) 17장([unified-mockup.md](unified-mockup.md)) | 통합 앱(CTX-026\~029) |
-| SCR-175\~ | 다음 범위. 쓰기 전에 설계 스레드에 받아요 | | | |
+| SCR-175\~179 | 비움(pet-app이 같은 날의 다른 설계와 겹치지 않게 간격을 두고 180부터 잡았어요) | | | |
+| SCR-180\~186 | 반려동물 캐릭터 앱 안(pet-app): 아이 소개, 상점, 아이템 보기, 보관함, 일기장 꾸미기, 스티커 붙이기, 관리자 아이템 | `docs/08-screens/pet-app.md` | 캔버스 [마롱이 반려동물 앱 안 목업](https://claude.ai/artifact/SvoMoaLwcvq5XoBQxT2uVd) 13장([pet-app-mockup.md](pet-app-mockup.md)) | 반려동물 캐릭터 앱 안(CTX-030\~031) |
+| SCR-187\~194 | pet-app 몫으로 남김(추억 모드 등) | | | 반려동물 캐릭터 앱 안 |
+| SCR-195\~ | 다음 범위. 쓰기 전에 설계 스레드에 받아요 | | | |
 
 앱 쪽 번호(SCR-101\~112)는 07 사이트맵(`docs/07-sitemap/sitemap.yaml`)이 아니라 위 앱 문서에 적혀 있어요. 사이트맵의 화면은 통화 웹과 `/chat/` 아래 화면이에요.
 
@@ -132,6 +135,7 @@
 - 반려동물 목업은 이 스레드가 토큰 값으로 HTML을 그려 360px 폭 전체 길이로 찍었어요(프로젝트 파일 `marong-pet-mockup-20261117/`, 후보와 추천은 [pet-candidates.md](pet-candidates.md)). 2026-11-17 16:33 KST에 A로 정해져(D72) B의 새 색은 넣지 않아요.
 - 선 전화 목업은 그 스레드가 실제 화면 CSS를 띄워 찍은 그림이라 그대로 올렸어요(원본 [그 목업](https://claude.ai/artifact/UQYxaGXQ72wGRSWv5YuU8x), 프로젝트 파일 `marong-call-first-mockup-20261116/`).
 - 통합 앱(MVP) 목업은 캔버스를 따로 써요: [마롱이 통합 앱 목업](https://claude.ai/artifact/GXVep4QepAUdFhH6gDmLb3), 대지 `C026-<SCR>-<상태>-<day|night>` 17장(2026-11-19). 대지가 실제 HTML이고 부품 클래스는 [unified-mockup.css](unified-mockup.css) 한 벌이에요. 기록은 [unified-mockup.md](unified-mockup.md)예요.
+- 반려동물 캐릭터 앱 안(pet-app) 목업도 캔버스를 따로 써요: [마롱이 반려동물 앱 안 목업](https://claude.ai/artifact/SvoMoaLwcvq5XoBQxT2uVd), 대지 `C027-<SCR>-<상태>-<day|night>` 13장(2026-11-21). `unified-mockup.css` 위에 [pet-app-mockup.css](pet-app-mockup.css)를 더 불러요. 아이템 그림은 [pet-app-mockup/](pet-app-mockup/)의 자리 표시 그림이에요. 기록은 [pet-app-mockup.md](pet-app-mockup.md)예요.
 
 ## 7. 다른 스레드가 화면을 더할 때
 

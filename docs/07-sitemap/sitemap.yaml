@@ -95,6 +95,20 @@
       status: active
       flows: [FL-117]
       terms: [CTX-007, TERM-021, TERM-029]
+    - id: SCR-184
+      name: 일기장 꾸미기
+      path: /chat/diary/decor
+      access: 로그인한 사람(초대 링크로 가입)
+      status: active
+      flows: [FL-191]
+      terms: [CTX-030, CTX-007, TERM-213, TERM-214, TERM-215]
+    - id: SCR-185
+      name: 스티커 붙이기
+      path: '/chat/diary/:date#stickers'
+      access: 로그인한 사람(초대 링크로 가입, 자기 일기만)
+      status: active
+      flows: [FL-191]
+      terms: [CTX-030, CTX-007, TERM-216]
     - id: SCR-118
       name: 내 모습 카드
       path: '/chat/diary/:date#look'
@@ -283,6 +297,13 @@
       status: active
       flows: [FL-172]
       terms: [CTX-027, TERM-107, TERM-178, TERM-179]
+    - id: SCR-180
+      name: 아이 소개
+      path: /chat/character/:id/intro
+      access: 로그인한 사람(초대 링크로 가입, 자기 캐릭터만)
+      status: active
+      flows: [FL-185, FL-186]
+      terms: [CTX-027, TERM-179, TERM-217]
     - id: SCR-166
       name: 입혀 보기
       path: /chat/character/:id/try
@@ -297,6 +318,32 @@
   status: active
   flows: [FL-175]
   terms: [CTX-028, TERM-187, TERM-188, TERM-189]
+# 반려동물 캐릭터 꾸미기(CTX-030, 2026-11-21 설계 pet-app, D113·D114). 상점(SCR-181)과 보관함(SCR-183)은 글 대화 메뉴(SCR-109)와 내 마롱이(SCR-165)의 줄에서 들어와요.
+# 값은 모두 0원이고 결제 화면은 없어요. 아이템 보기(SCR-182)는 상점 위에 아래에서 올라오는 칸이에요(일기장 SCR-114~118과 같은 방식). 설정값 MARONG_DECOR=0이면 이 화면들의 메뉴 줄이 없어요.
+# 장면 그림(CTX-031)은 화면이 따로 없어요: 글 대화(SCR-107)의 화두 메시지와 통화 중(SCR-002)의 화두 카드에 그림으로 보여요(FL-187, FL-190). 일기 장면 그림은 일기장 한 날(SCR-113)에 보여요(FL-188).
+# without a screen: TERM-211(참조 이미지, 서버가 그림 모델에 보냄), TERM-212(아이템 받기, 상점의 버튼 동작)
+- id: SCR-181
+  name: 상점
+  path: /chat/shop
+  access: 로그인한 사람(초대 링크로 가입)
+  status: active
+  flows: [FL-189]
+  terms: [CTX-030, TERM-212]
+  children:
+    - id: SCR-182
+      name: 아이템 보기
+      path: '/chat/shop#item'
+      access: 로그인한 사람(초대 링크로 가입)
+      status: active
+      flows: [FL-189, FL-190]
+      terms: [CTX-030, TERM-212, TERM-218]
+- id: SCR-183
+  name: 보관함
+  path: /chat/closet
+  access: 로그인한 사람(초대 링크로 가입)
+  status: active
+  flows: [FL-189, FL-190, FL-191]
+  terms: [CTX-030, TERM-213, TERM-214, TERM-215, TERM-218]
 - id: SCR-169
   name: 관리자
   path: /chat/admin/
@@ -304,6 +351,14 @@
   status: active
   flows: [FL-169, FL-170, FL-171, FL-177, FL-179]
   terms: [CTX-026, CTX-029, TERM-173, TERM-176, TERM-190, TERM-192, TERM-199, TERM-200]
+  children:
+    - id: SCR-186
+      name: 관리자 아이템
+      path: /chat/admin/items
+      access: 동희님(Cloudflare Access)
+      status: active
+      flows: [FL-192]
+      terms: [CTX-030, TERM-212]
 
 # 반려동물 서비스(CTX-022~025, 2026-11-17 설계, 아직 만들지 않음). 친구용 마롱이와 다른 공개 서비스예요: 새 프로세스 run_pet.py가 내보내는 모바일 웹(PWA)이고,
 # Cloudflare Access 없이 카카오·구글 로그인으로 들어와요(SPEC-310, 368). 화면 정의는 docs/08-screens/pet.md, API는 api/pet.openapi.yaml(API-150~210)이에요.

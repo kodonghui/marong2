@@ -22,7 +22,7 @@
   --ring: #8a4b2470; --ring-outer: #8a4b2440;
 }
 .phone * {box-sizing: border-box}
-.phone button, .phone input {font: inherit; color: inherit}
+:where(.phone) button, :where(.phone) input {font: inherit; color: inherit}
 .phone p, .phone h1, .phone h2 {margin: 0}
 .ico {width: var(--size-icon); height: var(--size-icon); fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none}
 
