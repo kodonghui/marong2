@@ -39,6 +39,8 @@ from marong.llm import LLM
 from marong.memory import MemoryWorker
 from marong.pet.settings import PriceBook
 from marong.pet_app_settings import PetAppSettings
+from marong.scene_picture import ScenePictures
+from marong.scene_worker import SceneWorker
 from marong.store import Store
 from marong.topics import Topics
 from marong.unified_delivery import AppProactive, AppReminders, UnifiedDelivery
@@ -151,7 +153,7 @@ async def serve(settings, credentials, options, secret, authentication, home, st
                                invite_days=int(os.getenv("MARONG_INVITE_DAYS", "7")),
                                session_days=int(os.getenv("MARONG_SESSION_DAYS", "90")))
         diary_enabled = os.getenv("MARONG_DIARY") == "1"
-        if diary_enabled:
+        if diary_enabled or pet_settings.scene_pictures:
             diary_models = DiaryModels(settings, os.environ)
         chat = AppChat(store, agent, locks, AccessVerifier(options["access"]), push,
                        origin=options["origin"], port=options["port"], timezone=settings.timezone,
@@ -215,6 +217,9 @@ async def serve(settings, credentials, options, secret, authentication, home, st
             proactive = AppProactive(settings, store, agent, locks, delivery, topics=topics)
             reminders = AppReminders(settings, store, agent, delivery, origin=options["origin"])
             jobs.update(proactive=proactive.run, reminders=reminders.run)
+            if pet_settings.scene_pictures and chat.characters.media is not None:
+                pictures = ScenePictures(store, chat.characters.media, diary_models, pet_settings.scene_model)
+                jobs["scenes"] = SceneWorker(store, pictures, chat.usage).run
             if diary_enabled:
                 diary = DiaryWorker(store, diary_models, delivery, pet_settings.diary_image_budget,
                                     unified=True, pet_voice=pet_settings.pet_voice)
