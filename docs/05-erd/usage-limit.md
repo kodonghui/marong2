@@ -71,6 +71,7 @@ erDiagram
 - 무제한인데 하루 5, 하루 0·100001, 통화 0·1000.01 → 모두 제약 오류. 하루 200·통화 5는 들어감. 통과.
 - `marong` 역할: 한도 칸 고치기 됨, 함수 실행 됨, `call.live_usage` 직접 읽기는 권한 오류. `marong_call` 역할: 새 칸 읽기 됨, 한도 칸 고치기는 권한 오류, 함수 실행 됨. `PUBLIC` 실행 권한 없음. 통과.
 - 통화 비용 시험(TC-173)과 같은 자료(10,000·1,000 토큰, 단가 3·6)로 `call.friend_month_usd` = 0.036000. 지금 `personal_budget_blocked`가 0.036에서 막고 0.037에서 막지 않는 것과 같아요. 다른 친구는 0, 12월은 0. 통과.
+- `usage_mode` 설정 없이(그래서 `live_usage` 0줄) 닫힌 2분 구간 하나 → `call.friend_month_usd` = 0.100000(분당 기본 0.05달러 어림), `personal_budget_blocked`도 0.10에서 막고 0.11에서 막지 않음. 통과. 운영 DB에 `usage_mode`가 없다는 관찰은 [기능 명세 3.2](../04-functional-spec/usage-limit.md#32-이번-달-통화-비용callfriend_month_usd)에 있어요.
 - 저장소 시험 파일로는 아직 만들지 않았어요. TASK-411의 끝 조건이 이 검사들을 `tests/test_usage_limit.py`로 옮기는 거예요.
 
 ## 4. 되돌리기

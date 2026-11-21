@@ -13,7 +13,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | TC-496 | 있던 프로필은 무제한, 새 프로필은 기본 | SPEC-397, REQ-490, TBL-167 | api(`tests/test_usage_limit.py`) | 020·008까지 적용한 DB에 프로필 2행 | 021·009 적용 → 두 행 읽기 → 프로필 1행 더 넣기 | 앞 두 행은 (`usage_unlimited` 참, 비움, 비움). 새 행은 (거짓, 비움, 비움) | |
 | TC-497 | 다시 돌려도 관리자 값이 남고, 틀린 조합은 DB가 막음 | SPEC-397, REQ-487, TBL-167 | api(`tests/test_usage_limit.py`) | TC-496의 DB | 한 행을 (거짓, 비움, 비움)으로 바꾼 뒤 021·009를 다시 적용 → 무제한인데 하루 5, 하루 0·100001, 통화 0·1000.01 UPDATE → 하루 200·통화 5 UPDATE | 바꾼 행이 무제한으로 돌아가지 않음. 틀린 UPDATE는 모두 제약 오류이고 행이 그대로. 하루 200·통화 5는 들어감 | |
-| TC-498 | 통화 합 함수의 값과 권한 | SPEC-397, SPEC-399, `call.friend_month_usd` | api(`tests/test_usage_limit.py`) | TC-173과 같은 합성 통화(10,000·1,000 토큰, 단가 3·6), 다른 친구 하나 | 이 친구의 이번 달 합 → 다른 친구의 합 → 다음 달 범위의 합 → `marong` 역할로 함수 실행과 `call.live_usage` 읽기 → `marong_call` 역할로 한도 칸 UPDATE → `PUBLIC` 실행 권한 확인 | 0.036(지금 `personal_budget_blocked`가 0.036에서 막고 0.037에서 막지 않는 것과 같음), 다른 친구 0, 다음 달 0. `marong`은 실행되고 표 읽기는 권한 오류. `marong_call`의 UPDATE는 권한 오류. `PUBLIC` 실행 권한 없음 | |
+| TC-498 | 통화 합 함수의 값과 권한 | SPEC-397, SPEC-399, `call.friend_month_usd` | api(`tests/test_usage_limit.py`) | TC-173과 같은 합성 통화(10,000·1,000 토큰, 단가 3·6), 다른 친구 하나, `usage_mode` 없이 닫힌 2분 구간 하나인 셋째 친구 | 이 친구의 이번 달 합 → 다른 친구의 합 → 다음 달 범위의 합 → 셋째 친구의 합 → `marong` 역할로 함수 실행과 `call.live_usage` 읽기 → `marong_call` 역할로 한도 칸 UPDATE → `PUBLIC` 실행 권한 확인 | 0.036(지금 `personal_budget_blocked`가 0.036에서 막고 0.037에서 막지 않는 것과 같음), 다른 친구 0, 다음 달 0, 셋째 친구 0.10(분당 0.05달러 어림). `marong`은 실행되고 표 읽기는 권한 오류. `marong_call`의 UPDATE는 권한 오류. `PUBLIC` 실행 권한 없음 | |
 
 ## ② 한도 적용(TASK-412·413)
 
