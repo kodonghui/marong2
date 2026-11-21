@@ -137,7 +137,7 @@ def validate_draft(value, has_look: bool) -> tuple[str | None, str | None]:
     return None, scene_error(value["scene"], has_look=has_look)
 
 
-def parse_picture(encoded) -> DiaryPicture:
+def parse_picture(encoded, *, square=False) -> DiaryPicture:
     if not isinstance(encoded, str) or len(encoded) > 4 * ((MAX_IMAGE + 2) // 3):
         raise ValueError("image_size")
     try:
@@ -150,7 +150,7 @@ def parse_picture(encoded) -> DiaryPicture:
         with Image.open(io.BytesIO(data), formats=["WEBP", "PNG"]) as decoded:
             kind = decoded.format.lower()
             width, height = decoded.size
-            if not width > height > 0:
+            if height <= 0 or (width != height if square else width <= height):
                 raise ValueError("image_shape")
             if width * height > 25_000_000:
                 raise ValueError("image_size")
@@ -292,18 +292,25 @@ class DiaryModels:
                       for name in ("01-neutral.webp", "02-big-laugh.webp")]
         except OSError:
             return ModelResult(outcome="error", error="references", total_ms=milliseconds(started))
+        return await self.edit_picture(draw_prompt(scene, look), images, model=self.image_model,
+                                       size="1536x1024", output_format=self.image_format, deadline=60)
+
+    async def edit_picture(self, prompt, images, *, model, size, output_format, deadline, estimate_errors=False):
+        started = monotonic()
         try:
-            async with asyncio.timeout(60):
+            async with asyncio.timeout(deadline):
                 response = await self.http.post(
                     IMAGE_URL, headers={"Authorization": f"Bearer {self.image_key}"}, files=images,
-                    data={"model": self.image_model, "prompt": draw_prompt(scene, look), "n": "1", "quality": "low",
-                          "size": "1536x1024", "output_format": self.image_format},
-                    timeout=60,
+                    data={"model": model, "prompt": prompt, "n": "1", "quality": "low",
+                          "size": size, "output_format": output_format},
+                    timeout=deadline,
                 )
         except (TimeoutError, httpx.TimeoutException):
-            return ModelResult(outcome="timeout", error="timeout", total_ms=milliseconds(started))
+            metrics = drawing_usage(None, self.prices, estimate=estimate_errors)
+            return ModelResult(outcome="timeout", error="timeout", total_ms=milliseconds(started), **metrics)
         except httpx.RequestError:
-            return ModelResult(outcome="error", error="transport", total_ms=milliseconds(started))
+            metrics = drawing_usage(None, self.prices, estimate=estimate_errors)
+            return ModelResult(outcome="error", error="transport", total_ms=milliseconds(started), **metrics)
         try:
             data = response.json()
         except ValueError:
@@ -312,7 +319,7 @@ class DiaryModels:
         if not response.is_success:
             error = data.get("error")
             code = error.get("code") if isinstance(error, dict) else None
-            metrics = drawing_usage(data.get("usage"), self.prices, estimate=False)
+            metrics = drawing_usage(data.get("usage"), self.prices, estimate=estimate_errors)
             if code in ("content_policy_violation", "moderation_blocked", "safety_violations"):
                 return ModelResult(outcome="refused", error="content_policy", total_ms=milliseconds(started), **metrics)
             if response.status_code in (401, 402, 403) or code in ("billing_hard_limit_reached", "insufficient_quota"):
@@ -322,7 +329,7 @@ class DiaryModels:
         metrics = drawing_usage(data.get("usage"), self.prices, estimate=True)
         try:
             item, = data["data"]
-            picture = parse_picture(item["b64_json"])
+            picture = await asyncio.to_thread(parse_picture, item["b64_json"], square=size == "1024x1024")
         except (KeyError, TypeError, ValueError):
             return ModelResult(outcome="invalid", error="image_invalid", total_ms=milliseconds(started), **metrics)
         return ModelResult(value=picture, total_ms=milliseconds(started), **metrics)
