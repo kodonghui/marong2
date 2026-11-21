@@ -44,7 +44,7 @@ def valid_edits(data):
 
 
 def valid_result(data):
-    if not isinstance(data, dict) or data.keys() != EDITABLE | FLAGS | {"confidence"}:
+    if not isinstance(data, dict) or data.keys() != EDITABLE | FLAGS | {"confidence", "bestPhoto", "petBox"}:
         return False
     return (all(type(data[key]) is bool for key in FLAGS) and data["confidence"] in CONFIDENCE
             and valid_edits({key: data[key] for key in EDITABLE}))
@@ -57,6 +57,9 @@ def output_schema():
     fields.update({key: {"type": "boolean"} for key in FLAGS})
     fields["coatColors"] = {"type": "array", "items": {"type": "string", "enum": list(COLORS)}}
     fields["confidence"] = {"type": "string", "enum": list(CONFIDENCE)}
+    fields["bestPhoto"] = {"type": "integer", "description": "아이가 가장 크고 또렷하게 나온 사진 번호, 1부터"}
+    fields["petBox"] = {"type": "array", "items": {"type": "number"},
+                        "description": "그 사진에서 아이를 감싸는 상자 [x, y, w, h], 사진 크기에 대한 0~1 비율"}
     return {"type": "object", "properties": fields, "required": sorted(fields), "additionalProperties": False}
 
 

@@ -101,7 +101,7 @@ class CharacterAPI:
         friend = await self.member(req, write=True)
         ident = self.ident(req)
         async with self.pool.connection() as conn:
-            require_stage(await owned(conn, friend, ident), "photos", "traits")
+            self.require_photo_stage(await owned(conn, friend, ident))
         if self.detector is None:
             raise CharacterError("check_unavailable")
         if req.content_length is not None and req.content_length > MAX_BODY:
@@ -129,12 +129,23 @@ class CharacterAPI:
         if not photos:
             raise CharacterError("invalid_input")
         async with self.media.change(self.pool) as (conn, batch):
-            require_stage(await owned(conn, friend, ident, lock=True), "photos", "traits")
+            row = await owned(conn, friend, ident, lock=True)
+            self.require_photo_stage(row)
             await batch.remove(conn, ident, PHOTOS)
             for slot, photo in zip(PHOTOS, photos):
                 await batch.replace(conn, ident, slot, photo.png)
+            if row["error"] == "photo_missing":
+                await batch.remove(conn, ident, ("preview", *CANDIDATES))
+                await conn.execute("UPDATE marong.characters SET stage='photos',photo_pick=NULL WHERE id=%s", (ident,))
             await self.enqueue(conn, ident, "traits")
             return await self.response(conn, friend, ident, 202)
+
+    @staticmethod
+    def require_photo_stage(row):
+        if row["job_state"] == "failed" and row["error"] == "photo_missing":
+            require_stage(row, "photos", "traits", "preview", "candidates")
+        else:
+            require_stage(row, "photos", "traits")
 
     async def traits(self, req):
         friend = await self.member(req, write=True)

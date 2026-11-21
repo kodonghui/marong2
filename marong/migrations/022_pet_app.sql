@@ -50,6 +50,10 @@ ALTER TABLE marong.characters ADD CONSTRAINT characters_photo_pick_check CHECK (
   END
 );
 
+ALTER TABLE marong.character_jobs DROP CONSTRAINT IF EXISTS character_jobs_error_check;
+ALTER TABLE marong.character_jobs ADD CONSTRAINT character_jobs_error_check
+  CHECK (error IN ('model_error', 'model_refused', 'timeout', 'check_failed', 'budget', 'photo_missing'));
+
 -- Changes to friend_profiles (TBL-167 in 020) ← SPEC-407 | terms: TERM-217
 -- Who set the call voice: NULL (nobody, the default voice), 'recommended' (picked from the pet intro) or 'chosen'
 -- (the friend picked it). A recommendation never replaces a chosen voice.
