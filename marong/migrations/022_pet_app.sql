@@ -1,6 +1,6 @@
 -- 022 Pet characters inside the unified app: the pet speaks for itself, scene pictures drawn each time, a free shop
 -- of outfits and diary decorations, stickers on diary pages.
--- (docs/04-functional-spec/pet-app.md SPEC-405~427, CTX-030~031, decisions D110~D117.)
+-- (docs/04-functional-spec/pet-app.md SPEC-406~427, CTX-030~031, decisions D110~D117.)
 -- Seven new tables (TBL-175~181) and new columns on characters, friend_profiles, diaries, topic_sends and app_rings.
 -- 021 is left for the usage-limit work, which is designed in parallel; this file does not depend on it.
 -- Rules kept here:
@@ -11,13 +11,13 @@
 --   * Prices are 0 for now (D113). A paid item needs a new migration and a decision, so price_krw is checked = 0.
 --   * Nobody gets DELETE on marong tables, as in schema.sql. Ended rows keep a timestamp or a state instead.
 --   * No names, intros, prompts or chat text go into these tables except the pet intro the friend wrote, which is
---     the friend's own setting (SPEC-405). Logs read ids and numbers only (REQ-524).
+--     the friend's own setting (SPEC-409). Logs read ids and numbers only (REQ-524).
 -- Safe to run twice. Apply after 020_unified.sql and the call's 008_unified.sql, as the migration administrator.
 BEGIN;
 SET LOCAL lock_timeout = '2s';
 SET LOCAL ROLE marong_owner;
 
--- Changes to characters (TBL-169 in 020) ← SPEC-405, SPEC-406 | terms: TERM-179
+-- Changes to characters (TBL-169 in 020) ← SPEC-409, SPEC-406 | terms: TERM-179
 -- The pet intro: up to three personality words from a fixed list, likes, dislikes and what the pet calls its owner.
 -- intro_at is set the first time the intro is saved; the recommended voice is picked at that moment (SPEC-407).
 ALTER TABLE marong.characters ADD COLUMN IF NOT EXISTS personality text[] NOT NULL DEFAULT '{}';

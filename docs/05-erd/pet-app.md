@@ -2,7 +2,7 @@
 
 상태: 초안(2026-11-21 KST, Claude, corthex 한 번에 초안). 마이그레이션은 파일로만 있고 서버 DB에는 적용하지 않았어요. 적용은 10 단계 체크포인트와 구현 뒤의 서버 반영 작업이에요.
 원본: [`marong/migrations/022_pet_app.sql`](../../marong/migrations/022_pet_app.sql). 이 그림은 그 파일에서 손으로 옮긴 것이고, 다르면 SQL이 맞아요.
-입력: [기능 명세](../04-functional-spec/pet-app.md) SPEC-405\~427, [도메인](../01-domain/pet-app.md) CTX-030·031, TERM-210\~218.
+입력: [기능 명세](../04-functional-spec/pet-app.md) SPEC-406\~427, [도메인](../01-domain/pet-app.md) CTX-030·031, TERM-210\~218.
 사람 보기: 다른 05 문서처럼 GitHub의 Mermaid 그림과 NEXUS로 봐요(`.corthex/project.json` 05-erd 메모).
 API 계약: [`api/pet-app.openapi.yaml`](../../api/pet-app.openapi.yaml) API-250\~266.
 번호: 021은 같은 때 설계 중인 사용량 한도 작업 몫으로 비워 두고 이 파일은 022예요. 022는 021에 기대지 않아요.
@@ -25,7 +25,7 @@ API 계약: [`api/pet-app.openapi.yaml`](../../api/pet-app.openapi.yaml) API-250
 
 | 표 | 더하는 칸 | 하는 일 | 명세 |
 | --- | --- | --- | --- |
-| `characters`(TBL-169) | `personality`(글 배열 3개까지, 정한 8개 중), `likes`·`dislikes`(60자), `owner_call`(1\~10자), `intro_at` | 아이 소개(TERM-179의 일부). 처음 저장한 때가 `intro_at` | SPEC-405, 406 |
+| `characters`(TBL-169) | `personality`(글 배열 3개까지, 정한 8개 중), `likes`·`dislikes`(60자), `owner_call`(1\~10자), `intro_at` | 아이 소개(TERM-179의 일부). 처음 저장한 때가 `intro_at` | SPEC-409, 406 |
 | `characters`(TBL-169) | `photo_pick`(JSON `{photo, box}`) | 특징표 작업이 고른 사진과 그 안의 아이 상자. 정면 그림 때 잘라 쓰고 시트가 끝나면 사진과 함께 비워요(D120) | SPEC-428 |
 | `friend_profiles`(TBL-167) | `voice_source`(`recommended`·`chosen`) | 추천 목소리(TERM-217)인지 친구가 고른 목소리인지. 지금 목소리가 있는 줄은 `chosen`으로 채워요 | SPEC-407 |
 | `diaries`(TBL-105) | `character_id` | 그 날 일기를 쓴 반려동물 캐릭터. 비면 기본 마롱이 | SPEC-408, 413 |
@@ -165,7 +165,7 @@ erDiagram
 
 | 규칙 | 지키는 것 | 명세 |
 | --- | --- | --- |
-| 성격은 정한 8개 중 3개까지, 좋아하는 것·싫어하는 것 60자, 부르는 말 1\~10자, 소개를 저장했으면 부르는 말이 있음 | `characters_intro_check` | SPEC-405 |
+| 성격은 정한 8개 중 3개까지, 좋아하는 것·싫어하는 것 60자, 부르는 말 1\~10자, 소개를 저장했으면 부르는 말이 있음 | `characters_intro_check` | SPEC-409 |
 | 고른 사진은 `photo_1`\~`photo_3` 가운데 하나이고 상자는 숫자 4개 자리 | `characters_photo_pick_check` | SPEC-428 |
 | 추천 목소리 표시는 목소리가 있을 때만 | `friend_profiles_voice_source_check` | SPEC-407 |
 | 아이템 값은 0원만 | `decor_items.price_krw` CHECK | SPEC-417, D113 |
@@ -205,4 +205,4 @@ DB가 지키지 않고 앱이 지키는 것: 차림의 아이템이 보관함에
 - 임시 Postgres 16(`pgserver`, 임시 폴더, 합성 행만)에서 돌려 봤어요(2026-11-21, D120을 넣은 뒤 다시 돌림). 저장소의 `tests/pg.py` 순서대로 `schema.sql`, 통화 스키마, 통화 002\~007, 010\~019, 020과 통화 008, 021과 통화 009·010 뒤에 022를 두 번 적용해 통과했어요. 022 전에 목소리를 고른 프로필은 `voice_source`가 `chosen`으로 채워졌어요. 앱 서버 계정으로 새 표 7개의 읽기·넣기·고치기가 되고 지우기는 안 되는 것, 통화 서버 계정이 `app_rings.scene_picture_id`, `characters.personality`, `friend_profiles.voice_source`는 읽고 새 표 7개는 하나도 읽지 못하는 것을 확인했어요. 3절 규칙이 거절해야 할 넣기·고치기·지우기 21가지가 모두 거절됐어요(성격 목록 밖·4개, 부르는 말 없이 소개, 61자, 사진 고르기의 사진 이름 틀림·상자 3칸·객체 아님, 자리 틀림, 자리 없는 옷, 100원, 처음 스티커, 시각 없이 내리기, 화두 없는 화두 장면, 화두 있는 반응 장면, 그림 없이 `done`, 임대 없이 `drawing`, 비용 있는 겹친 그림, 같은 첫 착용, 그림 없이 `sent`, 목소리 없이 추천 표시, 지우기). 이 확인 스크립트는 저장소에 넣지 않았어요. 같은 확인을 시험 코드로 만드는 것은 10 단계 TASK-420·TC-510\~512예요.
 - 지금 목소리가 있는 `friend_profiles` 줄을 `chosen`으로 채우는 백필은 빈 DB에서만 돌렸어요. 채울 줄 수는 서버에서 세지 않았어요 [확인 안 함].
 - 운영 DB에는 적용하지 않았어요.
-- 명세의 저장하는 데이터가 표와 칸에 있어요: 아이 소개(SPEC-405), 추천 목소리(SPEC-407), 일기를 쓴 아이(SPEC-408, 413), 장면 그림(SPEC-410, 411, 414\~416), 아이템(SPEC-417, 418, 425, 426), 보관함(SPEC-419), 차림(SPEC-420, 421), 반응(SPEC-422), 일기장 꾸밈(SPEC-423), 스티커(SPEC-424). SPEC-406, 412, 427은 새로 저장하는 값이 없어요(SPEC-409는 쓰지 않은 번호).
+- 명세의 저장하는 데이터가 표와 칸에 있어요: 아이 소개(SPEC-409), 추천 목소리(SPEC-407), 일기를 쓴 아이(SPEC-408, 413), 장면 그림(SPEC-410, 411, 414\~416), 아이템(SPEC-417, 418, 425, 426), 보관함(SPEC-419), 차림(SPEC-420, 421), 반응(SPEC-422), 일기장 꾸밈(SPEC-423), 스티커(SPEC-424). SPEC-406, 412, 427은 새로 저장하는 값이 없어요(SPEC-409는 쓰지 않은 번호).

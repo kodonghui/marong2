@@ -1,4 +1,4 @@
-# 마롱이 통합 앱의 반려동물 캐릭터 API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/pet-app.md(SPEC-405~427), DB: marong/migrations/022_pet_app.sql(TBL-175~181), 표 설명: docs/05-erd/pet-app.md
+# 마롱이 통합 앱의 반려동물 캐릭터 API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/pet-app.md(SPEC-406~427), DB: marong/migrations/022_pet_app.sql(TBL-175~181), 표 설명: docs/05-erd/pet-app.md
 openapi: 3.1.0
 info:
   title: 마롱이 반려동물 캐릭터(통합 앱) API
@@ -17,7 +17,7 @@ info:
     - API 256번은 쓰지 않은 번호예요. 267\~279번은 비워 둬요.
 
     이 파일 밖에서 바뀌는 것(같은 PR에서 그 계약 파일에 칸을 더했어요. 모두 선택 칸이라 지금 서버의 응답도 계약에 맞아요).
-    1. 프로필(API-216)의 `character`에 `template`, `outfit`(이 파일의 `WornOutfit`), `introMissing`이 생겨요(SPEC-405, 421).
+    1. 프로필(API-216)의 `character`에 `template`, `outfit`(이 파일의 `WornOutfit`), `introMissing`이 생겨요(SPEC-409, 421).
     2. 일기 한 날(API-110)에 `writer`(이 파일의 `DiaryWriter`)가 생겨요(SPEC-408, 413).
     3. 목소리 고르기(API-217)는 모양이 그대로이고, 서버가 `friend_profiles.voice_source`를 `chosen`으로 같이 적어요(SPEC-407).
     4. 글 대화 메시지의 `meta`에 `scene`(장면 그림 id)과 `reaction`(아이템 id)이 생길 수 있어요. 글 대화 화면은 `scene`이 있으면 API-262 주소로 그림을 그려요(SPEC-411, 416, 422). 통화 서버가 선 전화 화면에 보내는 화두 카드의 `picture`도 `/chat/api/scenes/{id}`일 수 있어요. 두 화면의 그림 주소 검사에 이 모양을 더해요.
@@ -30,7 +30,7 @@ info:
     5. 스티커(API-261)는 그 날 스티커 전체를 보내는 PUT이에요. 배열 순서가 겹치는 순서(앞이 아래)예요. 빈 배열이면 모두 떼요.
     6. 상점은 지금 모든 값이 0원이에요(D113). `priceKrw`는 정수이고 지금은 늘 0이에요. 결제·충전 API는 없어요.
 
-    Open: 기본 마롱이의 차림(질문 A)은 답이 온 뒤 API를 더해요. 추억 모드(D118)는 답 대기예요.
+    Open: 기본 마롱이의 차림(질문 A)은 답이 온 뒤 API를 더해요. 추억 모드(D121)는 답 대기예요.
 servers:
 - url: https://marong.corthex-hq.com
   description: 앱 서버. 터널이 /chat/ 아래를 앱 서버로 보내요. /chat/admin/ 아래만 Cloudflare Access 뒤예요
@@ -45,7 +45,7 @@ paths:
       x-corthex:
         id: API-250
         spec:
-        - SPEC-405
+        - SPEC-409
       parameters:
       - $ref: '#/components/parameters/CharacterId'
       responses:
@@ -75,7 +75,7 @@ paths:
       x-corthex:
         id: API-251
         spec:
-        - SPEC-405
+        - SPEC-409
         - SPEC-407
       parameters:
       - $ref: '#/components/parameters/CharacterId'

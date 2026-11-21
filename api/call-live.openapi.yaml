@@ -483,7 +483,7 @@ components:
       additionalProperties: false
     LivePlayback:
       type: object
-      description: 재생 진단(SPEC-404 3.3). 앱 0.3.1이 아니면 device는 unknown이고 볼륨 칸이 없어요
+      description: 재생 진단(SPEC-404 3.3). 웹이나 앱 0.3.0이면 device는 unknown이고 볼륨 칸이 없어요. 앱 0.3.1부터 앱이 장치·볼륨을 넘겨요(SPEC-405)
       required:
       - type
       - v

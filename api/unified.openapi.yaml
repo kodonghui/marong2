@@ -3191,7 +3191,7 @@ components:
           description: 지금 입은 아이템과 그 템플릿의 레이어 주소(pet-app SPEC-421, API-255). MARONG_DECOR가 꺼져 있으면 세 자리가 모두 null
         introMissing:
           type: boolean
-          description: 아이 소개를 아직 저장하지 않았으면 true(pet-app SPEC-405). 내 마롱이 화면이 안내 줄을 보여요
+          description: 아이 소개를 아직 저장하지 않았으면 true(pet-app SPEC-409). 내 마롱이 화면이 안내 줄을 보여요
     Profile:
       type: object
       additionalProperties: false

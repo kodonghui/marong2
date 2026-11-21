@@ -23,7 +23,7 @@
       "checks": [
         {
           "level": "info",
-          "message": "docs/02-prd/pet-app.md: REQ-500~546·550~552(547~549는 추억 모드 D118 답 뒤로 남김). pet.md·call-first.md의 바뀌는 REQ 표시. 용어 검사 통과",
+          "message": "docs/02-prd/pet-app.md: REQ-500~546·550~552(547~549는 추억 모드 D121 답 뒤로 남김). pet.md·call-first.md의 바뀌는 REQ 표시. 용어 검사 통과",
           "at": "2026-11-21"
         }
       ],
@@ -49,7 +49,7 @@
       "checks": [
         {
           "level": "info",
-          "message": "docs/04-functional-spec/pet-app.md: SPEC-405~429(409 비움), AI-40~43, AI-30·31 바꿈. D119 그림 월 예산 없음, D120 사진도 보여 주기(SPEC-428). 고양이 사진 그리기 시험 숫자 3.3·3.13. 용어 검사 통과",
+          "message": "docs/04-functional-spec/pet-app.md: SPEC-406~429, AI-40~43, AI-30·31 바꿈. D119 그림 월 예산 없음, D120 사진도 보여 주기(SPEC-428). 고양이 사진 그리기 시험 숫자 3.3·3.13. 용어 검사 통과",
           "at": "2026-11-21"
         }
       ],
