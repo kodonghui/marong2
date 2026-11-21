@@ -9,12 +9,19 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.os.SystemClock;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
+import android.webkit.WebView;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
+import com.getcapacitor.BridgeWebViewClient;
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -54,25 +61,74 @@ public class RingAnswerDeviceTest {
         long now = System.currentTimeMillis();
         assertTrue(PushState.firstRing(context, ring, now));
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
-            scenario.onActivity(activity -> {
-                String base = PushLinks.pageUrl(activity.getBridge().getServerUrl(), "/");
-                activity.getBridge().getWebView().loadDataWithBaseURL(base, """
+            AtomicInteger fallbackLoads = loadFixture(scenario, ring, """
                     <!doctype html><script>
                     window.__marongCall = {
                       prepareCall() { window.prepared = true; return true; },
                       answerRing(id, at) { window.answer = id; window.answeredAt = at; return true; }
                     };
                     </script>
-                    """, "text/html", "UTF-8", null);
-            });
-            awaitScript(scenario, "typeof window.__marongCall === 'object'", "true");
+                    """);
+            awaitScript(scenario, "document.readyState === 'complete' && typeof window.__marongCall === 'object'", "true");
             scenario.onActivity(activity -> CallControl.prepareForRing());
             awaitScript(scenario, "window.prepared === true", "true");
-            scenario.onActivity(activity -> activity.onNewIntent(
-                Ring.answerIntent(context, ring).putExtra(Ring.EXTRA_ANSWERED_AT, now)));
+            answer(scenario, ring, now);
             awaitScript(scenario, "window.answer === '" + ring + "' && window.answeredAt === " + now, "true");
             assertEquals("true", script(scenario, "location.search === ''"));
+            assertEquals(0, fallbackLoads.get());
         }
+    }
+
+    @Test
+    public void rejectedHookOpensTheFallbackOnce() throws Exception {
+        String ring = UUID.randomUUID().toString();
+        long now = System.currentTimeMillis();
+        assertTrue(PushState.firstRing(context, ring, now));
+        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+            AtomicInteger fallbackLoads = loadFixture(scenario, ring, """
+                    <!doctype html><script>window.__marongCall = {answerRing() { return false; }};</script>
+                    """);
+            awaitScript(scenario, "document.readyState === 'complete' && typeof window.__marongCall === 'object'", "true");
+            answer(scenario, ring, now);
+            awaitScript(scenario, "document.readyState === 'complete' && location.search === '?ring=" + ring + "'", "true");
+            answer(scenario, ring, now);
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+            assertEquals(1, fallbackLoads.get());
+        }
+    }
+
+    private void answer(ActivityScenario<MainActivity> scenario, String ring, long now) {
+        scenario.onActivity(activity -> {
+            Intent launch = activity.getIntent();
+            activity.onNewIntent(Ring.answerIntent(context, ring).putExtra(Ring.EXTRA_ANSWERED_AT, now));
+            activity.setIntent(launch); // ActivityScenario identifies the activity by its launch intent.
+        });
+    }
+
+    private static AtomicInteger loadFixture(ActivityScenario<MainActivity> scenario, String ring, String html) {
+        AtomicInteger fallbackLoads = new AtomicInteger();
+        byte[] markup = html.getBytes(StandardCharsets.UTF_8);
+        scenario.onActivity(activity -> {
+            String base = PushLinks.pageUrl(activity.getBridge().getServerUrl(), "/");
+            String fallback = PushLinks.ringUrl(activity.getBridge().getServerUrl(), ring);
+            WebView web = activity.getBridge().getWebView();
+            web.stopLoading();
+            web.setWebViewClient(new BridgeWebViewClient(activity.getBridge()) {
+                @Override
+                public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                    String url = request.getUrl().toString();
+                    if (request.isForMainFrame() && (base.equals(url) || fallback.equals(url))) {
+                        if (fallback.equals(url)) {
+                            fallbackLoads.incrementAndGet();
+                        }
+                        return new WebResourceResponse("text/html", "UTF-8", new ByteArrayInputStream(markup));
+                    }
+                    return super.shouldInterceptRequest(view, request);
+                }
+            });
+            web.loadUrl(base);
+        });
+        return fallbackLoads;
     }
 
     private static String script(ActivityScenario<MainActivity> scenario, String code) throws Exception {
