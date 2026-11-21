@@ -123,7 +123,12 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             response = await client.get(image, headers=member)
             self.assertEqual((response.status, response.content_type), (200, "image/png"))
             self.assertEqual(response.headers["Cache-Control"], "public, max-age=31536000, immutable")
+            font = await client.get("/chat/decor/v1/starter-font/font.woff2", headers=member)
+            self.assertEqual((font.status, font.content_type), (200, "font/woff2"))
             self.assertEqual((await client.get("/chat/decor/v1/hat-fixture/items.json", headers=member)).status, 404)
+            self.assertEqual((await client.get(image.replace("/v1/", "/v2/"), headers=member)).status, 404)
+            self.assertEqual((await client.get("/chat/decor/v1/hat-fixture/%2e%2e%2fitems.json",
+                                               headers=member)).status, 404)
             self.assertEqual((await client.get("/chat/admin/api/items", headers=member)).status, 403)
             rejected = await client.post("/chat/admin/api/items/bad-fixture/list", headers=admin)
             self.assertEqual((rejected.status, (await rejected.json())["missing"]),
@@ -178,12 +183,26 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             db.admin("UPDATE marong.diaries SET state='ready',ready_at=now(),revision=1 WHERE id=%s", (diary,))
             path = f"/chat/diary/api/days/{day}/stickers"
             sticker = {"itemId": "sticker-fixture", "x": 100, "y": 300, "scale": 85, "rotation": -10}
+            missing = f"/chat/diary/api/days/{day - timedelta(days=1)}/stickers"
+            invalid = "/chat/diary/api/days/2026-13-01/stickers"
+            for method, params in ((client.get, {}), (client.put, {"json": {"stickers": [sticker]}})):
+                self.assertEqual((await method(missing, headers=member, **params)).status, 404)
+                error = await method(invalid, headers=member, **params)
+                self.assertEqual((error.status, (await error.json())["code"]), (400, "invalid_input"))
+            origin_mismatch = {**member, "Origin": "https://other.invalid"}
+            self.assertEqual((await client.put(path, headers=origin_mismatch, json={"stickers": [sticker]})).status, 403)
             self.assertEqual((await client.put(path, headers=member, json={"stickers": [sticker] * 11})).status, 409)
             self.assertEqual((await client.put(path, headers=member, json={"stickers": [sticker]})).status, 200)
             self.assertEqual((await (await client.get(path, headers=member)).json())["stickers"][0]["x"], 100)
             await client.put(path, headers=member, json={"stickers": []})
             self.assertEqual(db.admin("SELECT removed_at IS NOT NULL FROM marong.diary_stickers WHERE diary_id=%s",
                                       (diary,)), [(True,)])
+            positions = [[{**sticker, "x": x} for x in range(start, start + 10)] for start in (10, 20)]
+            saved = await asyncio.gather(*(client.put(path, headers=member, json={"stickers": batch})
+                                           for batch in positions))
+            self.assertEqual([response.status for response in saved], [200, 200])
+            result = await (await client.get(path, headers=member)).json()
+            self.assertIn([row["x"] for row in result["stickers"]], [list(range(10, 20)), list(range(20, 30))])
 
 
 if __name__ == "__main__":
