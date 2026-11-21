@@ -396,8 +396,8 @@ async def live(req):
         bot_name=resume.get('bot_name') or authn.get('bot_name')
         character = resume.get("character")
         if PET_VOICE and "character" not in resume and person and person.unified:
-            query = CHARACTER_PROFILE.format(intro_columns=PET_INTRO_COLUMNS)
-            character = await memory_store.one(query, (False, person.friend_id))
+            query = CHARACTER_PROFILE.format(intro_columns=PET_INTRO_COLUMNS, has_friends="false")
+            character = await memory_store.one(query, (person.friend_id,))
         configure=partial(setup,voice=voice,bot_name=bot_name,character=character)
         session=LiveSession(ws,authn['owner'],memory_store,person,configure,google_headers,resume,{},LOCATION,MODEL,voice,client_id,search=SEARCH,ring=ring)
         session.shop=SHOP

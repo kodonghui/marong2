@@ -12,14 +12,15 @@ PET_LINES = (
 )
 KIND_LABELS = {None: "기본 마롱이", "dog": "강아지 캐릭터", "cat": "고양이 캐릭터"}
 CHARACTER_PROFILE = """
-    SELECT p.bot_name,c.kind,c.traits,c.tone{intro_columns}, %s AND EXISTS (
-        SELECT 1 FROM marong.friendships fs WHERE p.friend_id IN (fs.friend_a,fs.friend_b)
-        AND fs.state='accepted'
-    ) AS has_friends
+    SELECT p.bot_name,c.kind,c.traits,c.tone{intro_columns}, {has_friends} AS has_friends
     FROM marong.friend_profiles p LEFT JOIN marong.characters c
         ON c.id=p.character_id AND c.friend_id=p.friend_id AND c.status='ready'
     WHERE p.friend_id=%s
 """
+ACCEPTED_FRIENDSHIPS = """%s AND EXISTS (
+    SELECT 1 FROM marong.friendships fs
+    WHERE p.friend_id IN (fs.friend_a,fs.friend_b) AND fs.state='accepted'
+)"""
 PET_INTRO_COLUMNS = ",c.personality,c.likes,c.dislikes,c.owner_call"
 
 
