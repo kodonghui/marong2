@@ -1,5 +1,6 @@
 """Access-protected account administration (SPEC-395)."""
 
+import asyncio
 from datetime import datetime, timedelta
 import hmac
 import re
@@ -9,6 +10,7 @@ from aiohttp import web
 from .app_chat import Problem
 from .app_session import one
 from .diary import KST
+from .decor import KINDS, SLOTS
 from .pet.cost import month_bounds
 
 
@@ -42,6 +44,9 @@ class AppAdmin:
             percent = round(spent * 100 / characters.budget)
             display = f'<p class="caption">이번 달 그림 예산 사용률 {percent}%</p>'
             response.body = response.body.replace(b"<!-- image-budget -->", display.encode("utf-8"))
+        if self.chat.decor.catalog:
+            response.body = response.body.replace(b"<!-- decor-items -->",
+                '<a href="/chat/admin/items" class="btn2">아이템</a>'.encode("utf-8"))
         return response
 
     async def image_costs(self, req):
@@ -78,6 +83,64 @@ class AppAdmin:
                 "character": budget(self.chat.characters.budget, costs["character"]),
             },
         })
+
+    async def _decor_item_states(self, ident=None):
+        rows = await self.chat.store._all("""
+            SELECT d.id,d.state,count(o.item_id) AS owners FROM marong.decor_items d
+            LEFT JOIN marong.decor_owned o ON o.item_id=d.id
+            WHERE d.item_set=%s AND (%s::text IS NULL OR d.id=%s)
+            GROUP BY d.id
+        """, (self.chat.decor.catalog.set, ident, ident))
+        return {row["id"]: row for row in rows}
+
+    async def _item_description(self, item, row=None):
+        missing = await asyncio.to_thread(self.chat.decor.catalog.check, item)
+        return {"id": item.id, "kind": item.kind, "slot": SLOTS.get(item.kind),
+                "name": str(item.name or "")[:20], "state": row["state"] if row else "new",
+                "starter": item.starter is True, "owners": row["owners"] if row else 0, "missing": missing}
+
+    async def decor_page(self, req):
+        self.chat.decor.require_catalog()
+        await self.require_admin(req)
+        return self.chat.unified_page("admin-items")
+
+    async def decor_items(self, req):
+        catalog = self.chat.decor.require_catalog()
+        await self.require_admin(req)
+        states = await self._decor_item_states()
+        return self.chat._json(200, {"set": catalog.set, "items": [
+            await self._item_description(item, states.get(item.id))
+            for item in catalog.items.values() if item.kind in KINDS
+        ]})
+
+    async def set_decor_listing(self, req):
+        catalog = self.chat.decor.require_catalog()
+        await self.require_admin(req, write=True)
+        ident = self.chat.decor.item_key(req.match_info["itemId"])
+        item = catalog.items.get(ident)
+        if item is None:
+            raise Problem("not_found")
+        if req.match_info["action"] == "list":
+            missing = await asyncio.to_thread(catalog.check, item)
+            if missing:
+                raise Problem("item_invalid", missing=missing)
+            await self.chat.store._one("""
+                INSERT INTO marong.decor_items(id,item_set,kind,slot,starter)
+                VALUES (%s,%s,%s,%s,%s) ON CONFLICT (id) DO UPDATE
+                SET state='listed',listed_at=now(),unlisted_at=NULL
+                WHERE marong.decor_items.state='unlisted' RETURNING id
+            """, (ident, catalog.set, item.kind, item.slot, item.starter))
+        else:
+            if item.starter:
+                raise Problem("invalid_input")
+            await self.chat.store._one("""
+                UPDATE marong.decor_items SET state='unlisted',unlisted_at=now()
+                WHERE id=%s AND item_set=%s AND state='listed' AND NOT starter RETURNING id
+            """, (ident, catalog.set))
+        state = (await self._decor_item_states(ident)).get(ident)
+        if not state:
+            raise Problem("not_found")
+        return self.chat._json(200, await self._item_description(item, state))
 
     async def create_invite(self, req):
         await self.require_admin(req, write=True)
@@ -176,6 +239,9 @@ class AppAdmin:
     def register(self, router):
         router.add_get(ADMIN_PATH + "/", self.page)
         router.add_get(ADMIN_PATH + "/api/image-costs", self.image_costs)
+        router.add_get(ADMIN_PATH + "/items", self.decor_page)
+        router.add_get(ADMIN_PATH + "/api/items", self.decor_items)
+        router.add_post(ADMIN_PATH + "/api/items/{itemId}/{action:list|unlist}", self.set_decor_listing)
         router.add_get(ADMIN_PATH + "/api/invites", self.list_invites)
         router.add_post(ADMIN_PATH + "/api/invites", self.create_invite)
         router.add_get(ADMIN_PATH + "/api/members", self.list_members)
