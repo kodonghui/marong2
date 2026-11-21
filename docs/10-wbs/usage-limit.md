@@ -5,7 +5,7 @@
 ## GPT 인계
 
 - 목표: 계정마다 사용 한도(무제한·기본·직접 숫자)를 두고, 각자 앱과 웹의 '내 마롱이'에서 자기 사용량과 한도를 봐요. 지금 쓰는 사람은 모두 무제한이에요. 관리자 화면의 초대 링크 날짜에 만든 때·쓴 때·만료 이름표를 붙여요. 동희님 2026-11-21 프로젝트 채팅: "야 근데 사람별 사용한도는 어디서 봐? 자기가 자기꺼. (지금은 기능만 만들고 현경이나 나나 등등은 무제한으로 해놔야댐)"(D106, 15:31 KST), "날짜는 왜 이따위임"(15:46 KST, 관리자 화면 사진).
-- 시작: 이 설계 PR이 `main`에 합쳐진 뒤 `main` 머리에서 새 브랜치 `codex/usage-limit`. 설계를 쓸 때의 `main`은 `ad9f2f4`예요. 초안 PR 하나예요.
+- 시작: 설계는 `main`에 있어요(PR #78·#80). `main` 머리(2026-11-21 16:44 KST에 `986c730`)에서 새 브랜치 `codex/usage-limit`. 초안 PR 하나예요. 시작 허락은 D118(2026-11-21 16:47 KST "야 넥서스 하지 말고 걍 작업해")이에요.
 - 읽을 것: [기능 명세](../04-functional-spec/usage-limit.md)의 SPEC-397\~399와 3.1\~3.6절, [계약](../../api/unified.openapi.yaml)의 API-243과 API-216·234·236·240(머리 설명의 14\~18번), [마이그레이션 021](../../marong/migrations/021_usage_limit.sql)·[통화 009](../../marong/call/migrations/009_usage_limit.sql), [화면 상태](../08-screens/usage-limit.md), [시험 계획](../12-qa/usage-limit.md)의 TC-496\~509. 이 밖의 문서는 읽지 않아도 돼요.
 - 화면 모양: [와이어프레임](https://claude.ai/artifact/W1E3o6x6THzQ1oTbYxtcey)(원본 [`design/usage-limit-wireframe.html`](../../design/usage-limit-wireframe.html))은 상태와 문구를 눌러 보는 용이에요. 실제 화면은 지금 `unified.css`·`chat.css`의 부품과 얼린 토큰만 써요. 새 토큰은 없어요.
 - 이미 된 것: 설계와 마이그레이션 두 파일이에요. 2026-11-21에 버리는 Postgres(`pgserver`, 합성 행)에서 확인했어요: 백필·다시 돌리기·제약·권한, 그리고 `call.friend_month_usd`가 지금 `personal_budget_blocked`의 합(TC-173 자료로 0.036)과 같음([표 문서 3절](../05-erd/usage-limit.md#3-검사2026-11-21-kst-claude-버리는-pgserver-db-합성-행만)). 운영 DB에는 적용하지 않았어요. 코드는 아직 아무것도 바꾸지 않았어요.
