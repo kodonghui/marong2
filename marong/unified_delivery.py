@@ -9,6 +9,7 @@ from .app_delivery import (ANSWER_APP, ANSWER_DISCORD, LATE_RING, MISSED_LINES, 
                            RING_LATE_TEXT, RING_LINK, reminder_ttl)
 from .app_push import REMINDER, TALK
 from .discord_dm import PROACTIVE_APP_TTL_S, PrivateProactive, PrivateReminders
+from .proactive import schedule
 from .schedules import reminder_text
 from .style import tidy
 from .topics import HELLO_MISSED_LINES, MISSED_NOTE, picture_set
@@ -99,16 +100,89 @@ class UnifiedDelivery:
 
 
 class AppProactive(PrivateProactive):
-    def __init__(self, settings, store, agent, locks, delivery, *, scenes=None, **kwargs):
+    def __init__(self, settings, store, agent, locks, delivery, *, scenes=None, reactions=None, **kwargs):
         super().__init__(settings, store, agent, locks, app=delivery.push, **kwargs)
         self.delivery = delivery
         self.scenes = scenes
+        self.reactions = reactions
+        self.reaction_friends = set()
 
     def ready(self):
         return True
 
     async def can_reach(self, room):
         return True
+
+    def next_slot(self, room, now):
+        current = self._slot(room, now)
+        (start, end), _ = schedule(room, self.s)
+        morning = now.replace(hour=start, minute=0, second=0, microsecond=0)
+        if current and current[1] < now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(hours=end):
+            return current[1]
+        return morning if now < morning else morning + timedelta(days=1)
+
+    def plan(self, room, now):
+        if room.get("friend_id") in self.reaction_friends:
+            return super(PrivateProactive, self).plan(room, now)
+        return super().plan(room, now)
+
+    async def step(self, now=None):
+        if not self.reactions:
+            return await super().step(now)
+        now = now or self.clock()
+        rows = await self.reactions.due()
+        before = {row["id"]: row for row in rows}
+        self.reaction_friends = {row["friend_id"] for row in rows if row["active"]}
+        try:
+            result = await super().step(now)
+            active_rooms = {row["friend_id"]: row for row in await self.store.proactive_rooms()}
+            for row in await self.reactions.due():
+                if row["id"] not in before:
+                    continue
+                if not row["active"]:
+                    await self.reactions.finish(row, "skipped")
+                else:
+                    room = active_rooms.get(row["friend_id"], {})
+                    await self.reactions.defer(row, self.next_slot(room, now))
+            return result
+        finally:
+            self.reaction_friends = set()
+
+    async def priority(self, room, begin):
+        if not self.reactions or room["friend_id"] not in self.reaction_friends:
+            return None
+        for row in await self.reactions.due(room["friend_id"]):
+            if not row["active"]:
+                await self.reactions.finish(row, "skipped")
+                continue
+            item = self.reactions.catalog.items.get(row["item_id"])
+            if not item:
+                await self.reactions.finish(row, "skipped")
+                continue
+            try:
+                scene = await self.reactions.scene(row)
+                if not scene or not await self.still_current(room, begin):
+                    return None
+                current = await self.reactions.due(room["friend_id"])
+                if not any(job["id"] == row["id"] and job["active"] for job in current):
+                    await self.reactions.finish(row, "skipped")
+                    return None
+                made = await self.agent.proactive_message(room, reaction=item.name)
+                text = made[0].strip() if made and made[0] else ""
+                if not text or len(text) > 60 or "\n" in text:
+                    text = f"나 {item.name} 생겼어! 어때?"
+                result = await self.delivery.say(row["friend_id"], text, kind="proactive", ttl_s=PROACTIVE_APP_TTL_S,
+                    meta={"proactive": True, "reaction": row["item_id"], "scene": str(scene),
+                          "sceneAlt": row["name"] + "의 새 차림", "reactionName": item.name},
+                    key=f"app-reaction:{row['id']}")
+                if result:
+                    await self.reactions.finish(row, "sent", scene)
+                    await self.store.record_delivery(room, begin, True)
+                    return {"text": text, "ok": True, "code": None, "via": "app"}
+            except Exception as error:
+                log.warning("reaction_send_error friend=%s error=%s", row["friend_id"], type(error).__name__)
+            return None
+        return None
 
     async def still_current(self, room, begin, discord=False):
         current = self._slot(room, self.clock())

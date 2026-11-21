@@ -1,0 +1,209 @@
+"""Synthetic decor assets, admin moderation, account wardrobe and diary edits."""
+
+import asyncio
+import csv
+import json
+from datetime import timedelta
+from io import BytesIO
+from pathlib import Path
+import secrets
+import shutil
+import sys
+import tempfile
+from types import SimpleNamespace
+import unittest
+from unittest.mock import AsyncMock
+
+from aiohttp.test_utils import TestClient, TestServer
+from PIL import Image, ImageDraw
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from marong.app_chat import AppChat
+from marong.app_push import AppPush
+from marong.app_session import AppSessions, COOKIE
+from marong.character.graphics import TEMPLATE_IDS
+from marong.decor import DecorCatalog
+from marong.decor_reactions import DecorReactions
+from marong.diary import KST
+from marong.unified_store import UnifiedStore
+from pg import TestDB
+from run_app import RoomLocks
+
+
+ORIGIN = "https://fixture.invalid"
+
+
+def assets(root):
+    folder = Path(root) / "v1"
+    folder.mkdir()
+    items = []
+    for ident, kind, slot, starter in (("hat-fixture", "hat", "head", False), ("top-fixture", "top", "body", False),
+                                        ("starter-background", "background", None, True),
+                                        ("starter-paper", "paper", None, True), ("starter-font", "font", None, True),
+                                        ("sticker-fixture", "sticker", None, False), ("bad-fixture", "sticker", None, False)):
+        output = folder / ident
+        output.mkdir()
+        thumb = Image.new("RGB", (24, 24), "#ddcab2")
+        files = {}
+        if kind != "sticker":
+            thumb.save(output / "thumb.webp", "WEBP")
+            files["thumb.webp"] = "thumb.webp"
+        if slot:
+            for template in TEMPLATE_IDS:
+                boxes = ROOT / "design" / "pet" / "templates" / f"{template}.json"
+                left, top, right, bottom = json.loads(boxes.read_text(encoding="utf-8"))["slots"][slot]
+                layer = Image.new("RGBA", (1024, 1024))
+                ImageDraw.Draw(layer).rectangle((left * 1024 + 4, top * 1024 + 4, right * 1024 - 4, bottom * 1024 - 4),
+                                                fill="#654321")
+                name = template + ".png"
+                layer.save(output / name)
+                files[name] = name
+        if kind == "background":
+            thumb.save(output / "bg.webp", "WEBP")
+            files["bg.webp"] = "bg.webp"
+        if kind == "paper":
+            files["paperCss"] = "manuscript"
+        if kind == "font":
+            font = ROOT / "marong" / "app_chat_static" / "diary" / "Gaegu-Regular.woff2"
+            shutil.copyfile(font, output / "font.woff2")
+            files["font.woff2"] = "font.woff2"
+        if ident == "sticker-fixture":
+            art = Image.new("RGBA", (512, 512))
+            ImageDraw.Draw(art).ellipse((80, 80, 432, 432), fill="#654321")
+            art.save(output / "sticker.webp", "WEBP")
+            files["sticker.webp"] = "sticker.webp"
+        items.append({"id": ident, "kind": kind, "slot": slot, "name": ident,
+                      "prompt": "a soft hat" if slot else None, "starter": starter, "files": files,
+                      "priceKrw": 100 if ident == "bad-fixture" else 0, "license": ident})
+    (folder / "items.json").write_text(json.dumps({"set": "v1", "items": items}), encoding="utf-8")
+    with (folder / "licenses.csv").open("w", encoding="utf-8", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(("id", "item_id", "file", "source", "author", "license", "terms", "checked_at"))
+        for item in items:
+            if item["id"] != "bad-fixture":
+                writer.writerow((item["id"], item["id"], "*", "synthetic", "fixture",
+                                "OFL-1.1" if item["kind"] == "font" else "CC0-1.0", "fixture", "2026-11-21"))
+
+
+class DecorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_catalog_and_account_scoped_actions(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        assets(folder.name)
+        catalog = DecorCatalog(folder.name)
+        self.assertEqual(catalog.check(catalog.items["hat-fixture"]), [])
+        self.assertEqual(catalog.check(catalog.items["bad-fixture"]), ["price", "license", "file:sticker.webp"])
+        db = TestDB()
+        self.addCleanup(db.close)
+        db.apply_unified_prerequisites()
+        db.apply_unified()
+        db.apply_pet_app_prerequisites()
+        db.apply_pet_app()
+        store = UnifiedStore(db.app_url)
+        await store.open(wait=True)
+        self.addAsyncCleanup(store.close)
+        sessions = AppSessions(store.pool, secrets.token_bytes(32), contact_schedule=(2, 8, 22))
+        auth = await sessions.join((await sessions.create_invite("join"))[0], "시험친구", "웹")
+        friend = (await sessions.find_session(auth.token))["friend_id"]
+        member = {"Cookie": f"{COOKIE}={auth.token}", "Origin": ORIGIN}
+        admin = {"Cf-Access-Jwt-Assertion": "fixture", "Origin": ORIGIN}
+        access = SimpleNamespace(check=AsyncMock(return_value=("ok", "a" * 64)))
+        chat = AppChat(store, SimpleNamespace(friend_cards=None), RoomLocks(), access, AppPush(store),
+                       origin=ORIGIN, sessions=sessions, authentication="session", admin_email_hash="a" * 64)
+        async with TestClient(TestServer(chat.web_app())) as client:
+            self.assertEqual((await client.get("/chat/api/shop", headers=member)).status, 404)
+            self.assertEqual((await client.get("/chat/diary/api/decor", headers=member)).status, 404)
+            chat.decor.catalog = catalog
+            await chat.decor.seed()
+            await chat.decor.seed()
+            self.assertEqual(db.admin("SELECT count(*) FROM marong.decor_items"), [(6,)])
+            image = "/chat/decor/v1/hat-fixture/dog_small.png"
+            self.assertEqual((await client.get(image)).status, 401)
+            response = await client.get(image, headers=member)
+            self.assertEqual((response.status, response.content_type), (200, "image/png"))
+            self.assertEqual(response.headers["Cache-Control"], "public, max-age=31536000, immutable")
+            font = await client.get("/chat/decor/v1/starter-font/font.woff2", headers=member)
+            self.assertEqual((font.status, font.content_type), (200, "font/woff2"))
+            self.assertEqual((await client.get("/chat/decor/v1/hat-fixture/items.json", headers=member)).status, 404)
+            self.assertEqual((await client.get(image.replace("/v1/", "/v2/"), headers=member)).status, 404)
+            self.assertEqual((await client.get("/chat/decor/v1/hat-fixture/%2e%2e%2fitems.json",
+                                               headers=member)).status, 404)
+            self.assertEqual((await client.get("/chat/admin/api/items", headers=member)).status, 403)
+            rejected = await client.post("/chat/admin/api/items/bad-fixture/list", headers=admin)
+            self.assertEqual((rejected.status, (await rejected.json())["missing"]),
+                             (409, ["price", "license", "file:sticker.webp"]))
+            self.assertEqual((await client.post("/chat/admin/api/items/starter-font/unlist", headers=admin)).status, 400)
+            shop = (await (await client.get("/chat/api/shop", headers=member)).json())["items"]
+            self.assertEqual([item["kind"] for item in shop], ["hat", "top", "background", "paper", "font", "sticker"])
+            path = "/chat/api/shop/hat-fixture/claim"
+            claims = await asyncio.gather(*(client.post(path, headers=member) for _ in range(2)))
+            self.assertEqual(sorted(response.status for response in claims), [200, 201])
+            self.assertEqual((await client.post("/chat/admin/api/items/hat-fixture/unlist", headers=admin)).status, 200)
+            self.assertEqual((await client.post(path, headers=member)).status, 404)
+            self.assertEqual((await client.post("/chat/api/shop/top-fixture/claim", headers=member)).status, 201)
+            character = db.admin("""
+                INSERT INTO marong.characters(friend_id,kind,status,stage,ready_at,template,name,traits)
+                VALUES (%s,'dog','ready','done',now(),'dog_small','콩이','{}') RETURNING id
+            """, (friend,))[0][0]
+            db.admin("UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s", (character, friend))
+            outfit = "/chat/api/characters/" + str(character) + "/outfit"
+            picks = {"head": "hat-fixture", "body": "top-fixture", "neck": None}
+            response = await client.put(outfit, headers=member, json=picks)
+            self.assertEqual(response.status, 200)
+            self.assertEqual((await response.json())["head"]["layerUrl"], image)
+            await client.put(outfit, headers=member, json=picks)
+            self.assertEqual(db.admin("SELECT item_id,state FROM marong.outfit_firsts ORDER BY id"),
+                             [("hat-fixture", "waiting"), ("top-fixture", "skipped")])
+            closet = await (await client.get("/chat/api/closet", headers=member)).json()
+            self.assertEqual(closet["characterId"], character)
+            self.assertIn("hat-fixture", [row["id"] for row in closet["items"]])
+            db.admin("UPDATE marong.outfit_firsts SET next_at=now() WHERE state='waiting'")
+            expression = BytesIO()
+            Image.new("RGBA", (1024, 1024), "#e6ac87").save(expression, "PNG")
+            reactions = DecorReactions(store, SimpleNamespace(read=AsyncMock(return_value=expression.getvalue())),
+                                       chat.usage, catalog, None)
+            due, = await reactions.due(friend)
+            self.assertTrue(due["active"])
+            scene = await reactions.scene(due)
+            await reactions.finish(due, "sent", scene)
+            self.assertEqual(db.admin("SELECT fallback,state,cost_usd FROM marong.scene_pictures WHERE id=%s", (scene,)),
+                             [(True, "done", 0)])
+            style = {"backgroundId": "starter-background", "paperId": "starter-paper", "fontId": "starter-font"}
+            self.assertEqual((await client.put("/chat/diary/api/decor", headers=member, json=style)).status, 200)
+            self.assertEqual((await client.post("/chat/api/shop/sticker-fixture/claim", headers=member)).status, 201)
+            day = sessions.now().astimezone(KST).date() - timedelta(days=1)
+            diary = db.admin("""
+                INSERT INTO marong.diaries(friend_id,diary_date) VALUES (%s,%s) RETURNING id
+            """, (friend, day))[0][0]
+            db.admin("""
+                INSERT INTO marong.diary_revisions(diary_id,revision,source,title,weather,body)
+                VALUES (%s,1,'weather','시험 일기','sunny',repeat('가', 60))
+            """, (diary,))
+            db.admin("UPDATE marong.diaries SET state='ready',ready_at=now(),revision=1 WHERE id=%s", (diary,))
+            path = f"/chat/diary/api/days/{day}/stickers"
+            sticker = {"itemId": "sticker-fixture", "x": 100, "y": 300, "scale": 85, "rotation": -10}
+            missing = f"/chat/diary/api/days/{day - timedelta(days=1)}/stickers"
+            invalid = "/chat/diary/api/days/2026-13-01/stickers"
+            for method, params in ((client.get, {}), (client.put, {"json": {"stickers": [sticker]}})):
+                self.assertEqual((await method(missing, headers=member, **params)).status, 404)
+                error = await method(invalid, headers=member, **params)
+                self.assertEqual((error.status, (await error.json())["code"]), (400, "invalid_input"))
+            origin_mismatch = {**member, "Origin": "https://other.invalid"}
+            self.assertEqual((await client.put(path, headers=origin_mismatch, json={"stickers": [sticker]})).status, 403)
+            self.assertEqual((await client.put(path, headers=member, json={"stickers": [sticker] * 11})).status, 409)
+            self.assertEqual((await client.put(path, headers=member, json={"stickers": [sticker]})).status, 200)
+            self.assertEqual((await (await client.get(path, headers=member)).json())["stickers"][0]["x"], 100)
+            await client.put(path, headers=member, json={"stickers": []})
+            self.assertEqual(db.admin("SELECT removed_at IS NOT NULL FROM marong.diary_stickers WHERE diary_id=%s",
+                                      (diary,)), [(True,)])
+            positions = [[{**sticker, "x": x} for x in range(start, start + 10)] for start in (10, 20)]
+            saved = await asyncio.gather(*(client.put(path, headers=member, json={"stickers": batch})
+                                           for batch in positions))
+            self.assertEqual([response.status for response in saved], [200, 200])
+            result = await (await client.get(path, headers=member)).json()
+            self.assertIn([row["x"] for row in result["stickers"]], [list(range(10, 20)), list(range(20, 30))])
+
+
+if __name__ == "__main__":
+    unittest.main()

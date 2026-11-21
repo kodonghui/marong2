@@ -1,0 +1,621 @@
+{
+  "set": "v1",
+  "items": [
+    {
+      "id": "berry-beanie",
+      "kind": "hat",
+      "name": "딸기 털모자",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "cat.png": "cat.png",
+        "cat_round.png": "cat_round.png",
+        "dog_large.png": "dog_large.png",
+        "dog_long.png": "dog_long.png",
+        "dog_small.png": "dog_small.png",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "berry-beanie",
+      "prompt": "a raspberry red knitted beanie with a cream pom-pom",
+      "slot": "head"
+    },
+    {
+      "id": "clover-cap",
+      "kind": "hat",
+      "name": "클로버 모자",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "cat.png": "cat.png",
+        "cat_round.png": "cat_round.png",
+        "dog_large.png": "dog_large.png",
+        "dog_long.png": "dog_long.png",
+        "dog_small.png": "dog_small.png",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "clover-cap",
+      "prompt": "a soft sage green cap with one stitched four leaf clover",
+      "slot": "head"
+    },
+    {
+      "id": "picnic-hat",
+      "kind": "hat",
+      "name": "밀짚모자",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "cat.png": "cat.png",
+        "cat_round.png": "cat_round.png",
+        "dog_large.png": "dog_large.png",
+        "dog_long.png": "dog_long.png",
+        "dog_small.png": "dog_small.png",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "picnic-hat",
+      "prompt": "a honey yellow straw sunhat with a muted blue ribbon",
+      "slot": "head"
+    },
+    {
+      "id": "star-beret",
+      "kind": "hat",
+      "name": "별 베레모",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "cat.png": "cat.png",
+        "cat_round.png": "cat_round.png",
+        "dog_large.png": "dog_large.png",
+        "dog_long.png": "dog_long.png",
+        "dog_small.png": "dog_small.png",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "star-beret",
+      "prompt": "a plum beret with a tiny golden star pin",
+      "slot": "head"
+    },
+    {
+      "id": "oat-sweater",
+      "kind": "top",
+      "name": "오트밀 스웨터",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "cat.png": "cat.png",
+        "cat_round.png": "cat_round.png",
+        "dog_large.png": "dog_large.png",
+        "dog_long.png": "dog_long.png",
+        "dog_small.png": "dog_small.png",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "oat-sweater",
+      "prompt": "a cream knit sleeveless pet sweater with a single brown cable stripe",
+      "slot": "body"
+    },
+    {
+      "id": "blue-raincoat",
+      "kind": "top",
+      "name": "하늘색 우비",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "cat.png": "cat.png",
+        "cat_round.png": "cat_round.png",
+        "dog_large.png": "dog_large.png",
+        "dog_long.png": "dog_long.png",
+        "dog_small.png": "dog_small.png",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "blue-raincoat",
+      "prompt": "a pastel blue sleeveless pet rain jacket, hood folded down",
+      "slot": "body"
+    },
+    {
+      "id": "forest-vest",
+      "kind": "top",
+      "name": "숲빛 조끼",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "cat.png": "cat.png",
+        "cat_round.png": "cat_round.png",
+        "dog_large.png": "dog_large.png",
+        "dog_long.png": "dog_long.png",
+        "dog_small.png": "dog_small.png",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "forest-vest",
+      "prompt": "a muted green pet vest with a round wooden button",
+      "slot": "body"
+    },
+    {
+      "id": "apricot-apron",
+      "kind": "top",
+      "name": "살구빛 앞치마",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "cat.png": "cat.png",
+        "cat_round.png": "cat_round.png",
+        "dog_large.png": "dog_large.png",
+        "dog_long.png": "dog_long.png",
+        "dog_small.png": "dog_small.png",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "apricot-apron",
+      "prompt": "a pet apron with warm peach fabric and a single small pocket",
+      "slot": "body"
+    },
+    {
+      "id": "cloud-scarf",
+      "kind": "scarf",
+      "name": "구름 목도리",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "cat.png": "cat.png",
+        "cat_round.png": "cat_round.png",
+        "dog_large.png": "dog_large.png",
+        "dog_long.png": "dog_long.png",
+        "dog_small.png": "dog_small.png",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "cloud-scarf",
+      "prompt": "a light lavender loop scarf for a pet, two short ends",
+      "slot": "neck"
+    },
+    {
+      "id": "chestnut-scarf",
+      "kind": "scarf",
+      "name": "밤색 목도리",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "cat.png": "cat.png",
+        "cat_round.png": "cat_round.png",
+        "dog_large.png": "dog_large.png",
+        "dog_long.png": "dog_long.png",
+        "dog_small.png": "dog_small.png",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "chestnut-scarf",
+      "prompt": "a warm cinnamon knit pet scarf with short cream tassels",
+      "slot": "neck"
+    },
+    {
+      "id": "garden-book",
+      "kind": "background",
+      "name": "초록 정원",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "bg.webp": "bg.webp",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "garden-book"
+    },
+    {
+      "id": "moon-book",
+      "kind": "background",
+      "name": "달빛 책장",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "bg.webp": "bg.webp",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "moon-book"
+    },
+    {
+      "id": "picnic-book",
+      "kind": "background",
+      "name": "소풍 바구니",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "bg.webp": "bg.webp",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "picnic-book"
+    },
+    {
+      "id": "rain-book",
+      "kind": "background",
+      "name": "비 오는 오후",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "bg.webp": "bg.webp",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "rain-book"
+    },
+    {
+      "id": "berry-book",
+      "kind": "background",
+      "name": "딸기 정원",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "bg.webp": "bg.webp",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "berry-book"
+    },
+    {
+      "id": "snow-book",
+      "kind": "background",
+      "name": "눈 내린 창가",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "bg.webp": "bg.webp",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "snow-book"
+    },
+    {
+      "id": "ivory-paper",
+      "kind": "paper",
+      "name": "아이보리 속지",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "paper.webp": "paper.webp",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "ivory-paper"
+    },
+    {
+      "id": "moss-paper",
+      "kind": "paper",
+      "name": "이끼빛 속지",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "paper.webp": "paper.webp",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "moss-paper"
+    },
+    {
+      "id": "rose-paper",
+      "kind": "paper",
+      "name": "장밋빛 속지",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "paper.webp": "paper.webp",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "rose-paper"
+    },
+    {
+      "id": "sky-paper",
+      "kind": "paper",
+      "name": "하늘색 속지",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "paper.webp": "paper.webp",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "sky-paper"
+    },
+    {
+      "id": "paw-sticker",
+      "kind": "sticker",
+      "name": "발자국",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "paw-sticker"
+    },
+    {
+      "id": "star-sticker",
+      "kind": "sticker",
+      "name": "별",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "star-sticker"
+    },
+    {
+      "id": "heart-sticker",
+      "kind": "sticker",
+      "name": "하트",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "heart-sticker"
+    },
+    {
+      "id": "cloud-sticker",
+      "kind": "sticker",
+      "name": "구름",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "cloud-sticker"
+    },
+    {
+      "id": "leaf-sticker",
+      "kind": "sticker",
+      "name": "나뭇잎",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "leaf-sticker"
+    },
+    {
+      "id": "berry-sticker",
+      "kind": "sticker",
+      "name": "딸기",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "berry-sticker"
+    },
+    {
+      "id": "moon-sticker",
+      "kind": "sticker",
+      "name": "달",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "moon-sticker"
+    },
+    {
+      "id": "sun-sticker",
+      "kind": "sticker",
+      "name": "햇님",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "sun-sticker"
+    },
+    {
+      "id": "umbrella-sticker",
+      "kind": "sticker",
+      "name": "우산",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "umbrella-sticker"
+    },
+    {
+      "id": "snow-sticker",
+      "kind": "sticker",
+      "name": "눈송이",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "snow-sticker"
+    },
+    {
+      "id": "flower-sticker",
+      "kind": "sticker",
+      "name": "꽃",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "flower-sticker"
+    },
+    {
+      "id": "ribbon-sticker",
+      "kind": "sticker",
+      "name": "리본",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "ribbon-sticker"
+    },
+    {
+      "id": "mug-sticker",
+      "kind": "sticker",
+      "name": "코코아",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "mug-sticker"
+    },
+    {
+      "id": "ball-sticker",
+      "kind": "sticker",
+      "name": "공",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "ball-sticker"
+    },
+    {
+      "id": "bone-sticker",
+      "kind": "sticker",
+      "name": "뼈다귀",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "bone-sticker"
+    },
+    {
+      "id": "fish-sticker",
+      "kind": "sticker",
+      "name": "물고기",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "fish-sticker"
+    },
+    {
+      "id": "envelope-sticker",
+      "kind": "sticker",
+      "name": "편지",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "envelope-sticker"
+    },
+    {
+      "id": "music-sticker",
+      "kind": "sticker",
+      "name": "음표",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "music-sticker"
+    },
+    {
+      "id": "acorn-sticker",
+      "kind": "sticker",
+      "name": "도토리",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "acorn-sticker"
+    },
+    {
+      "id": "cake-sticker",
+      "kind": "sticker",
+      "name": "케이크",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "sticker.webp": "sticker.webp"
+      },
+      "license": "cake-sticker"
+    },
+    {
+      "id": "starter-background",
+      "kind": "background",
+      "name": "기본 배경",
+      "priceKrw": 0,
+      "starter": true,
+      "files": {
+        "bg.webp": "bg.webp",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "starter-background"
+    },
+    {
+      "id": "starter-paper",
+      "kind": "paper",
+      "name": "원고지",
+      "priceKrw": 0,
+      "starter": true,
+      "files": {
+        "paperCss": "manuscript",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "starter-paper"
+    },
+    {
+      "id": "starter-font",
+      "kind": "font",
+      "name": "Gaegu",
+      "priceKrw": 0,
+      "starter": true,
+      "files": {
+        "font.woff2": "font.woff2",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "starter-font"
+    },
+    {
+      "id": "gamjaflower-font",
+      "kind": "font",
+      "name": "Gamja Flower",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "font.woff2": "font.woff2",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "gamjaflower-font"
+    },
+    {
+      "id": "himelody-font",
+      "kind": "font",
+      "name": "Hi Melody",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "font.woff2": "font.woff2",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "himelody-font"
+    },
+    {
+      "id": "poorstory-font",
+      "kind": "font",
+      "name": "Poor Story",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "font.woff2": "font.woff2",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "poorstory-font"
+    },
+    {
+      "id": "yeonsung-font",
+      "kind": "font",
+      "name": "Yeon Sung",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "font.woff2": "font.woff2",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "yeonsung-font"
+    },
+    {
+      "id": "cutefont-font",
+      "kind": "font",
+      "name": "Cute Font",
+      "priceKrw": 0,
+      "starter": false,
+      "files": {
+        "font.woff2": "font.woff2",
+        "thumb.webp": "thumb.webp"
+      },
+      "license": "cutefont-font"
+    }
+  ]
+}

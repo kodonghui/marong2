@@ -1428,7 +1428,7 @@ class Agent:
 
     # ── 선톡(먼저 말 걸기) ──────────────────────────────────────
 
-    async def proactive_message(self, room: dict, topic=None) -> tuple[str, dict] | None:
+    async def proactive_message(self, room: dict, topic=None, *, reaction=None) -> tuple[str, dict] | None:
         """방(1:1 이나 관리자가 켠 단체방)에 먼저 보낼 말을 만든다(보내지는 않음). 오류·거절·빈 답이면 None.
         넣은 기억은 meta.memory 로.
         room: store.proactive_rooms 의 한 줄(room_key, is_channel, user_key, name, last_said, per_day …).
@@ -1457,7 +1457,10 @@ class Agent:
             said = []
         memory = {"recent": [rows[0]["id"], rows[-1]["id"]] if rows else [],
                   "summaries": [x["id"] for x in summaries], "notes": [n["id"] for n in notes]}
-        system = self._system(self._proactive_situation(room, notes, summaries, rows, topic, said=said))
+        situation = self._proactive_situation(room, notes, summaries, rows, topic, said=said)
+        if reaction:
+            situation += f"\n처음 입은 아이템 '{reaction}'을 자랑하는 글을 반말 한 줄로, 60자 이내로 써."
+        system = self._system(situation)
         system = await self._friend_system(system, room.get("friend_id"), room_key, private=room.get("is_channel", True))
         msg = Incoming(room_key=room["room_key"], user_key=room["user_key"], text=PROACTIVE_TRIGGER,
                        is_channel=room.get("is_channel", True))

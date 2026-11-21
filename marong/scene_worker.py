@@ -22,8 +22,9 @@ class SceneWorker:
         due = at - timedelta(minutes=30)
         async with self.store.pool.connection() as conn, conn.transaction():
             profile = await (await conn.execute("""
-                SELECT c.id FROM marong.friend_profiles p
+                SELECT c.id,o.body,o.neck,o.head FROM marong.friend_profiles p
                 JOIN marong.characters c ON c.id=p.character_id AND c.friend_id=p.friend_id AND c.status='ready'
+                LEFT JOIN marong.outfits o ON o.character_id=c.id
                 WHERE p.friend_id=%s FOR UPDATE OF p
             """, (friend,))).fetchone()
             if profile is None:
@@ -37,9 +38,9 @@ class SceneWorker:
             if job or not queue:
                 return job
             return await (await conn.execute("""
-                INSERT INTO marong.scene_pictures(friend_id,character_id,topic,not_before,purpose)
-                VALUES (%s,%s,%s,%s,'topic') RETURNING id,state
-            """, params)).fetchone()
+                INSERT INTO marong.scene_pictures(friend_id,character_id,topic,not_before,purpose,outfit)
+                VALUES (%s,%s,%s,%s,'topic',%s) RETURNING id,state
+            """, (*params, [profile[key] for key in ("body", "neck", "head") if profile[key]]))).fetchone()
 
     async def wait_for_topic(self, job):
         if not job:
@@ -111,7 +112,16 @@ class SceneWorker:
         """, (job["character_id"], job["friend_id"]))
         topics = picture_set()
         topic = topics.get(job["topic"]) if topics and job["purpose"] == "topic" else None
-        result = await self.pictures.draw("topic", character, (), topic.scene) if character and topic else None
+        result = None
+        if character:
+            outfit = self.pictures.outfit_prompts(job["outfit"])
+            if topic:
+                result = await self.pictures.draw("topic", character, outfit, topic.scene)
+            elif job["purpose"] == "reaction":
+                item = self.pictures.catalog.items.get(job["item_id"]) if self.pictures.catalog else None
+                if item and item.prompt:
+                    scene = f"The pet character proudly shows off the new {item.prompt}, looking at the viewer."
+                    result = await self.pictures.draw("reaction", character, outfit, scene)
         if await self.finish(job, result, fail_reason="check_failed"):
             log.info("scene_finished result=%s friend=%s character=%s scene=%s ms=%d usd=%s",
                      result.outcome if result else "check_failed", job["friend_id"], job["character_id"], job["id"],

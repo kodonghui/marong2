@@ -73,6 +73,13 @@
 .unified .intro-chip[aria-pressed="true"] {border-color: var(--accent)}
 .unified .intro-loading {background: var(--line)}
 .unified .intro-placeholder {width: 100%; min-height: 120px; border-radius: 8px}
+.unified .decor-thumb {width: 96px; height: 96px; object-fit: contain}
+.unified .decor-face {position: relative; width: min(100%, 220px); aspect-ratio: 1; margin-inline: auto}
+.unified .decor-face img {position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain}
+@font-face {font-family: DecorGaegu; src: url('/chat/diary/Gaegu-Regular.woff2') format('woff2'); font-display: swap}
+.unified .decor-book-preview-frame {padding: 18px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface) var(--book-background, none) center / cover}
+.unified .decor-paper-preview {padding: 12px; min-height: 100px; border-radius: 9px; color: var(--text); background: var(--surface) var(--paper-background, none) center / cover; font-family: var(--font-diary, DecorGaegu), sans-serif; line-height: 1.6; overflow-wrap: anywhere}
+.unified .decor-paper-preview img {display: block; width: 100%; max-height: 145px; margin-bottom: 8px; object-fit: contain}
 .unified .character-expressions {grid-template-columns: repeat(6, minmax(0, 1fr))}
 .unified .character-expressions .picture-choice {padding: 2px; min-width: 0}
 .unified .character-preview-header {display: flex; align-items: center; gap: 8px}

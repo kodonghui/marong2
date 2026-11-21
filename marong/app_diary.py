@@ -15,7 +15,7 @@ _PREFIX = "/chat/diary/api"
 _PAGE = "/chat/diary/"
 _STATIC = Path(__file__).with_name("app_chat_static") / "diary"
 _FILES = {"diary.css": "text/css", "tokens.css": "text/css",
-          "diary.js": "text/javascript", "sheets.js": "text/javascript",
+          "diary.js": "text/javascript", "sheets.js": "text/javascript", "decor.js": "text/javascript",
           "Gaegu-Regular.woff2": "font/woff2", "Gaegu-OFL.txt": "text/plain"}
 _DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _MONTH = re.compile(r"[0-9]{4}-[0-9]{2}")
