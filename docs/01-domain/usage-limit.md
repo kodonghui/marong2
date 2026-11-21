@@ -59,7 +59,7 @@ ID 번호: TERM-199\~200, REQ-484\~490, FL-179, SPEC-397\~399, API-243(그다음
 
 ## 4. 컨텍스트 표
 
-### 사용량 맥락의 바뀐 뒤 전체(CTX-029)
+### 바뀌는 기존 맥락: 사용량(CTX-029, 바뀐 뒤 전체)
 
 목적: 사람마다 하루에 쓴 양을 세고, 그 사람의 유효 한도가 있을 때만 막고, 친구가 자기 사용량과 한도를 보게 해요.
 
@@ -85,7 +85,7 @@ ID 번호: TERM-199\~200, REQ-484\~490, FL-179, SPEC-397\~399, API-243(그다음
 - Given–When–Then: Given 직접 계정(하루 200, 통화 월 비움)이고 `MARONG_CALL_PERSON_MONTHLY_USD`가 5, When 이번 달 그 사람 통화 비용이 5.1달러에서 통화를 시작함, Then 통화가 `budget_exhausted`로 거절돼요.
 - External systems: 없음.
 
-### 통화 예산 맥락의 바뀌는 줄만(CTX-006)
+### 바뀌는 기존 맥락: 통화 예산(CTX-006, 바뀌는 줄만)
 
 | Given by | Read model | Command | Aggregate | Events |
 | --- | --- | --- | --- | --- |
