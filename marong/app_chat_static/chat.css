@@ -98,6 +98,10 @@ button:disabled {cursor: default; opacity: .45}
 .message.me .row {flex-direction: row-reverse}
 .face {flex: none; width: 34px; height: 34px; border-radius: 50%; background: var(--face-base); display: grid; place-items: center; align-self: flex-start}
 .face img {width: 30px; height: 30px; object-fit: contain}
+.face {position: relative}
+.face img.face-layer {position: absolute; inset: 0; pointer-events: none}
+#header-pet-face {display: inline-block; width: 30px; height: 30px; margin-inline-start: 4px; vertical-align: middle}
+#header-pet-face[hidden] {display: none}
 .message.me .face {display: none}
 .body {display: flex; flex-direction: column; max-width: 78%}
 .message.me .body {align-items: flex-end}

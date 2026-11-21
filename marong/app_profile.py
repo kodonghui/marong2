@@ -58,7 +58,8 @@ class AppProfile:
         if record["character_id"] is not None:
             character = {"id": record["character_id"], "name": record["character_name"], "kind": record["kind"],
                          "faceUrl": f"/chat/api/characters/{record['character_id']}/images/front",
-                         "template": record["template"], "outfit": {"head": None, "body": None, "neck": None},
+                         "template": record["template"],
+                         "outfit": await self.chat.decor.equipped(record["character_id"], record["template"]),
                          "introMissing": record["intro_at"] is None}
         ringing = None
         if record["ring_id"] is not None:

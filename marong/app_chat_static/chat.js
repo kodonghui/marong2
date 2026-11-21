@@ -109,6 +109,21 @@ function relogin(result) {
 }
 
 let ringExpiry;
+let outfitLayers = [];
+const LAYER = /^\/chat\/decor\/v[0-9]{1,3}\/[a-z0-9-]{3,40}\/[a-z_]+\.png$/;
+
+function showLayers(face) {
+  face.querySelectorAll('.face-layer').forEach(image => image.remove());
+  for (const url of outfitLayers) {
+    const layer = document.createElement('img');
+    layer.className = 'face-layer';
+    layer.src = url;
+    layer.alt = '';
+    layer.addEventListener('error', () => layer.remove(), {once: true});
+    face.append(layer);
+  }
+}
+
 async function refreshProfile() {
   if (!$('menu-profile')) return;
   const result = await api('/profile');
@@ -127,10 +142,30 @@ async function refreshProfile() {
   const nextFace = profile.character?.faceUrl || FACE;
   if (nextFace !== app.face) {
     app.face = nextFace;
-    for (const image of document.querySelectorAll('.message.marong .face img, #typing .face img')) image.src = app.face;
+    for (const image of document.querySelectorAll('.message.marong .face img:not(.face-layer), #typing .face img:not(.face-layer)')) {
+      image.src = app.face;
+    }
+  }
+  outfitLayers = ['body', 'neck', 'head'].map(slot => profile.character?.outfit?.[slot]?.layerUrl)
+    .filter(url => typeof url === 'string' && LAYER.test(url));
+  for (const face of document.querySelectorAll('.message.marong .face, #typing .face')) showLayers(face);
+  const headerFace = $('header-pet-face');
+  if (headerFace) {
+    headerFace.hidden = !profile.character;
+    headerFace.replaceChildren();
+    if (profile.character) {
+      const image = document.createElement('img');
+      image.alt = '';
+      image.src = app.face;
+      headerFace.append(image);
+      showLayers(headerFace);
+    }
   }
   $('menu-profile').hidden = false;
   $('menu-friends').hidden = !profile.features.friends;
+  for (const id of ['menu-shop', 'menu-closet']) {
+    if ($(id)) $(id).hidden = !profile.features.decor;
+  }
   const ring = $('ring-accept');
   clearTimeout(ringExpiry);
   const until = Date.parse(profile.pendingRing?.until || '');
@@ -233,6 +268,7 @@ function item(message) {
   const img = document.createElement('img');
   img.src = me ? FACE : app.face; img.alt = ''; img.width = 30; img.height = 30;
   face.append(img);
+  if (!me) showLayers(face);
   const body = document.createElement('div');
   body.className = 'body';
   const picture = !me && message.picture ? topicPicture(message.picture) : null;
@@ -252,7 +288,15 @@ function item(message) {
   time.dateTime = message.at;
   time.textContent = message.at.slice(11, 16);
   meta.append(time);
-  if (picture) body.append(picture);
+  if (picture) {
+    if (typeof message.picture.reaction === 'string' && message.picture.reaction) {
+      const badge = document.createElement('p');
+      badge.className = 'meta';
+      badge.textContent = '새 ' + message.picture.reaction + '!';
+      body.append(badge);
+    }
+    body.append(picture);
+  }
   body.append(bubble, meta);
   if (!me && message.card) showCard(li, body, message);
   row.append(face, body);

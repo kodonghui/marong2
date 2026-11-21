@@ -98,6 +98,8 @@ header {display: flex; align-items: center; justify-content: space-between}
   display: grid; place-items: center; box-shadow: inset 0 0 0 1px var(--face-edge);
 }
 .face-disc img {width: 90%; height: 90%; object-fit: contain; filter: drop-shadow(0 9px 8px var(--face-shadow))}
+.face-disc img.outfit-layer {position:absolute; inset:5%; width:90%; height:90%; filter:none; pointer-events:none}
+.topic-on .face-disc .outfit-layer {display:none}
 .ring {position: absolute; inset: -12px; border: 1px solid var(--ring); border-radius: 50%; opacity: 0; transition: opacity .4s}
 .ring-two {inset: -25px; border-color: var(--ring-outer)}
 h1 {font-size: 29px; line-height: 1.45; letter-spacing: -1px; font-weight: 650; margin: 0 0 12px}
