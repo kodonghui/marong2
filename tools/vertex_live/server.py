@@ -13,6 +13,9 @@ import jwt
 import psycopg
 from marong.app_session import COOKIE as SESSION_COOKIE, SessionError, auth_mode, find_session, identify_request
 from marong.call_voice import call_capacity, chosen_voice
+from marong.pet_app_settings import pet_voice_enabled
+from marong.unified_prompt import (CHARACTER_PROFILE, PET_INTRO_COLUMNS, character_section, clean,
+                                  common_prompt, marker_positions, particle)
 from live_session import LiveSession, BUILD
 from call_cost import BLOCKED, budget_status, personal_budget_blocked
 from call_shop import DECLARATION as SHOP_READ, configured_reader
@@ -49,6 +52,7 @@ INSTRUCTION_FILE=HERE/'call_instruction.md'
 SEARCH=call_search.from_env()
 SHOP=configured_reader()
 WAIT_SOUND=os.getenv('MARONG_CALL_WAIT_SOUND')=='1'
+PET_VOICE=pet_voice_enabled(os.environ)
 
 
 def personal_budget(env=os.environ):
@@ -251,19 +255,24 @@ def ring_part(ring):
     return (HELLO_GUIDE if hello else RING_GUIDE)+json.dumps(data,ensure_ascii=False)
 
 def setup(handle=None,seed='',memory=False,hangup=False,search=None,ring=None,tuning=None,handoff=False,
-          friend_instruction='',*,voice=None,bot_name=None,friend_memory=None):
+          friend_instruction='',*,voice=None,bot_name=None,friend_memory=None,character=None):
     # search: 'on' adds Google Search and its guide, 'spent'/'off' only a guide that she cannot search now,
     # None (callers without a search budget) neither. ring: the promise of a call Marong placed, or None.
     resume={'transparent':True}
     if handle:resume['handle']=handle
+    base_instruction = instruction()
+    speaking_pet = PET_VOICE and character is not None and character["kind"] in {"dog", "cat"}
+    if speaking_pet and marker_positions(base_instruction.splitlines()) is not None:
+        base_instruction = common_prompt(base_instruction, pet=True)
     result={'setup':{'model':f'projects/{PROJECT}/locations/{LOCATION}/publishers/google/models/{MODEL}',
       'generationConfig':{'responseModalities':['AUDIO'],'maxOutputTokens':1024,'speechConfig':{'languageCode':'ko-KR','voiceConfig':{'prebuiltVoiceConfig':{'voiceName':voice or VOICE}}}},
-      'systemInstruction':{'parts':[{'text':instruction()}]},
+      'systemInstruction':{'parts':[{'text':base_instruction}]},
       'realtimeInputConfig':{'automaticActivityDetection':{'silenceDurationMs':700,'prefixPaddingMs':100}},
       'contextWindowCompression':{'triggerTokens':8192,'slidingWindow':{'targetTokens':4096}},
       'sessionResumption':resume,'inputAudioTranscription':{},'outputAudioTranscription':{},'explicitVadSignal':True}}
-    if bot_name and bot_name != '마롱이':
-        from marong.unified_prompt import clean, particle
+    if speaking_pet:
+        result["setup"]["systemInstruction"]["parts"].append({"text": character_section(character, pet_voice=True)})
+    elif bot_name and bot_name != '마롱이':
         name = clean(bot_name, 12)
         if name:
             result['setup']['systemInstruction']['parts'].append({
@@ -385,7 +394,11 @@ async def live(req):
             resumed_voice=await memory_store.resume_voice(person,client_id)
         voice=resumed_voice or chosen_voice(authn.get('voice'))
         bot_name=resume.get('bot_name') or authn.get('bot_name')
-        configure=partial(setup,voice=voice,bot_name=bot_name)
+        character = resume.get("character")
+        if PET_VOICE and "character" not in resume and person and person.unified:
+            query = CHARACTER_PROFILE.format(intro_columns=PET_INTRO_COLUMNS)
+            character = await memory_store.one(query, (False, person.friend_id))
+        configure=partial(setup,voice=voice,bot_name=bot_name,character=character)
         session=LiveSession(ws,authn['owner'],memory_store,person,configure,google_headers,resume,{},LOCATION,MODEL,voice,client_id,search=SEARCH,ring=ring)
         session.shop=SHOP
         session.wait_enabled=WAIT_SOUND
@@ -408,7 +421,7 @@ async def live(req):
         try:
             if slot is not None and active_calls.get(owner) is slot:
                 if resume and slot.session and not slot.session.explicit:
-                    resume.update(voice=voice,bot_name=bot_name)
+                    resume.update(voice=voice,bot_name=bot_name,character=character)
                     resume_state[(owner,client_id)]=resume
                 else:
                     resume_state.pop((owner,client_id),None)

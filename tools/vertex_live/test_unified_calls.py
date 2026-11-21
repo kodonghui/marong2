@@ -41,6 +41,16 @@ async def main():
     with tempfile.TemporaryDirectory() as directory, patch.object(Path, "home", return_value=Path(directory)):
         import server
 
+    character = {"bot_name": "콩이", "kind": "dog", "owner_call": "누나", "personality": ["먹보"]}
+    with patch.object(server, "PET_VOICE", False):
+        assert server.setup(bot_name="콩이", character=character) == server.setup(bot_name="콩이")
+        default_setup = server.setup(bot_name="마롱이")
+    with patch.object(server, "PET_VOICE", True):
+        parts = server.setup(bot_name="콩이", character=character)["setup"]["systemInstruction"]["parts"]
+        assert parts[1]["text"] == server.character_section(character, pet_voice=True)
+        assert "누나랑 함께 사는 강아지야" in parts[1]["text"]
+        assert server.setup(bot_name="마롱이", character={"kind": None}) == default_setup
+
     voices = {1: "Aoede", 2: "Sulafat", 3: "Removed"}
 
     async def identify(req):

@@ -14,6 +14,7 @@ from marong.app_push import AppPush
 from marong.app_session import AppSessions, COOKIE
 from marong.pet_app_settings import PetAppSettings
 from marong.pet_intro import recommended_voice
+from marong.unified_prompt import PET_LINES, character_section
 from marong.unified_store import UnifiedStore
 from pg import TestDB
 from run_app import RoomLocks
@@ -25,6 +26,25 @@ VOICE_RULES = {"dog": {"활발함": "Puck"}}
 
 
 class PetIntroTests(unittest.IsolatedAsyncioTestCase):
+    def test_first_person_section_is_bounded_and_default_is_unchanged(self):
+        pet = {"bot_name": "콩이", "kind": "dog", "owner_call": "누나", "personality": ["먹보", "호기심 많음"],
+               "likes": "가" * 60, "dislikes": "나" * 60, "tone": "짧게 말해 주는 편",
+               "has_friends": True, "traits": {"patternNotes": "다" * 60, "distinctive": "라" * 60}}
+        section = character_section(pet, pet_voice=True)
+        self.assertIn("누나랑 함께 사는 강아지야", section)
+        self.assertIn("누나를 '누나'라고 불러", section)
+        self.assertIn("성격: 먹보, 호기심 많음.", section)
+        self.assertLessEqual(len(section), 600)
+        self.assertTrue(section.endswith("\n".join(PET_LINES)))
+        original = character_section(pet)
+        self.assertNotIn("1인칭", original)
+        self.assertEqual(character_section(pet, pet_voice=False), original)
+        empty = {"bot_name": "나비", "kind": "cat"}
+        self.assertIn("이 사람이랑 함께 사는 고양이야", character_section(empty, pet_voice=True))
+        self.assertNotIn("성격:", character_section(empty, pet_voice=True))
+        default = {"bot_name": "마롱이", "kind": None}
+        self.assertEqual(character_section(default, pet_voice=True), character_section(default))
+
     def test_voice_order_and_fallback(self):
         for traits, rules, choices, expected in (
             ([], {}, ("Sulafat",), "Sulafat"),
