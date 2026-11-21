@@ -14,8 +14,8 @@
   path: /
   access: 허용된 Google 계정(통화하는 친구)
   status: active
-  flows: [FL-001, FL-002, FL-006, FL-007, FL-008, FL-009, FL-121, FL-177]
-  terms: [CTX-002, CTX-006, CTX-029, TERM-001, TERM-003, TERM-014, TERM-018, TERM-167, TERM-178, TERM-190]
+  flows: [FL-001, FL-002, FL-006, FL-007, FL-008, FL-009, FL-121, FL-177, FL-179]
+  terms: [CTX-002, CTX-006, CTX-029, TERM-001, TERM-003, TERM-014, TERM-018, TERM-167, TERM-178, TERM-190, TERM-199]
   children:
     - id: SCR-002
       name: 통화 중
@@ -151,8 +151,8 @@
   path: /chat/
   access: 허용된 Google 계정(통화하는 친구, 마롱이 친구에 묶임)
   status: active
-  flows: [FL-141, FL-143, FL-144, FL-176, FL-177]
-  terms: [CTX-001, CTX-020, CTX-029, TERM-163, TERM-080, TERM-083, TERM-178, TERM-190]
+  flows: [FL-141, FL-143, FL-144, FL-176, FL-177, FL-179]
+  terms: [CTX-001, CTX-020, CTX-029, TERM-163, TERM-080, TERM-083, TERM-178, TERM-190, TERM-199]
   children:
     - id: SCR-109
       name: 알림 상태(글 대화 메뉴)
@@ -214,6 +214,8 @@
 #   /chat/character/:id 로 들어오면 서버의 만들기 단계(photos·traits·preview·candidates·sheet·name·done)에 맞는 화면으로 보내요.
 # 있는 화면에서 바뀌는 곳(08 unified.md 15절): 글 대화 SCR-107·109·112의 머리말 이름·얼굴과 '내 마롱이'·'친구' 줄, 밀린 연락(FL-176), 하루 한도(FL-177),
 #   통화 홈 SCR-001의 통화 못 거는 상태(FL-177), 통화 중 SCR-002의 대기 소리(FL-178)와 캐릭터 얼굴. 앱 알림 SCR-108·111의 제목은 그 사람의 마롱이 이름이에요(REQ-441).
+# 사람별 사용 한도(2026-11-21, D106, docs/08-screens/usage-limit.md): 새 화면은 없어요. 내 마롱이(SCR-165)의 사용량 카드가 '내 사용량'이 되고, 관리자(SCR-169)에 계정 한도 바꾸기와
+#   초대 링크 날짜 이름표가 늘고, 하루 한도 안내(SCR-107·001)에 '내 사용량 보기' 링크가 생겨요(FL-179, TERM-199·200).
 # 웹(아이폰 사파리)에는 알림과 전화 벨이 없어요(REQ-462). 내 마롱이(SCR-165)에 '홈 화면에 추가' 안내 한 줄이 있어요(REQ-461).
 # without a screen: TERM-180(캐릭터 구간, 프롬프트 안), TERM-193(방 주인, 서버가 읽을 때 거름), TERM-194(앱 서버), TERM-195(턴 계획)·TERM-196(사전 조회, 글 답 안에서만),
 # without a screen: TERM-198(작업 루프, 서버 안)
@@ -236,8 +238,8 @@
   path: /chat/me
   access: 로그인한 사람(초대 링크로 가입)
   status: active
-  flows: [FL-171, FL-173, FL-174, FL-177]
-  terms: [CTX-027, CTX-029, TERM-175, TERM-177, TERM-178, TERM-179, TERM-182, TERM-183, TERM-186, TERM-190, TERM-191, TERM-192]
+  flows: [FL-171, FL-173, FL-174, FL-177, FL-179]
+  terms: [CTX-027, CTX-029, TERM-175, TERM-177, TERM-178, TERM-179, TERM-182, TERM-183, TERM-186, TERM-190, TERM-191, TERM-192, TERM-199]
   children:
     - id: SCR-167
       name: 목소리 고르기
@@ -300,8 +302,8 @@
   path: /chat/admin/
   access: 동희님(Cloudflare Access)
   status: active
-  flows: [FL-169, FL-170, FL-171, FL-177]
-  terms: [CTX-026, CTX-029, TERM-173, TERM-176, TERM-190, TERM-192]
+  flows: [FL-169, FL-170, FL-171, FL-177, FL-179]
+  terms: [CTX-026, CTX-029, TERM-173, TERM-176, TERM-190, TERM-192, TERM-199, TERM-200]
 
 # 반려동물 서비스(CTX-022~025, 2026-11-17 설계, 아직 만들지 않음). 친구용 마롱이와 다른 공개 서비스예요: 새 프로세스 run_pet.py가 내보내는 모바일 웹(PWA)이고,
 # Cloudflare Access 없이 카카오·구글 로그인으로 들어와요(SPEC-310, 368). 화면 정의는 docs/08-screens/pet.md, API는 api/pet.openapi.yaml(API-150~210)이에요.
