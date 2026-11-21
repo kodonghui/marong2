@@ -13,7 +13,8 @@
     "pet",
     "unified",
     "usage-limit",
-    "call-connect"
+    "call-connect",
+    "pet-app"
   ],
   "records": {
     "kind": "notion",
