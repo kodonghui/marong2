@@ -129,6 +129,28 @@ class TestCharacter(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await worker.step())
             self.assertEqual((await client.post(target + "/candidates", headers=a)).status, 202)
             self.assertTrue(await worker.step())
+            info = (await (await client.get(target, headers=a)).json())["character"]
+            self.assertEqual(info["regenLeft"], 2)
+            models.candidate = AsyncMock(side_effect=ValueError("image_refused"))
+            rejected_job = await client.post(target + "/candidates", headers=a)
+            self.assertEqual(rejected_job.status, 202)
+            self.assertTrue(await worker.step())
+            info = (await (await client.get(target, headers=a)).json())["character"]
+            self.assertEqual(info["job"]["state"], "failed")
+            self.assertEqual(info["regenLeft"], 2)
+
+            models.candidate = draw
+            for remaining in (1, 0):
+                regenerate = await client.post(target + "/candidates", headers=a)
+                self.assertEqual(regenerate.status, 202)
+                self.assertTrue(await worker.step())
+                info = (await (await client.get(target, headers=a)).json())["character"]
+                self.assertEqual(info["job"]["state"], "done")
+                self.assertEqual(info["regenLeft"], remaining)
+            limit = await client.post(target + "/candidates", headers=a)
+            self.assertEqual(limit.status, 409)
+            self.assertEqual((await limit.json())["code"], "no_regen_left")
+
             chat.admin.email_hash = "a" * 64
             chat.access = SimpleNamespace(check=AsyncMock(return_value=("ok", chat.admin.email_hash)))
             db.admin("""UPDATE marong.character_jobs SET cost_usd=16 WHERE character_id=%s AND step='preview'""",

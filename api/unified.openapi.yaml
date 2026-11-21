@@ -1,8 +1,9 @@
 # 마롱이 통합 앱(MVP) API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/unified.md(SPEC-370~396), DB: marong/migrations/020_unified.sql(TBL-164~172), 표 설명: docs/05-erd/unified.md
+# 사람별 사용 한도(2026-11-21): docs/04-functional-spec/usage-limit.md(SPEC-397~399), DB: marong/migrations/021_usage_limit.sql, marong/call/migrations/009_usage_limit.sql, 표 설명: docs/05-erd/usage-limit.md
 openapi: 3.1.0
 info:
   title: 마롱이 통합 앱(MVP) API
-  version: 0.1.0-draft
+  version: 0.2.0-draft
   description: |-
     앱과 브라우저의 가입(SCR-163), 로그인(SCR-164), 내 마롱이(SCR-165), 입혀 보기(SCR-166), 목소리 고르기(SCR-167), 친구(SCR-168), 관리자(SCR-169), 캐릭터 만들기(SCR-170\~174) 화면이 앱 서버(TERM-194)와 주고받는 계약이에요. 원본은 이 파일이고 코드는 이 파일을 따라가요(06단계). 글 대화 API(`api/app-chat.openapi.yaml`)와 같은 서버·같은 `/chat/` 아래예요. 범위는 동희님 주변 사람이 쓰는 MVP예요(D103). 고지, 동의, 나이 확인, 결제는 없어요.
 
@@ -14,7 +15,7 @@ info:
     - 오류는 다른 계약과 같은 RFC 9457 Problem Details에 `code`와 `traceId`를 더한 모양이에요. 코드 목록은 `components.x-corthex.errors`예요. JSON 응답은 모두 `Cache-Control: no-store`이고 그림만 `private`이에요.
     - 응답에는 토큰·코드의 해시, 파일 경로, 모델 이름, 작업 비용, 대화 글이 없어요. 초대 링크 주소(API-235)와 기기 추가 코드(API-214)는 만든 응답에 한 번만 있어요. 로그에는 결과 코드와 친구의 짧은 키만 남기고 토큰·코드·이름은 남기지 않아요.
     - 페이지(`/chat/join/:token`, `/chat/login`, `/chat/me`, `/chat/friends`, `/chat/character/…`, `/chat/admin/`)와 그 js·css, 목소리 견본 파일은 HTML과 파일이라 이 계약에 넣지 않았어요. 화면은 07 사이트맵과 08 화면 정의에 있어요.
-    - 이 파일 밖에서 바뀌는 것: 글 대화(API-101\~106), 성향 맞춤, 앱 업데이트(API-141), 통화 서버의 API는 경로와 모양이 그대로이고 로그인만 이 계약의 쿠키로 바뀌어요(`no_dm`이 없어져요). 글 보내기(API-103)에 429 `daily_limit`(설정값 `MARONG_DAILY_UNITS`가 있고 티켓이 0일 때만)이 생겨요. 통화 시작(API-107)은 웹소켓이라 브라우저가 상태 번호를 읽지 못해요. 그래서 통화 시작의 거절은 지금의 `call_busy`·`budget_exhausted`처럼 연결을 받은 뒤 보내고 닫는 메시지예요: `{"type":"call_busy"}`(그 친구가 이미 통화 중), `{"type":"calls_full"}`(서버가 `MARONG_CALL_MAX`에 닿음), `{"type":"daily_limit"}`(하루 한도), `{"type":"budget_exhausted"}`(전체 예산과 사람별 상한). 통화 홈 상태(API-124)의 `blockedReason`에 `daily_limit`이 늘어서 화면이 걸기 전에 버튼을 막아요. 그 고침은 각 계약 파일에서 해요(TASK-395, TASK-401, TASK-406).
+    - 이 파일 밖에서 바뀌는 것: 글 대화(API-101\~106), 성향 맞춤, 앱 업데이트(API-141), 통화 서버의 API는 경로와 모양이 그대로이고 로그인만 이 계약의 쿠키로 바뀌어요(`no_dm`이 없어져요). 글 보내기(API-103)에 429 `daily_limit`(그 친구의 유효 하루 한도(SPEC-397)가 있고 티켓이 0일 때만)이 생겨요. 통화 시작(API-107)은 웹소켓이라 브라우저가 상태 번호를 읽지 못해요. 그래서 통화 시작의 거절은 지금의 `call_busy`·`budget_exhausted`처럼 연결을 받은 뒤 보내고 닫는 메시지예요: `{"type":"call_busy"}`(그 친구가 이미 통화 중), `{"type":"calls_full"}`(서버가 `MARONG_CALL_MAX`에 닿음), `{"type":"daily_limit"}`(하루 한도), `{"type":"budget_exhausted"}`(전체 예산과 그 친구의 유효 통화 월 한도). 통화 홈 상태(API-124)의 `blockedReason`에 `daily_limit`이 늘어서 화면이 걸기 전에 버튼을 막아요. 그 고침은 각 계약 파일에서 해요(TASK-395, TASK-401, TASK-406).
 
     계약에서 정한 것(Claude 제안, 2026-11-19, 검토 대상).
     1. 검증 오류는 400 `invalid_input`이에요(422는 쓰지 않음). 경로 id의 형식이 틀리면 400, 없거나 남의 것이면 404예요. 초대 토큰만은 형식이 틀려도 404 `invite_not_found`예요.
@@ -30,6 +31,13 @@ info:
     11. Access로만 확인된 기존 친구(`MARONG_AUTH`가 `access`·`both`일 때)가 이 계약의 API를 부르면, 프로필 행이 없을 때 서버가 `link`와 같은 방법으로 빠진 행을 먼저 만들어요(SPEC-374). 그래서 프로필(API-216)은 늘 친구 코드를 가져요.
     12. 약속 전화의 받기(REQ-464): 프로필(API-216)의 `pendingRing`이 지금 울리는 약속 전화예요. 웹 화면은 그 값이 있으면 받기 버튼을 그리고, 누르면 통화 화면을 `ring` 값과 함께 열어요. 통화 서버가 지금처럼 그 벨을 받음으로 바꿔요(API-107).
     13. 친구 요청의 `requestedAt`은 TBL `friendships.requested_at`이에요. 거절했거나 끊긴 쌍에 다시 요청하면 같은 행의 보낸 사람과 보낸 때를 새로 쓰고 답한 때를 비워요.
+
+    사람별 사용 한도에서 정한 것(Claude 제안, 2026-11-21, 0.2.0-draft, 검토 대상. SPEC-397\~399, D106).
+    14. 계정 한도(TERM-199)는 `mode`가 `unlimited`(무제한), `default`(기본 한도 TERM-200을 따름), `custom`(직접 정한 숫자, 빈 쪽은 기본 한도) 셋이에요. 바꾸기(API-243)는 PUT이라 세 칸을 통째로 정해요. 같은 값이면 200이고 아무것도 바뀌지 않아요(위 2와 같음).
+    15. 달러 값은 JSON 숫자가 아니라 소수 둘째 자리까지의 문자열이에요(`"5.00"`, 정규식 `^[0-9]{1,4}\.[0-9]{2}$`). 받을 때는 소수 둘째 자리까지면 `"5"`, `"5.5"`도 받아요. 부동소수 반올림이 끼지 않게 하려고요.
+    16. 친구가 받는 응답(API-216·234)에는 달러가 없어요. 통화는 유효 통화 월 한도의 몇 %인지(`callMonth.percent`, 내림)와 다시 채워지는 때만 있어요. 달러는 관리자 응답(API-236·243)에만 있어요.
+    17. `limit`(유효 하루 한도)과 `callMonth.limited`는 서버가 계산한 값이라, 화면은 무제한인지 스스로 판단하지 않고 이 값만 봐요. 프로필 행이 없는 친구는 이 계약의 API를 부르기 전에 행이 생겨서(11) '기본'이에요.
+    18. 오늘 사용량(API-234)과 프로필의 `usageToday`(API-216)는 같은 `Usage` 모양이에요. 지금 코드가 프로필에 `day`·`tickets`·`limit`을 이미 넣고 있어서, 계약을 코드에 맞추면서 `callMonth`를 더했어요(계약 손봄).
 
     Open: 초대 링크를 거두는 요청(TBL-164 `revoked_at`)과 보낸 친구 요청을 거두는 요청은 이 계약에 없어요. 필요해지면 ID를 더해요. 로컬 서버 포트는 앱 서버 진입점(SPEC-376)을 만들 때 확정해요.
 servers:
@@ -265,12 +273,13 @@ paths:
     get:
       operationId: getProfile
       summary: 내 마롱이(프로필)
-      description: 내 마롱이 화면(SCR-165)과 글 대화·통화 화면의 머리말이 불러요. 마롱이 이름, 쓰는 캐릭터(없으면 `null` = 기본 마롱이), 통화 목소리(`null` = 기본 목소리), 내 친구 코드, 공유 설정, 오늘 사용량이 와요. 이미 적용한 캐릭터는 캐릭터 설정(`MARONG_CHARACTER`)이 꺼져 있어도 그대로 읽혀요(명세 공통 9).
+      description: 내 마롱이 화면(SCR-165)과 글 대화·통화 화면의 머리말이 불러요. 마롱이 이름, 쓰는 캐릭터(없으면 `null` = 기본 마롱이), 통화 목소리(`null` = 기본 목소리), 내 친구 코드, 공유 설정, 오늘 사용량(API-234와 같은 모양, SPEC-399)이 와요. 이미 적용한 캐릭터는 캐릭터 설정(`MARONG_CHARACTER`)이 꺼져 있어도 그대로 읽혀요(명세 공통 9).
       x-corthex:
         id: API-216
         spec:
         - SPEC-377
         - SPEC-394
+        - SPEC-399
         omit:
           '400': 입력이 없음
           '403': 읽기라 Origin을 보지 않고, 설정으로 끄는 기능이 아님
@@ -294,10 +303,17 @@ paths:
                     friendCode: K7M2QX
                     share: true
                     usageToday:
+                      day: '2026-11-21'
                       chatTurns: 42
                       callSeconds: 780
                       images: 0
                       units: 432
+                      tickets: 0
+                      limit: null
+                      callMonth:
+                        limited: false
+                        percent: null
+                        resetsAt: null
                     features:
                       character: true
                       friends: true
@@ -316,10 +332,17 @@ paths:
                     friendCode: K7M2QX
                     share: true
                     usageToday:
+                      day: '2026-11-21'
                       chatTurns: 42
                       callSeconds: 780
                       images: 0
                       units: 432
+                      tickets: 0
+                      limit: null
+                      callMonth:
+                        limited: false
+                        percent: null
+                        resetsAt: null
                     features:
                       character: true
                       friends: true
@@ -382,10 +405,17 @@ paths:
                     friendCode: K7M2QX
                     share: true
                     usageToday:
+                      day: '2026-11-21'
                       chatTurns: 42
                       callSeconds: 780
                       images: 0
                       units: 432
+                      tickets: 0
+                      limit: null
+                      callMonth:
+                        limited: false
+                        percent: null
+                        resetsAt: null
                     features:
                       character: true
                       friends: true
@@ -490,10 +520,17 @@ paths:
                     friendCode: K7M2QX
                     share: true
                     usageToday:
+                      day: '2026-11-21'
                       chatTurns: 42
                       callSeconds: 780
                       images: 0
                       units: 432
+                      tickets: 0
+                      limit: null
+                      callMonth:
+                        limited: false
+                        percent: null
+                        resetsAt: null
                     features:
                       character: true
                       friends: true
@@ -508,10 +545,17 @@ paths:
                     friendCode: K7M2QX
                     share: true
                     usageToday:
+                      day: '2026-11-21'
                       chatTurns: 42
                       callSeconds: 780
                       images: 0
                       units: 432
+                      tickets: 0
+                      limit: null
+                      callMonth:
+                        limited: false
+                        percent: null
+                        resetsAt: null
                     features:
                       character: true
                       friends: true
@@ -1648,12 +1692,13 @@ paths:
   /chat/api/usage:
     get:
       operationId: getUsage
-      summary: 오늘 사용량
-      description: 오늘(새벽 4시에 바뀌는 하루)의 글 답 수, 통화 초, 그림 수와 그것을 합친 사용 단위예요. `limit`은 설정값 `MARONG_DAILY_UNITS`이고 비어 있으면 `null`이에요(세기만 하고 막지 않아요). `tickets`는 남은 티켓이에요. 오늘 쓴 것이 없어도 200이고 값이 0이에요.
+      summary: 내 사용량
+      description: 내 마롱이의 '내 사용량' 카드(SCR-165)가 불러요. 오늘(새벽 4시에 바뀌는 하루)의 글 답 수, 통화 초, 그림 수와 그것을 합친 사용 단위예요. `limit`은 로그인한 친구의 유효 하루 한도(SPEC-397 3.1)이고 없으면 `null`이에요(무제한, 또는 기본인데 설정값 `MARONG_DAILY_UNITS`가 비어 있음. 세기만 하고 막지 않아요). `tickets`는 남은 티켓이에요. `callMonth`는 이번 달(UTC 달, 한국 시각 1일 오전 9시에 바뀜) 통화가 유효 통화 월 한도의 몇 %인지예요. 달러는 없어요. 이번 달 통화 합을 읽지 못하면(1초 넘음 포함) `percent`만 `null`이고 200이에요. 오늘 쓴 것이 없어도 200이고 값이 0이에요. 다른 친구의 값은 어떤 경우에도 없어요(REQ-489).
       x-corthex:
         id: API-234
         spec:
         - SPEC-394
+        - SPEC-399
         omit:
           '400': 입력이 없음
           '403': 읽기라 Origin을 보지 않고, 설정으로 끄는 기능이 아님
@@ -1668,24 +1713,45 @@ paths:
               schema:
                 $ref: '#/components/schemas/Usage'
               examples:
-                counting:
+                unlimited:
                   value:
-                    day: '2026-11-19'
+                    day: '2026-11-21'
                     chatTurns: 42
                     callSeconds: 780
                     images: 0
                     units: 432
-                    limit: null
                     tickets: 0
+                    limit: null
+                    callMonth:
+                      limited: false
+                      percent: null
+                      resetsAt: null
                 limited:
                   value:
-                    day: '2026-11-19'
+                    day: '2026-11-21'
                     chatTurns: 120
                     callSeconds: 1800
                     images: 1
                     units: 1060
-                    limit: 1000
                     tickets: 3
+                    limit: 1000
+                    callMonth:
+                      limited: true
+                      percent: 40
+                      resetsAt: '2026-12-01T09:00:00+09:00'
+                callMonthUnknown:
+                  value:
+                    day: '2026-11-21'
+                    chatTurns: 10
+                    callSeconds: 0
+                    images: 0
+                    units: 10
+                    tickets: 0
+                    limit: 1000
+                    callMonth:
+                      limited: true
+                      percent: null
+                      resetsAt: '2026-12-01T09:00:00+09:00'
         '401':
           $ref: '#/components/responses/LoginRequired'
         '503':
@@ -1696,13 +1762,14 @@ paths:
     get:
       operationId: adminListInvites
       summary: 초대 링크 목록
-      description: 관리자 화면(SCR-169)이 불러요. 최근에 만든 것부터 100개까지 와요. 토큰과 링크 주소는 없어요(만들 때 한 번만 보여요). `state`는 `open`(쓸 수 있음), `used`, `expired`, `revoked`(거둠)예요.
+      description: 관리자 화면(SCR-169)이 불러요. 최근에 만든 것부터 100개까지 와요. 토큰과 링크 주소는 없어요(만들 때 한 번만 보여요). `state`는 `open`(쓸 수 있음), `used`, `expired`, `revoked`(거둠)예요. 날짜는 `createdAt`(만든 때), `expiresAt`(만료), `usedAt`(쓴 때, 안 썼으면 null), `revokedAt`(거둔 때, 안 거뒀으면 null)이고, 화면은 날짜마다 이름표를 붙여요(SPEC-398 3.4).
       security:
       - cfAccess: []
       x-corthex:
         id: API-240
         spec:
         - SPEC-395
+        - SPEC-398
         omit:
           '400': 입력이 없음
           '401': Access 증명이 없어도 403 not_allowed(SPEC-395)
@@ -1724,13 +1791,19 @@ paths:
                       kind: join
                       note: 구름
                       state: open
+                      createdAt: '2026-11-19T10:20:00+09:00'
                       expiresAt: '2026-11-26T10:20:00+09:00'
+                      usedAt: null
+                      revokedAt: null
                       usedBy: null
                     - id: 4
                       kind: join
                       note: 하늘
                       state: used
+                      createdAt: '2026-11-18T09:00:00+09:00'
                       expiresAt: '2026-11-25T09:00:00+09:00'
+                      usedAt: '2026-11-18T09:12:00+09:00'
+                      revokedAt: null
                       usedBy:
                         friendId: 5
                         name: 하늘
@@ -1799,13 +1872,14 @@ paths:
     get:
       operationId: adminListMembers
       summary: 회원 목록
-      description: '`members`는 프로필이 있는 친구(초대 링크로 가입했거나 연결한 사람)이고 가입한 순서로 와요. `sessions`는 살아 있는 기기 로그인 수, `lastSeenAt`은 가장 최근에 쓴 때(로그인이 없으면 `null`)예요. `unlinked`는 프로필이 아직 없는 기존 친구 행이에요(`link` 초대 링크를 만들 때 고르는 목록, 이름과 id만). 대화 글은 없어요.'
+      description: '`members`는 프로필이 있는 친구(초대 링크로 가입했거나 연결한 사람)이고 가입한 순서로 와요. `sessions`는 살아 있는 기기 로그인 수, `lastSeenAt`은 가장 최근에 쓴 때(로그인이 없으면 `null`)예요. `limits`는 그 사람의 계정 한도(TERM-199), `effective`는 기본 한도까지 넣어 계산한 유효 한도, `callMonthUsd`는 이번 달(UTC 달) 통화 비용이에요(`call.friend_month_usd`). 이번 달 통화 비용을 읽지 못하면(1초 넘음 포함) 모든 줄의 `callMonthUsd`가 `null`이고 200이에요. `defaults`는 서버 설정값의 기본 한도(TERM-200)예요. `unlinked`는 프로필이 아직 없는 기존 친구 행이에요(`link` 초대 링크를 만들 때 고르는 목록, 이름과 id만). 대화 글은 없어요.'
       security:
       - cfAccess: []
       x-corthex:
         id: API-236
         spec:
         - SPEC-395
+        - SPEC-398
         omit:
           '400': 입력이 없음
           '401': Access 증명이 없어도 403 not_allowed(SPEC-395)
@@ -1822,6 +1896,9 @@ paths:
               examples:
                 list:
                   value:
+                    defaults:
+                      dailyUnits: 1000
+                      callMonthlyUsd: '3.00'
                     members:
                     - friendId: 5
                       name: 하늘
@@ -1834,6 +1911,14 @@ paths:
                         callSeconds: 780
                         images: 0
                         units: 432
+                      limits:
+                        mode: unlimited
+                        dailyUnits: null
+                        callMonthlyUsd: null
+                      effective:
+                        dailyUnits: null
+                        callMonthlyUsd: null
+                      callMonthUsd: '1.23'
                     - friendId: 11
                       name: 구름
                       botName: 마롱이
@@ -1845,6 +1930,14 @@ paths:
                         callSeconds: 0
                         images: 0
                         units: 0
+                      limits:
+                        mode: custom
+                        dailyUnits: 200
+                        callMonthlyUsd: null
+                      effective:
+                        dailyUnits: 200
+                        callMonthlyUsd: '3.00'
+                      callMonthUsd: '0.00'
                     unlinked:
                     - friendId: 2
                       name: 바다
@@ -1933,12 +2026,87 @@ paths:
           $ref: '#/components/responses/DbUnavailable'
         default:
           $ref: '#/components/responses/Internal'
+  /chat/admin/api/members/{friendId}/limits:
+    put:
+      operationId: adminSetLimits
+      summary: 계정 한도 바꾸기
+      description: 그 회원의 계정 한도(TERM-199)를 정해요. `unlimited`(무제한)와 `default`(기본 한도 TERM-200을 따름)는 숫자를 보내지 않고, `custom`(직접)은 `dailyUnits`(하루 사용 단위 1\~100000)와 `callMonthlyUsd`(통화 월 달러 0.01\~1000, 소수 둘째 자리까지) 가운데 하나 이상을 보내요. 보내지 않은 쪽은 기본 한도를 따라요. 프로필 행 UPDATE 하나로 바꾸고, 그 친구의 다음 요청부터 적용돼요(서버 재시작 없음). 지금 값과 같으면 200이고 아무것도 바뀌지 않아요. 로그는 `admin_limits friend=<id> mode=<mode>`뿐이에요. 응답은 바꾼 뒤의 계정 한도와 유효 한도예요.
+      security:
+      - cfAccess: []
+      x-corthex:
+        id: API-243
+        spec:
+        - SPEC-398
+        omit:
+          '401': Access 증명이 없어도 403 not_allowed(SPEC-395)
+          '409': 부딪히는 상태가 없음(마지막에 보낸 값이 이김)
+          '429': 동희님만 부름
+      parameters:
+      - $ref: '#/components/parameters/FriendId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LimitsUpdate'
+            examples:
+              unlimited:
+                value:
+                  mode: unlimited
+              default:
+                value:
+                  mode: default
+              custom:
+                value:
+                  mode: custom
+                  dailyUnits: 200
+                  callMonthlyUsd: '5.00'
+              customDailyOnly:
+                value:
+                  mode: custom
+                  dailyUnits: 200
+      responses:
+        '200':
+          description: 바꾼 뒤의 계정 한도와 유효 한도
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LimitsChanged'
+              examples:
+                unlimited:
+                  value:
+                    limits:
+                      mode: unlimited
+                      dailyUnits: null
+                      callMonthlyUsd: null
+                    effective:
+                      dailyUnits: null
+                      callMonthlyUsd: null
+                customDailyOnly:
+                  value:
+                    limits:
+                      mode: custom
+                      dailyUnits: 200
+                      callMonthlyUsd: null
+                    effective:
+                      dailyUnits: 200
+                      callMonthlyUsd: '3.00'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '403':
+          $ref: '#/components/responses/AdminForbiddenWrite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+        default:
+          $ref: '#/components/responses/Internal'
 components:
   x-corthex:
     errors:
       invalid_input:
         status: 400
-        meaning: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖, 목록에 없는 값, 형식이 틀린 경로 id, join 초대에 친구 id를 넣거나 link·relogin 초대에 친구 id가 없음, relogin 초대인데 그 친구에게 프로필이 없음)
+        meaning: 요청 모양이 틀림(빠진 칸, 길이·형식·범위 밖, 목록에 없는 값, 형식이 틀린 경로 id, join 초대에 친구 id를 넣거나 link·relogin 초대에 친구 id가 없음, relogin 초대인데 그 친구에게 프로필이 없음, 계정 한도의 mode가 목록 밖이거나 숫자가 범위 밖·소수 셋째 자리, custom인데 숫자가 없음, unlimited·default에 숫자가 있음)
         message: 뭔가 잘못 보냈나 봐. 다시 해 볼게
         client: 입력 칸 오류면 그 칸 옆에 보이고, 아니면 오류 상태와 추적 id
       voice_unknown:
@@ -2909,10 +3077,11 @@ components:
           type: integer
           minimum: 0
           description: 사용 단위(TERM-191)로 합친 값
-      description: 오늘(새벽 4시 기준) 쓴 양
+      description: 오늘(새벽 4시 기준) 쓴 양. 관리자 회원 목록(API-236)만 써요. 친구가 받는 모양은 Usage예요
     Usage:
       type: object
       additionalProperties: false
+      description: 내 사용량(SPEC-399). API-234와 프로필(API-216)의 `usageToday`가 같은 모양이에요. 로그인한 친구의 값만 있어요
       required:
       - day
       - chatTurns
@@ -2921,6 +3090,7 @@ components:
       - units
       - limit
       - tickets
+      - callMonth
       properties:
         day:
           type: string
@@ -2946,12 +3116,41 @@ components:
           oneOf:
           - type: integer
             minimum: 1
-            description: 하루 단위 한도(MARONG_DAILY_UNITS). 비어 있으면 null
+            maximum: 100000
+            description: 그 친구의 유효 하루 한도(SPEC-397 3.1)
           - type: 'null'
+          description: 유효 하루 한도. 무제한이거나 기본인데 MARONG_DAILY_UNITS가 비어 있으면 null(막지 않음)
         tickets:
           type: integer
           minimum: 0
           description: 남은 티켓(TERM-192)
+        callMonth:
+          $ref: '#/components/schemas/CallMonth'
+    CallMonth:
+      type: object
+      additionalProperties: false
+      description: 이번 달(UTC 달) 통화가 유효 통화 월 한도의 몇 %인지. 달러는 없어요(SPEC-399)
+      required:
+      - limited
+      - percent
+      - resetsAt
+      properties:
+        limited:
+          type: boolean
+          description: 유효 통화 월 한도가 있는지. false면 percent·resetsAt이 null이고 화면은 '무제한'
+        percent:
+          oneOf:
+          - type: integer
+            minimum: 0
+            description: 내림(이번 달 합 ÷ 유효 통화 월 한도 × 100). 통화 중에 넘으면 100보다 클 수 있어요
+          - type: 'null'
+          description: limited가 false이거나 이번 달 합을 읽지 못했으면 null
+        resetsAt:
+          oneOf:
+          - type: string
+            format: date-time
+            description: 다음 UTC 달 1일 00:00(한국 시각 1일 오전 9시). +09:00으로 줘요
+          - type: 'null'
     ProfileCharacter:
       type: object
       additionalProperties: false
@@ -2978,6 +3177,21 @@ components:
           type: string
           format: uri-reference
           description: 정면 그림(API-242)
+        template:
+          type: string
+          enum:
+          - dog_small
+          - dog_large
+          - dog_long
+          - cat
+          - cat_round
+          description: 몸 템플릿. 차림 레이어 파일을 고를 때 써요(pet-app SPEC-421). 반려동물 part가 더한 칸이라 그 전 서버는 보내지 않아요
+        outfit:
+          $ref: 'pet-app.openapi.yaml#/components/schemas/WornOutfit'
+          description: 지금 입은 아이템과 그 템플릿의 레이어 주소(pet-app SPEC-421, API-255). MARONG_DECOR가 꺼져 있으면 세 자리가 모두 null
+        introMissing:
+          type: boolean
+          description: 아이 소개를 아직 저장하지 않았으면 true(pet-app SPEC-409). 내 마롱이 화면이 안내 줄을 보여요
     Profile:
       type: object
       additionalProperties: false
@@ -3020,7 +3234,7 @@ components:
           type: boolean
           description: 내 얘기를 다른 친구에게 해도 되는지(friends.share)
         usageToday:
-          $ref: '#/components/schemas/UsageToday'
+          $ref: '#/components/schemas/Usage'
         features:
           type: object
           additionalProperties: false
@@ -3034,6 +3248,9 @@ components:
             friends:
               type: boolean
               description: MARONG_FRIENDS가 켜져 있으면 true
+            decor:
+              type: boolean
+              description: MARONG_DECOR가 켜져 있으면 true(pet-app SPEC-417~424). 반려동물 part가 더한 칸이라 그 전 서버는 보내지 않아요. 없으면 false로 봐요
           description: 서버에서 켜진 기능. 화면은 꺼진 기능의 메뉴를 그리지 않아요(명세 공통 규칙 9)
         google:
           type: string
@@ -3656,7 +3873,10 @@ components:
       - kind
       - note
       - state
+      - createdAt
       - expiresAt
+      - usedAt
+      - revokedAt
       - usedBy
       properties:
         id:
@@ -3679,9 +3899,26 @@ components:
           - used
           - expired
           - revoked
+        createdAt:
+          type: string
+          format: date-time
+          description: 만든 때(TBL-164 created_at)
         expiresAt:
           type: string
           format: date-time
+          description: 만료(만든 때 + MARONG_INVITE_DAYS)
+        usedAt:
+          oneOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          description: 쓴 때. 아직 안 썼으면 null
+        revokedAt:
+          oneOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          description: 거둔 때. 안 거뒀으면 null
         usedBy:
           oneOf:
           - $ref: '#/components/schemas/InviteUser'
@@ -3709,6 +3946,9 @@ components:
       - lastSeenAt
       - tickets
       - usageToday
+      - limits
+      - effective
+      - callMonthUsd
       properties:
         friendId:
           type: integer
@@ -3736,13 +3976,25 @@ components:
           minimum: 0
         usageToday:
           $ref: '#/components/schemas/UsageToday'
+        limits:
+          $ref: '#/components/schemas/AccountLimits'
+        effective:
+          $ref: '#/components/schemas/LimitValues'
+        callMonthUsd:
+          oneOf:
+          - $ref: '#/components/schemas/Usd'
+          - type: 'null'
+          description: 이번 달(UTC 달) 통화 비용. 읽지 못하면 null
     MemberList:
       type: object
       additionalProperties: false
       required:
+      - defaults
       - members
       - unlinked
       properties:
+        defaults:
+          $ref: '#/components/schemas/LimitValues'
         members:
           type: array
           maxItems: 500
@@ -3785,3 +4037,104 @@ components:
         tickets:
           type: integer
           minimum: 0
+    Usd:
+      type: string
+      pattern: ^[0-9]{1,4}\.[0-9]{2}$
+      description: 달러 값. 소수 둘째 자리까지의 문자열(예 "5.00")
+    AccountLimits:
+      type: object
+      additionalProperties: false
+      description: 계정 한도(TERM-199). TBL-167의 usage_unlimited·daily_units·call_monthly_usd를 mode로 읽은 것
+      required:
+      - mode
+      - dailyUnits
+      - callMonthlyUsd
+      properties:
+        mode:
+          type: string
+          enum:
+          - unlimited
+          - default
+          - custom
+          description: unlimited = usage_unlimited 참. default = 거짓이고 두 숫자가 비어 있음. custom = 거짓이고 숫자가 하나 이상 있음
+        dailyUnits:
+          oneOf:
+          - type: integer
+            minimum: 1
+            maximum: 100000
+          - type: 'null'
+          description: 직접 정한 하루 사용 단위. 비어 있으면 기본 한도를 따름
+        callMonthlyUsd:
+          oneOf:
+          - $ref: '#/components/schemas/Usd'
+          - type: 'null'
+          description: 직접 정한 통화 월 달러. 비어 있으면 기본 한도를 따름
+    LimitValues:
+      type: object
+      additionalProperties: false
+      description: 하루 사용 단위와 통화 월 달러 한 쌍. null은 한도 없음. 유효 한도(effective)와 기본 한도(defaults)에 써요
+      required:
+      - dailyUnits
+      - callMonthlyUsd
+      properties:
+        dailyUnits:
+          oneOf:
+          - type: integer
+            minimum: 1
+          - type: 'null'
+        callMonthlyUsd:
+          oneOf:
+          - $ref: '#/components/schemas/Usd'
+          - type: 'null'
+    LimitsUpdate:
+      type: object
+      additionalProperties: false
+      description: 계정 한도 바꾸기(API-243). unlimited·default는 숫자를 보내지 않아요. custom은 하나 이상을 보내요
+      required:
+      - mode
+      properties:
+        mode:
+          type: string
+          enum:
+          - unlimited
+          - default
+          - custom
+        dailyUnits:
+          type: integer
+          minimum: 1
+          maximum: 100000
+        callMonthlyUsd:
+          type: string
+          pattern: ^[0-9]{1,4}(\.[0-9]{1,2})?$
+          description: 0.01\~1000, 소수 둘째 자리까지. "5", "5.5", "5.00" 모두 받아요
+      oneOf:
+      - properties:
+          mode:
+            enum:
+            - unlimited
+            - default
+        not:
+          anyOf:
+          - required:
+            - dailyUnits
+          - required:
+            - callMonthlyUsd
+      - properties:
+          mode:
+            const: custom
+        anyOf:
+        - required:
+          - dailyUnits
+        - required:
+          - callMonthlyUsd
+    LimitsChanged:
+      type: object
+      additionalProperties: false
+      required:
+      - limits
+      - effective
+      properties:
+        limits:
+          $ref: '#/components/schemas/AccountLimits'
+        effective:
+          $ref: '#/components/schemas/LimitValues'

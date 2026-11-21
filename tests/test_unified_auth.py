@@ -138,16 +138,41 @@ class UnifiedAuthTest(unittest.IsolatedAsyncioTestCase):
         await self.problem(await self.client.post(base + f"/api/members/{unknown}/tickets", json={"add": 1},
                                                  headers=admin), 404, "not_found")
         code, _ = await self.sessions.create_device_code(owner)
+        other_cookie = await self.joined()
         revoke = base + f"/api/members/{owner}/revoke"
         for _ in range(2):
             self.assertEqual((await self.client.post(revoke, headers=admin)).status, 204)
         await self.problem(await self.client.get("/chat/api/me", headers=member_cookie), 401, "login_required")
+        await self.problem(await self.client.get("/chat/api/me", headers={
+            "Cookie": f"{COOKIE}={redemption.cookies[COOKIE].value}",
+        }), 401, "login_required")
+        self.assertIsNotNone(await self.sessions.find_session(other_cookie))
         await self.problem(await self.post(LOGIN, {"code": code}), 401, "code_wrong")
         people = await (await self.client.get(base + "/api/members", headers=admin)).json()
-        self.assertEqual((people["members"][0]["tickets"], people["members"][0]["sessions"]), (8, 0))
+        member = next(member for member in people["members"] if member["friendId"] == owner)
+        self.assertEqual((member["tickets"], member["sessions"]), (8, 0))
+
+        invite = await self.client.post(path, json={"kind": "join"}, headers=admin)
+        self.assertEqual(invite.status, 201)
+        address = (await invite.json())["url"]
+        token = address.rsplit("/", 1)[1]
+        available = await self.client.get(INVITES + token)
+        self.assertEqual((available.status, await available.json()), (200, {"kind": "join", "state": "open"}))
+        fresh = await self.post(JOIN, {"token": token, "name": "New Fixture"})
+        self.assertEqual(fresh.status, 201)
+        self.assertEqual(await fresh.json(), {"friendName": "New Fixture", "botName": "마롱이"})
+        cookie = fresh.cookies[COOKIE]
+        self.assertTrue(cookie["secure"] and cookie["httponly"])
+        self.assertEqual((cookie["path"], cookie["samesite"]), ("/", "Lax"))
+        profile = await self.client.get("/chat/api/profile", headers={"Cookie": f"{COOKIE}={cookie.value}"})
+        self.assertEqual(profile.status, 200)
+        self.assertEqual((await profile.json())["friendName"], "New Fixture")
+        listed = await (await self.client.get(path, headers=admin)).json()
+        self.assertNotIn(token, str(listed))
 
     async def test_check_redeem_and_validate_invites(self):
         token, expiry = await self.sessions.create_invite("join")
+        self.assertEqual(expiry - self.now, timedelta(days=7))
         for invalid in ("bad-format", secrets.token_urlsafe(32)):
             await self.problem(await self.client.get(INVITES + invalid), 404, "invite_not_found")
             await self.problem(await self.post(JOIN, {"token": invalid, "name": "Tester"}), 404, "invite_not_found")
@@ -176,6 +201,7 @@ class UnifiedAuthTest(unittest.IsolatedAsyncioTestCase):
         self.now = expiry + timedelta(minutes=1)
         await self.problem(await self.client.get(INVITES + expired), 410, "invite_expired")
         await self.problem(await self.post(JOIN, {"token": expired, "name": "Tester"}), 410, "invite_expired")
+        self.assertEqual(self.db.admin("SELECT count(*) FROM marong.friends"), [(1,)])
 
     async def test_cookie_session_renewal_expiry_and_logout(self):
         invite, _ = await self.sessions.create_invite("join")
@@ -257,6 +283,7 @@ class UnifiedAuthTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.db.admin(f"SELECT count(*) FROM marong.{table}"), [(0,)])
         self.assertEqual(self.db.admin("SELECT used_at,used_by FROM marong.invites"), [(None, None)])
         self.assertEqual(self.db.admin("SELECT count(*) FROM call.kakao_guards"), [(0,)])
+        self.assertEqual(self.db.admin("SELECT count(*) FROM call.callers"), [(0,)])
         self.db.admin("DROP TRIGGER fail_fixture ON call.callers")
         created = await self.post(JOIN, {"token": invite, "name": "Fixture"})
         self.assertEqual(created.status, 201)
@@ -396,8 +423,14 @@ class UnifiedAuthTest(unittest.IsolatedAsyncioTestCase):
                 self.db.admin("UPDATE call.callers SET enabled=false")
                 self.assertEqual((await client.get("/api/me", headers=by_cookie)).status, 403)
                 self.db.admin("UPDATE call.callers SET enabled=true")
-                await self.sessions.logout(token)
+                self.chat.access = SimpleNamespace(check=AsyncMock(return_value=("ok", self.admin_hash)))
+                revoked = await self.client.post(f"/chat/admin/api/members/{member['friend_id']}/revoke",
+                    headers={"Cf-Access-Jwt-Assertion": "fixture-admin", "Origin": ORIGIN})
+                self.assertEqual(revoked.status, 204)
                 self.assertEqual((await client.get("/api/me", headers=by_cookie)).status, 401)
+                with self.assertRaises(WSServerHandshakeError) as failure:
+                    await client.ws_connect("/live", headers={**by_cookie, "Origin": origin})
+                self.assertEqual(failure.exception.status, 401)
 
     async def test_owned_room_scope_for_recent_text_search_and_embeddings(self):
         member_a = await self.sessions.find_session(await self.joined())

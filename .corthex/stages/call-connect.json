@@ -1,0 +1,230 @@
+{
+  "format": 1,
+  "project": "marong",
+  "part": "call-connect",
+  "stages": {
+    "01-domain": {
+      "state": "skipped",
+      "checkpoints": [],
+      "next": "새 맥락·용어 없음(통화 CTX-002 안의 일)",
+      "checks": [
+        {
+          "level": "info",
+          "message": "고장 고치기라 새 맥락·용어가 없음. 바뀌는 것은 통화 CTX-002 안의 연결 순서와 재생 확인",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T07:10:04+00:00"
+    },
+    "02-prd": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "PR #79는 2026-11-21 16:44 KST main에 합침(동희님 '니가 머지해'). NEXUS 체크포인트는 하지 않음(동희님 16:47 KST '넥서스 하지 말고 걍 작업해'). GPT 구현 결과를 받아 TASK-471",
+      "checks": [
+        {
+          "level": "info",
+          "message": "고장 BUG-108~110(동희님 2026-11-21 15:31·15:51 KST 원문, docs/12-qa/call-connect.md)에서 거꾸로 올라온 설계. 동희님 15:35 KST \"그냥 만들지 말고 /corthex로 만들어\"",
+          "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "docs/02-prd/call-connect.md: REQ-491~497(7개, Must 3·Should 4, 모두 active). REQ-491은 REQ-008(P95 4초)을 벨 받기에 적용, REQ-008은 그대로. 고르지 않은 안(벨 때 서버가 Gemini 미리 열기)을 이유와 함께 적음",
+          "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "REQ-494를 Must로, REQ-498(통화 볼륨 하한 60%·되돌리기·볼륨 버튼) 추가. 원문4·5(2026-11-21 16:36·16:37 KST '소리가 너무 작아', '가장 크게 해도 안들리고')",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T07:50:21+00:00"
+    },
+    "03-user-flow": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "PR #79는 2026-11-21 16:44 KST main에 합침(동희님 '니가 머지해'). NEXUS 체크포인트는 하지 않음(동희님 16:47 KST '넥서스 하지 말고 걍 작업해'). GPT 구현 결과를 받아 TASK-471",
+      "checks": [
+        {
+          "level": "info",
+          "message": "고장 BUG-108~110(동희님 2026-11-21 15:31·15:51 KST 원문, docs/12-qa/call-connect.md)에서 거꾸로 올라온 설계. 동희님 15:35 KST \"그냥 만들지 말고 /corthex로 만들어\"",
+          "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "FL-180(벨 받기에서 첫 목소리까지), FL-181(목소리가 안 들릴 때). REQ-491~497이 모두 흐름에 있음",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T07:10:04+00:00"
+    },
+    "04-functional-spec": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "PR #79는 2026-11-21 16:44 KST main에 합침(동희님 '니가 머지해'). NEXUS 체크포인트는 하지 않음(동희님 16:47 KST '넥서스 하지 말고 걍 작업해'). GPT 구현 결과를 받아 TASK-471",
+      "checks": [
+        {
+          "level": "info",
+          "message": "고장 BUG-108~110(동희님 2026-11-21 15:31·15:51 KST 원문, docs/12-qa/call-connect.md)에서 거꾸로 올라온 설계. 동희님 15:35 KST \"그냥 만들지 말고 /corthex로 만들어\"",
+          "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "docs/04-functional-spec/call-connect.md: SPEC-400~404(시각 기록과 진짜 준비 시각, 정적 파일 캐시와 스크립트 순서, 동시 시작과 첫마디 붙잡기, 앱 0.3.1, 재생 확인). 새 문구 없음(지금 app.js 문구를 그대로 씀)",
+          "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "SPEC-405(앱 0.3.1: 스피커 기본·통화 모드·다시 고르기·볼륨 하한·볼륨 버튼·진단) 추가, SPEC-403은 앱 0.3.2로. 3.5에 화면만 고치는 안(setSinkId, Web Audio 증폭, 울림 제거 끄기, 스피커 버튼)을 고르지 않은 이유",
+          "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "화면 함수를 window.__marongCall로 옮김(3.6): 앱 스크립트의 window.__marongApp은 defineProperty·freeze라 화면이 함수를 더할 수 없음(marong_page.js 읽음). SPEC-405에 Android 11 이하 블루투스 SCO만·보청기, 저장 commit 시점, 듣기 붙이고 떼는 때를 더함",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T08:12:36+00:00"
+    },
+    "05-erd": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "PR #79는 2026-11-21 16:44 KST main에 합침(동희님 '니가 머지해'). NEXUS 체크포인트는 하지 않음(동희님 16:47 KST '넥서스 하지 말고 걍 작업해'). GPT 구현 결과를 받아 TASK-471",
+      "checks": [
+        {
+          "level": "info",
+          "message": "고장 BUG-108~110(동희님 2026-11-21 15:31·15:51 KST 원문, docs/12-qa/call-connect.md)에서 거꾸로 올라온 설계. 동희님 15:35 KST \"그냥 만들지 말고 /corthex로 만들어\"",
+          "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "marong/call/migrations/010_call_connect.sql: TBL-004(call.segments)에 connect_timing·playback jsonb, call.transport_events.reason에 rtc_silent. 임시 Postgres 16(pgserver, 합성 행)에서 통합 앱 마이그레이션(020·통화 008)과 사용 한도 마이그레이션(021·통화 009) 뒤에 두 번 적용, 확인 11개 통과, 실패 0. 운영 DB에는 적용하지 않음. 그림은 docs/05-erd/call-connect.md",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T07:10:04+00:00"
+    },
+    "06-api": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "PR #79는 2026-11-21 16:44 KST main에 합침(동희님 '니가 머지해'). NEXUS 체크포인트는 하지 않음(동희님 16:47 KST '넥서스 하지 말고 걍 작업해'). GPT 구현 결과를 받아 TASK-471",
+      "checks": [
+        {
+          "level": "info",
+          "message": "고장 BUG-108~110(동희님 2026-11-21 15:31·15:51 KST 원문, docs/12-qa/call-connect.md)에서 거꾸로 올라온 설계. 동희님 15:35 KST \"그냥 만들지 말고 /corthex로 만들어\"",
+          "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "api/call-live.openapi.yaml 0.1.0-draft → 0.2.0-draft: API-107에 hold와 timing·audio_ready·playback 메시지, 새 API-246(정적 파일). openapi-spec-validator로 OpenAPI 3.1 통과. 구현 전이라 계약 시험은 없음",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T07:10:04+00:00"
+    },
+    "07-sitemap": {
+      "state": "skipped",
+      "checkpoints": [],
+      "next": "새 화면 없음(SCR-002 통화 화면의 상태만 바뀜)",
+      "checks": [
+        {
+          "level": "info",
+          "message": "새 화면·경로 없음",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T07:10:04+00:00"
+    },
+    "08-screen-states": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "PR #79는 2026-11-21 16:44 KST main에 합침(동희님 '니가 머지해'). NEXUS 체크포인트는 하지 않음(동희님 16:47 KST '넥서스 하지 말고 걍 작업해'). GPT 구현 결과를 받아 TASK-471",
+      "checks": [
+        {
+          "level": "info",
+          "message": "고장 BUG-108~110(동희님 2026-11-21 15:31·15:51 KST 원문, docs/12-qa/call-connect.md)에서 거꾸로 올라온 설계. 동희님 15:35 KST \"그냥 만들지 말고 /corthex로 만들어\"",
+          "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "docs/08-screens/call-connect.md: SCR-002의 상태 #preparing(새 이름, 동작 고정), #tap-to-hear·#sound-switching(새 이름, 지금 문구를 더 많은 경우에 씀). 와이어프레임·목업은 바뀌지 않음",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T07:10:04+00:00"
+    },
+    "09-mockup": {
+      "state": "skipped",
+      "checkpoints": [],
+      "next": "새 토큰·목업 없음",
+      "checks": [
+        {
+          "level": "info",
+          "message": "화면 모양이 바뀌지 않아 목업·토큰을 고치지 않음",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T07:10:04+00:00"
+    },
+    "10-wbs": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "PR #79는 2026-11-21 16:44 KST main에 합침(동희님 '니가 머지해'). NEXUS 체크포인트는 하지 않음(동희님 16:47 KST '넥서스 하지 말고 걍 작업해'). GPT 구현 결과를 받아 TASK-471",
+      "checks": [
+        {
+          "level": "info",
+          "message": "고장 BUG-108~110(동희님 2026-11-21 15:31·15:51 KST 원문, docs/12-qa/call-connect.md)에서 거꾸로 올라온 설계. 동희님 15:35 KST \"그냥 만들지 말고 /corthex로 만들어\"",
+          "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "docs/10-wbs/call-connect.md: GPT 인계 절과 TASK-460~471(12개, Owner GPT 11·Claude 1). 1차는 통화 서버·화면(codex/call-connect-web), 2차는 앱 0.3.1(codex/call-connect-app)",
+          "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "TASK-472~474(앱 0.3.1 스피커·통화 볼륨, 서명·게시, 실제 폰 기록)를 맨 앞에. TASK-467·468은 앱 0.3.2(versionCode 10)",
+          "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "TASK-464·465·472를 __marongCall에 맞춤, 서명 위치(노트북이나 학원 컴퓨터, 같은 인증서). 구현은 동희님이 Codex에 직접 주는 통합 프롬프트로(2026-11-21 17:08 KST)",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T08:12:36+00:00"
+    },
+    "12-qa": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "PR #79는 2026-11-21 16:44 KST main에 합침(동희님 '니가 머지해'). NEXUS 체크포인트는 하지 않음(동희님 16:47 KST '넥서스 하지 말고 걍 작업해'). GPT 구현 결과를 받아 TASK-471",
+      "checks": [
+        {
+          "level": "info",
+          "message": "고장 BUG-108~110(동희님 2026-11-21 15:31·15:51 KST 원문, docs/12-qa/call-connect.md)에서 거꾸로 올라온 설계. 동희님 15:35 KST \"그냥 만들지 말고 /corthex로 만들어\"",
+          "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "docs/12-qa/call-connect.md: BUG-108(늦은 연결), BUG-109(입은 움직이는데 소리 없음), BUG-110(준비 시각·구간 모드가 틀림). 증거는 운영 DB 읽기(대화 글 없이 개수·시각만)와 코드. 회귀 TC-570~589(20개, 자동 18·실제 폰 2), 모두 돌리기 전",
+          "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "허브 snapshot 경고 2개는 자유 형식 문서에 정의된 번호예요: SPEC-145(docs/app-chat.md, 앱 통화 화면의 글 칸 숨김), TC-147(docs/app-ring.md, 앱 벨 에뮬레이터 시험). 두 곳 모두 그 문서로 링크함",
+          "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "BUG-111(가장 크게 해도 너무 작음, 16:34 KST 통화 WebRTC 끝까지, 친구 말 11·마롱이 12줄) 추가, BUG-109 후보 나를 높음으로. TC-590~595(자동 5·실제 폰 1)",
+          "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "TC-596(화면 함수) 더함, TC-584·585·586·590·591·592·595 맞춤",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T08:12:36+00:00"
+    }
+  }
+}

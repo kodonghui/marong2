@@ -1,0 +1,102 @@
+/* Pet characters inside the unified app (pet-app) mockup. Loads after unified-mockup.css and adds only the parts
+   the pet-app screens need. Every value is a frozen token of design/base.tokens.json (D67): diary colours are color.a/b.diary-*,
+   sizes are size.*, font-size.diary-*. Item pictures (hats, stickers, backgrounds, papers) are placeholder content art, not UI. */
+.phone {
+  --diary-paper: #d9cfbc; --diary-grid: #6e9786; --diary-ink: #2b211a; --diary-ink-muted: #5a4c40;
+  --diary-stamp: #9a3227; --diary-frame: #4a3a2e; --diary-shadow: #00000066; --scrim: #0507109e;
+  --size-diary-cell: 32px; --size-topic-picture: 240px; --size-avatar: 168px;
+  --font-size-diary-small: 18px; --font-size-diary-body: 22px; --font-size-diary-title: 26px;
+  --font-diary: "Gaegu", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --font-display-b: "Gowun Dodum", "Noto Sans KR", system-ui, sans-serif;
+  --opacity-faded: 0.4;
+}
+.phone[data-theme="chestnut"] {
+  --diary-paper: #fffdf7; --diary-grid: #7fb09e; --diary-ink: #2b211a; --diary-ink-muted: #6b5b4f;
+  --diary-stamp: #c23b2e; --diary-frame: #4a3a2e; --diary-shadow: #58361b24; --scrim: #2b211a80;
+}
+
+/* a character with its outfit: the expression picture and each layer are the same 1024 square, stacked body, neck, head */
+.dress {position: relative; display: block; aspect-ratio: 1 / 1}
+.dress > img {position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain}
+.face .dress {width: 100%; height: 100%}
+.face .dress > img {width: 100%; height: 100%}
+
+/* item cards (shop, closet) */
+.items {display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-sm)}
+.item {display: flex; flex-direction: column; gap: var(--space-xs); min-width: 0; padding: var(--space-sm); border-radius: var(--radius-md); background: var(--surface); border: 1px solid var(--line); color: var(--text); text-decoration: none; text-align: left}
+.item.on {border: 2px solid var(--accent); padding: 7px}
+.thumb {position: relative; display: grid; place-items: center; aspect-ratio: 1 / 1; border-radius: var(--radius-sm); background: var(--raised); overflow: hidden}
+.thumb > img {width: 80%; height: 80%; object-fit: contain}
+.thumb.fill > img {width: 100%; height: 100%; object-fit: cover}
+.thumb .font-sample {font-size: var(--font-size-display); color: var(--diary-ink)}
+.thumb .badge {position: absolute; left: var(--space-xs); top: var(--space-xs)}
+.item .name {font-size: var(--font-size-caption); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap}
+.item .price {font-size: var(--font-size-caption); color: var(--muted)}
+.mini {min-height: var(--size-touch-min); border: 0; border-radius: var(--radius-sm); background: var(--accent); color: var(--on-accent); font-size: var(--font-size-caption); font-weight: 700}
+.mini.done {background: transparent; color: var(--muted); border: 1px solid var(--line)}
+.tabs3 {display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-sm)}
+.slot-title {display: flex; align-items: center; gap: var(--space-sm); font-size: var(--font-size-caption); color: var(--muted); font-weight: 700}
+
+/* a sheet over the screen */
+.scrim {position: absolute; inset: 0; background: var(--scrim)}
+.sheet {position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; gap: var(--space-md); padding: var(--space-sm) var(--space-md) var(--space-lg); border-radius: var(--radius-lg) var(--radius-lg) 0 0; background: var(--page)}
+.grab {align-self: center; width: var(--space-xl); height: var(--space-xs); border-radius: var(--radius-full); background: var(--line)}
+.phone.layered {position: relative}
+
+/* horizontal pickers (diary decor) */
+.hrow {display: flex; gap: var(--space-sm); overflow-x: auto; padding-bottom: var(--space-xs)}
+.opt {flex: none; display: flex; flex-direction: column; align-items: center; gap: var(--space-xs); width: var(--size-control); padding: 0; border: 0; background: transparent; color: var(--text); font-size: var(--font-size-caption)}
+.opt .thumb {width: var(--size-control); border: 1px solid var(--line)}
+.opt.on .thumb {border: 2px solid var(--accent)}
+.opt.on {font-weight: 700}
+
+/* the diary page (the same parts as marong/app_chat_static/diary/diary.css) */
+.desk {padding: var(--space-sm); background: var(--raised)}
+.desk.dots {background: url("pet-app-mockup/bg-dots.svg") repeat}
+.desk.stars {background: url("pet-app-mockup/bg-stars.svg") repeat}
+.dpaper {position: relative; padding: var(--space-sm); border-radius: var(--radius-sm); background: var(--diary-paper); color: var(--diary-ink); box-shadow: 0 var(--space-xs) var(--space-md) var(--diary-shadow); font-family: var(--font-diary)}
+.dpaper.lined {background: url("pet-app-mockup/paper-lined.svg") repeat}
+.dpaper.kraft {background: url("pet-app-mockup/paper-kraft.svg") repeat}
+.dpaper.gowun {font-family: var(--font-display-b)}
+.dline {display: flex; justify-content: space-between; align-items: center; gap: var(--space-xs); padding: var(--space-xs); border-bottom: 2px solid var(--diary-grid); font-size: var(--font-size-diary-small)}
+.dtitle {display: flex; align-items: center; gap: var(--space-sm); margin: var(--space-sm) 0; padding: var(--space-xs); border-bottom: 2px solid var(--diary-grid)}
+.dtitle h2 {flex: 1; min-width: 0; font-size: var(--font-size-diary-title); font-weight: 400}
+.writer {display: flex; align-items: center; gap: var(--space-sm); font-size: var(--font-size-diary-small); color: var(--diary-ink-muted)}
+.writer .face {width: var(--size-touch-min); height: var(--size-touch-min)}
+.dframe {position: relative; aspect-ratio: 3 / 2; overflow: hidden; border: 2px solid var(--diary-frame); background: var(--diary-paper)}
+.dframe > img {display: block; width: 100%; height: 100%; object-fit: cover}
+.dframe.none {display: grid; place-items: center; gap: var(--space-xs); border-style: dashed; text-align: center; color: var(--diary-ink-muted); font-size: var(--font-size-diary-small)}
+.dgrid {display: grid; grid-template-columns: repeat(9, var(--size-diary-cell)); width: max-content; margin: var(--space-md) auto var(--space-sm); border-top: 1px solid var(--diary-grid); border-left: 1px solid var(--diary-grid)}
+.dgrid span {height: var(--size-diary-cell); display: grid; place-items: center; border: solid var(--diary-grid); border-width: 0 1px 1px 0; font-size: var(--font-size-diary-body)}
+.dtext {margin: var(--space-sm) 0; font-size: var(--font-size-diary-body); line-height: var(--size-diary-cell)}
+.dtext.lines {background: repeating-linear-gradient(to bottom, transparent 0 calc(var(--size-diary-cell) - 1px), var(--diary-grid) calc(var(--size-diary-cell) - 1px) var(--size-diary-cell))}
+
+/* stickers on the diary page */
+.stk {position: absolute; width: var(--size-control); height: var(--size-control); padding: 0; border: 0; background: transparent}
+.stk > img {width: 100%; height: 100%}
+.stk.sel {outline: 2px dashed var(--accent); outline-offset: 4px}
+.handle {position: absolute; right: calc(-1 * var(--space-md)); bottom: calc(-1 * var(--space-md)); width: var(--size-icon); height: var(--size-icon); border-radius: 50%; border: 2px solid var(--accent); background: var(--surface)}
+.peel {position: absolute; display: inline-flex; align-items: center; gap: var(--space-xs); min-height: var(--size-touch-min); padding: 0 var(--space-md); border: 0; border-radius: var(--radius-full); background: var(--text); color: var(--page); font-size: var(--font-size-caption); font-weight: 700}
+.tray {display: flex; gap: var(--space-sm); overflow-x: auto}
+.tray .stkbtn {flex: none; width: var(--size-control); height: var(--size-control); display: grid; place-items: center; border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--surface); padding: 0}
+.tray .stkbtn img {width: 70%; height: 70%}
+
+/* scene pictures in the chat (SCR-107#picture: size.topic-picture, radius.md) and the call topic card */
+.scene {position: relative; display: block; width: var(--size-topic-picture); max-width: 100%; aspect-ratio: 1 / 1; margin: 0 0 var(--space-xs); border-radius: var(--radius-md); border: 1px solid var(--line); overflow: hidden; background: var(--surface)}
+.scene > img {position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover}
+.scene > .dress {position: absolute; left: 12%; right: 12%; bottom: 0}
+.scene .tag {position: absolute; left: var(--space-sm); top: var(--space-sm); padding: 2px var(--space-sm); border-radius: var(--radius-full); background: var(--accent); color: var(--on-accent); font-size: var(--font-size-caption); font-weight: 700}
+.stack-col {display: flex; flex-direction: column; max-width: 78%}
+.stack-col .bubble {max-width: 100%}
+.topic {position: relative; width: var(--size-face-call); height: var(--size-face-call); border-radius: 50%; overflow: hidden}
+.topic > img {width: 100%; height: 100%; object-fit: cover}
+.close-pic {position: absolute; top: -4px; right: -4px; width: var(--size-touch-min); height: var(--size-touch-min); border-radius: 50%; border: 0; background: var(--raised); color: var(--text); display: grid; place-items: center}
+
+/* admin table */
+.tablebox {overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--surface)}
+.tbl {border-collapse: collapse; min-width: 560px; font-size: var(--font-size-caption)}
+.tbl th, .tbl td {padding: var(--space-sm); border-top: 1px solid var(--line); text-align: left; vertical-align: middle; white-space: nowrap}
+.tbl th {border-top: 0; color: var(--muted)}
+.tbl .thumb {width: var(--size-touch-min)}
+.miss {color: var(--danger); white-space: normal}
+.btn2.tight {width: auto; min-height: var(--size-touch-min); padding: 0 var(--space-sm); border-width: 1px; font-size: var(--font-size-caption)}

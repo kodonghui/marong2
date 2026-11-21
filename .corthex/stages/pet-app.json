@@ -1,0 +1,150 @@
+{
+  "format": 1,
+  "project": "marong",
+  "part": "pet-app",
+  "stages": {
+    "01-domain": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/01-domain/pet-app.md: 바뀌는 맥락 CTX-030·031, TERM-210~218. 결정 D110~D117·D119·D120. 용어 검사 통과",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T08:07:22+00:00"
+    },
+    "02-prd": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/02-prd/pet-app.md: REQ-500~546·550~552(547~549는 추억 모드 D121 답 뒤로 남김). pet.md·call-first.md의 바뀌는 REQ 표시. 용어 검사 통과",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T08:07:22+00:00"
+    },
+    "03-user-flow": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/03-user-flow/FL-185~192(아이 소개·목소리, 1인칭, 화두 장면, 일기, 꾸미기 상점, 입히기·반응, 일기장 꾸미기, 관리자 아이템). 용어 검사 통과",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T08:07:22+00:00"
+    },
+    "04-functional-spec": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/04-functional-spec/pet-app.md: SPEC-406~429, AI-40~43, AI-30·31 바꿈. D119 그림 월 예산 없음, D120 사진도 보여 주기(SPEC-428). 고양이 사진 그리기 시험 숫자 3.3·3.13. 용어 검사 통과",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T08:07:22+00:00"
+    },
+    "05-erd": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "marong/migrations/022_pet_app.sql: TBL-175~181(새 표 7개)과 characters·friend_profiles·diaries·topic_sends·app_rings 칸. 2026-11-21 버리는 pgserver에서 020·021(통화 008~010) 뒤 022 두 번 적용, 거절 21가지·목소리 백필·권한 통과. 운영 DB에는 넣지 않음. 설명 docs/05-erd/pet-app.md",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T08:07:22+00:00"
+    },
+    "06-api": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "api/pet-app.openapi.yaml: API-250~266(256 비움). unified·diary 계약의 바뀌는 API 표시. OpenAPI 검사 통과",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T08:07:22+00:00"
+    },
+    "07-sitemap": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "SCR-180~186 더함(sitemap.yaml·sitemap.md). sitemap.yaml 읽기 통과",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T08:07:22+00:00"
+    },
+    "08-screen-states": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/08-screens/pet-app.md: SCR-180~186 상태. 질문 A는 기본값 '반려동물 캐릭터만'으로 진행",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T08:07:22+00:00"
+    },
+    "09-mockup": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "design/pet-app-mockup.html·css·md: 얼린 토큰(D67) 위 목업. 캔버스 https://claude.ai/artifact/SvoMoaLwcvq5XoBQxT2uVd(비공개)",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T08:07:22+00:00"
+    },
+    "10-wbs": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/10-wbs/pet-app.md: GPT 인계 절, TASK-420~444(Owner GPT, PR 4개 ①→②→③→④). README에 D110~D120·머지 규칙, 작업 패키지·ID 범위·겹치는 파일 줄 더함",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T08:07:22+00:00"
+    },
+    "12-qa": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/12-qa/pet-app.md: TC-510~560(자동과 반영 뒤 사람 확인 TC-537·558~560). 실행은 구현 뒤 GPT",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T08:07:22+00:00"
+    }
+  }
+}

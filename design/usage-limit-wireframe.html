@@ -1,0 +1,404 @@
+<title>마롱이 내 사용량 와이어프레임</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Noto+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* Layout: 두 화면을 나란히(좁으면 위아래). 왼쪽은 폰 폭 SCR-165, 오른쪽은 관리자 SCR-169. 위의 칩으로 상태를 바꿔요.
+   색은 design/base.tokens.json의 얼린 토큰만 써요: 밝은 테마 = color.b '군밤 크림', 어두운 테마 = color.a '밤하늘'(D67). */
+:root {
+  --page: #FBF6EE; --surface: #FFFFFF; --surface-2: #F1E6D6; --text: #2B211A; --muted: #6B5B4F;
+  --accent: #8A4B24; --on-accent: #FFFFFF; --accent-soft: #F3DCC4; --line: #E2D3BF; --danger: #B3261E;
+  --input-border: #A88F76; --scrim: rgba(43, 33, 26, .5);
+  --font-body: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-display: "Gowun Dodum", "Noto Sans KR", system-ui, sans-serif;
+  --r-sm: 8px; --r-md: 16px; --r-lg: 24px; --r-full: 999px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #121729; --surface: #1C2340; --surface-2: #252E52; --text: #F4F1EA; --muted: #B4B2C6;
+    --accent: #E8A35C; --on-accent: #121729; --accent-soft: #252E52; --line: rgba(180, 178, 198, .25); --danger: #FF8A8D;
+    --input-border: rgba(180, 178, 198, .4); --scrim: rgba(5, 7, 16, .62); color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #121729; --surface: #1C2340; --surface-2: #252E52; --text: #F4F1EA; --muted: #B4B2C6;
+  --accent: #E8A35C; --on-accent: #121729; --accent-soft: #252E52; --line: rgba(180, 178, 198, .25); --danger: #FF8A8D;
+  --input-border: rgba(180, 178, 198, .4); --scrim: rgba(5, 7, 16, .62); color-scheme: dark;
+}
+* { box-sizing: border-box }
+body {
+  background: var(--page); color: var(--text); font: 400 16px/1.55 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 24px 48px;
+}
+.wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 24px }
+header h1 { font: 400 28px/1.25 var(--font-display); margin: 0; text-wrap: balance }
+header p { margin: 6px 0 0; color: var(--muted); max-width: 68ch; font-size: 15px }
+.ids { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums }
+.cols { display: grid; grid-template-columns: minmax(0, 390px) minmax(0, 1fr); gap: 24px; align-items: start }
+@media (max-width: 860px) { .cols { grid-template-columns: minmax(0, 1fr) } }
+section.screen { display: grid; gap: 12px; min-width: 0 }
+.screen-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px }
+.screen-head h2 { font: 400 22px/1.3 var(--font-display); margin: 0 }
+.screen-head .ids { margin-left: auto }
+.chips { display: flex; flex-wrap: wrap; gap: 6px }
+.chip {
+  min-height: 36px; padding: 4px 12px; border-radius: var(--r-full); border: 1px solid var(--input-border);
+  background: transparent; color: var(--text); font: 500 14px/1 var(--font-body); cursor: pointer;
+}
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent) }
+.chip:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+.state { font-size: 13px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace }
+
+/* 폰 화면 */
+.phone { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--page); padding: 16px; display: grid; gap: 12px }
+.phone .topbar { display: flex; align-items: center; gap: 8px; font-weight: 700 }
+.phone .topbar span { color: var(--muted); font-weight: 400; font-size: 14px }
+.ghost { height: 44px; border-radius: var(--r-md); background: var(--surface); border: 1px dashed var(--line); color: var(--muted);
+  display: flex; align-items: center; padding: 0 14px; font-size: 14px }
+.card { background: var(--surface); border-radius: var(--r-md); padding: 16px; display: grid; gap: 12px; border: 1px solid var(--line) }
+.card h3 { margin: 0; font-size: 17px }
+.row { display: grid; gap: 6px }
+.row .label { display: flex; justify-content: space-between; gap: 8px; font-size: 15px }
+.row .label b { font-weight: 500 }
+.row .sub { font-size: 14px; color: var(--muted) }
+.row .sub.warn { color: var(--danger) }
+.meter { height: 8px; border-radius: var(--r-full); background: var(--surface-2); overflow: hidden }
+.meter i { display: block; height: 100%; background: var(--accent); border-radius: inherit }
+.meter.full i { background: var(--danger) }
+.num { font-variant-numeric: tabular-nums }
+.err { display: grid; gap: 8px; justify-items: start; color: var(--muted) }
+.btn-t { min-height: 44px; padding: 0 16px; border-radius: var(--r-sm); border: 1px solid var(--accent); background: transparent; color: var(--accent);
+  font: 500 15px/1 var(--font-body); cursor: pointer }
+.btn { min-height: 44px; padding: 0 18px; border-radius: var(--r-sm); border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent);
+  font: 500 15px/1 var(--font-body); cursor: pointer }
+.btn[disabled] { opacity: .45; cursor: not-allowed }
+.banner { background: var(--accent-soft); border-radius: var(--r-md); padding: 12px 14px; display: grid; gap: 6px; font-size: 15px }
+.banner a { color: var(--accent); font-weight: 500 }
+
+/* 관리자 화면 */
+.admin { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); padding: 16px; display: grid; gap: 16px; min-width: 0 }
+.admin h3 { margin: 0; font-size: 17px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center }
+.list { display: grid; gap: 0; border-top: 1px solid var(--line) }
+.item { padding: 12px 0; border-bottom: 1px solid var(--line); display: grid; gap: 4px; min-width: 0 }
+.item .l1 { font-weight: 500 }
+.item .l2, .item .l3 { font-size: 14px; color: var(--muted) }
+.item.dim .l1, .item.dim .l2, .item.dim .l3 { opacity: .6 }
+.item .l3 .k { color: var(--text); font-weight: 500 }
+.defaults { font-size: 14px; color: var(--muted); background: var(--surface-2); border-radius: var(--r-sm); padding: 8px 12px }
+.member-top { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between }
+.member-top .actions { display: flex; flex-wrap: wrap; gap: 6px }
+.small { min-height: 36px; padding: 0 12px; font-size: 14px }
+.editor { margin-top: 8px; background: var(--surface-2); border-radius: var(--r-sm); padding: 12px; display: grid; gap: 10px }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px }
+.field { display: grid; gap: 4px; font-size: 14px }
+.field input { min-height: 44px; border: 1px solid var(--input-border); border-radius: var(--r-sm); background: var(--surface); color: var(--text);
+  padding: 0 12px; font: 400 16px var(--font-body); font-variant-numeric: tabular-nums; width: 100% }
+.hint { font-size: 13px; color: var(--muted) }
+.field-err { font-size: 14px; color: var(--danger) }
+.editor .bar { display: flex; flex-wrap: wrap; gap: 8px }
+.toast { position: sticky; bottom: max(12px, env(safe-area-inset-bottom, 0px)); justify-self: center; background: var(--text); color: var(--page);
+  padding: 10px 16px; border-radius: var(--r-full); font-size: 14px }
+.compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px }
+.compare h4 { margin: 0 0 6px; font-size: 14px; color: var(--muted); font-weight: 500 }
+.foot { font-size: 13px; color: var(--muted); max-width: 80ch }
+.foot code { font-size: 12px }
+@media (prefers-reduced-motion: no-preference) { .meter i { transition: width .25s ease } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>내 사용량과 관리자 한도</h1>
+    <p>사람별 사용 한도(D106)의 화면 상태를 눌러 보는 와이어프레임이에요. 칩을 누르면 상태가 바뀌어요. 이름·숫자는 지어낸 값이고, 기본 한도 숫자도 예시예요(서버의 실제 설정값은 아직 확인하지 않았어요).</p>
+    <p class="ids">FL-179 · SPEC-397~399 · API-216·234·236·240·243 · 정의 docs/08-screens/usage-limit.md</p>
+  </header>
+
+  <div class="cols">
+    <section class="screen" aria-labelledby="h165">
+      <div class="screen-head"><h2 id="h165">내 마롱이</h2><span class="ids">SCR-165 · /chat/me</span></div>
+      <div class="chips" role="group" aria-label="내 사용량 상태" id="usageChips"></div>
+      <div class="state" id="usageState"></div>
+      <div class="phone">
+        <div class="topbar">마롱이 <span>· 내 마롱이</span></div>
+        <div class="ghost">얼굴 · 이름 바꾸기 · 통화 목소리 (그대로)</div>
+        <div class="ghost">캐릭터 · 다른 기기에서도 쓰기 (그대로)</div>
+        <div class="card" id="usageCard" aria-live="polite"></div>
+        <div class="ghost">친구 · 구글 캘린더 · 로그아웃 (그대로)</div>
+      </div>
+
+      <div class="screen-head"><h2>하루 한도 안내</h2><span class="ids">SCR-107·001 #daily-limit</span></div>
+      <div class="banner">
+        <span>오늘 쓸 수 있는 양을 다 썼어. 새벽 4시에 다시 채워져</span>
+        <a href="#h165" id="seeUsage">내 사용량 보기</a>
+      </div>
+      <p class="foot">무제한 계정에는 이 안내가 나오지 않아요. 통화 홈(SCR-001)에도 같은 링크가 붙어요.</p>
+    </section>
+
+    <section class="screen" aria-labelledby="h169">
+      <div class="screen-head"><h2 id="h169">관리자</h2><span class="ids">SCR-169 · /chat/admin/ · Access 뒤</span></div>
+
+      <div class="admin">
+        <h3>초대 링크
+          <span class="chips" role="group" aria-label="비교" id="inviteChips"></span>
+        </h3>
+        <div class="compare" id="inviteBox"></div>
+      </div>
+
+      <div class="admin">
+        <h3>가입한 사람
+          <span class="chips" role="group" aria-label="이번 달 통화 비용" id="costChips"></span>
+        </h3>
+        <div class="defaults num" id="defaults"></div>
+        <div class="list" id="members"></div>
+      </div>
+      <div class="toast" id="toast" role="status" hidden></div>
+    </section>
+  </div>
+
+  <p class="foot">날짜는 한국 시각 짧은 모양이에요('11월 21일 오후 2:59', 다른 해면 연도를 붙임). 남은 날은 지금(이 예시에서는 2026년 11월 21일 오후 3:50)에서 만료까지 올림한 날 수예요. 저장은 이 페이지 안에서만 바뀌고 서버로 보내지 않아요. 입력 검사는 API-243 계약과 같아요: 하루 1~100000 정수, 통화 월 0.01~1000(소수 둘째 자리까지), '직접'은 하나 이상.</p>
+</div>
+
+<script>
+(() => {
+  const NOW = new Date('2026-11-21T15:50:00+09:00');
+  const fmt = (iso, opts) => new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', ...opts }).format(new Date(iso));
+  const year = iso => fmt(iso, { year: 'numeric' });
+  function short(iso) {
+    const base = { month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' };
+    if (year(iso) !== year(NOW.toISOString())) base.year = 'numeric';
+    return fmt(iso, base);
+  }
+  function dayHour(iso) {
+    const d = new Date(iso);
+    const opts = { month: 'long', day: 'numeric', hour: 'numeric' };
+    if (d.getUTCMinutes() !== 0) opts.minute = '2-digit';
+    return fmt(iso, opts);
+  }
+  const daysLeft = iso => Math.ceil((new Date(iso) - NOW) / 86400000);
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+
+  function chipGroup(box, items, current, onPick) {
+    box.textContent = '';
+    items.forEach(([key, label]) => {
+      const b = el('button', 'chip', label); b.type = 'button'; b.id = box.id + '-' + key;
+      b.setAttribute('aria-pressed', String(key === current));
+      b.addEventListener('click', () => onPick(key));
+      box.append(b);
+    });
+  }
+
+  /* ---------- SCR-165 내 사용량 ---------- */
+  const RESET = '2026-12-01T00:00:00Z';
+  const usagePresets = {
+    unlimited: { label: '무제한 계정', states: '#usage #usage-unlimited #call-month-unlimited',
+      u: { chatTurns: 42, callSeconds: 780, images: 0, units: 432, tickets: 0, limit: null, callMonth: { limited: false, percent: null, resetsAt: null } } },
+    limited: { label: '한도 있음', states: '#usage #usage-limit #tickets #call-month',
+      u: { chatTurns: 12, callSeconds: 500, images: 1, units: 320, tickets: 3, limit: 1000, callMonth: { limited: true, percent: 40, resetsAt: RESET } } },
+    overTickets: { label: '넘음(티켓)', states: '#usage #usage-over #tickets #call-month-over',
+      u: { chatTurns: 120, callSeconds: 1800, images: 1, units: 1060, tickets: 2, limit: 1000, callMonth: { limited: true, percent: 103, resetsAt: RESET } } },
+    over: { label: '넘음(티켓 0)', states: '#usage #usage-over #call-month',
+      u: { chatTurns: 110, callSeconds: 1200, images: 2, units: 1000, tickets: 0, limit: 1000, callMonth: { limited: true, percent: 72, resetsAt: RESET } } },
+    unknown: { label: '통화 합 못 읽음', states: '#usage #usage-limit #call-month-unknown',
+      u: { chatTurns: 10, callSeconds: 0, images: 0, units: 10, tickets: 0, limit: 1000, callMonth: { limited: true, percent: null, resetsAt: RESET } } },
+    error: { label: '카드 오류', states: '#usage-error', u: null },
+  };
+  let usageKey = 'unlimited';
+
+  function meter(pct) {
+    const m = el('div', 'meter' + (pct >= 100 ? ' full' : ''));
+    m.setAttribute('role', 'presentation');
+    const i = el('i'); i.style.width = Math.min(100, pct) + '%'; m.append(i); return m;
+  }
+  function renderUsage() {
+    const p = usagePresets[usageKey];
+    chipGroup(document.getElementById('usageChips'), Object.entries(usagePresets).map(([k, v]) => [k, v.label]), usageKey, k => { usageKey = k; renderUsage(); });
+    document.getElementById('usageState').textContent = 'SCR-165' + p.states.split(' ').join(' · ');
+    const card = document.getElementById('usageCard'); card.textContent = '';
+    card.append(el('h3', null, '내 사용량'));
+    if (!p.u) {
+      const e = el('div', 'err'); e.append(el('span', null, '지금은 못 불러왔어'));
+      const b = el('button', 'btn-t', '다시 해 볼게'); b.type = 'button'; b.id = 'retryUsage';
+      b.addEventListener('click', () => { usageKey = 'limited'; renderUsage(); });
+      e.append(b); card.append(e); return;
+    }
+    const u = p.u;
+    const today = el('div', 'row');
+    today.append(el('div', 'label num', `오늘 · 글 답 ${u.chatTurns}번 · 통화 ${Math.floor(u.callSeconds / 60)}분 · 그림 ${u.images}장`));
+    card.append(today);
+
+    const daily = el('div', 'row');
+    if (u.limit === null) {
+      const l = el('div', 'label'); l.append(el('span', null, '하루 한도'), el('b', null, '무제한')); daily.append(l);
+    } else {
+      const l = el('div', 'label num'); l.append(el('span', null, '하루 한도'), el('b', null, `오늘 ${u.units} / ${u.limit}`)); daily.append(l);
+      daily.append(meter(u.units / u.limit * 100));
+      if (u.units >= u.limit) daily.append(el('div', 'sub warn', u.tickets > 0 ? '오늘 양을 넘어서 티켓으로 이어 가는 중이야' : '오늘 쓸 수 있는 양을 다 썼어. 새벽 4시에 다시 채워져'));
+    }
+    card.append(daily);
+
+    if (u.tickets > 0) {
+      const t = el('div', 'row'); const l = el('div', 'label num'); l.append(el('span', null, '티켓'), el('b', null, `${u.tickets}장`)); t.append(l); card.append(t);
+    }
+
+    const cm = el('div', 'row'); const c = u.callMonth;
+    const l = el('div', 'label num'); l.append(el('span', null, '이번 달 통화'));
+    if (!c.limited) { l.append(el('b', null, '무제한')); cm.append(l); }
+    else if (c.percent === null) { cm.append(l); cm.append(el('div', 'sub', '이번 달 통화 양은 지금 못 불러왔어')); }
+    else {
+      l.append(el('b', null, `${c.percent}%`)); cm.append(l); cm.append(meter(c.percent));
+      cm.append(el('div', 'sub' + (c.percent >= 100 ? ' warn' : ''), c.percent >= 100
+        ? `이번 달 통화를 다 썼어. ${dayHour(c.resetsAt)}에 다시 채워져`
+        : `${c.percent}% 썼어 · ${dayHour(c.resetsAt)}에 다시 채워져`));
+    }
+    card.append(cm);
+  }
+
+  /* ---------- SCR-169 초대 링크 ---------- */
+  const invites = [
+    { kind: '새 사람', note: '구름', state: 'open', createdAt: '2026-11-21T14:59:00+09:00', expiresAt: '2026-11-28T14:59:00+09:00', usedAt: null, revokedAt: null },
+    { kind: '새 사람', note: '하늘', state: 'used', who: '하늘', createdAt: '2026-11-21T14:59:00+09:00', expiresAt: '2026-11-28T14:59:00+09:00', usedAt: '2026-11-21T15:01:00+09:00', revokedAt: null },
+    { kind: '다시 로그인', note: '바다', state: 'expired', createdAt: '2026-11-12T19:16:00+09:00', expiresAt: '2026-11-19T19:16:00+09:00', usedAt: null, revokedAt: null },
+    { kind: '기존 계정 연결', note: '별', state: 'revoked', createdAt: '2026-11-12T19:16:00+09:00', expiresAt: '2026-11-19T19:16:00+09:00', usedAt: null, revokedAt: '2026-11-13T09:00:00+09:00' },
+  ];
+  const stateName = { open: '열림', used: '씀', expired: '기간 지남', revoked: '거둠' };
+  const oldDate = iso => new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'short', timeStyle: 'short' }).format(new Date(iso));
+  let inviteView = 'both';
+
+  function dateLine(inv) {
+    const line = el('div', 'l3 num');
+    const part = (k, v) => { const s = el('span'); s.append(el('span', 'k', k + ' '), document.createTextNode(v)); return s; };
+    line.append(part('만든 때', short(inv.createdAt)), document.createTextNode(' · '));
+    if (inv.state === 'open') { const d = daysLeft(inv.expiresAt); line.append(part('만료', short(inv.expiresAt) + (d >= 1 ? `(${d}일 남음)` : '(오늘 끝나요)'))); }
+    if (inv.state === 'used') line.append(part('쓴 때', short(inv.usedAt)));
+    if (inv.state === 'expired') line.append(part('만료됨', short(inv.expiresAt)));
+    if (inv.state === 'revoked') line.append(part('거둔 때', short(inv.revokedAt)));
+    return line;
+  }
+  function inviteList(kind) {
+    const box = el('div');
+    box.append(el('h4', null, kind === 'old' ? '지금 화면(이름표 없음)' : '바뀐 화면'));
+    const list = el('div', 'list');
+    invites.forEach(inv => {
+      const it = el('div', 'item' + (kind === 'new' && (inv.state === 'expired' || inv.state === 'revoked') ? ' dim' : ''));
+      it.append(el('div', 'l1', `${inv.kind} · ${inv.note}`));
+      const st = stateName[inv.state] + (inv.state === 'used' ? `(${inv.who})` : '');
+      if (kind === 'old') it.append(el('div', 'l2 num', `${st} · ${oldDate(inv.expiresAt)}`));
+      else { it.append(el('div', 'l2', st)); it.append(dateLine(inv)); }
+      list.append(it);
+    });
+    box.append(list); return box;
+  }
+  function renderInvites() {
+    chipGroup(document.getElementById('inviteChips'), [['both', '나란히'], ['new', '바뀐 화면만']], inviteView, k => { inviteView = k; renderInvites(); });
+    const box = document.getElementById('inviteBox'); box.textContent = '';
+    if (inviteView === 'both') box.append(inviteList('old'));
+    box.append(inviteList('new'));
+  }
+
+  /* ---------- SCR-169 가입한 사람과 계정 한도 ---------- */
+  const DEFAULTS = { dailyUnits: 1000, callMonthlyUsd: '3.00' };
+  const members = [
+    { id: 5, name: '하늘', bot: '초코', sessions: 2, lastSeenAt: '2026-11-21T15:40:00+09:00', tickets: 0, units: 432,
+      limits: { mode: 'unlimited', dailyUnits: null, callMonthlyUsd: null }, callMonthUsd: '1.23' },
+    { id: 7, name: '구름', bot: '마롱이', sessions: 1, lastSeenAt: '2026-11-20T22:10:00+09:00', tickets: 3, units: 120,
+      limits: { mode: 'default', dailyUnits: null, callMonthlyUsd: null }, callMonthUsd: '0.40' },
+    { id: 11, name: '바다', bot: '몽실', sessions: 0, lastSeenAt: null, tickets: 10, units: 0,
+      limits: { mode: 'custom', dailyUnits: 200, callMonthlyUsd: '5.00' }, callMonthUsd: '0.00' },
+  ];
+  let costView = 'ok', openEditor = null, draft = null, editorError = '';
+  const usd = v => v === null ? '없음' : '$' + v;
+  const n = v => v === null ? '없음' : String(v);
+  function effective(l) {
+    if (l.mode === 'unlimited') return { dailyUnits: null, callMonthlyUsd: null };
+    return { dailyUnits: l.dailyUnits ?? DEFAULTS.dailyUnits, callMonthlyUsd: l.callMonthlyUsd ?? DEFAULTS.callMonthlyUsd };
+  }
+  function limitText(l) {
+    if (l.mode === 'unlimited') return '한도 · 무제한';
+    if (l.mode === 'default') return `한도 · 기본(하루 ${n(DEFAULTS.dailyUnits)} · 통화 월 ${usd(DEFAULTS.callMonthlyUsd)})`;
+    return `한도 · 직접(하루 ${l.dailyUnits ?? '기본 따름'} · 통화 월 ${l.callMonthlyUsd ? '$' + l.callMonthlyUsd : '기본 따름'})`;
+  }
+  function validate(d) {
+    if (d.mode !== 'custom') return { ok: { mode: d.mode, dailyUnits: null, callMonthlyUsd: null } };
+    const ds = d.daily.trim(), cs = d.call.trim();
+    if (!ds && !cs) return { err: '숫자를 하나 이상 넣어 주세요' };
+    let daily = null, call = null;
+    if (ds) { if (!/^\d+$/.test(ds) || +ds < 1 || +ds > 100000) return { err: '숫자를 확인해 주세요(하루 1~100000, 통화 월 0.01~1000)' }; daily = +ds; }
+    if (cs) { if (!/^\d{1,4}(\.\d{1,2})?$/.test(cs) || +cs < 0.01 || +cs > 1000) return { err: '숫자를 확인해 주세요(하루 1~100000, 통화 월 0.01~1000)' }; call = (+cs).toFixed(2); }
+    return { ok: { mode: 'custom', dailyUnits: daily, callMonthlyUsd: call } };
+  }
+  let toastTimer;
+  function toast(msg) {
+    const t = document.getElementById('toast'); t.textContent = msg; t.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 3000);
+  }
+  function editor(m) {
+    const box = el('div', 'editor');
+    box.append(el('div', 'state', 'SCR-169#limits-edit' + (draft.mode === 'custom' ? ' · #limits-custom' : '') + (editorError ? ' · #limits-invalid' : '')));
+    const chips = el('div', 'chips'); chips.id = 'modeChips-' + m.id;
+    chipGroup(chips, [['unlimited', '무제한'], ['default', '기본 한도'], ['custom', '직접 정하기']], draft.mode, k => { draft.mode = k; editorError = ''; renderMembers(); });
+    box.append(chips);
+    if (draft.mode === 'custom') {
+      const f = el('div', 'fields');
+      const mk = (id, label, key, mode) => {
+        const w = el('label', 'field'); w.htmlFor = id; w.append(el('span', null, label));
+        const i = el('input'); i.id = id; i.inputMode = mode; i.value = draft[key]; i.autocomplete = 'off';
+        i.addEventListener('input', () => { draft[key] = i.value; save.disabled = !draft.daily.trim() && !draft.call.trim(); });
+        w.append(i); return w;
+      };
+      f.append(mk('daily-' + m.id, '하루 사용 단위', 'daily', 'numeric'), mk('call-' + m.id, '통화 월 달러', 'call', 'decimal'));
+      box.append(f, el('div', 'hint', '비운 칸은 기본 한도를 따라요'));
+    }
+    if (editorError) box.append(el('div', 'field-err', editorError));
+    const bar = el('div', 'bar');
+    const save = el('button', 'btn', '저장'); save.type = 'button'; save.id = 'save-' + m.id;
+    save.disabled = draft.mode === 'custom' && !draft.daily.trim() && !draft.call.trim();
+    save.addEventListener('click', () => {
+      const r = validate(draft);
+      if (r.err) { editorError = r.err; renderMembers(); return; }
+      m.limits = r.ok; openEditor = null; draft = null; editorError = '';
+      renderMembers(); toast('한도를 바꿨어요');
+    });
+    const cancel = el('button', 'btn-t', '그만두기'); cancel.type = 'button'; cancel.id = 'cancel-' + m.id;
+    cancel.addEventListener('click', () => { openEditor = null; draft = null; editorError = ''; renderMembers(); });
+    bar.append(save, cancel); box.append(bar);
+    return box;
+  }
+  function renderMembers() {
+    chipGroup(document.getElementById('costChips'), [['ok', '통화 비용 읽음'], ['unknown', '못 읽음']], costView, k => { costView = k; renderMembers(); });
+    document.getElementById('defaults').textContent = `기본 한도 · 하루 ${n(DEFAULTS.dailyUnits)} · 통화 월 ${usd(DEFAULTS.callMonthlyUsd)} (서버 설정값, 예시)`;
+    const list = document.getElementById('members'); list.textContent = '';
+    members.forEach(m => {
+      const it = el('div', 'item');
+      const top = el('div', 'member-top');
+      top.append(el('div', 'l1', `${m.name} · 마롱이 이름 ${m.bot}`));
+      const act = el('div', 'actions');
+      const edit = el('button', 'btn-t small', '한도 바꾸기'); edit.type = 'button'; edit.id = 'edit-' + m.id;
+      edit.setAttribute('aria-expanded', String(openEditor === m.id));
+      edit.addEventListener('click', () => {
+        if (openEditor === m.id) { openEditor = null; draft = null; }
+        else { openEditor = m.id; editorError = ''; draft = { mode: m.limits.mode, daily: m.limits.dailyUnits ? String(m.limits.dailyUnits) : '', call: m.limits.callMonthlyUsd || '' }; }
+        renderMembers();
+      });
+      act.append(el('button', 'btn-t small', '티켓 넣기'), edit);
+      act.firstChild.type = 'button'; act.firstChild.disabled = true; act.firstChild.title = '이 와이어프레임에서는 그대로예요';
+      top.append(act); it.append(top);
+      it.append(el('div', 'l2 num', `로그인 ${m.sessions} · 마지막 사용 ${m.lastSeenAt ? short(m.lastSeenAt) : '없음'} · 오늘 ${m.units} · 티켓 ${m.tickets}`));
+      const e = effective(m.limits);
+      const l3 = el('div', 'l3 num');
+      l3.append(el('span', 'k', limitText(m.limits)));
+      l3.append(document.createTextNode(` · 이번 달 통화 ${costView === 'ok' ? '$' + m.callMonthUsd : '—'}`));
+      it.append(l3);
+      it.append(el('div', 'state', `limits.mode=${m.limits.mode} · effective 하루 ${n(e.dailyUnits)} · 통화 월 ${e.callMonthlyUsd ?? '없음'}`));
+      if (openEditor === m.id) it.append(editor(m));
+      list.append(it);
+    });
+  }
+
+  document.getElementById('seeUsage').addEventListener('click', ev => {
+    ev.preventDefault(); usageKey = 'over'; renderUsage();
+    document.getElementById('usageCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
+  });
+  renderUsage(); renderInvites(); renderMembers();
+})();
+</script>

@@ -1,7 +1,7 @@
 'use strict';
 
 (() => {
-  const {node, button, link, request, signal} = Unified;
+  const {node, button, link, request, signal, endLetter} = Unified;
   const area = document.getElementById('profile');
   const face = document.getElementById('face');
   const groups = document.getElementById('profile-groups');
@@ -59,7 +59,7 @@
           editing = false;
           data = reply.body;
           render();
-          signal(notice, '이제 ' + data.botName + '라고 불러 줘!');
+          signal(notice, '이제 ' + endLetter(data.botName, '이라고', '라고') + ' 불러 줘!');
           clearTimeout(timer);
           timer = setTimeout(() => signal(notice), 3000);
         } else if (reply.body?.code === 'invalid_input') signal(warning, '이름은 1~12자로 적어 줘');

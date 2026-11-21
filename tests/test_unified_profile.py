@@ -7,6 +7,7 @@ from pathlib import Path
 import secrets
 import sys
 import unittest
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 from aiohttp.test_utils import TestClient, TestServer
@@ -43,7 +44,10 @@ class ProfileTests(unittest.IsolatedAsyncioTestCase):
         settings = replace(load_settings(), database_url=db.app_url)
         model = ScriptedLLM(lambda _: message([text("합성 답이야.")]))
         agent = AppAgent(settings, store, FakeEmbeddings(), model)
-        chat = AppChat(store, agent, RoomLocks(), None, AppPush(store), origin=ORIGIN,
+        fcm = AsyncMock()
+        fcm.send.return_value = "ok"
+        push = AppPush(store, fcm, ring_enabled=True, title_for=store.app_bot_name)
+        chat = AppChat(store, agent, RoomLocks(), None, push, origin=ORIGIN,
                        sessions=sessions, authentication="session")
         async with TestClient(TestServer(chat.web_app())) as client:
             cookie = {"Cookie": f"{COOKIE}={auth.token}"}
@@ -83,6 +87,12 @@ class ProfileTests(unittest.IsolatedAsyncioTestCase):
             system = model.bodies[-1]["system"]
             self.assertEqual(system[0]["text"], agent.persona())
             self.assertTrue(any("네 이름은 군밤이야" in block["text"] for block in system))
+            await store.app_device_put("256369f0-36a6-4d30-9c19-345e352a9839", who["friend_id"],
+                                       "fixture-fcm-id-not-real", "granted", "0.3.0", "enabled", "granted")
+            self.assertEqual(await push.notify(who["friend_id"], "proactive", "합성 선톡"), (1, 1))
+            notification = fcm.send.await_args.args[0]
+            self.assertEqual(notification["notification"]["title"], "군밤이")
+            self.assertEqual(notification["android"]["notification"]["channel_id"], "marong_talk")
             schedule = db.admin("""
                 INSERT INTO marong.schedules(friend_id,room_key,source,title,remind_at,action)
                 VALUES (%s,%s,'app','Fixture call',now(),'call') RETURNING id
@@ -91,6 +101,9 @@ class ProfileTests(unittest.IsolatedAsyncioTestCase):
                                         who["caller_id"], "app", "ringing", timedelta(minutes=10))
             ringing = await (await client.get(PROFILE, headers=cookie)).json()
             self.assertEqual(ringing["pendingRing"]["ringId"], ring["id"])
+            devices = await push.ring_devices(who["friend_id"])
+            self.assertEqual(await push.ring(devices, ring["id"], friend_id=who["friend_id"]), 1)
+            self.assertEqual(fcm.send.await_args.args[0]["data"]["title"], "군밤이")
             db.admin("UPDATE marong.app_rings SET answer_until=now()-interval '1 second' WHERE id=%s", (ring["id"],))
             expired = await (await client.get(PROFILE, headers=cookie)).json()
             self.assertIsNone(expired["pendingRing"])

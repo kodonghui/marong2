@@ -1,0 +1,227 @@
+{
+  "format": 1,
+  "project": "marong",
+  "part": "usage-limit",
+  "stages": {
+    "01-domain": {
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/01-domain/usage-limit.md: TERM-199(계정 한도)·TERM-200(기본 한도), 바뀌는 CTX-029·006. 새 CTX 없음. D106·D107. 용어 검사 통과",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T07:49:39+00:00"
+    },
+    "02-prd": {
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/02-prd/usage-limit.md: REQ-484~490(7개). 바뀌는 REQ-474·481 Status를 unified.md에 고침. 용어 검사 통과",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T07:49:39+00:00"
+    },
+    "03-user-flow": {
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/03-user-flow/FL-179-usage-limit.md: FL-179(내 사용량 보기, 관리자 한도 바꾸기). REQ-484~490 모두 흐름이나 명세에 있음. 용어 검사 통과",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T07:49:39+00:00"
+    },
+    "04-functional-spec": {
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/04-functional-spec/usage-limit.md: SPEC-397~399, 3.1 유효 한도, 3.2 통화 월 합 함수, 3.3 카드 문구, 3.4 관리자 날짜 형식, 3.5 관리자 한도, 3.6 바뀌는 기존 명세(SPEC-390·394·395). 용어 검사 통과",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T07:49:40+00:00"
+    },
+    "05-erd": {
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
+      "checks": [
+        {
+          "level": "info",
+          "message": "마이그레이션 021_usage_limit.sql(friend_profiles 칸 3·제약 1)과 통화 009_usage_limit.sql(call.friend_month_usd). 2026-11-21 버리는 pgserver에서 백필·다시 돌리기·제약·권한 통과, 함수 합 0.036000이 지금 personal_budget_blocked와 같음. 운영 DB에는 넣지 않음. 설명 docs/05-erd/usage-limit.md",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T07:49:40+00:00"
+    },
+    "06-api": {
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
+      "checks": [
+        {
+          "level": "info",
+          "message": "api/unified.openapi.yaml 0.2.0-draft: 새 API-243(PUT 한도), 바뀌는 API-216·234·236·240, 새 스키마 CallMonth·Usd·AccountLimits·LimitValues·LimitsUpdate·LimitsChanged. OpenAPI 검사 통과, 예시 65개 스키마에 맞음. call-live의 budget_exhausted 뜻 고침",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T07:49:40+00:00"
+    },
+    "07-sitemap": {
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
+      "checks": [
+        {
+          "level": "info",
+          "message": "새 SCR 없음. SCR-001·107·165·169에 FL-179·TERM-199(·200) 더함, 보드 연결 SCR-107→SCR-165. sitemap.yaml 읽기 통과",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T07:49:40+00:00"
+    },
+    "08-screen-states": {
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/08-screens/usage-limit.md: SCR-165 상태 10개, SCR-169 상태 18개(초대 날짜 이름표·한도 줄·한도 바꾸기), SCR-107·001의 daily-limit 링크. 와이어프레임 https://claude.ai/artifact/W1E3o6x6THzQ1oTbYxtcey, 390px 넘침 없음·JS 오류 없음",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T07:49:40+00:00"
+    },
+    "09-mockup": {
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
+      "checks": [
+        {
+          "level": "info",
+          "message": "새 토큰 없음. 얼린 토큰(D67)과 지금 unified.css·chat.css 부품만 씀. 모양 확인은 08의 와이어프레임으로",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T07:49:40+00:00"
+    },
+    "10-wbs": {
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/10-wbs/usage-limit.md: GPT 인계 절, TASK-411~419(약 6일, Owner GPT), 시작 조건은 설계 PR 합침 뒤. README에 D106·D107, 작업 패키지·ID 범위·겹치는 파일 줄 더함",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T07:49:40+00:00"
+    },
+    "12-qa": {
+      "state": "in_progress",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음. 12는 시험 계획(TC-496~509)만 이 말로 진행",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "구현 뒤 GPT가 TC-496~508 실행, 반영 뒤 TC-509 사람 확인",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/12-qa/usage-limit.md: TC-496~509(자동 13개, 반영 뒤 사람 확인 TC-509)",
+          "at": "2026-11-21"
+        }
+      ],
+      "updated": "2026-11-21T07:49:40+00:00"
+    }
+  }
+}

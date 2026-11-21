@@ -1,14 +1,14 @@
-# 마롱이 지금 통화 서버(Gemini 길) API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/call-cost.md(SPEC-174, SPEC-176), docs/app-ring.md(API-107). 코드: tools/vertex_live/server.py
+# 마롱이 지금 통화 서버(Gemini 경로) API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/call-cost.md(SPEC-174, SPEC-176), docs/app-ring.md(API-107), docs/04-functional-spec/call-connect.md(SPEC-400~404, API-246). 코드: tools/vertex_live/server.py
 openapi: 3.1.0
 info:
   title: 마롱이 지금 통화 서버 API
-  version: 0.1.0-draft
+  version: 0.2.0-draft
   description: |-
     지금 도는 통화 서버(`tools/vertex_live/server.py`, Gemini 길)의 계약 가운데 통화 비용 설계(2026-11-16)가 바꾸는 곳만 적었어요. 원본은 이 파일이고 코드는 이 파일을 따라가요(06단계).
 
     - 같은 주소의 처음 통화 계약(`api/openapi.yaml`, API-001~012)은 OpenAI 길로 설계한 서버라 지금 서버와 모양이 달라요. 지금 서버의 통화 홈 상태와 웹소켓은 이 파일이 원본이에요.
     - 모든 요청은 Cloudflare Access를 지나고, 터널이 `/chat/` 밖의 길을 이 서버(127.0.0.1:8792)로 보내요. 서버는 `Cf-Access-Jwt-Assertion`을 다시 확인하거나, 초대 쿠키 `marong_live`를 받아요.
-    - 바꾸지 않는 길(`/auth`, `/api/rtc`, `/rtc`, `/api/calls/{id}/end`, `/healthz`, 정적 파일)은 아직 이 계약에 없어요.
+    - 바꾸지 않는 경로(`/auth`, `/api/rtc`, `/rtc`, `/api/calls/{id}/end`, `/healthz`)은 아직 이 계약에 없어요. 정적 파일은 2026-11-21부터 API-246으로 있어요.
 
     바꾸는 것(Claude 제안, 2026-11-16, 검토 대상).
     1. `GET /api/me`에 `canCall`과 `blockedReason`을 더해요(SPEC-174). 금액·퍼센트·80% 경고는 없어요(친구 화면에는 막힐 때만 마롱이 말투로). 같은 처리기가 `GET /status`로도 답하고(지금 화면이 부르는 주소) 응답이 같아요.
@@ -16,7 +16,13 @@ info:
     3. 120%(hard_stop)에서는 마이크 소리를 구글로 보내지 않고 인사 한 턴 뒤 15초 안에 끝내요. 화면에는 지금 끊기와 같은 `hangup` 메시지로 알려요(SPEC-176). 끝 이유 `budget_hard_stop`은 DB에만 남아요.
     4. 오류 본문을 aiohttp 기본 글에서 RFC 9457 Problem Details(`code`, `traceId`)로 바꿔요. 지금 화면은 상태 번호만 읽어서 깨지지 않아요(`static/app.js`의 refresh).
 
-    깨지는 변경: 없음. 캐시에 남은 옛 화면은 `budget_exhausted`를 모르고 끊긴 통화로 보여요(이 서버의 화면 파일은 no-store라 새로 불러오면 고쳐짐).
+    바꾸는 것 2(Claude 제안, 2026-11-21, 통화 연결 속도와 무음 고치기 BUG-108~110, 검토 대상).
+    5. `/live`에 `hold=1`을 더해요. 새 통화에서 마롱이가 먼저 말하게 하는 신호를 화면이 `audio_ready`를 보내거나 `ready` 뒤 3,000ms가 지날 때까지 붙잡아요(SPEC-402).
+    6. 화면이 보내는 메시지 `timing`(단계 시각, SPEC-400), `audio_ready`(소리 나갈 준비, SPEC-402), `playback`(재생 진단, SPEC-404)을 더해요. 서버는 맞는 칸만 구간 줄에 저장하고 답하지 않아요.
+    7. 화면이 보내는 PCM 바꾸기 이유에 `rtc_silent`를 더해요(SPEC-404).
+    8. 정적 파일(API-246)은 주소의 `v`가 그 파일 내용의 버전과 같을 때만 `private, max-age=31536000, immutable`로 내려줘요. 그 밖은 지금처럼 `no-store`예요(SPEC-401).
+
+    깨지는 변경: 없음. 새 메시지를 모르는 옛 서버는 그 메시지를 버리고, `hold`가 없는 옛 화면에는 지금처럼 바로 첫마디가 나가요. 캐시에 남은 옛 화면은 `budget_exhausted`를 모르고 끊긴 통화로 보여요(이 서버의 화면 파일은 no-store라 새로 불러오면 고쳐짐).
 
     Open: 화면이 읽지 않는 진단 칸(`model`, `voice`, `route`, `project`, `build`, `diagnostics` 등)을 `/api/me`에서 뺄지는 이 설계 밖이라 따로 정해요.
 servers:
@@ -94,12 +100,21 @@ paths:
         - `{"type":"budget_exhausted"}` 새로 더함. 새 통화인데 이번 달 예산 상태가 exhausted나 hard_stop이에요. 보낸 뒤 서버가 닫아요. 통화 기록과 구글 연결은 만들지 않아요.
         - `{"type":"hangup","pendingMs":1200}` 지금과 같음. 120%에서 인사 뒤 끝낼 때도 이 메시지예요(SPEC-176).
         - `{"type":"ready","callId":"…","memoryConnected":true,"ring":false}`, `{"type":"call_busy"}` 지금과 같음.
+
+        화면이 보내는 메시지 가운데 이 설계로 더하는 것(2026-11-21, 그 밖의 `stats`, `stop`, `rtc_fallback` 등은 그대로). 모양은 `LiveTiming`, `LiveAudioReady`, `LivePlayback`이에요. 서버는 답하지 않아요.
+        - `{"type":"timing","v":1,"client":{…}}` 연결마다 한 번(SPEC-400). 4KB 넘으면 전체를, 틀린 칸은 그 칸만 버려요. 두 번째부터는 버려요. 서버가 `server` 칸을 더해 `call.segments.connect_timing`에 저장해요.
+        - `{"type":"audio_ready","path":"webrtc"}` 연결마다 한 번(SPEC-402). `hold=1`이면 이것이 첫마디 신호를 풀어요.
+        - `{"type":"playback","v":1,"path":"webrtc",…}` 재생 상태가 바뀔 때, 30초에 한 번까지(SPEC-404). 마지막 값이 `call.segments.playback`에 남아요.
+        - PCM 바꾸기 이유에 `rtc_silent`(WebRTC 소리가 도착했는데 재생되지 않음, SPEC-404). 서버는 `call.transport_events`에 `pcm`/`rtc_silent`로 남겨요.
       x-corthex:
         id: API-107
         spec:
         - SPEC-136
         - SPEC-174
         - SPEC-176
+        - SPEC-400
+        - SPEC-402
+        - SPEC-404
         omit:
           '400': 형식이 틀린 client와 ring은 무시함(새 client id, 보통 통화)
           '401': 로그인이 없어도 403(지금 서버 규칙). 브라우저 웹소켓은 상태 번호를 읽지 못함
@@ -138,6 +153,14 @@ paths:
           type: string
           enum:
           - '1'
+      - name: hold
+        in: query
+        required: false
+        description: 1이면 새 통화의 첫마디 신호를 `audio_ready`나 `ready` 뒤 3,000ms까지 붙잡아요(SPEC-402). 다시 연결에는 붙잡을 첫마디가 없어요
+        schema:
+          type: string
+          enum:
+          - '1'
       responses:
         '101':
           description: 웹소켓으로 바꿈. 그 뒤는 위의 메시지예요
@@ -145,6 +168,70 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/CallActive'
+        default:
+          $ref: '#/components/responses/Internal'
+  /{asset}:
+    get:
+      operationId: getCallAsset
+      summary: 통화 화면 정적 파일
+      description: 통화 화면의 스크립트·워크릿·대기음이에요(SPEC-401). 서버가 시작할 때 파일마다 내용 SHA-256의 앞 12자리를 버전으로 셈하고, `index.html`이 그 버전을 `v`로 붙여 불러요. `v`가 지금 버전과 같으면 1년 캐시, 아니면 `no-store`예요. `index.html`(`/`)과 그 밖의 경로는 지금처럼 `no-store`예요. 얼굴 그림 `/face/v1/`은 따로 1년 캐시예요(그대로).
+      security:
+      - cfAccess: []
+      - inviteCookie: []
+      x-corthex:
+        id: API-246
+        spec:
+        - SPEC-401
+        omit:
+          '400': 틀린 v는 오류가 아니라 no-store로 내려줌
+          '401': Access 뒤에서만 닿음(지금 서버 규칙)
+          '409': 읽기만 함
+          '429': 읽기만 함
+      parameters:
+      - name: asset
+        in: path
+        required: true
+        description: 정적 파일 이름. 이 목록 밖은 404
+        schema:
+          type: string
+          enum:
+          - app.js
+          - style.css
+          - capture.js
+          - playback.js
+          - worker-socket.js
+          - transport.js
+          - rtc-client.js
+          - livekit-client.js
+          - wait-tone.wav
+      - name: v
+        in: query
+        required: false
+        description: 파일 내용 SHA-256의 앞 12자리. 지금 버전과 같을 때만 1년 캐시
+        schema:
+          type: string
+          pattern: ^[0-9a-f]{12}$
+      responses:
+        '200':
+          description: 파일 내용
+          headers:
+            Cache-Control:
+              description: '`v`가 맞으면 `private, max-age=31536000, immutable`, 아니면 `no-store`'
+              schema:
+                type: string
+          content:
+            text/javascript:
+              schema:
+                type: string
+            text/css:
+              schema:
+                type: string
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: 목록 밖의 이름
         default:
           $ref: '#/components/responses/Internal'
 components:
@@ -177,7 +264,7 @@ components:
         client: 연결 확인 중 상태, 잠시 뒤 다시
     messages:
       budget_exhausted:
-        meaning: 이번 달 통화 예산을 다 써서 새 통화를 받지 않음(웹소켓 메시지)
+        meaning: 이번 달 통화 예산을 다 써서 새 통화를 받지 않음(웹소켓 메시지). 전체 예산과, 그 친구의 유효 통화 월 한도(계정 한도 TERM-199, SPEC-397. 무제한이면 보지 않음) 둘 다 이 메시지예요
         message: 이번 달 통화는 여기까지야. 다음 달에 또 걸어 줘! 글로는 계속 얘기할 수 있어
         client: 통화를 끝내고 통화 홈 예산 상태를 보임. 자동으로 다시 걸지 않음. 글 대화 링크를 보임
   securitySchemes:
@@ -335,3 +422,127 @@ components:
           type: boolean
           description: 이 서버가 WebRTC 소리 길을 켰는지
       additionalProperties: true
+    LiveTiming:
+      type: object
+      description: 화면이 보내는 단계 시각(SPEC-400 3.1). 값은 기준점에서 지난 밀리초예요. 대화 글은 없어요
+      required:
+      - type
+      - v
+      - client
+      properties:
+        type:
+          const: timing
+        v:
+          const: 1
+        client:
+          type: object
+          properties:
+            base:
+              type: string
+              enum:
+              - answer
+              - button
+              - page
+            entry:
+              type: string
+              enum:
+              - ring
+              - button
+              - redial
+            reloaded:
+              type: boolean
+            cachedAssets:
+              type: integer
+              minimum: 0
+              maximum: 20
+            fetchedAssets:
+              type: integer
+              minimum: 0
+              maximum: 20
+          patternProperties:
+            ^(pageStart|appStart|statusReady|micReady|rtcReady|liveOpen|ready|audioReady|firstAudioIn|firstAudioPlayed)$:
+              type: integer
+              minimum: 0
+              maximum: 600000
+          additionalProperties: false
+      additionalProperties: false
+    LiveAudioReady:
+      type: object
+      description: 소리가 나갈 준비가 됐다는 알림(SPEC-402)
+      required:
+      - type
+      - path
+      properties:
+        type:
+          const: audio_ready
+        path:
+          type: string
+          enum:
+          - webrtc
+          - pcm
+      additionalProperties: false
+    LivePlayback:
+      type: object
+      description: 재생 진단(SPEC-404 3.3). 웹이나 앱 0.3.0이면 device는 unknown이고 볼륨 칸이 없어요. 앱 0.3.1부터 앱이 장치·볼륨을 넘겨요(SPEC-405)
+      required:
+      - type
+      - v
+      - path
+      properties:
+        type:
+          const: playback
+        v:
+          const: 1
+        path:
+          type: string
+          enum:
+          - webrtc
+          - pcm
+        element:
+          type: string
+          enum:
+          - playing
+          - paused
+          - none
+        context:
+          type: string
+          enum:
+          - running
+          - suspended
+          - interrupted
+          - closed
+        playout:
+          type: string
+          enum:
+          - advancing
+          - stalled
+          - unsupported
+        silentMs:
+          type: integer
+          minimum: 0
+          maximum: 600000
+        device:
+          type: string
+          enum:
+          - speaker
+          - wired
+          - usb
+          - bluetooth
+          - earpiece
+          - unknown
+        voiceVolume:
+          type: integer
+          minimum: 0
+          maximum: 100
+        voiceVolumeMax:
+          type: integer
+          minimum: 0
+          maximum: 100
+        ringer:
+          type: string
+          enum:
+          - normal
+          - vibrate
+          - silent
+          - unknown
+      additionalProperties: false

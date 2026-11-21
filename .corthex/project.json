@@ -11,7 +11,10 @@
     "call-cost",
     "persona",
     "pet",
-    "unified"
+    "unified",
+    "usage-limit",
+    "call-connect",
+    "pet-app"
   ],
   "records": {
     "kind": "notion",

@@ -1634,6 +1634,11 @@ components:
           oneOf:
           - $ref: '#/components/schemas/DiaryContent'
           - type: 'null'
+        writer:
+          description: 이 일기를 쓴 반려동물 캐릭터(TBL-105 `character_id`, pet-app SPEC-408·413). 기본 마롱이가 쓴 일기면 null. 반려동물 part가 더한 칸이라 그 전 서버는 보내지 않아요. 값이 있고 그림이 없으면 화면이 기본 그림 대신 '오늘은 그림을 못 그렸어요' 칸을 그려요
+          oneOf:
+          - $ref: 'pet-app.openapi.yaml#/components/schemas/DiaryWriter'
+          - type: 'null'
       additionalProperties: false
     DiaryContent:
       type: object
