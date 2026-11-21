@@ -19,7 +19,7 @@
     "02-prd": {
       "state": "in_progress",
       "checkpoints": [],
-      "next": "설계 PR이 main에 합쳐진 뒤 02~06·08·10·12를 한 번에 확인하는 체크포인트 요청",
+      "next": "PR #79는 2026-11-21 16:44 KST main에 합침(동희님 '니가 머지해'). NEXUS 체크포인트는 하지 않음(동희님 16:47 KST '넥서스 하지 말고 걍 작업해'). GPT 구현 결과를 받아 TASK-471",
       "checks": [
         {
           "level": "info",
@@ -30,14 +30,19 @@
           "level": "info",
           "message": "docs/02-prd/call-connect.md: REQ-491~497(7개, Must 3·Should 4, 모두 active). REQ-491은 REQ-008(P95 4초)을 벨 받기에 적용, REQ-008은 그대로. 고르지 않은 안(벨 때 서버가 Gemini 미리 열기)을 이유와 함께 적음",
           "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "REQ-494를 Must로, REQ-498(통화 볼륨 하한 60%·되돌리기·볼륨 버튼) 추가. 원문4·5(2026-11-21 16:36·16:37 KST '소리가 너무 작아', '가장 크게 해도 안들리고')",
+          "at": "2026-11-21"
         }
       ],
-      "updated": "2026-11-21T07:10:04+00:00"
+      "updated": "2026-11-21T07:50:21+00:00"
     },
     "03-user-flow": {
       "state": "in_progress",
       "checkpoints": [],
-      "next": "설계 PR이 main에 합쳐진 뒤 02~06·08·10·12를 한 번에 확인하는 체크포인트 요청",
+      "next": "PR #79는 2026-11-21 16:44 KST main에 합침(동희님 '니가 머지해'). NEXUS 체크포인트는 하지 않음(동희님 16:47 KST '넥서스 하지 말고 걍 작업해'). GPT 구현 결과를 받아 TASK-471",
       "checks": [
         {
           "level": "info",
@@ -55,7 +60,7 @@
     "04-functional-spec": {
       "state": "in_progress",
       "checkpoints": [],
-      "next": "설계 PR이 main에 합쳐진 뒤 02~06·08·10·12를 한 번에 확인하는 체크포인트 요청",
+      "next": "PR #79는 2026-11-21 16:44 KST main에 합침(동희님 '니가 머지해'). NEXUS 체크포인트는 하지 않음(동희님 16:47 KST '넥서스 하지 말고 걍 작업해'). GPT 구현 결과를 받아 TASK-471",
       "checks": [
         {
           "level": "info",
@@ -66,14 +71,19 @@
           "level": "info",
           "message": "docs/04-functional-spec/call-connect.md: SPEC-400~404(시각 기록과 진짜 준비 시각, 정적 파일 캐시와 스크립트 순서, 동시 시작과 첫마디 붙잡기, 앱 0.3.1, 재생 확인). 새 문구 없음(지금 app.js 문구를 그대로 씀)",
           "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "SPEC-405(앱 0.3.1: 스피커 기본·통화 모드·다시 고르기·볼륨 하한·볼륨 버튼·진단) 추가, SPEC-403은 앱 0.3.2로. 3.5에 화면만 고치는 안(setSinkId, Web Audio 증폭, 울림 제거 끄기, 스피커 버튼)을 고르지 않은 이유",
+          "at": "2026-11-21"
         }
       ],
-      "updated": "2026-11-21T07:10:04+00:00"
+      "updated": "2026-11-21T07:50:21+00:00"
     },
     "05-erd": {
       "state": "in_progress",
       "checkpoints": [],
-      "next": "설계 PR이 main에 합쳐진 뒤 02~06·08·10·12를 한 번에 확인하는 체크포인트 요청",
+      "next": "PR #79는 2026-11-21 16:44 KST main에 합침(동희님 '니가 머지해'). NEXUS 체크포인트는 하지 않음(동희님 16:47 KST '넥서스 하지 말고 걍 작업해'). GPT 구현 결과를 받아 TASK-471",
       "checks": [
         {
           "level": "info",
@@ -91,7 +101,7 @@
     "06-api": {
       "state": "in_progress",
       "checkpoints": [],
-      "next": "설계 PR이 main에 합쳐진 뒤 02~06·08·10·12를 한 번에 확인하는 체크포인트 요청",
+      "next": "PR #79는 2026-11-21 16:44 KST main에 합침(동희님 '니가 머지해'). NEXUS 체크포인트는 하지 않음(동희님 16:47 KST '넥서스 하지 말고 걍 작업해'). GPT 구현 결과를 받아 TASK-471",
       "checks": [
         {
           "level": "info",
@@ -122,7 +132,7 @@
     "08-screen-states": {
       "state": "in_progress",
       "checkpoints": [],
-      "next": "설계 PR이 main에 합쳐진 뒤 02~06·08·10·12를 한 번에 확인하는 체크포인트 요청",
+      "next": "PR #79는 2026-11-21 16:44 KST main에 합침(동희님 '니가 머지해'). NEXUS 체크포인트는 하지 않음(동희님 16:47 KST '넥서스 하지 말고 걍 작업해'). GPT 구현 결과를 받아 TASK-471",
       "checks": [
         {
           "level": "info",
@@ -153,7 +163,7 @@
     "10-wbs": {
       "state": "in_progress",
       "checkpoints": [],
-      "next": "설계 PR이 main에 합쳐진 뒤 02~06·08·10·12를 한 번에 확인하는 체크포인트 요청",
+      "next": "PR #79는 2026-11-21 16:44 KST main에 합침(동희님 '니가 머지해'). NEXUS 체크포인트는 하지 않음(동희님 16:47 KST '넥서스 하지 말고 걍 작업해'). GPT 구현 결과를 받아 TASK-471",
       "checks": [
         {
           "level": "info",
@@ -164,14 +174,19 @@
           "level": "info",
           "message": "docs/10-wbs/call-connect.md: GPT 인계 절과 TASK-460~471(12개, Owner GPT 11·Claude 1). 1차는 통화 서버·화면(codex/call-connect-web), 2차는 앱 0.3.1(codex/call-connect-app)",
           "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "TASK-472~474(앱 0.3.1 스피커·통화 볼륨, 서명·게시, 실제 폰 기록)를 맨 앞에. TASK-467·468은 앱 0.3.2(versionCode 10)",
+          "at": "2026-11-21"
         }
       ],
-      "updated": "2026-11-21T07:10:04+00:00"
+      "updated": "2026-11-21T07:50:21+00:00"
     },
     "12-qa": {
       "state": "in_progress",
       "checkpoints": [],
-      "next": "설계 PR이 main에 합쳐진 뒤 02~06·08·10·12를 한 번에 확인하는 체크포인트 요청",
+      "next": "PR #79는 2026-11-21 16:44 KST main에 합침(동희님 '니가 머지해'). NEXUS 체크포인트는 하지 않음(동희님 16:47 KST '넥서스 하지 말고 걍 작업해'). GPT 구현 결과를 받아 TASK-471",
       "checks": [
         {
           "level": "info",
@@ -187,9 +202,14 @@
           "level": "info",
           "message": "허브 snapshot 경고 2개는 자유 형식 문서에 정의된 번호예요: SPEC-145(docs/app-chat.md, 앱 통화 화면의 글 칸 숨김), TC-147(docs/app-ring.md, 앱 벨 에뮬레이터 시험). 두 곳 모두 그 문서로 링크함",
           "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "BUG-111(가장 크게 해도 너무 작음, 16:34 KST 통화 WebRTC 끝까지, 친구 말 11·마롱이 12줄) 추가, BUG-109 후보 나를 높음으로. TC-590~595(자동 5·실제 폰 1)",
+          "at": "2026-11-21"
         }
       ],
-      "updated": "2026-11-21T07:10:04+00:00"
+      "updated": "2026-11-21T07:50:21+00:00"
     }
   }
 }
