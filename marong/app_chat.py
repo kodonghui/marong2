@@ -733,6 +733,8 @@ class AppChat:
             app.router.add_get("/chat/api/usage", self.profile.usage)
             self.friends.register(app.router)
             self.characters.register(app.router)
+            from .pet_intro import PetIntro
+            PetIntro(self).register(app.router)
         app.router.add_get("/chat", self.home)
         app.router.add_get("/chat/", self.page)
         app.router.add_get("/chat/{name:chat\\.(?:js|css)}", self.page)

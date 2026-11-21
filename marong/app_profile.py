@@ -93,14 +93,20 @@ class AppProfile:
             raise Problem("voice_unknown")
         if "share" in data and type(data["share"]) is not bool:
             raise Problem("invalid_input")
-        changes = [(col, data[field]) for field, col in (("botName", "bot_name"), ("voice", "voice")) if field in data]
         friend = who["friend_id"]
         async with self.chat.store.pool.connection() as conn, conn.transaction():
-            for column, value in changes:
-                await conn.execute(f"""
-                    UPDATE marong.friend_profiles SET {column}=%s,updated_at=now()
-                    WHERE friend_id=%s AND {column} IS DISTINCT FROM %s
-                """, (value, friend, value))
+            if "botName" in data:
+                await conn.execute("""
+                    UPDATE marong.friend_profiles SET bot_name=%s,updated_at=now()
+                    WHERE friend_id=%s AND bot_name IS DISTINCT FROM %s
+                """, (data["botName"], friend, data["botName"]))
+            if "voice" in data:
+                voice = data["voice"]
+                source = "chosen" if voice is not None else None
+                await conn.execute("""
+                    UPDATE marong.friend_profiles SET voice=%s,voice_source=%s,updated_at=now()
+                    WHERE friend_id=%s AND (voice,voice_source) IS DISTINCT FROM (%s,%s)
+                """, (voice, source, friend, voice, source))
             if "share" in data:
                 await conn.execute("UPDATE marong.friends SET share=%s WHERE id=%s AND share IS DISTINCT FROM %s",
                                    (data["share"], friend, data["share"]))

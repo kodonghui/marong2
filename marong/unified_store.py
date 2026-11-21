@@ -9,6 +9,7 @@ from .friend_scope import accepted_circle
 from .graphs.memory import lock_message_writer, schedule_text
 from .room_scope import writing_room, writing_room_key, writing_user_key
 from .store import PROACTIVE_MESSAGE
+from .unified_prompt import ACCEPTED_FRIENDSHIPS, CHARACTER_PROFILE, PET_INTRO_COLUMNS
 
 
 CONTACT_STATE = f"""
@@ -55,16 +56,10 @@ class UnifiedStore(DiscordStore):
             query = accepted_circle(self._forget_guard("'shared_note'", "x.id"))
             return await self._all(query, {"friend": person["friend_id"], "limit": min(20, limit)})
 
-    async def character_prompt(self, friend_id, friends_enabled):
-        return await self._one("""
-            SELECT p.bot_name,c.kind,c.traits,c.tone, %s AND EXISTS (
-                SELECT 1 FROM marong.friendships fs WHERE p.friend_id IN (fs.friend_a,fs.friend_b)
-                AND fs.state='accepted'
-            ) AS has_friends
-            FROM marong.friend_profiles p LEFT JOIN marong.characters c
-                ON c.id=p.character_id AND c.friend_id=p.friend_id AND c.status='ready'
-            WHERE p.friend_id=%s
-        """, (friends_enabled, friend_id))
+    async def character_prompt(self, friend_id, friends_enabled, *, pet_voice=False):
+        columns = PET_INTRO_COLUMNS if pet_voice else ""
+        sql = CHARACTER_PROFILE.format(intro_columns=columns, has_friends=ACCEPTED_FRIENDSHIPS)
+        return await self._one(sql, (friends_enabled, friend_id))
 
     async def app_bot_name(self, friend_id):
         row = await self._one("SELECT bot_name FROM marong.friend_profiles WHERE friend_id=%s", (friend_id,))

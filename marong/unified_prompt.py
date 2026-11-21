@@ -11,6 +11,17 @@ PET_LINES = (
     "네가 진짜 그 아이라고 말하지 마. 누가 물으면 그 아이를 닮은 캐릭터라고 말해.",
 )
 KIND_LABELS = {None: "기본 마롱이", "dog": "강아지 캐릭터", "cat": "고양이 캐릭터"}
+CHARACTER_PROFILE = """
+    SELECT p.bot_name,c.kind,c.traits,c.tone{intro_columns}, {has_friends} AS has_friends
+    FROM marong.friend_profiles p LEFT JOIN marong.characters c
+        ON c.id=p.character_id AND c.friend_id=p.friend_id AND c.status='ready'
+    WHERE p.friend_id=%s
+"""
+ACCEPTED_FRIENDSHIPS = """%s AND EXISTS (
+    SELECT 1 FROM marong.friendships fs
+    WHERE p.friend_id IN (fs.friend_a,fs.friend_b) AND fs.state='accepted'
+)"""
+PET_INTRO_COLUMNS = ",c.personality,c.likes,c.dislikes,c.owner_call"
 
 
 def marker_positions(lines):
@@ -39,16 +50,39 @@ def clean(value, limit):
                    not unicodedata.category(char).startswith("C") and char not in "\u2028\u2029").strip()[:limit]
 
 
+def suffix(name, with_coda, without_coda):
+    last = ord(name[-1]) if name else 0
+    return with_coda if 0xAC00 <= last <= 0xD7A3 and (last - 0xAC00) % 28 else without_coda
+
+
 def particle(name):
-    last = ord(name[-1])
-    return "이야" if 0xAC00 <= last <= 0xD7A3 and (last - 0xAC00) % 28 else "야"
+    return suffix(name, "이야", "야")
 
 
-def character_section(profile):
+def intro_line(profile, limit):
+    traits = ", ".join(clean(value, 10) for value in (profile.get("personality") or [])[:3])
+    values = (("성격", traits), ("좋아하는 것", clean(profile.get("likes"), limit)),
+              ("싫어하는 것", clean(profile.get("dislikes"), limit)))
+    return " ".join(f"{label}: {value}." for label, value in values if value)
+
+
+def character_section(profile, *, pet_voice=False):
     kind = profile["kind"]
     name = clean(profile["bot_name"], 12) or "마롱이"
     header = ["# 지금 네 모습", f"네 이름은 {name}{particle(name)}. 위에서 '마롱이'라고 적힌 곳은 모두 너를 가리켜.",
               KIND_LABELS[kind]]
+    speaking_pet = pet_voice and kind in {"dog", "cat"}
+    if speaking_pet:
+        owner = clean(profile.get("owner_call"), 10)
+        companion = owner or "이 사람"
+        animal = "강아지" if kind == "dog" else "고양이"
+        header[2] = (f"너는 마롱이가 아니라 {name}이고, {companion}{suffix(companion, '이랑', '랑')} 함께 사는 "
+                     f"{animal}야. {name}의 1인칭 반말로 ")
+        if owner:
+            header[2] += (f"말하고, {owner}{suffix(owner, '을', '를')} "
+                          f"'{owner}'{suffix(owner, '이라고', '라고')} 불러.")
+        else:
+            header[2] += "말해."
     tail = []
     tone = clean(profile.get("tone"), 60)
     if tone:
@@ -63,6 +97,14 @@ def character_section(profile):
         value = traits.get(field)
         values.append(", ".join(clean(x, 40) for x in value[:3]) if isinstance(value, list) else clean(value, 60))
     appearance = ", ".join(filter(None, values))
+    if speaking_pet:
+        skills = f"검색·일정·쇼핑·공부·고민 이야기는 지금처럼 다 도와줘. {name}답게 말할 뿐 아는 것과 할 수 있는 것은 같아."
+        details = intro_line(profile, 60)
+        expanded = ([details] if details else []) + [skills, *tail]
+        if len("\n".join(header + expanded)) > 600:
+            details = intro_line(profile, 40)
+            expanded = ([details] if details else []) + [skills, *tail]
+        tail = expanded
     if appearance:
         available = 600 - len("\n".join(header + tail)) - len("\n생김새: ")
         if available > 0:

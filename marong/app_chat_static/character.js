@@ -1,7 +1,7 @@
 'use strict';
 
 (() => {
-  const {node, button, link, request, signal} = Unified;
+  const {node, button, link, request, signal, endLetter} = Unified;
   const screen = document.getElementById('character');
   const root = document.getElementById('character-body');
   const title = document.getElementById('character-title');
@@ -15,7 +15,10 @@
   const wanted = fresh ? 'new' : parts[4];
   const editingEarlier = new URLSearchParams(location.search).has('edit');
   const names = {photos: '캐릭터 만들기', traits: '특징표 고치기', preview: '미리 보기', candidates: '후보 고르기',
-                 name: '이름 짓기', try: '입혀 보기', new: '캐릭터 만들기'};
+                 name: '이름 짓기', intro: '아이 소개', try: '입혀 보기', new: '캐릭터 만들기'};
+  const fromCreation = new URLSearchParams(location.search).get('from') === 'create';
+  const introReturn = fromCreation ? path + 'try' : '/chat/me';
+  const personalities = ['활발함', '얌전함', '겁이 많음', '먹보', '애교 많음', '고집 셈', '호기심 많음', '느긋함'];
   const templateNames = {dog_small: '작은 강아지', dog_large: '큰 강아지', dog_long: '몸이 긴 강아지',
                          cat: '고양이', cat_round: '동그란 고양이'};
   const expressions = {
@@ -288,7 +291,7 @@
     const count = node('p', '', 'caption');
     const submit = button('다 됐어', async () => {
       submit.textContent = '마무리하는 중이야…';
-      await save(submit, () => request(detail, {name: input.value.trim()}, 'PATCH'), () => go('try'));
+      await save(submit, () => request(detail, {name: input.value.trim()}, 'PATCH'), () => go('intro?from=create'));
       submit.textContent = '다 됐어';
       update();
     });
@@ -302,6 +305,124 @@
     input.addEventListener('input', update);
     update();
     root.append(count, node('p', '적용하면 이 이름이 마롱이 이름이 돼', 'caption'), submit);
+  }
+
+  async function introVoice(card, selection) {
+    root.replaceChildren(node('p', card.name + ' 목소리는 이걸로 해 볼게', 'title'),
+      node('p', selection.voice), link('좋아', introReturn, 'btn'),
+      link('다른 목소리 고를래', '/chat/me/voice?afterIntro=' + (fromCreation ? card.id : 'profile'), 'btn2'));
+    history.replaceState(null, '', location.pathname + location.search + '#voice');
+    const voices = await request('/chat/api/voices');
+    const voice = voices.body?.voices?.find(item => item.name === selection.voice);
+    if (!voice) return;
+    root.children[1].textContent = voice.label;
+    if (!voice.sampleUrl) return;
+    const audio = new Audio(voice.sampleUrl);
+    const play = button('견본 듣기', () => {
+      audio.currentTime = 0;
+      audio.play().catch(() => signal(error, '지금은 견본을 못 틀었어'));
+    }, 'btn2');
+    root.insertBefore(play, root.children[2]);
+    window.addEventListener('pagehide', () => audio.pause(), {once: true});
+  }
+
+  function renderIntro(card, initial) {
+    const face = node('div', '', 'account-face');
+    face.append(picture(card.images.front));
+    root.append(face, node('p', card.name + '에 대해 알려 줘. 그러면 ' +
+      endLetter(card.name, '이가', '가') + ' 직접 말할게', 'title'));
+    const form = node('form', '', 'stack');
+    const choices = node('div', '', 'intro-choices');
+    choices.setAttribute('role', 'group');
+    choices.setAttribute('aria-label', '성격');
+    const selected = new Set(initial?.personality || []);
+    let sending = false;
+    const chips = personalities.map(trait => {
+      const chip = button(trait, () => {
+        if (selected.has(trait)) selected.delete(trait);
+        else if (selected.size < 3) selected.add(trait);
+        update();
+      }, 'btn2 intro-chip');
+      choices.append(chip);
+      return chip;
+    });
+    const fields = [['likes', '좋아하는 것', 60], ['dislikes', '싫어하는 것', 60],
+                    ['ownerCall', '부르는 말', 10]].map(([name, label, limit]) => {
+      const field = node('label', label, 'field-label');
+      const input = node('input');
+      input.name = name;
+      input.value = initial?.[name] || '';
+      if (name === 'ownerCall') input.placeholder = '누나, 엄마, 형아';
+      const count = node('span', '', 'caption');
+      input.addEventListener('input', () => {
+        const characters = Array.from(input.value);
+        if (characters.length > limit) input.value = characters.slice(0, limit).join('');
+        update();
+      });
+      field.append(input, count);
+      return {name, input, count, limit, field};
+    });
+    const helper = node('p', '3개까지 고를 수 있어', 'caption');
+    const submit = node('button', '저장할래', 'btn');
+    submit.type = 'submit';
+    const validation = node('p', '', 'err');
+    validation.setAttribute('role', 'status');
+    validation.hidden = true;
+    function update() {
+      chips.forEach((chip, index) => {
+        const active = selected.has(personalities[index]);
+        chip.setAttribute('aria-pressed', String(active));
+        chip.disabled = sending || (!active && selected.size >= 3);
+      });
+      for (const {input, count, limit} of fields) {
+        input.disabled = sending;
+        count.textContent = Array.from(input.value).length + ' / ' + limit;
+      }
+      submit.disabled = sending || !fields[2].input.value.trim();
+      submit.textContent = sending ? '기억하는 중이야…' : '저장할래';
+    }
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (submit.disabled) return;
+      sending = true;
+      update();
+      signal(validation);
+      signal(error);
+      const data = Object.fromEntries(fields.map(({name, input}) => [name, input.value]));
+      const response = await request(detail + '/intro', {...data, personality: Array.from(selected)}, 'PUT');
+      sending = false;
+      update();
+      if (response.status === 200) {
+        if (!initial && response.body.voiceSource === 'recommended') {
+          await introVoice(card, response.body);
+        } else {
+          if (!fromCreation && initial) {
+            try { sessionStorage.setItem('marong.intro.saved', card.name); } catch {}
+          }
+          location.replace(introReturn);
+        }
+      } else if (response.status === 400) signal(validation, '입력한 내용을 한 번 확인해 줘');
+      else failure(response);
+    });
+    form.append(choices, helper, ...fields.map(field => field.field), validation, submit);
+    if (!initial) form.append(link('나중에 할래', introReturn, 'btnt'));
+    update();
+    root.append(form);
+  }
+
+  async function loadIntro() {
+    root.replaceChildren(node('div', '', 'account-face intro-loading'), node('div', '', 'intro-loading intro-placeholder'));
+    const [character, intro] = await Promise.all([request(detail), request(detail + '/intro')]);
+    screen.setAttribute('aria-busy', 'false');
+    root.replaceChildren();
+    retry.replaceChildren();
+    signal(error);
+    if (intro.status !== 200 || character.status !== 200) {
+      failure(intro.status !== 200 ? intro : character, loadIntro);
+      return;
+    }
+    if (fromCreation) document.querySelector('.profile-header a').href = introReturn;
+    renderIntro(character.body.character, intro.body.intro);
   }
 
   function tryOn(data, profile) {
@@ -392,6 +513,7 @@
 
   async function load() {
     clearTimeout(workTimer);
+    if (wanted === 'intro') { await loadIntro(); return; }
     if (fresh) {
       screen.setAttribute('aria-busy', 'false');
       pickNew();
