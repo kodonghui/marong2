@@ -1,6 +1,7 @@
 """Lease and publish scene jobs. The app owns image generation and all picture reads."""
 
 import asyncio
+from datetime import timedelta
 import logging
 from time import monotonic
 
@@ -15,6 +16,48 @@ class SceneWorker:
         self.store = store
         self.pictures = pictures
         self.usage = usage
+
+    async def topic_job(self, friend, key, at, *, queue=True):
+        """Keep one job per planned topic and selected character, including prefetch retries."""
+        due = at - timedelta(minutes=30)
+        async with self.store.pool.connection() as conn, conn.transaction():
+            profile = await (await conn.execute("""
+                SELECT c.id FROM marong.friend_profiles p
+                JOIN marong.characters c ON c.id=p.character_id AND c.friend_id=p.friend_id AND c.status='ready'
+                WHERE p.friend_id=%s FOR UPDATE OF p
+            """, (friend,))).fetchone()
+            if profile is None:
+                return None
+            params = (friend, profile["id"], key, due)
+            job = await (await conn.execute("""
+                SELECT id,state FROM marong.scene_pictures
+                WHERE friend_id=%s AND character_id=%s AND topic=%s AND not_before=%s AND purpose='topic'
+                ORDER BY created_at LIMIT 1
+            """, params)).fetchone()
+            if job or not queue:
+                return job
+            return await (await conn.execute("""
+                INSERT INTO marong.scene_pictures(friend_id,character_id,topic,not_before,purpose)
+                VALUES (%s,%s,%s,%s,'topic') RETURNING id,state
+            """, params)).fetchone()
+
+    async def wait_for_topic(self, job):
+        if not job:
+            return None
+        deadline = monotonic() + 185
+        while job["state"] in {"queued", "drawing"} and monotonic() < deadline:
+            await asyncio.sleep(.5)
+            job = await self.store._one("SELECT id,state FROM marong.scene_pictures WHERE id=%s", (job["id"],))
+            if job is None:
+                return None
+        if job["state"] != "done":
+            return None
+        active = await self.store._one("""
+            SELECT s.id FROM marong.scene_pictures s
+            JOIN marong.friend_profiles p ON p.friend_id=s.friend_id AND p.character_id=s.character_id
+            WHERE s.id=%s
+        """, (job["id"],))
+        return active["id"] if active else None
 
     async def recover(self):
         async with self.store.pool.connection() as conn, conn.transaction():

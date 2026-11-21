@@ -114,6 +114,7 @@ def pack(items, budget):
 class MemoryStore:
     def __init__(self, dsn):
         self.friend_marks = False
+        self.scene_rings = False
         self.pool = AsyncConnectionPool(dsn, min_size=1, max_size=4, open=False, timeout=2,
             kwargs={'autocommit': True, 'row_factory': dict_row, 'options': '-c statement_timeout=2500'})
         self.live_usage = Ledger(self)
@@ -127,6 +128,11 @@ class MemoryStore:
             raise RuntimeError('call_schema_version')
         marks = await self.one("SELECT to_regclass('marong.forget_marks') IS NOT NULL AS ready")
         self.friend_marks = marks["ready"]
+        scene = await self.one("""
+            SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='marong'
+                AND table_name='app_rings' AND column_name='scene_picture_id') AS ready
+        """)
+        self.scene_rings = scene["ready"]
 
     async def close(self):
         await self.live_usage.close()
@@ -374,18 +380,19 @@ class MemoryStore:
         answered by this call: fresh=True. A call that already answered it (a reconnect) gets it again: fresh=False.
         reason: promise | hello (a call Marong placed without a promise, docs/04-functional-spec/call-first.md
         SPEC-268), topic: its picture (v1/<name>) or None. None: an ordinary call."""
+        scene = ",scene_picture_id" if self.scene_rings else ""
         async with self.pool.connection() as c, c.transaction():
-            cur = await c.execute("""UPDATE marong.app_rings SET status='answered',answered_at=now(),call_id=%(call)s
+            cur = await c.execute(f"""UPDATE marong.app_rings SET status='answered',answered_at=now(),call_id=%(call)s
                 WHERE id=(SELECT id FROM marong.app_rings WHERE caller_id=%(caller)s AND status='ringing'
                           AND answer_until>now() AND (%(ring)s::uuid IS NULL OR id=%(ring)s::uuid)
                           ORDER BY created_at DESC LIMIT 1 FOR UPDATE SKIP LOCKED)
                   AND status='ringing'
-                RETURNING id,title,say,created_at,now()-created_at AS waited,reason,topic""",
+                RETURNING id,title,say,created_at,now()-created_at AS waited,reason,topic{scene}""",
                 {'call': call_id, 'caller': p.caller_id, 'ring': ring_id})
             row = await cur.fetchone()
             if row:
                 return {**row, 'fresh': True}
-            cur = await c.execute("""SELECT id,title,say,created_at,reason,topic FROM marong.app_rings
+            cur = await c.execute(f"""SELECT id,title,say,created_at,reason,topic{scene} FROM marong.app_rings
                 WHERE caller_id=%s AND status='answered' AND call_id=%s ORDER BY created_at DESC LIMIT 1""",
                 (p.caller_id, call_id))
             row = await cur.fetchone()

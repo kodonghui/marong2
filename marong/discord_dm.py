@@ -1314,8 +1314,9 @@ class PrivateProactive(Proactive):
     async def _hello(self, room, choice) -> bool:
         """Ring the friend's phones without a promise (SPEC-266). False when nothing rang."""
         p = choice.picture
+        options = {"scene_id": choice.scene_id} if getattr(choice, "scene_id", None) else {}
         ring = await self.store.hello_add(room["friend_id"], choice.call["caller"], p.title, f"{p.line} {p.ask}",
-                                          p.key if choice.prefs["pictures"] else None, HELLO_ANSWER)
+                                          p.key if choice.prefs["pictures"] else None, HELLO_ANSWER, **options)
         if ring is None:  # another ring of this friend is ringing right now
             log.info("hello_ring devices=0 reason=ringing")
             return False

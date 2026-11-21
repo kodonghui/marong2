@@ -364,7 +364,8 @@ async function refreshCards() {
 
 // A picture topic's picture above Marong's words (SCR-107#picture): an empty box while it loads, gone if it cannot.
 function topicPicture(picture) {
-  if (typeof picture.src !== 'string' || !/^\/chat\/topics\/v[0-9]{1,3}\/[a-z0-9-]{1,40}\.webp$/.test(picture.src)) {
+  const valid = /^\/chat\/(?:topics\/v[0-9]{1,3}\/[a-z0-9-]{1,40}\.webp|api\/scenes\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/;
+  if (typeof picture.src !== 'string' || !valid.test(picture.src)) {
     return null;
   }
   const img = document.createElement('img');
@@ -373,7 +374,17 @@ function topicPicture(picture) {
   img.width = 240; img.height = 240;
   img.decoding = 'async';
   img.addEventListener('load', () => img.classList.remove('waiting'), {once: true});
-  img.addEventListener('error', () => img.remove(), {once: true});
+  img.addEventListener('error', () => {
+    if (!picture.src.startsWith('/chat/api/scenes/')) { img.remove(); return; }
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'picture waiting';
+    retry.textContent = '그림 다시 보기';
+    retry.addEventListener('click', () => {
+      retry.replaceWith(topicPicture(picture));
+    });
+    img.replaceWith(retry);
+  }, {once: true});
   img.src = picture.src;
   return img;
 }

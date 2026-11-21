@@ -144,13 +144,18 @@ class AppStore:
             {"id": ring_id, "devices": devices, "via": via, "answer": answer_for, "failed": failed})
         return row is not None
 
-    async def rings_missed(self, limit: int = 20) -> list[dict]:
+    async def rings_missed(self, limit: int = 20, *, with_scenes=False) -> list[dict]:
         """Rings whose answer window passed become missed (SPEC-138). A call that answered first wins: the update
         only takes rows still ringing. reason: promise | hello (a hello call, docs/04-functional-spec/call-first.md
         SPEC-270), topic: its picture or None."""
+        fields = (
+            "coalesce(r.topic, (SELECT s.topic FROM marong.scene_pictures s "
+            "WHERE s.id=r.scene_picture_id)) AS topic, r.scene_picture_id"
+            if with_scenes else "r.topic"
+        )
         return await self._all(
             "WITH due AS (SELECT id FROM marong.app_rings WHERE status = 'ringing' AND answer_until < now() "
             "  ORDER BY answer_until LIMIT %s FOR UPDATE SKIP LOCKED) "
             "UPDATE marong.app_rings r SET status = 'missed', resolved_at = now() FROM due "
             "WHERE r.id = due.id AND r.status = 'ringing' "
-            "RETURNING r.id::text AS id, r.friend_id, r.via, r.schedule_id, r.reason, r.topic", (limit,))
+            f"RETURNING r.id::text AS id, r.friend_id, r.via, r.schedule_id, r.reason, {fields}", (limit,))

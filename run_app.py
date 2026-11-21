@@ -207,22 +207,26 @@ async def serve(settings, credentials, options, secret, authentication, home, st
             character_worker = CharacterWorker(chat.characters, templates, vision, editor, model_settings, prices,
                                                on_complete=notify_character)
             jobs["character"] = character_worker.run
+        scenes = None
+        if home == "app" and pet_settings.scene_pictures and chat.characters.media is not None:
+            pictures = ScenePictures(store, chat.characters.media, diary_models, pet_settings.scene_model)
+            chat.diary_scenes = pictures
+            scenes = SceneWorker(store, pictures, chat.usage)
+            jobs["scenes"] = scenes.run
         topics = None
         if os.getenv("MARONG_TOPICS") == "1" and await topic_tables(store):
-            candidate = Topics(settings, store, push)
+            candidate = Topics(settings, store, push, scenes=scenes)
             agent.topics = candidate.on
             topics = candidate if candidate.on else None
         await chat.serve()
         if home == "app":
-            proactive = AppProactive(settings, store, agent, locks, delivery, topics=topics)
-            reminders = AppReminders(settings, store, agent, delivery, origin=options["origin"])
+            proactive = AppProactive(settings, store, agent, locks, delivery, topics=topics, scenes=scenes)
+            reminders = AppReminders(settings, store, agent, delivery, origin=options["origin"],
+                                     scenes=bool(scenes))
             jobs.update(proactive=proactive.run, reminders=reminders.run)
-            if pet_settings.scene_pictures and chat.characters.media is not None:
-                pictures = ScenePictures(store, chat.characters.media, diary_models, pet_settings.scene_model)
-                jobs["scenes"] = SceneWorker(store, pictures, chat.usage).run
             if diary_enabled:
                 diary = DiaryWorker(store, diary_models, delivery, pet_settings.diary_image_budget,
-                                    unified=True, pet_voice=pet_settings.pet_voice)
+                                    unified=True, pet_voice=pet_settings.pet_voice, scenes=chat.diary_scenes)
                 jobs["diary"] = diary.run
             call_texts = await store._one("SELECT to_regclass('marong.call_texts') IS NOT NULL AS ready")
             if call_texts["ready"]:
