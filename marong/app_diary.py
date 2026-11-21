@@ -90,18 +90,23 @@ class AppDiary:
         return self.chat._json(200, await self.day_data(friend, day, now))
 
     async def day_data(self, friend, day, now):
+        character_columns = ("c.id AS writer_id, c.name AS writer_name, c.kind AS writer_kind, c.status AS writer_status,"
+                             if self.chat.sessions else "")
+        character_join = ("LEFT JOIN marong.characters c ON c.id=d.character_id AND c.friend_id=d.friend_id"
+                          if self.chat.sessions else "")
         row = await self.store._one(
             f"""WITH params AS (SELECT %s::bigint AS friend, %s::date AS day, %s::date AS today)
             SELECT d.state, d.revision, d.drawing_id, d.hidden, d.stamped_at, d.busy, d.busy_until,
                    d.fixes_used, d.redraws_used, d.redraw_result, d.redraw_at,
-                   r.title, r.weather, r.body,
+                   r.title, r.weather, r.body, {character_columns}
                    (SELECT max(diary_date) FROM marong.diaries
                     WHERE friend_id=p.friend AND {_VISIBLE} AND diary_date<p.day) AS prev,
                    (SELECT min(diary_date) FROM marong.diaries
                     WHERE friend_id=p.friend AND {_VISIBLE} AND diary_date>p.day) AS next
             FROM params p
             LEFT JOIN marong.diaries d ON d.friend_id=p.friend AND d.diary_date=p.day AND p.day<=p.today
-            LEFT JOIN marong.diary_revisions r ON r.diary_id=d.id AND r.revision=d.revision""",
+            LEFT JOIN marong.diary_revisions r ON r.diary_id=d.id AND r.revision=d.revision
+            {character_join}""",
             (friend, day, diary_day(now)),
         )
         state = row["state"] or "none"
@@ -195,12 +200,18 @@ class AppDiary:
         if redraw_block is None and not await drawing_allowed(self.store, self.draw_budget, now):
             redraw_block = "drawing_budget"
         drawing_id = row["drawing_id"]
+        writer = None
+        if row.get("writer_id") is not None:
+            writer = {"id": row["writer_id"], "name": row["writer_name"], "kind": row["writer_kind"],
+                      "faceUrl": f"/chat/api/characters/{row['writer_id']}/images/smile",
+                      "active": row["writer_status"] == "ready"}
         last = {"result": row["redraw_result"], "at": _iso(row["redraw_at"])} if row["redraw_result"] else None
         if row["busy"] == "redraw" and busy is None:
             last = {"result": "draw_failed", "at": _iso(row["busy_until"])}
         return {
             "revision": row["revision"], "title": row["title"], "weather": row["weather"], "body": row["body"],
             "drawing": {"id": str(drawing_id) if drawing_id else None, "kind": "ai" if drawing_id else "placeholder"},
+            "writer": writer,
             "hidden": row["hidden"], "stampedAt": _iso(row["stamped_at"]), "busy": busy,
             "fix": {"left": fixes, "blocked": fix_block},
             "redraw": {"left": redraws, "blocked": redraw_block, "last": last},

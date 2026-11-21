@@ -12,7 +12,7 @@ from psycopg.types.json import Jsonb
 
 from .app_push import TALK
 from .diary import KST, STOP_AT, WRITE_FROM, drawing_allowed, read_day_bundle, scene_error
-from .diary_models import ModelResult, PROMPT_VERSION, validate_draft
+from .diary_models import ModelResult, PET_PROMPT_VERSION, PROMPT_VERSION, validate_draft
 from .room_scope import writing_room_key
 
 log = logging.getLogger("marong.diary")
@@ -38,7 +38,8 @@ NOT EXISTS (
 """
 
 
-async def record_run(conn, diary_id, kind, origin, attempt, trace, model, style, sent, result, *, reask=False):
+async def record_run(conn, diary_id, kind, origin, attempt, trace, model, style, sent, result, *, reask=False,
+                     prompt_version=PROMPT_VERSION):
     effort, thinking = ("low", None) if kind == "draw" else (style, "adaptive")
     cursor = await conn.execute(
         """INSERT INTO marong.diary_ai_runs (
@@ -47,7 +48,7 @@ async def record_run(conn, diary_id, kind, origin, attempt, trace, model, style,
             cache_read_tokens, cache_write_tokens, cost_usd, cost_estimated, outcome, stop_reason, error_code
         ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         RETURNING id""",
-        (diary_id, kind, origin, attempt, reask, trace, model, PROMPT_VERSION, effort, thinking,
+        (diary_id, kind, origin, attempt, reask, trace, model, prompt_version, effort, thinking,
          sent, result.first_ms, result.total_ms, result.input_tokens, result.image_input_tokens,
          result.output_tokens, result.cache_read_tokens, result.cache_write_tokens, result.cost,
          result.estimated, result.outcome, result.stop, result.error),
@@ -65,7 +66,8 @@ async def insert_picture(conn, row, revision, origin, run_id, picture):
 
 
 class DiaryWorker:
-    def __init__(self, store, models, delivery, budget, *, now=None, rng=None, on_saved=None, unified=False):
+    def __init__(self, store, models, delivery, budget, *, now=None, rng=None, on_saved=None, unified=False,
+                 pet_voice=False):
         self.store = store
         self.models = models
         self.delivery = delivery
@@ -75,6 +77,7 @@ class DiaryWorker:
         self.on_saved = on_saved
         self.running = False
         self.unified = unified
+        self.pet_voice = pet_voice
 
     def destination(self, friend):
         if self.unified:
@@ -180,6 +183,24 @@ class DiaryWorker:
         )
         return await cursor.fetchone() is not None
 
+    async def _writer(self, row):
+        character_id = row["character_id"]
+        if character_id is None and row["attempts"] == 0:
+            updated = await self.store._one("""
+                UPDATE marong.diaries d SET character_id=(
+                    SELECT c.id FROM marong.friend_profiles p
+                    JOIN marong.characters c ON c.id=p.character_id AND c.friend_id=d.friend_id AND c.status='ready'
+                    WHERE p.friend_id=d.friend_id
+                )
+                WHERE d.id=%s AND d.lease_until=%s AND d.character_id IS NULL RETURNING character_id
+            """, (row["id"], row["lease_until"]))
+            character_id = updated["character_id"] if updated else None
+        if self.pet_voice and character_id is not None:
+            return await self.store._one("""
+                SELECT name,kind,owner_call FROM marong.characters WHERE id=%s AND friend_id=%s
+            """, (character_id, row["friend_id"]))
+        return None
+
     async def _write(self, row, deadline, trace):
         async with self.store.pool.connection() as conn:
             bundle = await read_day_bundle(conn, row["friend_id"], row["diary_date"], unified=self.unified)
@@ -198,8 +219,9 @@ class DiaryWorker:
         )
         attempt = min(row["attempts"] + 1, 3)
         origin = "night" if attempt == 1 else "retry"
+        writer = await self._writer(row) if self.unified else None
         draft, scene_problem, run_id, outcome = await self._draft(
-            row["id"], friend, bundle.value, attempt, origin, trace, deadline,
+            row["id"], friend, bundle.value, attempt, origin, trace, deadline, writer=writer,
         )
         async with self.store.pool.connection() as conn, conn.transaction():
             if not await self._owned(conn, row):
@@ -233,9 +255,11 @@ class DiaryWorker:
             )
             return await cursor.fetchone()
 
-    async def _draft(self, diary_id, friend, bundle, attempt, origin, trace, deadline):
+    async def _draft(self, diary_id, friend, bundle, attempt, origin, trace, deadline, *, writer=None):
         previous = reason = None
         valid_text = None
+        options = {"character": writer} if writer else {}
+        version = PET_PROMPT_VERSION if writer else PROMPT_VERSION
         for reask in (False, True):
             sent = self.now()
             if sent >= deadline:
@@ -243,7 +267,7 @@ class DiaryWorker:
             try:
                 async with asyncio.timeout((deadline - sent).total_seconds()):
                     result = await self.models.write(friend["name"], friend["has_look"], bundle,
-                                                     previous=previous, reason=reason)
+                                                     previous=previous, reason=reason, **options)
             except TimeoutError:
                 result = ModelResult(outcome="timeout", error="deadline")
             problem = scene_problem = None
@@ -253,7 +277,8 @@ class DiaryWorker:
             async with self.store.pool.connection() as conn:
                 run_id = await record_run(
                     conn, diary_id, "write", origin, attempt, trace, self.models.text_model, self.models.effort,
-                    sent, replace(result, outcome="invalid", error=error) if error else result, reask=reask,
+                    sent, replace(result, outcome="invalid", error=error) if error else result,
+                    reask=reask, prompt_version=version,
                 )
             if result.outcome != "ok":
                 if valid_text:

@@ -217,7 +217,7 @@ async def serve(settings, credentials, options, secret, authentication, home, st
             jobs.update(proactive=proactive.run, reminders=reminders.run)
             if diary_enabled:
                 diary = DiaryWorker(store, diary_models, delivery, pet_settings.diary_image_budget,
-                                    unified=True)
+                                    unified=True, pet_voice=pet_settings.pet_voice)
                 jobs["diary"] = diary.run
             call_texts = await store._one("SELECT to_regclass('marong.call_texts') IS NOT NULL AS ready")
             if call_texts["ready"]:
