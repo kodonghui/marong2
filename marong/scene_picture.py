@@ -5,7 +5,7 @@ from decimal import Decimal
 import re
 
 from .character.records import CharacterError
-from .diary_models import DRAW_PROMPT, DiaryPicture, draw_prompt
+from .diary_models import DRAW_PROMPT, DiaryPicture, ModelResult, draw_prompt
 
 
 VERSION = "scene-v1"
@@ -30,6 +30,7 @@ class SceneResult:
     estimated: bool
     model: str
     prompt_version: str = VERSION
+    measurement: ModelResult | None = None
 
 
 def subject(character):
@@ -64,6 +65,16 @@ class ScenePictures:
         self.models = models
         self.model = model
 
+    async def diary_art(self, row, scene, look, weather, friend_name):
+        character = await self.store._one("""
+            SELECT id, kind, template, traits, name FROM marong.characters
+            WHERE id=%s AND friend_id=%s AND status='ready'
+        """, (row["character_id"], row["friend_id"]))
+        if character is None:
+            return ModelResult(outcome="error", error="references")
+        result = await self.draw("diary", character, (), scene, look=look, weather=weather, friend_name=friend_name)
+        return result.measurement or ModelResult(outcome="error", error="references")
+
     async def draw(self, purpose, character, outfit, scene, *, look=None, weather=None, friend_name=None):
         if purpose not in {"topic", "reaction", "diary"}:
             raise ValueError("invalid_scene_purpose")
@@ -83,10 +94,10 @@ class ScenePictures:
             cost += result.cost or Decimal(0)
             estimated |= result.estimated
             if result.outcome == "ok":
-                return SceneResult("ok", None, result.value, cost, estimated, self.model)
+                return SceneResult("ok", None, result.value, cost, estimated, self.model, measurement=result)
             if result.outcome == "refused":
-                return SceneResult("refused", "refused", None, cost, estimated, self.model)
+                return SceneResult("refused", "refused", None, cost, estimated, self.model, measurement=result)
             if result.outcome == "invalid":
-                return SceneResult("failed", "check_failed", None, cost, estimated, self.model)
+                return SceneResult("failed", "check_failed", None, cost, estimated, self.model, measurement=result)
         reason = "timeout" if result.outcome == "timeout" else "model_error"
-        return SceneResult("failed", reason, None, cost, estimated, self.model)
+        return SceneResult("failed", reason, None, cost, estimated, self.model, measurement=result)

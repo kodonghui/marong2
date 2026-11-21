@@ -9,8 +9,9 @@ from math import ceil
 from .app_chat import UUID, Problem, bad
 from .app_diary import _date
 from .diary import KST, diary_day, drawing_allowed, drawing_allowed_in, read_day_bundle, scene_error
-from .diary_models import validate_draft
+from .diary_models import PROMPT_VERSION, validate_draft
 from .diary_worker import insert_picture, record_run
+from .scene_picture import VERSION as SCENE_PROMPT_VERSION
 
 log = logging.getLogger("marong.diary")
 LIMITS = {"fix": ("fixes_used", 5), "redraw": ("redraws_used", 2)}
@@ -96,6 +97,13 @@ class DiaryEdits:
                 return None, "not_ready", None, None
 
             used, limit = LIMITS[kind]
+            pet_picture = kind == "redraw" and row.get("character_id") is not None
+            if pet_picture:
+                writer = await (await conn.execute("""
+                    SELECT status FROM marong.characters WHERE id=%s AND friend_id=%s
+                """, (row["character_id"], friend))).fetchone()
+                if not writer or writer["status"] != "ready":
+                    return None, "not_ready", None, None
             retry = await self._retry_after(conn, friend, now)
             if retry:
                 code = "too_many_requests"
@@ -107,7 +115,8 @@ class DiaryEdits:
                 code = f"{kind}_limit"
             elif row["busy_until"] and row["busy_until"] > now:
                 code = "busy"
-            elif kind == "redraw" and not await drawing_allowed_in(conn, self.api.draw_budget, now):
+            elif (kind == "redraw" and not (pet_picture and self.chat.diary_scenes)
+                  and not await drawing_allowed_in(conn, self.api.draw_budget, now)):
                 code = "drawing_budget"
             else:
                 code = None
@@ -165,10 +174,10 @@ class DiaryEdits:
             (code, revision, scene_changed, friend, key),
         )
 
-    async def _log(self, row, kind, origin, model, trace, sent, result):
+    async def _log(self, row, kind, origin, model, trace, sent, result, *, version=PROMPT_VERSION):
         async with self.store.pool.connection() as conn:
             return await record_run(conn, row["id"], kind, origin, 1, trace, model,
-                                    "medium" if kind != "draw" else "low", sent, result)
+                                    "medium" if kind != "draw" else "low", sent, result, prompt_version=version)
 
     async def _run_fix(self, row, key, note, trace, deadline):
         draft = None
@@ -264,11 +273,17 @@ class DiaryEdits:
             await self._finish_redraw(row, "scene_rejected")
             return
         sent = datetime.now(KST)
-        if not await drawing_allowed(self.store, self.api.draw_budget, sent):
+        scenes = self.chat.diary_scenes if row.get("character_id") is not None else None
+        if not scenes and not await drawing_allowed(self.store, self.api.draw_budget, sent):
             await self._finish_redraw(row, "drawing_budget")
             return
-        result = await self.models.draw(scene, look)
-        run_id = await self._log(row, "draw", "redraw", self.models.image_model, trace, sent, result)
+        if scenes:
+            result = await scenes.diary_art(row, scene, look, current["weather"], current["name"])
+            model, version = scenes.model, SCENE_PROMPT_VERSION
+        else:
+            result = await self.models.draw(scene, look)
+            model, version = self.models.image_model, PROMPT_VERSION
+        run_id = await self._log(row, "draw", "redraw", model, trace, sent, result, version=version)
         if result.outcome == "ok":
             revision = {**current, "scene": scene} if scene != current["scene"] else None
             await self._finish_redraw(row, "done", result.value, run_id, revision, scene_run)
