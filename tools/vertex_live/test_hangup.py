@@ -113,7 +113,9 @@ class Store:
     """Just enough of MemoryStore to see how the call ends."""
     def __init__(self):self.finished=[]
     async def start_call(self,p,client_id,voice,build,entrypoint):return 'call-1',False
-    async def start_segment(self,p,call_id,client_id,model):return 'segment-1'
+    async def start_segment(self,p,call_id,client_id,model,**options):return 'segment-1'
+    async def segment_ready(self,segment):pass
+    async def record_connection(self,segment,**report):pass
     async def seed(self,p,call_id):return ''
     async def save_turn(self,*a):return 1
     async def record_transport(self,*a):pass
@@ -249,7 +251,7 @@ async def check_http(server):
                     if not server.active_calls:break
                     await asyncio.sleep(.01)
             page=await (await c.get('/')).text()
-            assert '/app.js?v=20261119-call-wait1' in page
+            assert f'/app.js?v={server.ASSET_VERSIONS["app.js"]}' in page
 
 
 async def main():
