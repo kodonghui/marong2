@@ -48,6 +48,8 @@ class TestCharacter(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(db.close)
         db.apply_unified_prerequisites()
         db.apply_unified()
+        db.apply_pet_app_prerequisites()
+        db.apply_pet_app()
         directory = self.enterContext(tempfile.TemporaryDirectory())
         store = UnifiedStore(db.app_url)
         await store.open(wait=True)
