@@ -108,7 +108,15 @@ function fallbackToPCM(reason='rtc_disconnected'){
   audioContext?.resume().catch(()=>{});requestPCM();
 }
 const captionNodes=new Map();
-function status(text){$('status').textContent=text;}
+function status(text){
+  const line=$('status');
+  line.textContent=text;
+  if(text!==DAILY_MESSAGE)return;
+  const link=document.createElement('a');
+  link.href='/chat/me';
+  link.textContent='내 사용량 보기';
+  line.append(' ',link);
+}
 const WAIT_TEXT='찾아보는 중…';
 let waitTimer=null,waitCutoff=null,waitSource=null,waitBuffer=null,waiting=false,statusBeforeWait='';
 function stopWaiting(){
