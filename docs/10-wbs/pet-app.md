@@ -46,13 +46,13 @@ for f in tools/vertex_live/test_*.py; do .venv/bin/python "$f" || exit 1; done  
 | TASK-423 | 아이 소개 화면(SCR-180)과 흐름: 이름 짓기(SCR-174) → 아이 소개 → 입혀 보기(SCR-166), 내 마롱이(SCR-165)의 '아이 소개'·'꾸미기' 줄과 안내 띠, 입혀 보기의 작은 글 바꿈(화면 정의 9절) | SPEC-409, 407 | SCR-180, SCR-174, SCR-165, SCR-166, `marong/app_chat_static/character.html`·`character.js`·`profile.js` | TASK-422 | GPT | 1 | TC-517 통과. 낮·밤 테마와 360px 폭에서 넘치지 않음 |
 | TASK-424 | 1인칭 구간(명세 3.1): `character_section`이 반려동물이고 `MARONG_PET_VOICE=1`일 때 줄 2·4·5를 바꾸고 600자 규칙을 지켜요. 구간이 그 친구의 모든 말 만들기(글 답, 선톡, 그림 화두 글, 일정 알림 글)에 붙는지 확인하고, 통화는 지금 이름 한 줄만 붙는 `tools/vertex_live/server.py`의 `setup`이 같은 구간을 붙이게 바꿔요(세션 조회 `find_session`이 캐릭터 칸을 함께 돌려줌)[사실: 2026-11-21 코드에서 통화 지시문에는 `bot_name` 한 줄만 붙음]. 기본 마롱이와 스위치 꺼짐은 글·통화 모두 지금과 바이트까지 같아요 | SPEC-406 | AI-40, `marong/unified_prompt.py`, `marong/unified_store.py`, `marong/app_session.py`, `run_app.py`, `tools/vertex_live/server.py` | TASK-421 | GPT | 1.5 | TC-518\~520 통과. `tools/vertex_live/test_unified_calls.py` 통과 |
 | TASK-425 | 아이가 쓰는 그림일기 글: 일기를 쓰기 시작할 때 `diaries.character_id`를 적고, 반려동물이면 `pet-diary-v1`(명세 3.6) 지시로 써요. 일기 한 날 API-110에 `writer` | SPEC-408 | AI-41, API-110, `marong/diary_models.py`·`diary_worker.py`·`app_diary.py` | TASK-424 | GPT | 1 | TC-521 통과. `tests/test_diary_worker.py`·`tests/test_app_diary.py` 통과 |
-| TASK-426 | 실제 모델 미통과 | `95914c4` | 첫 건강 질문의 답이 정해진 안내와 달라 중단했어요. 예상 비용 USD 0.000956. 스위치는 0으로 유지해요. |
+| TASK-426 | 1인칭 금지선 시험을 실제 모델로(명세 3.1의 5종 × 5번, 위반 0번). TC-453이 먼저 통과해야 해요. 질문은 합성 질문이고 결과는 위반 수와 비용만 PR에 적어요(답 글은 저장소에 넣지 않음) | SPEC-406 | `tests/` 아래 실제 모델 시험(기본으로는 건너뛰고 설정값이 있을 때만 돔) | TASK-424 | GPT | 0.5 | TC-522 통과(위반 0/25), 비용 1달러 이하 |
 | TASK-428 | 장면 그림 그리기 공통 함수(예: `marong/scene_picture.py`의 `draw`): 참조 이미지 2장(명세 3.3), 지시 글(3.4, 이름·대화 없음, `Marong` 바꿈, `SUBJECT` 6단어 이하), `MARONG_SCENE_MODEL`·`low`·크기, 받은 바이트 검사(지금 `diary_models`의 검사와 같은 방식), 거절·오류·90초 규칙, 부름마다 비용 | SPEC-410, 412 | AI-42, 새 모듈, `marong/diary_models.py`(검사 함수를 같이 쓰면) | TASK-421 | GPT | 1.5 | TC-526·527 통과 |
 | TASK-429 | 장면 그림 작업 루프(앱 서버 안, 동시에 2개, 10분 임대, 다시 뜨면 임대 지난 줄을 `queued`로), 비용 세기와 예산 없음(SPEC-414: `diary.image_budget`가 `unlimited`를 받고 `drawing_allowed_in`이 합을 읽지 않고 허락, 틀린 값은 지금처럼 5), 사용량 그림 수(SPEC-415), 그림 읽기 API-262 | SPEC-410, 414, 415, 416 | TBL-176, API-262, 새 모듈, `marong/diary.py`, `marong/usage.py`(그림 수 함수 부르기만), `run_app.py`(루프 시작) | TASK-428 | GPT | 1.5 | TC-528\~531 통과. API-262가 나열한 응답마다 시험 통과 |
 | TASK-430 | 그림 화두에 장면 그림(명세 3.5): `AppProactive._send`·`_hello`의 두 곳, 메시지 `meta.scene`, 선 전화의 30분 전 미리 그리기와 `app_rings.scene_picture_id`, REQ-281·282 뒤 글, 그림 세트에 `petScene`(31장을 보고 마롱이만의 장면을 거짓으로. 고른 목록과 이유를 PR에 적음), 글 대화 화면의 그림 주소 검사(`topicPicture`)와 통화 화면의 `TOPIC_RE`에 `/chat/api/scenes/{id}` 모양 더하기 | SPEC-411, 416 | SCR-107, SCR-002, `marong/unified_delivery.py`, `marong/topics.py`·`topic_store.py`, `marong/topics/v1/topics.json`, `marong/app_chat_static/chat.js`, `tools/vertex_live/static/app.js` | TASK-429 | GPT | 2 | TC-532·533 통과. `tests/test_topic_pictures.py`·`test_topics.py`·`test_proactive.py`·`test_app_ring.py` 통과 |
 | TASK-431 | 일기 장면 그림: `DiaryWorker._draw`의 그리는 부름을 SPEC-410으로(참조는 그 캐릭터의 `front`와 마음 날씨 표정), 다시 그리기 같은 아이, 그림 없는 날 SCR-113#no-drawing, SCR-115 글, 보관 해제한 캐릭터면 다시 그리기 버튼 없음 | SPEC-413 | AI-42, SCR-113, SCR-115, `marong/diary_worker.py`, `marong/app_chat_static/diary/diary.js` | TASK-429, TASK-425 | GPT | 1.5 | TC-534·535 통과. `tests/test_diary_worker.py` 통과 |
 | TASK-432 | 관리자 그림 비용 API-266과 관리자 첫 화면(SCR-169)의 '이번 달 그림 비용' 줄 | SPEC-427, 414 | API-266, SCR-169, `marong/app_admin.py`, `marong/app_chat_static/admin.js` | TASK-429 | GPT | 0.5 | TC-536 통과. API-266이 나열한 응답마다 시험 통과 |
-| TASK-433 | 실제 모델 미통과 | `92aacf4` | 공개 사진으로 4회 시험했어요. 마지막 시험은 푸들의 표정과 고양이 특징표에서 탈락했어요. 장면 0/30, 전체 예상 비용 USD 0.436192. |
+| TASK-433 | 닮음 시험을 실제 모델로: CC0 강아지·고양이 사진으로 캐릭터를 `pet-artwork-v2`로 만들고(정면·표정 6장), 그 캐릭터로 화두 장면 10장·일기 장면 5장씩. 비교 그림 한 장(사진, 정면, 표정, 장면)을 PR 설명에 붙여요 | SPEC-410, 428, 429 | AI-30, AI-31, AI-42, 시험 스크립트(저장소 `tools/` 아래, 기본으로 돌지 않음) | TASK-427, TASK-430, TASK-431 | GPT | 0.5 | TC-537 통과, 비용 3달러 이하 |
 | TASK-434 | 아이템 목록 폴더 읽기와 검사(명세 3.9: 파일, 형식·크기, 레이어 자리 상자 밖 불투명 5% 이하, 대장 줄, 글꼴 라이선스, `priceKrw = 0`), 처음 넣기(SPEC-426, 두 번 해도 줄 그대로, 걸린 것은 `new`와 로그 `decor_seed_skip`), 파일 내려 주기 API-257(목록에 적힌 파일만) | SPEC-417, 425, 426 | TBL-175, API-257, 새 모듈(예: `marong/decor.py`), 시험용 작은 합성 폴더(`tests/fixtures/` 아래) | TASK-421 | GPT | 1.5 | TC-538\~540 통과. API-257이 나열한 응답마다 시험 통과 |
 | TASK-435 | 처음 아이템 48개를 `marong/decor/v1/`에 넣기: 처음 셋(지금 일기장 배경, 속지 `manuscript`, 글꼴 Gaegu = 지금 `diary/Gaegu-Regular.woff2`와 `Gaegu-OFL.txt`)과 모자 4·옷 4·목도리 2·배경 6·속지 4·글꼴 5·스티커 20. 입는 아이템은 투명 배경으로 한 장 그린 뒤 템플릿 5종의 `slots` 자리 상자에 맞춰 레이어를 만들고, 맞지 않는 템플릿만 그 템플릿을 참조로 다시 그려요[새 제안]. 화풍은 그림 세트 화풍(`marong/topics/v1`)에 맞춰요. 글꼴 후보는 아래 '확인'의 표예요. `items.json`(영어 `prompt` 포함)과 `licenses.csv`를 채우고 글꼴마다 OFL 원문을 폴더에 둬요 | SPEC-425, 426 | `marong/decor/v1/` | TASK-434 | GPT | 3 | TC-541 통과(48개 모두 검사 통과), 그림 비용 10달러 이하. 글꼴 `woff2` 크기와 일기장 첫 화면 시간을 PR에 적음 |
 | TASK-436 | 관리자 아이템 API-263\~265와 화면 SCR-186, 관리자 첫 화면의 '아이템' 줄 | SPEC-417 | API-263\~265, SCR-186, SCR-169, `marong/app_admin.py`, `marong/app_chat_static/admin.js`·새 `admin-items` 페이지 | TASK-434 | GPT | 1 | TC-542·543 통과. 세 API가 나열한 응답마다 시험 통과 |
@@ -102,14 +102,14 @@ for f in tools/vertex_live/test_*.py; do .venv/bin/python "$f" || exit 1; done  
 | TASK-431 | 로컬 회귀 시험 통과 | `46cb159` | 기존 일기 작업·조회 회귀 시험이 통과했어요. 실제 그림 모델과 일기 화면의 실기기 확인은 대기예요. |
 | TASK-432 | 로컬 시험 통과 | `0c1dc47` | 한국 시각 월 합계와 무제한 일기 예산, 캐릭터 예산 비율 및 관리자 접근 차단을 확인했어요. |
 | TASK-433 | 실제 모델 미통과 | `92aacf4` | 공개 사진으로 4회 시험했어요. 마지막 시험은 푸들의 표정과 고양이 특징표에서 탈락했어요. 장면 0/30, 전체 예상 비용 USD 0.436192. |
-| TASK-434 | 대기 | | |
-| TASK-435 | 대기 | | |
-| TASK-436 | 대기 | | |
-| TASK-437 | 대기 | | |
-| TASK-438 | 대기 | | |
-| TASK-439 | 대기 | | |
-| TASK-440 | 대기 | | |
-| TASK-441 | 대기 | | |
-| TASK-442 | 대기 | | |
-| TASK-443 | 대기 | | |
-| TASK-444 | 대기 | | |
+| TASK-434 | 일부 로컬 확인 | `c9cff5c` | 목록 파일 검사, 첫 삽입 두 번, PNG와 글꼴의 로그인·캐시·파일 목록을 확인했어요. |
+| TASK-435 | 로컬 파일 검사 통과 | `3aa63ef` | 48개 전부 검사 통과. 그림 40개 예상 비용 USD 0.248190. 글꼴 크기는 PR에 적었어요. |
+| TASK-436 | 일부 API 확인 | `04a8dca` | 권한이 없는 요청, 검사 실패와 내리기를 확인했어요. 관리자 화면 전체 상태 시험은 대기예요. |
+| TASK-437 | 일부 로컬 확인 | `dc04d60` | 동시 두 요청에 201·200, 내려간 아이템은 받은 계정의 보관함에 남고 상점에서는 사라져요. |
+| TASK-438 | 일부 로컬 확인 | `dc04d60` | 첫 착용 한 자리 대기와 나머지 건너뜀, 360px 미리 보기 레이어를 확인했어요. |
+| TASK-439 | 합성 데이터 일부 확인 | `e0dfc87` | 반응 그림의 비용 0 합성 대체와 기존 선톡 회귀를 확인했어요. 일일 상한과 재시도 조합은 추가 검증이 필요해요. |
+| TASK-440 | 일부 로컬 확인 | `fb8adab` | 스타일 저장, 견본 배경 변경과 처음 모습 선택을 확인했어요. 기존 화면과 픽셀 비교는 대기예요. |
+| TASK-441 | 일부 로컬 확인 | `fb8adab` | 스티커 저장·취소, 11개 제한, 두 동시 저장의 원자성을 확인했어요. 실제 터치 시험은 대기예요. |
+| TASK-442 | 문서 확인 | `59c4c97` | 명세 3.7의 네 문서와 README 설정 6개를 연결했어요. |
+| TASK-443 | 병합 대기 |  | 운영 DB 022와 스위치 적용은 main 병합 뒤 진행해요. |
+| TASK-444 | 운영 측정 대기 |  | TC-537을 통과한 뒤 장면 그림을 운영에 켜야 P95를 측정할 수 있어요. |
