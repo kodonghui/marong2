@@ -297,7 +297,7 @@ class CharacterAPI:
 
     def register(self, router):
         router.add_get("/chat/character/new", self.page)
-        router.add_get("/chat/character/{id}/{stage:photos|traits|preview|candidates|name|try}", self.page)
+        router.add_get("/chat/character/{id}/{stage:photos|traits|preview|candidates|name|intro|try}", self.page)
         router.add_get(BASE, self.list)
         router.add_post(BASE, self.create)
         router.add_get(BASE + "/{id}", self.get)

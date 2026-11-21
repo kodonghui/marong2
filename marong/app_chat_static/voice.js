@@ -9,6 +9,7 @@
   const notice = document.getElementById('voice-notice');
   const retry = document.getElementById('voice-retry');
   const player = new Audio();
+  const afterIntro = new URLSearchParams(location.search).get('afterIntro');
   let profile, voices, current, noticeTimer, writing = false, loading = false;
 
   function stop() {
@@ -82,6 +83,10 @@
     writing = false;
     controls.forEach(control => { control.disabled = false; });
     if (reply.status === 200) {
+      if (afterIntro === 'profile' || /^[1-9][0-9]{0,18}$/.test(afterIntro || '')) {
+        location.replace(afterIntro === 'profile' ? '/chat/me' : '/chat/character/' + afterIntro + '/try');
+        return;
+      }
       profile = reply.body;
       render();
       signal(notice, '다음 통화부터 이 목소리야');
