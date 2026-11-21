@@ -41,6 +41,8 @@ class UnifiedAuthTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.db.close)
         self.db.apply_unified_prerequisites()
         self.db.apply_unified()
+        self.db.apply_pet_app_prerequisites()
+        self.db.apply_pet_app()
         self.store = UnifiedStore(self.db.app_url)
         await self.store.open(wait=True)
         self.addAsyncCleanup(self.store.close)

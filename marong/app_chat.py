@@ -7,6 +7,7 @@ writes into their own Discord DM room, so Marong answers with the same memory, l
 Logs carry result names and counts only: no text, FID, install id, email or token (SPEC-126).
 """
 import asyncio
+import os
 from collections import OrderedDict, defaultdict, deque
 from contextlib import AsyncExitStack
 import json
@@ -130,7 +131,7 @@ def bad(*errors) -> Problem:
 class AppChat:
     def __init__(self, store, agent, client, access, push, *, origin: str = DEFAULT_ORIGIN, port: int = DEFAULT_PORT,
                  timezone: str = "Asia/Seoul", clock=time.monotonic, releases: AppReleases | None = None,
-                 sessions=None, authentication="access", admin_email_hash=None, diary_models=None):
+                 sessions=None, authentication="access", admin_email_hash=None, diary_models=None, pet_app_settings=None):
         self.store = store
         self.agent = agent      # DiscordAgent: the same one that answers the Discord DM
         self.client = client    # DiscordDM: its room locks keep one answer at a time per room
@@ -161,6 +162,8 @@ class AppChat:
                 '<a class="icon-button" href="/chat/persona/" aria-label="친구 약속">나</a>'.encode("utf-8")), "text/html")
         self.runner = None
         self.diary_models = diary_models
+        from .pet_app_settings import PetAppSettings
+        self.pet_app_settings = pet_app_settings if pet_app_settings is not None else PetAppSettings.from_env(os.environ)
         from .app_persona import AppPersona
         self.persona = AppPersona(self)
         from .app_admin import AppAdmin

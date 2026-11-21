@@ -110,7 +110,9 @@ async def recent_stamp(store, friend_id: int, room: str, now: datetime) -> date 
     return row["diary_date"] if row else None
 
 
-def image_budget(value: str | None) -> Decimal:
+def image_budget(value: str | None) -> Decimal | None:
+    if value is not None and value.strip().lower() == "unlimited":
+        return None
     try:
         budget = Decimal(value or "5")
         if budget.is_finite() and budget > 0:
@@ -120,12 +122,16 @@ def image_budget(value: str | None) -> Decimal:
     return Decimal(5)
 
 
-async def drawing_allowed(store, budget: Decimal, now: datetime) -> bool:
+async def drawing_allowed(store, budget: Decimal | None, now: datetime) -> bool:
+    if budget is None:
+        return True
     async with store.pool.connection() as conn:
         return await drawing_allowed_in(conn, budget, now)
 
 
-async def drawing_allowed_in(conn, budget: Decimal, now: datetime) -> bool:
+async def drawing_allowed_in(conn, budget: Decimal | None, now: datetime) -> bool:
+    if budget is None:
+        return True
     start = now.astimezone(KST).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     cursor = await conn.execute(
         "SELECT COALESCE(sum(cost_usd),0) AS usd FROM marong.diary_ai_runs "

@@ -41,12 +41,18 @@ ALTER TABLE marong.characters ADD CONSTRAINT characters_intro_check CHECK (
 ALTER TABLE marong.characters ADD COLUMN IF NOT EXISTS photo_pick jsonb;
 ALTER TABLE marong.characters DROP CONSTRAINT IF EXISTS characters_photo_pick_check;
 ALTER TABLE marong.characters ADD CONSTRAINT characters_photo_pick_check CHECK (
-  photo_pick IS NULL OR (
-    jsonb_typeof(photo_pick) = 'object'
-    AND photo_pick ->> 'photo' IN ('photo_1', 'photo_2', 'photo_3')
-    AND jsonb_typeof(photo_pick -> 'box') = 'array' AND jsonb_array_length(photo_pick -> 'box') = 4
-  )
+  CASE
+    WHEN photo_pick IS NULL THEN true
+    WHEN jsonb_typeof(photo_pick -> 'box') = 'array' THEN
+      coalesce(photo_pick ->> 'photo' IN ('photo_1', 'photo_2', 'photo_3'), false)
+      AND jsonb_array_length(photo_pick -> 'box') = 4
+    ELSE false
+  END
 );
+
+ALTER TABLE marong.character_jobs DROP CONSTRAINT IF EXISTS character_jobs_error_check;
+ALTER TABLE marong.character_jobs ADD CONSTRAINT character_jobs_error_check
+  CHECK (error IN ('model_error', 'model_refused', 'timeout', 'check_failed', 'budget', 'photo_missing'));
 
 -- Changes to friend_profiles (TBL-167 in 020) ← SPEC-407 | terms: TERM-217
 -- Who set the call voice: NULL (nobody, the default voice), 'recommended' (picked from the pet intro) or 'chosen'

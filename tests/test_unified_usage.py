@@ -31,6 +31,8 @@ class UsageTests(IsolatedAsyncioTestCase):
         self.addCleanup(db.close)
         db.apply_unified_prerequisites()
         db.apply_unified()
+        db.apply_pet_app_prerequisites()
+        db.apply_pet_app()
         moment = datetime(2026, 11, 18, 18, 59, tzinfo=timezone.utc)
         store = UnifiedStore(db.app_url)
         await store.open(wait=True)
