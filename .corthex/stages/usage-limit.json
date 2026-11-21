@@ -4,9 +4,16 @@
   "part": "usage-limit",
   "stages": {
     "01-domain": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "설계 PR이 main에 합쳐진 뒤 01~08·10·12를 한 번에 확인하는 NEXUS 체크포인트 요청",
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
       "checks": [
         {
           "level": "info",
@@ -14,12 +21,19 @@
           "at": "2026-11-21"
         }
       ],
-      "updated": "2026-11-21T07:04:04+00:00"
+      "updated": "2026-11-21T07:49:39+00:00"
     },
     "02-prd": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "설계 PR이 main에 합쳐진 뒤 01~08·10·12를 한 번에 확인하는 NEXUS 체크포인트 요청",
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
       "checks": [
         {
           "level": "info",
@@ -27,12 +41,19 @@
           "at": "2026-11-21"
         }
       ],
-      "updated": "2026-11-21T07:04:04+00:00"
+      "updated": "2026-11-21T07:49:39+00:00"
     },
     "03-user-flow": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "설계 PR이 main에 합쳐진 뒤 01~08·10·12를 한 번에 확인하는 NEXUS 체크포인트 요청",
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
       "checks": [
         {
           "level": "info",
@@ -40,12 +61,19 @@
           "at": "2026-11-21"
         }
       ],
-      "updated": "2026-11-21T07:04:05+00:00"
+      "updated": "2026-11-21T07:49:39+00:00"
     },
     "04-functional-spec": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "설계 PR이 main에 합쳐진 뒤 01~08·10·12를 한 번에 확인하는 NEXUS 체크포인트 요청",
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
       "checks": [
         {
           "level": "info",
@@ -53,12 +81,19 @@
           "at": "2026-11-21"
         }
       ],
-      "updated": "2026-11-21T07:04:05+00:00"
+      "updated": "2026-11-21T07:49:40+00:00"
     },
     "05-erd": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "설계 PR이 main에 합쳐진 뒤 01~08·10·12를 한 번에 확인하는 NEXUS 체크포인트 요청",
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
       "checks": [
         {
           "level": "info",
@@ -66,12 +101,19 @@
           "at": "2026-11-21"
         }
       ],
-      "updated": "2026-11-21T07:04:05+00:00"
+      "updated": "2026-11-21T07:49:40+00:00"
     },
     "06-api": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "설계 PR이 main에 합쳐진 뒤 01~08·10·12를 한 번에 확인하는 NEXUS 체크포인트 요청",
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
       "checks": [
         {
           "level": "info",
@@ -79,12 +121,19 @@
           "at": "2026-11-21"
         }
       ],
-      "updated": "2026-11-21T07:04:05+00:00"
+      "updated": "2026-11-21T07:49:40+00:00"
     },
     "07-sitemap": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "설계 PR이 main에 합쳐진 뒤 01~08·10·12를 한 번에 확인하는 NEXUS 체크포인트 요청",
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
       "checks": [
         {
           "level": "info",
@@ -92,12 +141,19 @@
           "at": "2026-11-21"
         }
       ],
-      "updated": "2026-11-21T07:04:05+00:00"
+      "updated": "2026-11-21T07:49:40+00:00"
     },
     "08-screen-states": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "설계 PR이 main에 합쳐진 뒤 01~08·10·12를 한 번에 확인하는 NEXUS 체크포인트 요청",
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
       "checks": [
         {
           "level": "info",
@@ -105,12 +161,19 @@
           "at": "2026-11-21"
         }
       ],
-      "updated": "2026-11-21T07:04:05+00:00"
+      "updated": "2026-11-21T07:49:40+00:00"
     },
     "09-mockup": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "설계 PR이 main에 합쳐진 뒤 01~08·10·12를 한 번에 확인하는 NEXUS 체크포인트 요청",
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
       "checks": [
         {
           "level": "info",
@@ -118,12 +181,19 @@
           "at": "2026-11-21"
         }
       ],
-      "updated": "2026-11-21T07:04:05+00:00"
+      "updated": "2026-11-21T07:49:40+00:00"
     },
     "10-wbs": {
-      "state": "in_progress",
-      "checkpoints": [],
-      "next": "설계 PR이 main에 합쳐진 뒤 01~08·10·12를 한 번에 확인하는 NEXUS 체크포인트 요청",
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "GPT 구현(codex/usage-limit, TASK-411부터)",
       "checks": [
         {
           "level": "info",
@@ -131,12 +201,19 @@
           "at": "2026-11-21"
         }
       ],
-      "updated": "2026-11-21T07:04:05+00:00"
+      "updated": "2026-11-21T07:49:40+00:00"
     },
     "12-qa": {
       "state": "in_progress",
-      "checkpoints": [],
-      "next": "시험 계획 체크포인트 요청(다른 단계와 한 번에). 실행은 구현 뒤 GPT",
+      "checkpoints": [
+        {
+          "approved": "D118: '야 넥서스 하지 말고 걍 작업해'(2026-11-21 16:47:34 KST 프로젝트 채팅). NEXUS 체크포인트 없이 구현으로 넘어가라는 지시로 기록. 단계마다 검토해 통과시킨 말은 아님. 16:39 KST에 보낸 NEXUS 요청 nc_j78999m5mxdm은 이 말로 닫음. 12는 시험 계획(TC-496~509)만 이 말로 진행",
+          "by": "the maintainer",
+          "where": "https://claude.ai/code/project/chan_018wiT6q7b2xJeZMkepv6cnx?thread=cmsg_018wiT6q7b2xJeZMkepv6cnx6uTCoNMuNRWCWLusfdWijZ",
+          "date": "2026-11-21"
+        }
+      ],
+      "next": "구현 뒤 GPT가 TC-496~508 실행, 반영 뒤 TC-509 사람 확인",
       "checks": [
         {
           "level": "info",
@@ -144,7 +221,7 @@
           "at": "2026-11-21"
         }
       ],
-      "updated": "2026-11-21T07:04:05+00:00"
+      "updated": "2026-11-21T07:49:40+00:00"
     }
   }
 }
