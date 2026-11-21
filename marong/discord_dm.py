@@ -1197,6 +1197,9 @@ class PrivateProactive(Proactive):
             count += await self.store.hello_count(today)
         return count
 
+    async def priority(self, room, begin):
+        return None
+
     async def deliver(self, room, dry=False, *, send_until=None):
         if getattr(self.agent, "safety", None):
             room = {**room, "persona_dry": dry}
@@ -1214,6 +1217,10 @@ class PrivateProactive(Proactive):
         begin = planned[0]
         if not dry and not await self.store.claim_slot(room, begin):
             return empty
+        if not dry and not room.get("persona_care"):
+            preferred = await self.priority(room, begin)
+            if preferred is not None:
+                return preferred
         if self.topics is not None and not dry and not room.get("persona_care"):
             choice = None
             try:

@@ -28,6 +28,8 @@ from marong.character.vision import VisionExtractor
 from marong.character.worker import CharacterWorker, WorkerBudget
 from marong.config import load_dotenv, load_settings
 from marong.deepseek import from_env as deepseek_route
+from marong.decor import DecorCatalog
+from marong.decor_reactions import DecorReactions
 from marong.diary_models import DiaryModels
 from marong.diary_worker import DiaryWorker
 from marong.discord_dm import PrivateChatAgent
@@ -164,6 +166,9 @@ async def serve(settings, credentials, options, secret, authentication, home, st
                                   friends=os.getenv("MARONG_FRIENDS") == "1", google=google is not None,
                                   voice_samples=os.getenv("MARONG_VOICE_SAMPLES_DIR"),
                                   daily_limit=int(os.environ["MARONG_DAILY_UNITS"]) if os.getenv("MARONG_DAILY_UNITS") else None)
+        if pet_settings.decor:
+            chat.decor.catalog = await asyncio.to_thread(DecorCatalog)
+            await chat.decor.seed()
         saved = agent.on_saved
 
         def on_saved():
@@ -209,7 +214,8 @@ async def serve(settings, credentials, options, secret, authentication, home, st
             jobs["character"] = character_worker.run
         scenes = None
         if home == "app" and pet_settings.scene_pictures and chat.characters.media is not None:
-            pictures = ScenePictures(store, chat.characters.media, diary_models, pet_settings.scene_model)
+            pictures = ScenePictures(store, chat.characters.media, diary_models, pet_settings.scene_model,
+                                     catalog=chat.decor.catalog)
             chat.diary_scenes = pictures
             scenes = SceneWorker(store, pictures, chat.usage)
             jobs["scenes"] = scenes.run
@@ -220,7 +226,10 @@ async def serve(settings, credentials, options, secret, authentication, home, st
             topics = candidate if candidate.on else None
         await chat.serve()
         if home == "app":
-            proactive = AppProactive(settings, store, agent, locks, delivery, topics=topics, scenes=scenes)
+            reactions = (DecorReactions(store, chat.characters.media, chat.usage, chat.decor.catalog, scenes)
+                         if chat.decor.catalog and chat.characters.media else None)
+            proactive = AppProactive(settings, store, agent, locks, delivery, topics=topics, scenes=scenes,
+                                     reactions=reactions)
             reminders = AppReminders(settings, store, agent, delivery, origin=options["origin"],
                                      scenes=bool(scenes))
             jobs.update(proactive=proactive.run, reminders=reminders.run)

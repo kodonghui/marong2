@@ -59,20 +59,29 @@ def scene_prompt(purpose, character, outfit, scene, *, look=None, friend_name=No
 
 
 class ScenePictures:
-    def __init__(self, store, media, models, model):
+    def __init__(self, store, media, models, model, *, catalog=None):
         self.store = store
         self.media = media
         self.models = models
         self.model = model
+        self.catalog = catalog
+
+    def outfit_prompts(self, ids):
+        if not self.catalog:
+            return []
+        return [self.catalog.items[ident].prompt for ident in ids
+                if ident in self.catalog.items and self.catalog.items[ident].prompt]
 
     async def diary_art(self, row, scene, look, weather, friend_name):
         character = await self.store._one("""
-            SELECT id, kind, template, traits, name FROM marong.characters
-            WHERE id=%s AND friend_id=%s AND status='ready'
+            SELECT c.id,c.kind,c.template,c.traits,c.name,o.body,o.neck,o.head FROM marong.characters c
+            LEFT JOIN marong.outfits o ON o.character_id=c.id
+            WHERE c.id=%s AND c.friend_id=%s AND c.status='ready'
         """, (row["character_id"], row["friend_id"]))
         if character is None:
             return ModelResult(outcome="error", error="references")
-        result = await self.draw("diary", character, (), scene, look=look, weather=weather, friend_name=friend_name)
+        outfit = self.outfit_prompts([character[slot] for slot in ("body", "neck", "head") if character[slot]])
+        result = await self.draw("diary", character, outfit, scene, look=look, weather=weather, friend_name=friend_name)
         return result.measurement or ModelResult(outcome="error", error="references")
 
     async def draw(self, purpose, character, outfit, scene, *, look=None, weather=None, friend_name=None):
