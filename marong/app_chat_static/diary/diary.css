@@ -160,6 +160,18 @@ svg { width: var(--size-icon); height: var(--size-icon); fill: none; stroke: cur
 .writer-placeholder { border: 1px dashed currentColor; }
 .diary-writer { display: flex; align-items: center; gap: var(--space-sm); }
 .diary-writer img { width: 2.5rem; height: 2.5rem; object-fit: contain; }
+#day { background-image: var(--book-background, none); background-size: cover; }
+.paper { position: relative; background-image: var(--paper-background, none); background-size: cover; }
+.diary-sticker { position: absolute; width: 3rem; height: 3rem; object-fit: contain;
+  transform: translate(-50%, -50%) rotate(var(--sticker-angle, 0deg)) scale(var(--sticker-size, 1));
+  pointer-events: none; }
+.sticker-movable { pointer-events: auto; touch-action: none; border: 1px dashed currentColor; background: transparent; padding: 0; }
+.sticker-movable img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.sticker-handle { position: absolute; width: .8rem; height: .8rem; inset: auto -.2rem -.2rem auto;
+  background: currentColor; border-radius: 50%; cursor: nwse-resize; touch-action: none; }
+.sticker-editor { display: grid; gap: .5rem; }
+.sticker-controls { display: grid; grid-template-columns: 1fr 1fr auto; align-items: center; gap: .5rem; }
+.sticker-controls input { min-width: 0; width: 100%; }
 .over-picture {
   position: absolute; inset: 0; margin: 0;
   display: grid; place-items: center; padding: var(--space-md);

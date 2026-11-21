@@ -1,4 +1,5 @@
 import { makeSheets } from "./sheets.js";
+import { drawStickers, imageSource, moveSticker, paintDecor, resizeSticker, styleSticker } from "./decor.js";
 
 const BASE = "/chat/diary/";
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -43,6 +44,8 @@ let weatherOpen = false;
 let changing = false;
 let lastTrouble = null;
 let loadedState = "loading";
+let bookStyle, stickers = [], editingStickers = null;
+let stickerInventory = [];
 
 export function element(tag, cls, value) {
   const node = document.createElement(tag);
@@ -207,6 +210,8 @@ async function load(reset) {
   if (reset) {
     date = location.pathname.slice(BASE.length);
     day = null;
+    stickers = [];
+    editingStickers = null;
     weatherOpen = false;
     busySince = 0;
     expectedRedraw = false;
@@ -240,9 +245,113 @@ async function load(reset) {
     retryDelay = 5000;
     if (banner.textContent === CONNECTION || banner.textContent.startsWith(RETRY)) showBanner();
     setDay(next);
+    if (next.diary && (reset || bookStyle === undefined || !stickers.length)) {
+      void loadDecor(date, id);
+    }
   } catch (error) {
     readingFailed(error, id);
   }
+}
+
+async function loadDecor(forDate, id) {
+  try {
+    const decor = bookStyle === undefined ? await api("/decor") : bookStyle;
+    if (id !== loadId || date !== forDate) return;
+    bookStyle = decor;
+    if (!decor) return;
+    const values = await api(`/days/${forDate}/stickers`);
+    if (id !== loadId || date !== forDate) return;
+    stickers = values.stickers;
+    if (location.hash === "#stickers" && !editingStickers) {
+      await openStickers();
+    } else draw();
+  } catch {
+    if (id === loadId && bookStyle === undefined) bookStyle = null;
+  }
+}
+
+async function openStickers() {
+  if (!bookStyle || !day?.diary || editingStickers) return;
+  const current = date;
+  try {
+    const reply = await fetch("/chat/api/closet", {cache: "no-store"});
+    if (!reply.ok) throw new Error("closet");
+    const body = await reply.json();
+    if (date !== current) return;
+    stickerInventory = body.items.filter(item => item.kind === "sticker" && imageSource(item.thumbUrl));
+    editingStickers = stickers.map(sticker => ({...sticker}));
+    history.replaceState(history.state, "", location.pathname + "#stickers");
+    draw();
+  } catch {
+    showBanner("스티커를 불러오지 못했어");
+  }
+}
+
+function renderStickerEditor(paper) {
+  const panel = element("section", "sticker-editor");
+  const label = element("h2", "", "스티커 붙이기");
+  const count = element("p", "caption", `${editingStickers.length} / 10`);
+  panel.append(label, count);
+  for (const item of stickerInventory) {
+    const add = button(item.name, () => {
+      if (editingStickers.length >= 10) return;
+      editingStickers.push({itemId: item.id, imageUrl: item.thumbUrl, x: 500, y: 500, scale: 100, rotation: 0});
+      draw();
+    }, "text-button");
+    add.disabled = editingStickers.length >= 10;
+    panel.append(add);
+  }
+  if (!stickerInventory.length) panel.append(element("p", "caption", "받은 스티커가 없어"));
+  for (const [index, sticker] of editingStickers.entries()) {
+    const url = imageSource(sticker.imageUrl);
+    if (!url) continue;
+    const control = button("스티커 " + (index + 1), () => {}, "diary-sticker sticker-movable");
+    const image = new Image();
+    image.src = url;
+    image.alt = '';
+    image.draggable = false;
+    const handle = element("span", "sticker-handle");
+    handle.setAttribute("aria-hidden", "true");
+    control.replaceChildren(image, handle);
+    control.setAttribute("aria-label", "스티커 " + (index + 1) + " 움직이기");
+    paper.append(control);
+    styleSticker(control, sticker);
+    moveSticker(control, paper, sticker);
+    resizeSticker(handle, control, sticker);
+    const tools = element("div", "sticker-controls");
+    const size = element("input");
+    size.type = "range"; size.min = "50"; size.max = "200"; size.value = sticker.scale;
+    size.setAttribute("aria-label", "스티커 " + (index + 1) + " 크기");
+    size.addEventListener("input", () => { sticker.scale = Number(size.value); styleSticker(control, sticker); });
+    const rotation = element("input");
+    rotation.type = "range"; rotation.min = "-180"; rotation.max = "180"; rotation.value = sticker.rotation;
+    rotation.setAttribute("aria-label", "스티커 " + (index + 1) + " 기울기");
+    rotation.addEventListener("input", () => { sticker.rotation = Number(rotation.value); styleSticker(control, sticker); });
+    tools.append(size, rotation, button("떼기", () => {
+      editingStickers.splice(index, 1);
+      draw();
+    }, "text-button"));
+    panel.append(tools);
+  }
+  function close() {
+    editingStickers = null;
+    history.replaceState(history.state, "", location.pathname);
+    draw();
+  }
+  const save = button("저장", async () => {
+    save.disabled = true;
+    try {
+      const result = await api(`/days/${date}/stickers`, {method: "PUT",
+        body: {stickers: editingStickers.map(({itemId, x, y, scale, rotation}) => ({itemId, x, y, scale, rotation}))}});
+      stickers = result.stickers;
+      close();
+    } catch {
+      save.disabled = false;
+      showBanner("스티커를 저장하지 못했어");
+    }
+  });
+  panel.append(save, button("그만두기", close, "text-button"));
+  return panel;
 }
 
 function setDay(value) {
@@ -380,6 +489,7 @@ function drawPicture(diary) {
 
 function drawReady(diary) {
   const paper = element("article", "paper");
+  paintDecor(paper, view, bookStyle);
   if (diary.hidden) {
     const strip = element("div", "paper-note", "숨긴 일기야. 넘기기와 달력에는 안 보여");
     const reveal = button("다시 보이게", () => void change("hidden", { hidden: false }), "text-button");
@@ -466,7 +576,14 @@ function drawReady(diary) {
     if (BLOCKS[diary[kind].blocked]) slot.append(element("p", "caption", BLOCKS[diary[kind].blocked]));
     actions.append(slot);
   }
-  view.replaceChildren(paper, actions);
+  if (bookStyle && !editingStickers) {
+    drawStickers(paper, stickers);
+    actions.append(button("스티커", openStickers, "text-button"));
+    const decor = element("a", "text-button", "꾸미기");
+    decor.href = "/chat/diary/decor";
+    actions.append(decor);
+  }
+  view.replaceChildren(paper, editingStickers ? renderStickerEditor(paper) : actions);
 }
 
 function drawEmpty(face, text, action, trace) {
