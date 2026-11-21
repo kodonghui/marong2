@@ -102,7 +102,7 @@ public class RingActivity extends AppCompatActivity {
     }
 
     private void openCall() {
-        startActivity(Ring.answerIntent(this, ringId));
+        startActivity(Ring.answerIntent(this, ringId).putExtra(Ring.EXTRA_ANSWERED_AT, System.currentTimeMillis()));
         finish();
     }
 
