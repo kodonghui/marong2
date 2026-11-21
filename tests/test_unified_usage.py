@@ -31,6 +31,7 @@ class UsageTests(IsolatedAsyncioTestCase):
         self.addCleanup(db.close)
         db.apply_unified_prerequisites()
         db.apply_unified()
+        db.apply_usage_limit()
         moment = datetime(2026, 11, 18, 18, 59, tzinfo=timezone.utc)
         store = UnifiedStore(db.app_url)
         await store.open(wait=True)
@@ -80,16 +81,25 @@ class UsageTests(IsolatedAsyncioTestCase):
             await chat.usage.record(friend, images=1, searches=1, shop_reads=1)
             totals = await read()
             self.assertEqual(totals, {"day": "2026-11-18", "chatTurns": 2, "callSeconds": 90, "images": 1,
-                                      "units": 87, "limit": None, "tickets": 0})
+                                      "units": 87, "limit": None, "tickets": 0,
+                                      "callMonth": {"limited": False, "percent": None, "resetsAt": None}})
             profile = await (await http.get("/chat/api/profile", headers=login)).json()
             self.assertEqual(profile["usageToday"], totals)
             self.assertEqual(db.admin("SELECT searches,shop_reads FROM marong.usage_daily WHERE friend_id=%s",
                                       (friend,)), [(1, 1)])
             self.assertEqual((await chat.usage.get(other))["units"], 0)
+            await chat.usage.record(other, chat=5000)
+            self.assertFalse(await chat.usage.blocked(other))
+            chat.usage.limit = 5000
+            db.admin("UPDATE marong.friend_profiles SET tickets=2 WHERE friend_id=%s", (other,))
+            self.assertFalse(await chat.usage.blocked(other))
+            await chat.usage.record(other, chat=1)
+            self.assertEqual((await chat.usage.get(other))["tickets"], 1)
+            chat.usage.limit = None
             moment += timedelta(minutes=1)
             self.assertEqual((await read())["day"], "2026-11-19")
             self.assertEqual((await read())["units"], 0)
-            chat.usage.limit = 1
+            db.admin("UPDATE marong.friend_profiles SET daily_units=1 WHERE friend_id=%s", (friend,))
             await send(202)
             await send(429)
             db.admin("UPDATE marong.friend_profiles SET tickets=2 WHERE friend_id=%s", (friend,))
@@ -104,7 +114,6 @@ class UsageTests(IsolatedAsyncioTestCase):
 
             async def identify(_):
                 return {"owner": "fixture", "principal": voice}
-            calls.daily_usage.limit = 1
             with patch.object(server, "memory_store", calls), patch.object(server, "identity", identify):
                 async with TestClient(TestServer(server.app)) as relay:
                     origin = str(relay.make_url("/")).rstrip("/")
@@ -113,6 +122,16 @@ class UsageTests(IsolatedAsyncioTestCase):
                     ws = await relay.ws_connect("/live", headers={"Origin": origin})
                     self.assertEqual((await ws.receive_json())["type"], "daily_limit")
                     await ws.close()
+
+            chat.usage.limit = 10
+            db.admin("""UPDATE marong.friend_profiles SET usage_unlimited=true,daily_units=NULL,tickets=5
+                        WHERE friend_id=%s""", (friend,))
+            await chat.usage.record(friend, chat=50)
+            self.assertFalse(await chat.usage.blocked(friend))
+            await send(202)
+            self.assertEqual((await read())["tickets"], 5)
+            self.assertEqual(db.admin("SELECT tickets_used FROM marong.usage_daily WHERE friend_id=%s AND day='2026-11-19'",
+                                      (friend,)), [(2,)])
 
 
 if __name__ == "__main__":

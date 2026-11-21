@@ -8,7 +8,7 @@ import logging
 import os
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from psycopg import Error
@@ -31,6 +31,7 @@ class Principal:
     revision: int = 0
     private_rooms: tuple[str, str] | None = None
     unified: bool = False
+    usage_profile: dict | None = field(default=None, repr=False, compare=False)
 
 
 class CallBusy(Exception):
@@ -166,11 +167,15 @@ class MemoryStore:
                 prompt += "\n\n" + safety
         return prompt
 
-    async def principal(self, email_hash):
-        row = await self.one("""SELECT c.id AS caller_id,c.friend_id,f.name,c.context_revision
+    async def principal(self, email_hash, *, include_limits=False):
+        columns = ",p.usage_unlimited,p.daily_units,p.call_monthly_usd" if include_limits else ""
+        profile_join = "LEFT JOIN marong.friend_profiles p ON p.friend_id=f.id" if include_limits else ""
+        row = await self.one(f"""SELECT c.id AS caller_id,c.friend_id,f.name,c.context_revision{columns}
             FROM call.caller_logins l JOIN call.callers c ON c.id=l.caller_id
-            JOIN marong.friends f ON f.id=c.friend_id WHERE l.email_sha256=%s AND c.enabled""", (email_hash,))
-        return Principal(row['caller_id'], row['friend_id'], row['name'], row['context_revision']) if row else None
+            JOIN marong.friends f ON f.id=c.friend_id {profile_join}
+            WHERE l.email_sha256=%s AND c.enabled""", (email_hash,))
+        return Principal(row['caller_id'], row['friend_id'], row['name'], row['context_revision'],
+                         usage_profile=row if include_limits else None) if row else None
 
     def context_version(self):
         version = "context_revision"
