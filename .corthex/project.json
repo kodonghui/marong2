@@ -14,7 +14,8 @@
     "unified",
     "usage-limit",
     "call-connect",
-    "pet-app"
+    "pet-app",
+    "admin"
   ],
   "records": {
     "kind": "notion",

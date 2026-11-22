@@ -1,0 +1,67 @@
+# FL-200 관리 페이지 개요에서 손볼 일 처리하기
+
+Serves: REQ-570, REQ-571, REQ-572, REQ-573, REQ-574, REQ-575, REQ-576, REQ-579, REQ-582, REQ-583
+Screens: SCR-169, SCR-200, SCR-201, SCR-202, SCR-203, SCR-204
+Context: CTX-026, CTX-029, CTX-006, CTX-031, CTX-021
+상태: 초안(2026-11-23 KST, Claude 마롱이 봇). proposed예요.
+
+```mermaid
+flowchart TD
+  A(["관리자가<br/>/chat/admin/<br/>엶"])
+  B{"Access와<br/>관리자 확인<br/>통과?"}
+  X(["403 화면<br/>not_allowed"])
+  C["개요 읽기<br/>API-280<br/>REQ-572"]
+  D{"읽기<br/>됐나?"}
+  D1(["오류 한 줄과<br/>다시 해 볼게요"])
+  E{"주의 항목<br/>있나?<br/>REQ-573"}
+  E1(["손볼 일 없음<br/>숫자 카드만"])
+  G{"누른<br/>주의 항목은?"}
+  H["비용<br/>SCR-204<br/>REQ-579"]
+  I(["앱 버전<br/>SCR-203<br/>FL-201로"])
+  J(["초대 링크<br/>SCR-202<br/>만들기·거두기<br/>REQ-576·583"])
+  M["회원 한 사람<br/>SCR-201<br/>REQ-575"]
+  N{"로그인 끊기<br/>확인?<br/>REQ-582"}
+  N1(["모든 기기<br/>로그인 끊김"])
+  N2(["그대로"])
+  A e1@--> B
+  B e2@-->|"아니오"| X
+  B e3@-->|"예"| C
+  C e4@--> D
+  D e5@-->|"아니오"| D1
+  D e6@-->|"예"| E
+  E e7@-->|"없음"| E1
+  E e8@-->|"있음"| G
+  G e9@-->|"통화·그림 비용"| H
+  G e10@-->|"뒤처진 폰·멈춤"| I
+  G e11@-->|"초대 링크 만료<br/>프로필 없는 친구"| J
+  H e12@-->|"사람 줄 누름"| M
+  M e13@-->|"끊기 누름"| N
+  N e14@-->|"끊기"| N1
+  N e15@-->|"그만두기"| N2
+  %% legend: below
+  classDef term fill:#e7f5ff,stroke:#1c7ed6,color:#212529
+  classDef proc fill:#f8f9fa,stroke:#495057,color:#212529
+  classDef decide fill:#f3f0ff,stroke:#7048e8,color:#212529
+  classDef key stroke:#e03131,stroke-width:4px
+  classDef pass stroke:#868e96,stroke-width:1.5px
+  class A,X,D1,E1,I,J,N1,N2 term
+  class C,H,M proc
+  class B,D,E,G,N decide
+  class E key
+  class e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,e13,e14,e15 pass
+```
+
+| Shape | Means |
+| --- | --- |
+| Rectangle | 서버나 화면이 하는 한 단계 |
+| Diamond | 분기. 나가는 선마다 이름이 있어요 |
+| Stadium | 흐름이 끝나는 곳(또는 다른 흐름으로 넘어감) |
+| 빨간 굵은 테 | 이 흐름의 핵심 단계: 주의 항목이 있는지 |
+
+관리 페이지를 열면 손볼 일(주의 항목)이 먼저 보이고, 한 줄을 누르면 그 일을 다루는 화면으로 바로 간다는 것을 보세요. 회원 화면과 아이템 화면은 주의 항목이 없어도 탭 줄(REQ-571)로 언제나 갈 수 있어서 그림에 따로 그리지 않았어요.
+
+- 모든 화면 위에 탭 줄이 있어요: 개요 · 회원 · 초대 링크 · 앱 버전 · 비용 · 아이템(REQ-570·571). 아이템은 지금 화면 SCR-186 그대로예요(FL-192).
+- 주의 항목의 조건과 문턱은 [요구사항 '시작 값'](../02-prd/admin.md#시작-값설정)에 있어요. 서버가 API-280에서 계산하고, 화면은 받은 줄을 차례대로 그려요.
+- 회원 한 사람 화면(SCR-201)의 한도 바꾸기는 FL-179, 티켓 넣기는 FL-177의 관리자 쪽 그대로예요. 들어가는 화면만 바뀌어요(요구사항의 기능 변경 목록 8·9).
+- 초대 링크 만들기는 FL-169·170·171 그대로이고 시작 화면이 초대 링크 화면(SCR-202)이에요. 거두기(REQ-583)는 동희님 답을 기다리는 제안이에요.
+- 확인에 실패하면(Access 증명 없음, 관리자 아님) 어느 화면이든 같은 403이에요. 쓰기 요청이 다른 주소에서 오면 403 `cross_site`이고 화면은 공통 오류 줄을 보여요.

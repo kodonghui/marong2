@@ -1,0 +1,155 @@
+{
+  "format": 1,
+  "project": "marong",
+  "part": "admin",
+  "stages": {
+    "01-domain": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "동희님 답을 기다림: Orca 항목 3과 초안 PR의 질문 1-1~1-12(승인 항목이 바뀌는 열두 곳, 하나씩), 질문 2(초대 링크 거두기), 질문 3(셸 명령). 체크포인트 전. NEXUS는 쓰지 않음(동희님 2026-11-22 \"지금 nexus 리빌딩하고 있음 넥서스 쓰지 말고 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/01-domain/admin.md: 기존 제품에 더하기라 이벤트 스토밍 보드 없이 한 번에 초안. 새 CTX 없음, TERM-240(개요)·241(주의 항목), 결정 D132·D133. 바뀌는 맥락은 관리 화면(CTX-026·029·006·031·021). 구조 그림 lint 0건, 용어 검사 통과",
+          "at": "2026-11-23"
+        }
+      ],
+      "updated": "2026-11-23T00:00:00+00:00"
+    },
+    "02-prd": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "동희님 답을 기다림: Orca 항목 3과 초안 PR의 질문 1-1~1-12(승인 항목이 바뀌는 열두 곳, 하나씩), 질문 2(초대 링크 거두기), 질문 3(셸 명령). 체크포인트 전. NEXUS는 쓰지 않음(동희님 2026-11-22 \"지금 nexus 리빌딩하고 있음 넥서스 쓰지 말고 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/02-prd/admin.md: REQ-570~584(15개, REQ-583 Could·질문 2, REQ-584 deferred·질문 3, 다시 볼 날 2026-12-23). 승인 항목이 바뀌는 곳 열두 개를 번호·원문·승인 자리와 함께 적음. 용어 검사 통과",
+          "at": "2026-11-23"
+        }
+      ],
+      "updated": "2026-11-23T00:00:00+00:00"
+    },
+    "03-user-flow": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "동희님 답을 기다림: Orca 항목 3과 초안 PR의 질문 1-1~1-12(승인 항목이 바뀌는 열두 곳, 하나씩), 질문 2(초대 링크 거두기), 질문 3(셸 명령). 체크포인트 전. NEXUS는 쓰지 않음(동희님 2026-11-22 \"지금 nexus 리빌딩하고 있음 넥서스 쓰지 말고 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/03-user-flow/FL-200-admin-overview.md, FL-201-admin-app-version.md: 흐름 둘, lint 0건. FL-169~171·177·179·192의 관리자 노드는 기능 변경 목록 9·10번(답 전에는 고치지 않음)",
+          "at": "2026-11-23"
+        }
+      ],
+      "updated": "2026-11-23T00:00:00+00:00"
+    },
+    "04-functional-spec": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "동희님 답을 기다림: Orca 항목 3과 초안 PR의 질문 1-1~1-12(승인 항목이 바뀌는 열두 곳, 하나씩), 질문 2(초대 링크 거두기), 질문 3(셸 명령). 체크포인트 전. NEXUS는 쓰지 않음(동희님 2026-11-22 \"지금 nexus 리빌딩하고 있음 넥서스 쓰지 말고 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/04-functional-spec/admin.md: SPEC-450~457. 2026-11-23 PR #101(b54547d)의 friendId·상한을 따라 사람은 friendId로만 맞춤(3.5), 릴리스 노트는 textContent로만(1절 8). 용어 검사 통과",
+          "at": "2026-11-23"
+        }
+      ],
+      "updated": "2026-11-23T00:00:00+00:00"
+    },
+    "05-erd": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "동희님 답을 기다림: Orca 항목 3과 초안 PR의 질문 1-1~1-12(승인 항목이 바뀌는 열두 곳, 하나씩), 질문 2(초대 링크 거두기), 질문 3(셸 명령). 체크포인트 전. NEXUS는 쓰지 않음(동희님 2026-11-22 \"지금 nexus 리빌딩하고 있음 넥서스 쓰지 말고 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/05-erd/admin.md: 새 표·칸·TBL 없음. 통화 함수 call.month_budget 하나(마이그레이션 011은 TASK-490이 만듦, 이 PR은 문서만). DB에 돌린 것 없음",
+          "at": "2026-11-23"
+        },
+        {
+          "level": "warning",
+          "message": "함수 본문은 call_cost.MONTH를 옮겨야 같아짐. TC-631이 지킴. 이 단계에서 DB 실행은 하지 않음",
+          "at": "2026-11-23"
+        }
+      ],
+      "updated": "2026-11-23T00:00:00+00:00"
+    },
+    "06-api": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "동희님 답을 기다림: Orca 항목 3과 초안 PR의 질문 1-1~1-12(승인 항목이 바뀌는 열두 곳, 하나씩), 질문 2(초대 링크 거두기), 질문 3(셸 명령). 체크포인트 전. NEXUS는 쓰지 않음(동희님 2026-11-22 \"지금 nexus 리빌딩하고 있음 넥서스 쓰지 말고 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "api/admin.openapi.yaml 0.1.0-draft: API-280(개요), API-281(초대 링크 거두기, proposed·질문 2). OpenAPI 3.1 검사와 예시 13개 통과(교차 파일 $ref 포함). API-267은 PR #101 것이라 옮겨 적지 않음",
+          "at": "2026-11-23"
+        }
+      ],
+      "updated": "2026-11-23T00:00:00+00:00"
+    },
+    "07-sitemap": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "동희님 답을 기다림: Orca 항목 3과 초안 PR의 질문 1-1~1-12(승인 항목이 바뀌는 열두 곳, 하나씩), 질문 2(초대 링크 거두기), 질문 3(셸 명령). 체크포인트 전. NEXUS는 쓰지 않음(동희님 2026-11-22 \"지금 nexus 리빌딩하고 있음 넥서스 쓰지 말고 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/07-sitemap/sitemap.yaml·sitemap.md: SCR-169에 FL-200·TERM-240·241, 새 SCR-200~204. SCR-169 이름은 답 전에는 그대로. 구조 그림 lint 0건",
+          "at": "2026-11-23"
+        }
+      ],
+      "updated": "2026-11-23T00:00:00+00:00"
+    },
+    "08-screen-states": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "동희님 답을 기다림: Orca 항목 3과 초안 PR의 질문 1-1~1-12(승인 항목이 바뀌는 열두 곳, 하나씩), 질문 2(초대 링크 거두기), 질문 3(셸 명령). 체크포인트 전. NEXUS는 쓰지 않음(동희님 2026-11-22 \"지금 nexus 리빌딩하고 있음 넥서스 쓰지 말고 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/08-screens/admin.md: SCR-169·200~204·186의 상태(공통 넷 포함 78개)와 옛 SCR-169 상태 대응표. 와이어프레임 design/admin-wireframe.html(회색, 상태마다 360·430px, 79칸, 헤드리스 Chrome으로 그려 봄). 용어 검사 통과",
+          "at": "2026-11-23"
+        }
+      ],
+      "updated": "2026-11-23T00:00:00+00:00"
+    },
+    "09-mockup": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "동희님 답을 기다림: Orca 항목 3과 초안 PR의 질문 1-1~1-12(승인 항목이 바뀌는 열두 곳, 하나씩), 질문 2(초대 링크 거두기), 질문 3(셸 명령). 체크포인트 전. NEXUS는 쓰지 않음(동희님 2026-11-22 \"지금 nexus 리빌딩하고 있음 넥서스 쓰지 말고 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "새 토큰 없음: 얼린 design/base.tokens.json(D67)과 unified.css·chat.css 부품만. 관리 화면 대지는 TASK-501(Claude)로 미룸",
+          "at": "2026-11-23"
+        }
+      ],
+      "updated": "2026-11-23T00:00:00+00:00"
+    },
+    "10-wbs": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "동희님 답을 기다림: Orca 항목 3과 초안 PR의 질문 1-1~1-12(승인 항목이 바뀌는 열두 곳, 하나씩), 질문 2(초대 링크 거두기), 질문 3(셸 명령). 체크포인트 전. NEXUS는 쓰지 않음(동희님 2026-11-22 \"지금 nexus 리빌딩하고 있음 넥서스 쓰지 말고 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/10-wbs/admin.md: TASK-490~501(GPT 11, Claude 1), GPT 인계 절. README에 결정 D132·133, 작업 패키지, ID 범위(TASK-490~519, TC-620~669, D132~133·D135~149, D134는 PR #101 것), 겹치는 파일, 추천 순서 12번. GPT 시작 때는 동희님이 정함(\"지피티 아껴 이번달은\")",
+          "at": "2026-11-23"
+        }
+      ],
+      "updated": "2026-11-23T00:00:00+00:00"
+    },
+    "12-qa": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "동희님 답을 기다림: Orca 항목 3과 초안 PR의 질문 1-1~1-12(승인 항목이 바뀌는 열두 곳, 하나씩), 질문 2(초대 링크 거두기), 질문 3(셸 명령). 체크포인트 전. NEXUS는 쓰지 않음(동희님 2026-11-22 \"지금 nexus 리빌딩하고 있음 넥서스 쓰지 말고 작업해\")",
+      "checks": [
+        {
+          "level": "info",
+          "message": "docs/12-qa/admin.md: TC-620~639(시험 계획만, 돌리지 않음). SPEC-450~457과 REQ-570~583이 모두 시험을 가짐, REQ-584는 미룸. API-280·281의 응답마다 시험",
+          "at": "2026-11-23"
+        }
+      ],
+      "updated": "2026-11-23T00:00:00+00:00"
+    }
+  }
+}

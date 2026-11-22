@@ -347,13 +347,16 @@
   status: active
   flows: [FL-189, FL-190, FL-191]
   terms: [CTX-030, TERM-213, TERM-214, TERM-215, TERM-218]
+# 관리 페이지 다시 만들기(part admin, 2026-11-23 초안, D132): SCR-169가 개요(TERM-240)가 되고 자식 화면 다섯(SCR-200~204)이 늘어요. 화면 정의는 docs/08-screens/admin.md,
+# 새 API는 api/admin.openapi.yaml(API-280·281). 이 PR은 더하기만 했어요(FL-200, TERM-240·241, 자식 다섯). SCR-169의 이름을 '관리자 개요'로 바꾸고
+# 흐름 FL-169·170·171·177·179를 자식 화면으로 옮기는 것은 동희님 답(docs/02-prd/admin.md의 기능 변경 목록 12) 뒤에 해요. 모든 관리 화면 위에 탭 줄이 있어요(SPEC-450).
 - id: SCR-169
   name: 관리자
   path: /chat/admin/
   access: 동희님(Cloudflare Access)
   status: active
-  flows: [FL-169, FL-170, FL-171, FL-177, FL-179]
-  terms: [CTX-026, CTX-029, TERM-173, TERM-176, TERM-190, TERM-192, TERM-199, TERM-200]
+  flows: [FL-169, FL-170, FL-171, FL-177, FL-179, FL-200]
+  terms: [CTX-026, CTX-029, TERM-173, TERM-176, TERM-190, TERM-192, TERM-199, TERM-200, TERM-240, TERM-241]
   children:
     - id: SCR-186
       name: 관리자 아이템
@@ -362,6 +365,42 @@
       status: active
       flows: [FL-192]
       terms: [CTX-030, TERM-212]
+    - id: SCR-200
+      name: 관리자 회원
+      path: /chat/admin/members
+      access: 동희님(Cloudflare Access)
+      status: active
+      flows: [FL-200, FL-177]
+      terms: [CTX-026, CTX-029, TERM-176, TERM-190, TERM-192, TERM-199, TERM-200]
+      children:
+        - id: SCR-201
+          name: 관리자 회원 한 사람
+          path: /chat/admin/members/:friendId
+          access: 동희님(Cloudflare Access)
+          status: active
+          flows: [FL-200, FL-177, FL-179, FL-171]
+          terms: [CTX-026, CTX-029, CTX-006, CTX-021, TERM-190, TERM-192, TERM-199, TERM-200, TERM-014]
+    - id: SCR-202
+      name: 관리자 초대 링크
+      path: /chat/admin/invites
+      access: 동희님(Cloudflare Access)
+      status: active
+      flows: [FL-200, FL-169, FL-170, FL-171]
+      terms: [CTX-026, TERM-173]
+    - id: SCR-203
+      name: 관리자 앱 버전
+      path: /chat/admin/app
+      access: 동희님(Cloudflare Access)
+      status: active
+      flows: [FL-201]
+      terms: [CTX-021, TERM-093, TERM-100, TERM-221, TERM-222, TERM-223]
+    - id: SCR-204
+      name: 관리자 비용
+      path: /chat/admin/costs
+      access: 동희님(Cloudflare Access)
+      status: active
+      flows: [FL-200]
+      terms: [CTX-006, CTX-031, TERM-014, TERM-032]
 
 # 반려동물 서비스(CTX-022~025, 2026-11-17 설계, 아직 만들지 않음). 친구용 마롱이와 다른 공개 서비스예요: 새 프로세스 run_pet.py가 내보내는 모바일 웹(PWA)이고,
 # Cloudflare Access 없이 카카오·구글 로그인으로 들어와요(SPEC-310, 368). 화면 정의는 docs/08-screens/pet.md, API는 api/pet.openapi.yaml(API-150~210)이에요.
