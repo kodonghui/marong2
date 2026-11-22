@@ -117,9 +117,15 @@ public class RingActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onStart() {
+        AppUpdateJob.activityStarted(this);
+        super.onStart();
+    }
+
+    @Override
     protected void onStop() {
         super.onStop();
-        AppUpdateJob.retryWhenQuiet(this);
+        AppUpdateJob.activityStopped(this);
     }
 
     @Override

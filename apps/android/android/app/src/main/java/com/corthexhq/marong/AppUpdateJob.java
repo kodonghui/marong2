@@ -1,6 +1,6 @@
 package com.corthexhq.marong;
 
-import android.app.ActivityManager;
+import android.app.Activity;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.job.JobInfo;
@@ -57,9 +57,10 @@ public final class AppUpdateJob extends JobService {
     private static final int QUIET_INSTALL_JOB = 2213;
     private static final int RING_EXPIRY_JOB = 2214;
     private static final long DAY_MS = 24L * 60 * 60 * 1000;
-    static final long DEFER_MS = 15L * 60 * 1000;
+    static final long DEFER_MS = 14 * 60_000L;
     private static final int BUFFER_SIZE = 65536;
     static final Object STATE_LOCK = new Object();
+    private static final Set<Activity> VISIBLE_ACTIVITIES = new HashSet<>();
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -78,10 +79,23 @@ public final class AppUpdateJob extends JobService {
         schedule(context, DAILY_JOB, true);
     }
 
+    static void activityStarted(Activity activity) {
+        synchronized (STATE_LOCK) {
+            VISIBLE_ACTIVITIES.add(activity);
+        }
+    }
+
+    static void activityStopped(Activity activity) {
+        synchronized (STATE_LOCK) {
+            VISIBLE_ACTIVITIES.remove(activity);
+        }
+        scheduleQuietInstall(activity.getApplicationContext());
+    }
+
     static void retryWhenQuiet(Context source) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return;
         Context context = source.getApplicationContext();
-        // Android's process importance and service notification can lag a lifecycle callback.
+        // Android can remove the service notification after its lifecycle callback returns.
         new Handler(Looper.getMainLooper()).postDelayed(() -> scheduleQuietInstall(context), 900);
     }
 
@@ -94,9 +108,9 @@ public final class AppUpdateJob extends JobService {
         if (cached == null || !apk(context, cached.release.code).isFile()) return;
         JobInfo job = new JobInfo.Builder(QUIET_INSTALL_JOB, new ComponentName(context, AppUpdateJob.class))
             .setExpedited(true).build();
-        if (scheduler.schedule(job) != JobScheduler.RESULT_SUCCESS) {
-            Log.i(TAG, "update_install expedited_unavailable");
-        }
+        int result = scheduler.schedule(job);
+        Log.i(TAG, result == JobScheduler.RESULT_SUCCESS
+            ? "update_install expedited_scheduled" : "update_install expedited_unavailable");
     }
 
     static void observeRingExpiry(Context context) {
@@ -122,11 +136,14 @@ public final class AppUpdateJob extends JobService {
         JobInfo.Builder builder = new JobInfo.Builder(job, new ComponentName(context, AppUpdateJob.class));
         if (job == INSTALL_JOB) {
             builder.setMinimumLatency(DEFER_MS);
+            builder.setOverrideDeadline(DEFER_MS);
             builder.setBackoffCriteria(DEFER_MS, JobInfo.BACKOFF_POLICY_LINEAR);
         } else builder.setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY);
         if (job == DAILY_JOB) builder.setPeriodic(DAY_MS);
         if (scheduler.schedule(builder.build()) != JobScheduler.RESULT_SUCCESS) {
-            Log.i(TAG, "update_check scheduling_failed");
+            Log.i(TAG, job == INSTALL_JOB ? "update_install backup_unavailable" : "update_check scheduling_failed");
+        } else if (job == INSTALL_JOB) {
+            Log.i(TAG, "update_install backup_scheduled");
         }
     }
 
@@ -154,7 +171,11 @@ public final class AppUpdateJob extends JobService {
                     if (active.get(job) != cancel) return;
                     active.remove(job);
                     jobFinished(params, false);
-                    if (retryInstall) schedule(this, INSTALL_JOB, job == INSTALL_JOB);
+                    if (retryInstall) {
+                        schedule(this, INSTALL_JOB, job == INSTALL_JOB);
+                        // The last activity may have stopped before the backup job was registered.
+                        if (job != QUIET_INSTALL_JOB) scheduleQuietInstall(this);
+                    }
                 });
             }
         });
@@ -252,7 +273,10 @@ public final class AppUpdateJob extends JobService {
         }
         if (cached.permissionBlocked && installPermissionMissing(this)
                 && prefs.getInt("notified", -1) == release.code) return false;
-        if (!quiet(this)) return true;
+        if (!quiet(this)) {
+            Log.i(TAG, "update_install deferred code=" + release.code);
+            return true;
+        }
         return install(cached, apk, cancel);
     }
 
@@ -337,9 +361,6 @@ public final class AppUpdateJob extends JobService {
     }
 
     private static boolean quiet(Context context) {
-        ActivityManager.RunningAppProcessInfo process = new ActivityManager.RunningAppProcessInfo();
-        ActivityManager.getMyMemoryState(process);
-        boolean visible = process.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE;
         NotificationManager manager = context.getSystemService(NotificationManager.class);
         if (manager == null) return false;
         boolean calling = false;
@@ -348,7 +369,9 @@ public final class AppUpdateJob extends JobService {
             calling |= notification.getId() == CallService.NOTIFICATION_ID;
             ringing |= notification.getId() == Ring.NOTIFICATION_ID;
         }
-        return AppUpdate.quiet(calling, ringing, visible);
+        synchronized (STATE_LOCK) {
+            return AppUpdate.quiet(calling, ringing, !VISIBLE_ACTIVITIES.isEmpty());
+        }
     }
 
     private boolean install(Candidate candidate, File apk, CancellationSignal cancel) {
@@ -405,6 +428,7 @@ public final class AppUpdateJob extends JobService {
                     save(prefs, new Candidate(release, sessionId, false, false));
                     session.commit(callback.getIntentSender());
                     committed = true;
+                    Log.i(TAG, "update_install committed code=" + release.code);
                 }
             }
         } catch (IOException | RuntimeException error) {
