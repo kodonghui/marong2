@@ -61,6 +61,48 @@ class AppStore:
         await self._one("UPDATE marong.app_devices SET fid = NULL, dropped_at = now() "
                         "WHERE install_id = %s AND fid = %s RETURNING install_id", (install_id, fid))
 
+    async def app_update_targets(self, code: int, version: tuple[int, ...], limit: int) -> list[dict]:
+        return await self._all("""
+            WITH recent AS (
+                SELECT d.install_id, d.friend_id, d.fid, d.app_version, d.seen_at, d.dropped_at,
+                       row_number() OVER (PARTITION BY d.friend_id ORDER BY d.seen_at DESC, d.install_id) AS rank
+                FROM marong.app_devices d WHERE d.seen_at > now() - %(fresh)s
+            )
+            SELECT d.install_id, d.friend_id, d.fid, coalesce(p.attempt + 1, 1) AS attempt,
+                   count(*) OVER () AS total
+            FROM recent d
+            LEFT JOIN LATERAL (
+                SELECT attempt FROM marong.app_update_events
+                WHERE install_id = d.install_id AND version_code = %(code)s AND kind = 'pushed'
+                ORDER BY attempt DESC LIMIT 1
+            ) p ON true
+            LEFT JOIN marong.app_update_events failure
+                ON failure.install_id = d.install_id AND failure.version_code = %(code)s
+                AND failure.attempt = p.attempt AND failure.kind = 'push_failed'
+            WHERE d.rank <= 20 AND d.fid IS NOT NULL AND d.dropped_at IS NULL
+                AND string_to_array(d.app_version, '.')::int[] < %(version)s::int[]
+                AND (p.attempt IS NULL OR (p.attempt < 3 AND failure.at <= now() - interval '10 minutes'))
+            ORDER BY d.seen_at DESC, d.install_id LIMIT %(limit)s
+        """, {"code": code, "version": list(version), "limit": limit, "fresh": DEVICE_FRESH})
+
+    async def app_update_claim(self, target: dict, code: int, version: tuple[int, ...]) -> bool:
+        row = await self._one("""
+            INSERT INTO marong.app_update_events (kind, friend_id, install_id, version_code, attempt)
+            SELECT 'pushed', friend_id, install_id, %(code)s, %(attempt)s FROM marong.app_devices
+            WHERE install_id = %(install_id)s AND friend_id = %(friend_id)s AND fid = %(fid)s
+                AND dropped_at IS NULL AND seen_at > now() - %(fresh)s
+                AND string_to_array(app_version, '.')::int[] < %(version)s::int[]
+            ON CONFLICT DO NOTHING RETURNING id
+        """, {**target, "code": code, "version": list(version), "fresh": DEVICE_FRESH})
+        return row is not None
+
+    async def app_update_push_failed(self, target: dict, code: int, status: int) -> None:
+        await self._one("""
+            INSERT INTO marong.app_update_events (kind, friend_id, install_id, version_code, status, attempt)
+            VALUES ('push_failed', %(friend_id)s, %(install_id)s, %(code)s, %(status)s, %(attempt)s)
+            ON CONFLICT DO NOTHING RETURNING id
+        """, {**target, "code": code, "status": status})
+
     # ── in-app chat history (API-102, API-104) ─────────────────
 
     async def app_message(self, room_key: str, kakao_id: str) -> dict | None:

@@ -786,6 +786,9 @@ class AppChat:
         await self.runner.setup()
         await web.TCPSite(self.runner, host, self.port).start()
         log.info("app_chat_on port=%d", self.port)
+        if self.push and self.push.enabled and os.getenv("MARONG_APP_UPDATE_PUSH", "0").strip() not in ("", "0"):
+            from .app_update_push import AppUpdatePush
+            self._spawn(AppUpdatePush(self.store, self.releases, self.push.fcm, clock=self.clock).run())
         return self.runner
 
     async def close(self) -> None:

@@ -1,4 +1,5 @@
 """Server-side app update tests (TC-599–601, TC-607–613)."""
+import asyncio
 import json
 import os
 import subprocess
@@ -7,12 +8,19 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import httpx
+import psycopg
 
-from test_app_update import ROOT, apk
+from pg import TestDB
+from test_app_update import ROOT, apk, fixture
 from marong import fcm
+from marong.app_chat import AppChat
+from marong.app_push import AppPush
 from marong.app_release import PACKAGE, AppReleases
+from marong.app_update_push import AppUpdatePush
+from marong.discord_store import DiscordStore
 from tools import app_release
 
 
@@ -27,6 +35,201 @@ class UpdateMessageTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(sender, "_token", return_value="synthetic-token"):
             self.assertEqual(await sender.send(message), "failed")
         http.post.assert_awaited_once()
+
+
+def phone(ident):
+    return str(UUID(int=ident))
+
+
+def fid(ident):
+    return f"synthetic-fid-{ident:06d}"
+
+
+class FakeFCM:
+    def __init__(self, callback=None):
+        self.callback = callback
+        self.messages = []
+        self.active = 0
+        self.peak = 0
+
+    async def send(self, message):
+        self.messages.append(message)
+        self.active += 1
+        self.peak = max(self.peak, self.active)
+        try:
+            await asyncio.sleep(0.001)
+            return await self.callback(message) if self.callback else "ok"
+        finally:
+            self.active -= 1
+
+
+class PushWatcherTests(unittest.IsolatedAsyncioTestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.db = TestDB()
+        cls.addClassCleanup(cls.db.close)
+        cls.db.apply_sql(ROOT / "marong/call/schema.sql", ROOT / "marong/migrations/012_schedules.sql",
+                         ROOT / "marong/migrations/014_app_chat.sql", ROOT / "marong/migrations/015_app_ring.sql",
+                         ROOT / "marong/migrations/023_app_update_events.sql")
+
+    async def asyncSetUp(self):
+        self.db.admin("TRUNCATE marong.app_devices, marong.app_update_events")
+        self.db.admin("INSERT INTO marong.friends(id, name) OVERRIDING SYSTEM VALUE "
+                      "SELECT n, 'Fixture ' || n FROM generate_series(1, 10) n "
+                      "ON CONFLICT DO NOTHING")
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.folder = Path(directory.name)
+        self.releases = AppReleases(self.folder)
+        self.store = DiscordStore(self.db.app_url)
+        self.addAsyncCleanup(self.store.close)
+        await self.store.open(wait=True)
+        self.time = 0
+
+    def add_phone(self, ident, friend=1, *, version="0.2.9", days=0, has_fid=True, dropped=False):
+        self.db.admin("""INSERT INTO marong.app_devices (install_id, friend_id, fid, notifications, app_version,
+                       seen_at, dropped_at) VALUES (%s,%s,%s,'denied',%s,
+                       now() - make_interval(days => %s, secs => %s), CASE WHEN %s THEN now() END)""",
+                      (phone(ident), friend, fid(ident) if has_fid else None, version, days, ident, dropped))
+
+    def watcher(self, sender):
+        return AppUpdatePush(self.store, self.releases, sender, clock=lambda: self.time)
+
+    def events(self):
+        return self.db.admin("SELECT kind, attempt, status FROM marong.app_update_events ORDER BY id")
+
+    async def test_tc599_poll_and_select_current_eligible_phones(self):
+        self.add_phone(1)
+        self.add_phone(2, version="0.2.10")
+        self.add_phone(3, version="0.3.0")
+        self.add_phone(4, days=31)
+        self.add_phone(5, has_fid=False)
+        self.add_phone(6, has_fid=False, dropped=True)
+
+        async def existing_claim(_message):
+            self.assertEqual(self.events(), [("pushed", 1, None)])
+            return "ok"
+
+        sender = FakeFCM(existing_claim)
+        watcher = self.watcher(sender)
+        sleeps = []
+
+        async def sleep(seconds):
+            sleeps.append(seconds)
+            if len(sleeps) == 1:
+                fixture(self.folder, code=13)
+                self.time += seconds
+            else:
+                raise asyncio.CancelledError
+
+        watcher.sleep = sleep
+        with self.assertLogs("marong.app_update_push", level="INFO") as logs, self.assertRaises(asyncio.CancelledError):
+            await watcher.run()
+        self.assertEqual(sleeps, [30, 30])
+        self.assertEqual(logs.output, ["INFO:marong.app_update_push:app_update push started",
+                                       "INFO:marong.app_update_push:app_update push code=13 sent=1 failed=0 left=0"])
+        self.assertEqual(sender.messages, [fcm.app_update(fid(1), 13)])
+        await self.watcher(sender).poll()
+        self.assertEqual(len(sender.messages), 1)
+
+    async def test_tc599_caps_targets_batch_and_concurrency(self):
+        for ident in range(1, 161):
+            self.add_phone(ident, 1 if ident <= 30 else (ident - 31) // 20 + 2)
+        fixture(self.folder, code=13)
+        sender = FakeFCM()
+        watcher = self.watcher(sender)
+        with self.assertLogs("marong.app_update_push", level="INFO") as logs:
+            await watcher.poll()
+            self.assertEqual(len(sender.messages), 100)
+            self.time += 30
+            await watcher.poll()
+        self.assertEqual(len(sender.messages), 150)
+        self.assertNotIn(fid(21), {message["fid"] for message in sender.messages})
+        self.assertIn(fid(20), {message["fid"] for message in sender.messages})
+        self.assertEqual(sender.peak, 4)
+        self.assertTrue(logs.output[0].endswith("left=50"))
+        self.assertTrue(logs.output[1].endswith("left=0"))
+
+    async def test_tc600_unique_claim_pause_resume_and_failed_writes(self):
+        self.add_phone(1)
+        fixture(self.folder, code=13)
+        paused = self.folder / "paused"
+        paused.touch()
+        sender = FakeFCM()
+        watcher = self.watcher(sender)
+        await watcher.poll()
+        self.assertEqual(sender.messages, [])
+        paused.unlink()
+        self.time += 30
+        with patch.object(self.store, "app_update_claim", side_effect=psycopg.OperationalError):
+            with self.assertLogs("marong.app_update_push", level="WARNING"):
+                await self.watcher(sender).poll()
+        self.assertEqual(self.events(), [])
+        await asyncio.gather(watcher.poll(), self.watcher(sender).poll())
+        self.assertEqual(len(sender.messages), 1)
+        self.assertEqual(self.events(), [("pushed", 1, None)])
+
+        self.add_phone(2)
+
+        async def interrupted(_message):
+            raise asyncio.CancelledError
+
+        with self.assertRaises(asyncio.CancelledError):
+            await self.watcher(FakeFCM(interrupted)).poll()
+        await self.watcher(sender).poll()
+        self.assertEqual(len(sender.messages), 1)
+
+        self.add_phone(3)
+        failing = FakeFCM(AsyncMock(return_value="failed"))
+        with patch.object(self.store, "app_update_push_failed", side_effect=psycopg.OperationalError):
+            with self.assertLogs("marong.app_update_push", level="WARNING") as logs:
+                await self.watcher(failing).poll()
+        self.assertIn("app_update record failed kind=push_failed", logs.output[0])
+        await self.watcher(failing).poll()
+        self.assertEqual(len(failing.messages), 1)
+        self.assertEqual(self.events(), [("pushed", 1, None)] * 3)
+
+    async def test_tc600_gone_and_three_attempts_with_ten_minute_gap(self):
+        self.add_phone(1)
+        self.add_phone(2)
+        fixture(self.folder, code=13)
+
+        async def answer(message):
+            return "gone" if message["fid"] == fid(1) else "failed"
+
+        sender = FakeFCM(answer)
+        watcher = self.watcher(sender)
+        self.assertEqual(len(await self.store.app_update_targets(13, (0, 2, 10), 100)), 2)
+        await watcher.poll()
+        self.assertEqual(len(sender.messages), 2)
+        self.assertEqual(self.db.admin("SELECT fid, dropped_at IS NOT NULL FROM marong.app_devices WHERE install_id=%s",
+                                       (phone(1),)), [(None, True)])
+        self.assertIn(("push_failed", 1, 410), self.events())
+        self.time = 599
+        await watcher.poll()
+        await self.watcher(sender).poll()
+        self.assertEqual(len(sender.messages), 2)
+        for timepoint in (600, 1200, 1800):
+            self.time = timepoint
+            self.db.admin("UPDATE marong.app_update_events SET at = now() - interval '11 minutes' "
+                          "WHERE kind = 'push_failed'")
+            await watcher.poll()
+        failures = [n for kind, n, status in self.events() if kind == "push_failed" and status == 500]
+        self.assertEqual(failures, [1, 2, 3])
+        self.assertEqual(len(sender.messages), 4)
+
+    async def test_default_off_and_start_requires_fcm(self):
+        sender = FakeFCM()
+        for switch, fcm_sender, started in (("0", sender, False), ("1", None, False), ("1", sender, True)):
+            chat = AppChat(self.store, None, None, None, AppPush(self.store, fcm_sender), port=0)
+            with patch.dict(os.environ, {"MARONG_APP_UPDATE_PUSH": switch}), \
+                    patch.object(AppUpdatePush, "run", new_callable=AsyncMock) as task:
+                try:
+                    await chat.serve()
+                    await asyncio.sleep(0)
+                    self.assertEqual(task.await_count, int(started))
+                finally:
+                    await chat.close()
 
 
 class ReleaseHistoryTests(unittest.TestCase):
