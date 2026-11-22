@@ -20,14 +20,16 @@ async function page(rtcConnects){
   class Socket{
     constructor(url){urls.push(url);sockets.push(this);this.readyState=1;queueMicrotask(()=>this.onmessage?.({data:JSON.stringify({type:'ready',memoryConnected:false,callId:'synthetic'})}));}
     send(data){sent.push(JSON.parse(data));}close(){this.readyState=3;}
+    bind(){}
   }
   class RTC{
-    constructor(context,speaking){this.speaking=speaking;this.closed=false;rtc.push(this);}
+    static async waitForLibrary(){}
+    constructor(context,speaking){this.speaking=speaking;this.closed=false;this.element={paused:false};rtc.push(this);}
     async connect(){if(!rtcConnects)throw new Error('simulated ICE timeout');}
     async close(){this.closed=true;}
   }
   const sandbox={console,crypto,URL,Image:class{},matchMedia:()=>({matches:true}),
-    performance:{now:()=>performance.now()+clock.offset},
+    performance:{timeOrigin:performance.timeOrigin,now:()=>performance.now()+clock.offset,getEntriesByType:()=>[]},
     document:{getElementById:id=>{if(!nodes.has(id))nodes.set(id,element());return nodes.get(id);},
       body:element(),documentElement:{dataset:{}},querySelector(){return null;},visibilityState:'visible',addEventListener(){}},
     window:{AudioContext:Context,addEventListener(){}},navigator:{},AudioWorkletNode:Worklet,
