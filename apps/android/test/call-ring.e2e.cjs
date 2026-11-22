@@ -87,6 +87,71 @@ describe('call page: Marong\'s own call and the chat link', { skip }, () => {
 
   const inCall = (page) => page.waitForFunction(() => document.body.classList.contains('in-call'));
 
+  it('TC-575, TC-579: slow LiveKit does not block the page; profile and status overlap', async () => {
+    const site = await startCallSite();
+    sites.push(site);
+    const context = await browser.newContext(PHONE);
+    contexts.push(context);
+    const page = await context.newPage();
+    const starts = {};
+    let releaseKit;
+    const kit = new Promise(resolve => { releaseKit = resolve; });
+    await page.route('**/livekit-client.js', async route => {
+      await kit;
+      await route.continue();
+    });
+    for (const [url, reply] of [['/status', {ready: true}], ['/chat/api/profile', {botName: '시험'}]]) {
+      await page.route('**' + url, async route => {
+        starts[url] = Date.now();
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await route.fulfill({json: reply});
+      });
+    }
+    try {
+      await page.goto(site.url, {waitUntil: 'domcontentloaded'});
+      await page.locator('#start:enabled').waitFor({timeout: 1500});
+      assert.ok(Math.abs(starts['/status'] - starts['/chat/api/profile']) < 125);
+    } finally {
+      releaseKit();
+    }
+  });
+
+  it('TC-576, TC-589, TC-596: warm app ring opens the socket while the microphone is pending', async () => {
+    const site = await startCallSite({ready: {ring: true}});
+    sites.push(site);
+    const context = await browser.newContext(PHONE);
+    contexts.push(context);
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      navigator.mediaDevices.getUserMedia = async constraints => {
+        await new Promise(resolve => { window.__releaseFixtureMic = resolve; });
+        return original(constraints);
+      };
+    });
+    await page.goto(site.url);
+    await page.locator('#start:enabled').waitFor();
+    assert.deepEqual(await page.evaluate(() => {
+      const call = window.__marongCall;
+      return [call.version, Object.isFrozen(call), call.prepareCall(), call.prepareCall(),
+        call.answerRing('bad-id', Date.now())];
+    }), [1, true, true, false, false]);
+    const accepted = await page.evaluate(ring => window.__marongCall.answerRing(ring, Date.now()), RING);
+    assert.equal(accepted, true);
+    const socket = new URL(await socketURL(site), site.url);
+    assert.equal(socket.searchParams.get('ring'), RING);
+    assert.equal(socket.searchParams.get('hold'), '1');
+    assert.equal(site.audio.bytes, 0);
+    await page.evaluate(() => window.__releaseFixtureMic());
+    await page.waitForFunction(() => typeof worklet !== 'undefined' && worklet !== null);
+    await page.locator('#stop').click();
+    const timing = site.received.find(entry => entry.type === 'timing').client;
+    assert.equal(timing.base, 'answer');
+    assert.equal(timing.reloaded, false);
+    assert.ok(timing.liveOpen < timing.micReady);
+    assert.equal(site.received.filter(entry => entry.type === 'audio_ready').length, 1);
+  });
+
   it('SPEC-124: the header shows 글 대화 only when the chat answers 200 for this sign-in', async () => {
     const yes = await open({ chat: 200 });
     await yes.page.waitForSelector('#chat-link:not([hidden])');

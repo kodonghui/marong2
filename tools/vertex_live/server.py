@@ -2,7 +2,8 @@
 from __future__ import annotations
 import asyncio, hashlib, hmac, json, os, re, secrets, time, uuid
 from dataclasses import dataclass
-from datetime import timezone, timedelta
+from datetime import datetime, timezone, timedelta
+from mimetypes import guess_type
 from functools import partial
 from pathlib import Path
 from aiohttp import ClientError, ClientSession, ClientTimeout, WSMsgType, web
@@ -22,6 +23,21 @@ import call_search
 import rtc_transport
 
 HERE=Path(__file__).resolve().parent
+STATIC=HERE/'static'
+ASSET_NAMES=('app.js','style.css','capture.js','playback.js','worker-socket.js','transport.js',
+             'rtc-client.js','livekit-client.js','wait-tone.wav')
+def load_assets():
+    assets={}
+    for name in ASSET_NAMES:
+        try:assets[name]=(STATIC/name).read_bytes()
+        except OSError:print('asset_hash_failed',flush=True)
+    return assets
+
+
+ASSET_CONTENT=load_assets()
+ASSET_VERSIONS={name:hashlib.sha256(content).hexdigest()[:12] for name,content in ASSET_CONTENT.items()}
+ASSET_CACHE='private, max-age=31536000, immutable'
+INDEX_HTML=(STATIC/'index.html').read_text(encoding='utf-8')
 ROOT=Path.home()/'marong-vertex-test'
 CONFIG=Path.home()/'.config/marong-call'
 PROJECT='project-bc2d15a4-11c0-476b-ae8'
@@ -171,7 +187,12 @@ async def security_headers(req,handler):
     if not isinstance(res,web.WebSocketResponse):
         if res.status < 400:
             refresh_session_cookie(req,res)
-        res.headers.update({'Cache-Control':'public, max-age=31536000, immutable' if req.path.startswith('/face/v1/') and res.status==200 else 'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY',
+        cache='no-store'
+        if res.status==200 and req.path.startswith('/face/v1/'):
+            cache='public, max-age=31536000, immutable'
+        elif res.status==200 and req.path[1:] in ASSET_VERSIONS and req.query.getall('v',[])==[ASSET_VERSIONS[req.path[1:]]]:
+            cache=ASSET_CACHE
+        res.headers.update({'Cache-Control':cache,'Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY',
           'Permissions-Policy':'microphone=(self), camera=()',
           'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; media-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"})
     return res
@@ -206,10 +227,24 @@ async def health(req):return web.json_response({'ok':True,'route':'Vertex AI','m
 
 async def static(req):
     name=req.match_info.get('file','index.html')
-    if name=="index.html" and AUTHENTICATION!="access" and not await identity(req):
-        raise web.HTTPFound("/chat/login")
-    if name not in ('index.html','app.js','style.css','capture.js','playback.js','worker-socket.js','transport.js','rtc-client.js','livekit-client.js','livekit-client.LICENSE.txt','wait-tone.wav'):raise web.HTTPNotFound()
-    return web.FileResponse(HERE/'static'/name)
+    if name=="index.html":
+        if AUTHENTICATION!="access" and not await identity(req):
+            raise web.HTTPFound("/chat/login")
+        theme='chestnut' if 8<=datetime.now(KST).hour<20 else 'night'
+        html=INDEX_HTML.replace('data-theme="night"',f'data-theme="{theme}"',1)
+        if theme=='chestnut':
+            html=html.replace('name="theme-color" content="#121729"','name="theme-color" content="#fbf6ee"')
+            html=html.replace('name="color-scheme" content="dark"','name="color-scheme" content="light"')
+        html=html.replace("data-assets='{}'","data-assets='"+json.dumps(ASSET_VERSIONS,separators=(',',':'))+"'",1)
+        for asset,version in ASSET_VERSIONS.items():
+            html=html.replace(f'="/{asset}"',f'="/{asset}?v={version}"')
+        return web.Response(text=html,content_type='text/html')
+    if name in ASSET_CONTENT:
+        kind='text/javascript' if name.endswith('.js') else guess_type(name)[0]
+        return web.Response(body=ASSET_CONTENT[name],content_type=kind)
+    if name in ASSET_NAMES or name=='livekit-client.LICENSE.txt':
+        if (STATIC/name).is_file():return web.FileResponse(STATIC/name)
+    raise web.HTTPNotFound()
 
 async def face(req):
     name=req.match_info['name']
@@ -350,6 +385,7 @@ async def live(req):
         except ValueError:ring=None
         refresh_session_cookie(req,ws)
         await ws.prepare(req)
+        ws_opened=time.monotonic()
         resume=recent_resume(owner,client_id)
         if await budget_status(memory_store, 'web') in BLOCKED:
             if person:
@@ -384,6 +420,8 @@ async def live(req):
         session=LiveSession(ws,authn['owner'],memory_store,person,configure,google_headers,resume,{},LOCATION,MODEL,voice,client_id,search=SEARCH,ring=ring)
         session.shop=SHOP
         session.wait_enabled=WAIT_SOUND
+        session.ws_opened=ws_opened
+        session.hold_requested=req.query.get('hold')=='1'
         slot.session=session
         # Previously loaded pages used headerless PCM. Keep their wire format
         # until the page refreshes, so headers never become audible clicks.
@@ -392,7 +430,7 @@ async def live(req):
         session.hangup=req.query.get('hangup')=='1'
         bridge=rtc_transport.bridges.get(client_id)
         if bridge and not bridge.closed and bridge.owner==authn['owner'] and req.query.get('rtc')=='1':
-            session.rtc=bridge;bridge.session=session
+            session.offer_rtc(bridge)
         elif bridge and bridge.owner==authn['owner']:await bridge.close()
         await session.run()
     except CallBusy:
@@ -444,7 +482,7 @@ async def rtc_config(req):
         if slot.client_id!=client or (session and session.pcm_forced):
             await bridge.close();raise web.HTTPConflict()
         if session:
-            session.rtc=bridge;bridge.session=session
+            session.offer_rtc(bridge)
     return json_response({'url':'wss://'+req.host,'token':bridge.token(),'room':bridge.name})
 
 async def rtc_signal(req):

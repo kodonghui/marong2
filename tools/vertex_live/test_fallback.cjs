@@ -17,8 +17,10 @@ async function scenario(rtcConnects,midCall=false,busy=false){
   class Socket{
     constructor(url){urls.push(url);sockets.push(this);this.readyState=1;queueMicrotask(()=>this.onmessage?.({data:JSON.stringify(busy?{type:'call_busy'}:{type:'ready',memoryConnected:false,callId:'synthetic'})}));}
     send(data){sent.push(JSON.parse(data));}close(){this.readyState=3;}
+    bind(){}
   }
   class RTC{
+    static async waitForLibrary(){}
     constructor(context,speaking,failed){this.stats={};this.closed=false;this.failed=failed;rtcInstances.push(this);}
     async connect(){if(!rtcConnects)throw new Error('simulated ICE timeout');}
     async close(){this.closed=true;}
@@ -27,7 +29,7 @@ async function scenario(rtcConnects,midCall=false,busy=false){
     document:{getElementById:id=>{if(!nodes.has(id))nodes.set(id,element());return nodes.get(id);},
       body:element(),documentElement:{dataset:{}},querySelector(){return null;},visibilityState:'visible',addEventListener(){}},
     window:{AudioContext:Context,addEventListener(name,fn){listeners[name]=fn;}},navigator:{},AudioWorkletNode:Worklet,
-    localStorage:{getItem(){return null;},setItem(){}},location:{protocol:'https:',host:'example.test',hash:'',pathname:'/'},history:{replaceState(){}},
+    localStorage:{getItem(){return null;},setItem(){}},location:{origin:'https://example.test',protocol:'https:',host:'example.test',hash:'',pathname:'/'},history:{replaceState(){}},
     WebSocket:{OPEN:1},WorkerSocket:Socket,MarongRTC:RTC,
     fetch:async()=>({ok:true,status:200,json:async()=>({ready:true,active:false,webRTC:true,memoryConnected:false})}),
     setInterval(){return 1;},clearInterval(){},
@@ -42,7 +44,8 @@ async function scenario(rtcConnects,midCall=false,busy=false){
     return;
   }
   assert.equal(urls.length,1);
-  assert.equal(new URL(urls[0]).searchParams.get('rtc'),rtcConnects?'1':null);
+  assert.equal(new URL(urls[0]).searchParams.get('rtc'),'1','control starts before ICE succeeds or fails');
+  assert.equal(new URL(urls[0]).searchParams.get('hold'),'1');
   assert.equal(rtcInstances[0].closed,!rtcConnects);
   assert.equal(vm.runInContext('ready && intended',sandbox),true);
   if(midCall){
