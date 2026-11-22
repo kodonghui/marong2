@@ -96,9 +96,14 @@
           "level": "info",
           "message": "기능 변경 03 고침(D131): FL-148에 선톡 알림 → 글 대화(SCR-107) 입구 P2와 두 화면 배너 설명, FL-147의 배너 이름",
           "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "코드 검토 반영(PR #101 코멘트, 2026-11-23): FL-193은 보내기 전에 기록에 '보냄'을 먼저 남기고 남긴 때만 보냄, FL-194는 '설치됨'을 상태 줄로 남기지 않고 한 폰·앱 버전에 한 줄, 같은 버전·상태·실패 번호만 다시 보내지 않음",
+          "at": "2026-11-23"
         }
       ],
-      "updated": "2026-11-22T15:01:34+00:00"
+      "updated": "2026-11-22T15:18:07+00:00"
     },
     "04-functional-spec": {
       "state": "in_progress",
@@ -126,9 +131,14 @@
           "level": "info",
           "message": "기능 변경 04 고침(D131): 새 SPEC-443(글 대화 업데이트 배너), SPEC-296·440·442와 8.1·8.7·8.8 고침",
           "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "코드 검토 반영(PR #101 코멘트, 2026-11-23): SPEC-430 보내기 전 `pushed` 잡기(시도 번호 1~3), SPEC-433 중복 판단에 상태 번호, SPEC-433·434·435 설치됨은 `installed` 한 줄만, SPEC-435 쓰기 실패 규칙, SPEC-437·8.3 `backfilled`는 published 줄에 늘 있음, SPEC-438·8.6 `fetches`는 친구마다 한 칸(items 20줄), `file`은 뺌, 폰 기록은 지금 친구의 줄만. 새 ID 없음",
+          "at": "2026-11-23"
         }
       ],
-      "updated": "2026-11-22T15:01:34+00:00"
+      "updated": "2026-11-22T15:18:07+00:00"
     },
     "05-erd": {
       "state": "in_progress",
@@ -149,9 +159,14 @@
           "level": "info",
           "message": "기능 변경 05: D131은 DB를 바꾸지 않음. 사람 보기 줄에서 NEXUS를 빼고 검토 자리를 Orca 항목 2와 PR #101로 적음",
           "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "코드 검토 반영(PR #101 코멘트, 2026-11-23): TBL-182에 `attempt` 칸, `push_failed`의 NULL `status` 막음, `state` 칸에서 `installed` 뺌, 유일 인덱스 `app_update_events_push_attempt`·`app_update_events_installed_once`, `fetched` 부분 인덱스 `app_update_events_fetched_idx`, 친구가 바뀐 폰의 규칙. pglast로 10문장 파싱 통과, DB 적용 시험은 안 함(TASK-475)",
+          "at": "2026-11-23"
         }
       ],
-      "updated": "2026-11-22T15:01:34+00:00"
+      "updated": "2026-11-22T15:18:07+00:00"
     },
     "06-api": {
       "state": "in_progress",
@@ -174,9 +189,14 @@
           "level": "info",
           "message": "기능 변경 06: API-105에 선택 칸 update(UpdateState, 400 bad-update 예시), 새 API-267 GET /chat/admin/api/app-versions(200·403·500·503). 두 계약 openapi-spec-validator 통과, 새 예시가 스키마에 맞음. 깨지는 변경 없음(옛 서버는 update를 400으로 거절하므로 서버 먼저, SPEC-442)",
           "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "코드 검토 반영(PR #101 코멘트, 2026-11-23): API-267 `fetches`를 친구마다 한 칸(`items` 20줄까지), VersionHistoryEntry 설명에 `file`을 뺀다고 적음, `backfilled`는 published 줄에 늘 있음(8.3과 같음), AppUpdateEvent에 `attempt`, `state`에서 `installed` 뺌. API-105 설명에 설치됨 규칙. 두 파일 openapi-spec-validator 통과, API-267 두 예시가 스키마에 맞음",
+          "at": "2026-11-23"
         }
       ],
-      "updated": "2026-11-22T14:41:07+00:00"
+      "updated": "2026-11-22T15:18:07+00:00"
     },
     "07-sitemap": {
       "state": "in_progress",
@@ -299,9 +319,14 @@
           "level": "info",
           "message": "기능 변경 10 고침(D131): 새 TASK-489(글 대화 배너), TASK-483·484·486과 인계 절 고침",
           "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "코드 검토 반영(PR #101 코멘트, 2026-11-23): TASK-475·478·479·480 글을 고친 설계에 맞춤. 새 TASK 없음",
+          "at": "2026-11-23"
         }
       ],
-      "updated": "2026-11-22T15:01:34+00:00"
+      "updated": "2026-11-22T15:18:07+00:00"
     },
     "12-qa": {
       "state": "in_progress",
@@ -329,9 +354,14 @@
           "level": "info",
           "message": "기능 변경 12 고침(D131): 새 TC-618(글 대화 배너, e2e)·TC-619(선톡 알림으로 연 글 대화에서 지금 설치, 에뮬레이터), TC-616에 글 대화 배너",
           "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "코드 검토 반영(PR #101 코멘트, 2026-11-23): TC-599·600·606·607·608·612·613의 기대 결과를 고친 설계에 맞춤. 새 TC 없음",
+          "at": "2026-11-23"
         }
       ],
-      "updated": "2026-11-22T15:01:34+00:00"
+      "updated": "2026-11-22T15:18:07+00:00"
     }
   }
 }

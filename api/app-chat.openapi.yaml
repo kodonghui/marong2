@@ -21,7 +21,7 @@ info:
     6. (0.2.0, 3단계) 기기 등록의 `ring`은 선택이에요. 벨 상태를 보고하지 않은 앱은 약속 전화를 디스코드로 받아요(SPEC-129). 응답과 /me의 `ring`은 늘 있어요. 약속 전화의 받기는 통화 서버 웹소켓 `/live`의 `ring` 값(API-107)이라 이 파일에는 없어요.
     7. (0.3.0, 선 전화·그림 화두) 메시지에 `picture: {src, alt}`(그림이 있는 마롱이 말만, SPEC-274)와 종류 `hello`(못 받은 선 전화 뒤의 말, SPEC-270)를 더해요. 새 칸·새 값이라 깨지는 변경이 아니에요. 그림 파일 경로(API-140)는 `api/call-first.openapi.yaml`에 있어요.
     8. (0.4.0, 성향 맞춤) 마롱이 말에 고르기 카드 `card`(SCR-123, SPEC-192·193·196·231·238)를 더해요. 모양은 `api/persona.openapi.yaml`의 ChatCard 하나이고 답은 API-136으로 해요. `status`·`answer`는 목록을 부른 때의 지금 값이라 같은 메시지를 다시 받으면 바뀌어 있을 수 있어요. 새 칸이라 깨지는 변경이 아니에요. 글 대화는 봇이 내보내는 페이지라 앱 버전과 상관없이 새 chat.js가 카드를 그려요. 카드를 못 그린 페이지에서도 친구는 칸 글을 글로 써서 답할 수 있어요(SCR-123).
-    9. (0.5.0, 앱 업데이트 상태, 2026-11-22 D125) 기기 등록에 선택 칸 `update`(버전 코드, 업데이트 상태, 실패 번호)를 더해요(SPEC-433, SPEC-434, docs/04-functional-spec/app-update.md 8.4). 앱 자바 코드가 업데이트 상태가 바뀔 때 웹 페이지와 같은 네 칸에 이 칸을 더해 보내요. 서버는 업데이트 기록(TBL-182)에 한 줄을 더하고 응답은 그대로예요. 새 선택 칸이라 지금 클라이언트에는 깨지는 변경이 아니에요. 다만 옛 서버는 모르는 칸을 400으로 거절하므로 서버를 먼저 반영해요(SPEC-442).
+    9. (0.5.0, 앱 업데이트 상태, 2026-11-22 D125) 기기 등록에 선택 칸 `update`(버전 코드, 업데이트 상태, 실패 번호)를 더해요(SPEC-433, SPEC-434, docs/04-functional-spec/app-update.md 8.4). 앱 자바 코드가 업데이트 상태가 바뀔 때 웹 페이지와 같은 네 칸에 이 칸을 더해 보내요. 서버는 업데이트 기록(TBL-182)에 한 줄을 더하고(`installed`는 앱 버전이 올라간 것으로 한 줄) 응답은 그대로예요. 새 선택 칸이라 지금 클라이언트에는 깨지는 변경이 아니에요. 다만 옛 서버는 모르는 칸을 400으로 거절하므로 서버를 먼저 반영해요(SPEC-442).
 servers:
 - url: https://marong.corthex-hq.com
   description: Cloudflare Access 뒤. 터널이 /chat/ 아래만 봇으로 보내요
@@ -374,7 +374,7 @@ paths:
     put:
       operationId: putChatDevice
       summary: 이 폰의 알림 등록
-      description: 앱의 페이지 스크립트가 FID, 알림 권한, 벨 상태가 바뀌었을 때와 12시간마다 보내요(SPEC-123, SPEC-139). 없으면 만들고(201) 있으면 고쳐요(200). 같은 FID가 다른 installId에 있으면 옛 줄의 FID를 지워요. 응답은 이 기기로 선톡·일정 알림과 약속 전화를 보낼지예요(SPEC-115, SPEC-116, SPEC-129). 쓰기 요청이라 Origin이 앱 주소여야 해요. 2026-11-22부터 앱 자바 코드도 업데이트 상태가 바뀔 때 같은 네 칸에 `update`를 더해 보내요(SPEC-433). 서버는 `update`가 맞으면 업데이트 기록(TBL-182)에 한 줄을 더하고, 틀리면 기기 보고 전체를 400으로 거절해요(SPEC-434). 보고한 `appVersion`이 올라가면 `installed` 줄을 더해요(SPEC-435).
+      description: 앱의 페이지 스크립트가 FID, 알림 권한, 벨 상태가 바뀌었을 때와 12시간마다 보내요(SPEC-123, SPEC-139). 없으면 만들고(201) 있으면 고쳐요(200). 같은 FID가 다른 installId에 있으면 옛 줄의 FID를 지워요. 응답은 이 기기로 선톡·일정 알림과 약속 전화를 보낼지예요(SPEC-115, SPEC-116, SPEC-129). 쓰기 요청이라 Origin이 앱 주소여야 해요. 2026-11-22부터 앱 자바 코드도 업데이트 상태가 바뀔 때 같은 네 칸에 `update`를 더해 보내요(SPEC-433). 서버는 `update`가 맞으면 업데이트 기록(TBL-182)에 `state` 한 줄을 더하고(`installed`는 빼고), 틀리면 기기 보고 전체를 400으로 거절해요(SPEC-434). 보고한 `appVersion`이 올라가면 `installed` 줄을 한 번 더해요(설치됨의 유일한 기록, SPEC-435).
       x-corthex:
         id: API-105
         spec:
@@ -1110,7 +1110,7 @@ components:
       additionalProperties: false
     UpdateState:
       type: object
-      description: 앱 업데이트 상태(TERM-220, SPEC-433, SPEC-434). 앱 자바 코드만 보내고 웹 페이지 보고에는 없어요. 서버는 업데이트 기록(TBL-182)의 `state` 줄로 둬요
+      description: 앱 업데이트 상태(TERM-220, SPEC-433, SPEC-434). 앱 자바 코드만 보내고 웹 페이지 보고에는 없어요. 서버는 업데이트 기록(TBL-182)의 `state` 줄로 둬요. `installed`는 `state` 줄을 남기지 않고, 같은 보고의 `appVersion`이 올라간 것으로 `installed` 줄 하나만 남겨요(SPEC-435)
       required:
       - versionCode
       - state
