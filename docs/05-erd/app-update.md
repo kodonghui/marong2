@@ -3,7 +3,7 @@
 상태: 초안(2026-11-22 KST, Claude 마롱이 봇, 기능 변경). 마이그레이션은 파일로만 있고 서버 DB에는 적용하지 않았어요. 적용은 구현 뒤 서버 반영(SPEC-442 ①)이에요.
 원본: [`marong/migrations/023_app_update_events.sql`](../../marong/migrations/023_app_update_events.sql). 이 그림은 그 파일에서 손으로 옮긴 것이고, 다르면 SQL이 맞아요.
 입력: [기능 명세](../04-functional-spec/app-update.md#8-2026-11-22-기능-변경-게시-즉시-업데이트와-업데이트-상태) SPEC-430\~438, [도메인](../01-domain/app-update.md) CTX-021, TERM-219\~224, 결정 D126(05 단계에 새 표).
-사람 보기: 다른 05 문서처럼 GitHub의 Mermaid 그림과 NEXUS로 봐요(`.corthex/project.json` 05-erd 메모).
+사람 보기: GitHub의 Mermaid 그림으로 봐요. 이 변경의 검토와 체크포인트는 Orca 마롱이 항목 2와 설계 PR #101에서 해요(동희님 2026-11-22, [도메인 9.3](../01-domain/app-update.md#93-결정)).
 API 계약: [`api/app-chat.openapi.yaml`](../../api/app-chat.openapi.yaml)의 API-105(`update` 칸), [`api/app-update.openapi.yaml`](../../api/app-update.openapi.yaml)의 API-267.
 
 ## 1. 바뀌는 것
