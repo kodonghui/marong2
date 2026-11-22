@@ -12,22 +12,26 @@ from PIL import Image, ImageChops
 IMAGE_MAX = 5 * 1024 * 1024
 
 
+class InvalidArtwork(ValueError):
+    """An image was returned but failed the format or transparency checks."""
+
+
 def preview_png(raw):
     if not isinstance(raw, bytes) or not 0 < len(raw) <= IMAGE_MAX:
-        raise ValueError("invalid_image_bytes")
+        raise InvalidArtwork("invalid_image_bytes")
     with Image.open(BytesIO(raw)) as image:
         if image.format != "PNG" or image.size != (1024, 1024) or getattr(image, "n_frames", 1) != 1:
-            raise ValueError("invalid_image_format")
+            raise InvalidArtwork("invalid_image_format")
         clean = image.convert("RGBA")
         min_alpha, max_alpha = clean.getchannel("A").getextrema()
         if min_alpha != 0 or max_alpha == 0:
-            raise ValueError("unexpected_alpha")
+            raise InvalidArtwork("unexpected_alpha")
         clean.info.clear()
         result = BytesIO()
         clean.save(result, "PNG")
     png = result.getvalue()
     if len(png) > IMAGE_MAX:
-        raise ValueError("invalid_image_bytes")
+        raise InvalidArtwork("invalid_image_bytes")
     return png
 
 

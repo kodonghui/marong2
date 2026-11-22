@@ -8,7 +8,7 @@ from psycopg.types.json import Jsonb
 
 from ..app_session import one
 from ..pet.cost import microusd
-from .graphics import EXPRESSIONS, MATCH, alpha, fit_score, head_in_box, preview_png
+from .graphics import EXPRESSIONS, MATCH, InvalidArtwork, alpha, fit_score, head_in_box, preview_png
 from .photos import crop_pick
 from .records import CANDIDATES, PHOTOS, CharacterError, query
 from .traits import EDITABLE, template_for, valid_result
@@ -202,7 +202,10 @@ class CharacterWorker:
 
     async def fitted(self, draw, reference, threshold, box=None):
         for _ in range(3):
-            image = await asyncio.to_thread(preview_png, await draw())
+            try:
+                image = await asyncio.to_thread(preview_png, await draw())
+            except InvalidArtwork:
+                continue
             if await asyncio.to_thread(fit_score, image, reference) >= threshold:
                 if box is None or await asyncio.to_thread(head_in_box, alpha(image), box):
                     return image

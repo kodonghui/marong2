@@ -32,6 +32,7 @@ final class Ring {
     static final String EXTRA_REASON = "reason";
     static final String EXTRA_LINE = "line";
     static final String EXTRA_NAME = "botName";
+    static final String EXTRA_ANSWERED_AT = "answeredAt";
     /** How long the phone rings; the server's answer window is 5 minutes. */
     static final long RING_MS = 45_000L;
 
@@ -62,6 +63,7 @@ final class Ring {
         String shownName = name == null || name.trim().isEmpty() || name.length() > 24
             ? context.getString(R.string.ring_caller) : name.trim();
         show(context, ringId, kind, PushLinks.ringLine(kind, line), shownName);
+        CallControl.prepareForRing();
     }
 
     /** The phone or another app is in a call (SPEC-132). */

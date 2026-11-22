@@ -42,7 +42,7 @@ from marong.pet_app_settings import PetAppSettings
 from marong.store import Store
 from marong.topics import Topics
 from marong.unified_delivery import AppProactive, AppReminders, UnifiedDelivery
-from marong.unified_prompt import character_section, marker_positions
+from marong.unified_prompt import PET_HEALTH_REFERRAL, character_section, explicit_pet_health, marker_positions
 from marong.unified_store import UnifiedStore
 from marong.work_loops import loops_home, run_locked
 
@@ -67,6 +67,28 @@ class AppAgent(PrivateChatAgent):
         return [line.replace("이 DM으로", "앱 글 대화로").replace("이 DM에서는", "이 대화에서는")
                 for line in lines]
     friend_context_limit = 20
+
+    async def _reply(self, msg, person, user_id, text, timeout, use_memory=True, held=None):
+        if msg.friend_id and not getattr(msg, "safety_decision", None) and explicit_pet_health(text):
+            try:
+                profile = await asyncio.wait_for(self.store.character_prompt(msg.friend_id, False), .5)
+            except Exception as exc:
+                log.warning("pet_referral_profile_error %s", type(exc).__name__)
+            else:
+                if profile and profile["kind"] in ("dog", "cat"):
+                    msg.pet_health_referral = True
+                    return PET_HEALTH_REFERRAL, {"pet_health_referral": True}
+        return await super()._reply(msg, person, user_id, text, timeout, use_memory=use_memory, held=held)
+
+    async def _review_reply(self, msg, person, reply, text, deadline, *, proactive=False, recent=()):
+        if getattr(msg, "pet_health_referral", False):
+            return PET_HEALTH_REFERRAL, {}
+        return await super()._review_reply(msg, person, reply, text, deadline, proactive=proactive, recent=recent)
+
+    async def _with_question(self, msg, reply, text):
+        if getattr(msg, "pet_health_referral", False):
+            return PET_HEALTH_REFERRAL
+        return await super()._with_question(msg, reply, text)
 
     async def _friend_system(self, system, friend, room, *, private):
         if private and friend:
@@ -160,8 +182,7 @@ async def serve(settings, credentials, options, secret, authentication, home, st
                        pet_app_settings=pet_settings)
         chat.profile = AppProfile(chat, character=os.getenv("MARONG_CHARACTER") == "1",
                                   friends=os.getenv("MARONG_FRIENDS") == "1", google=google is not None,
-                                  voice_samples=os.getenv("MARONG_VOICE_SAMPLES_DIR"),
-                                  daily_limit=int(os.environ["MARONG_DAILY_UNITS"]) if os.getenv("MARONG_DAILY_UNITS") else None)
+                                  voice_samples=os.getenv("MARONG_VOICE_SAMPLES_DIR"))
         saved = agent.on_saved
 
         def on_saved():

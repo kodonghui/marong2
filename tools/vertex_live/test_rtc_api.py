@@ -25,7 +25,7 @@ async def main():
                 assert (await c.post('/api/rtc',json={'client':'bad'},headers=headers)).status==400
                 response=await c.post('/api/rtc',json={'client':client},headers=headers)
                 assert response.status==200 and (await response.json())['room']=='synthetic-room'
-                session=SimpleNamespace(owner='a',client_id=client,rtc=None,pcm_forced=False)
+                session=server.LiveSession(None,'a',None,None,None,None,{}, {},'local','fixture','fixture',client)
                 server.active_calls['a']=server.CallSlot(client,session)
                 acquire.side_effect=PermissionError()
                 assert (await c.post('/api/rtc',json={'client':client},headers=headers|{'X-Test-Owner':'b'})).status==403

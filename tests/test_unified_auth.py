@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 import hashlib
 import hmac
 from pathlib import Path
@@ -12,6 +13,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 from aiohttp import WSServerHandshakeError, web
 from aiohttp.test_utils import TestClient, TestServer
@@ -77,6 +79,95 @@ class UnifiedAuthTest(unittest.IsolatedAsyncioTestCase):
         response = await self.post(JOIN, {"token": invite, "name": "Fixture"})
         self.assertEqual(response.status, 201)
         return response.cookies[COOKIE].value
+
+    async def test_usage_limits_admin_and_friend_summary(self):
+        # TC-502–506: paired views, isolation, validation, permissions and graceful cost lookup failure.
+        token = await self.joined()
+        friend = (await self.sessions.find_session(token))["friend_id"]
+        other_token = await self.joined()
+        other = (await self.sessions.find_session(other_token))["friend_id"]
+        self.chat.usage.limit, self.chat.usage.call_limit = 1000, Decimal("3")
+        self.chat.access = SimpleNamespace(check=AsyncMock(return_value=("ok", self.admin_hash)))
+        admin = {"Cf-Access-Jwt-Assertion": "fixture-admin", "Origin": ORIGIN}
+        login = {"Cookie": f"{COOKIE}={token}"}
+        path = f"/chat/admin/api/members/{friend}/limits"
+        await self.problem(await self.client.put(path, headers=login, json={"mode": "default"}), 403, "not_allowed")
+        await self.problem(await self.client.put(path, headers={**admin, "Origin": "https://else.invalid"},
+                                               json={"mode": "default"}), 403, "cross_site")
+        await self.problem(await self.client.put("/chat/admin/api/members/99999/limits", headers=admin,
+                                               json={"mode": "default"}), 404, "not_found")
+        (unlinked,), = self.db.admin("INSERT INTO marong.friends(name) VALUES ('Unlinked') RETURNING id")
+        await self.problem(await self.client.put(f"/chat/admin/api/members/{unlinked}/limits", headers=admin,
+                                               json={"mode": "default"}), 404, "not_found")
+        for invalid in [
+            {"mode": "custom"}, {"mode": "unlimited", "dailyUnits": 5}, {"mode": "default", "callMonthlyUsd": "1"},
+            {"mode": "custom", "dailyUnits": 0}, {"mode": "custom", "dailyUnits": 100001},
+            {"mode": "custom", "dailyUnits": True}, {"mode": "custom", "dailyUnits": "15"},
+            {"mode": "custom", "callMonthlyUsd": "1.234"}, {"mode": "custom", "callMonthlyUsd": "1000.01"},
+            {"mode": "custom", "callMonthlyUsd": "0"}, {"mode": "custom", "callMonthlyUsd": 5},
+        ]:
+            with self.subTest(invalid=invalid):
+                await self.problem(await self.client.put(path, headers=admin, json=invalid), 400, "invalid_input")
+        with patch.object(self.store, "_one", side_effect=psycopg.OperationalError):
+            await self.problem(await self.client.put(path, headers=admin, json={"mode": "default"}),
+                               503, "db_unavailable")
+
+        member_list = "/chat/admin/api/members"
+        before = await (await self.client.get(member_list, headers=admin)).json()
+        self.assertEqual(before["defaults"], {"dailyUnits": 1000, "callMonthlyUsd": "3.00"})
+        self.assertEqual(before["members"][0]["limits"]["mode"], "default")
+        form = {"mode": "custom", "dailyUnits": 200}
+        changed = await self.client.put(path, headers=admin, json=form)
+        self.assertEqual(changed.status, 200)
+        self.assertEqual(await changed.json(), {
+            "limits": {"mode": "custom", "dailyUnits": 200, "callMonthlyUsd": None},
+            "effective": {"dailyUnits": 200, "callMonthlyUsd": "3.00"},
+        })
+        self.db.admin("UPDATE marong.friend_profiles SET updated_at=%s WHERE friend_id=%s", (self.now, friend))
+        self.assertEqual((await self.client.put(path, headers=admin, json=form)).status, 200)
+        self.assertEqual(self.db.admin("SELECT updated_at FROM marong.friend_profiles WHERE friend_id=%s", (friend,)),
+                         [(self.now,)])
+        self.assertEqual((await self.client.put(path, headers=admin,
+                                               json={**form, "callMonthlyUsd": "5"})).status, 200)
+        await self.chat.usage.record(friend, chat=12, seconds=480, images=1)
+        await self.chat.usage.record(other, chat=97)
+        client = uuid4()
+        (call,), = self.db.admin("""
+            INSERT INTO call.calls(caller_id,client_id,prompt_version,voice)
+            SELECT c.id,%s,'fixture','fixture' FROM call.callers c WHERE c.friend_id=%s RETURNING id
+        """, (client, friend))
+        self.db.admin("""
+            INSERT INTO call.segments(call_id,mode,client_id,state,opened_at,closed_at,close_reason)
+            VALUES (%s,'start',%s,'closed',%s,%s,'user_hangup')
+        """, (call, client, self.now, self.now + timedelta(minutes=40)))
+        usage_path = "/chat/api/usage"
+        usage = await (await self.client.get(usage_path, headers=login)).json()
+        profile = await (await self.client.get("/chat/api/profile", headers=login)).json()
+        self.assertEqual(profile["usageToday"], usage)
+        self.assertEqual(usage, {
+            "day": "2026-01-03", "chatTurns": 12, "callSeconds": 480, "images": 1,
+            "units": 292, "tickets": 0, "limit": 200,
+            "callMonth": {"limited": True, "percent": 40, "resetsAt": "2026-02-01T09:00:00+09:00"},
+        })
+        listed = await (await self.client.get(member_list, headers=admin)).json()
+        self.assertEqual([row["callMonthUsd"] for row in listed["members"]], ["2.00", "0.00"])
+        invites = await (await self.client.get("/chat/admin/api/invites", headers=admin)).json()
+        self.assertTrue(all(i["createdAt"] and i["usedAt"] and i["revokedAt"] is None for i in invites["invites"]))
+
+        self.db.admin("REVOKE EXECUTE ON FUNCTION call.friend_month_usd(bigint,timestamptz,timestamptz) FROM marong")
+        unavailable = await self.client.get(usage_path, headers=login)
+        self.assertEqual(unavailable.status, 200)
+        self.assertEqual((await unavailable.json())["callMonth"], {**usage["callMonth"], "percent": None})
+        listed = await (await self.client.get(member_list, headers=admin)).json()
+        self.assertEqual([row["callMonthUsd"] for row in listed["members"]], [None, None])
+        self.assertEqual((await self.client.put(path, headers=admin, json={"mode": "unlimited"})).status, 200)
+        unlimited = await (await self.client.get(usage_path, headers=login)).json()
+        self.assertIsNone(unlimited["limit"])
+        self.assertEqual(unlimited["callMonth"], {"limited": False, "percent": None, "resetsAt": None})
+        other_usage = await (await self.client.get(usage_path, headers={"Cookie": f"{COOKIE}={other_token}"})).json()
+        self.assertEqual((other_usage["units"], other_usage["limit"]), (97, 1000))
+        defaults = await self.client.put(path, headers=admin, json={"mode": "default"})
+        self.assertEqual((await defaults.json())["effective"], {"dailyUnits": 1000, "callMonthlyUsd": "3.00"})
 
     async def test_admin_invites_members_ticket_balance_and_revocation(self):
         base = "/chat/admin"
@@ -422,6 +513,33 @@ class UnifiedAuthTest(unittest.IsolatedAsyncioTestCase):
                 async with client.ws_connect("/live", headers={**by_cookie, "Origin": origin}) as ws:
                     self.assertEqual(await ws.receive_json(), {"type": "fixture_call"})
                 self.assertEqual(served, [(f"friend:{member['friend_id']}", member["friend_id"])])
+                self.db.admin("UPDATE marong.friend_profiles SET call_monthly_usd=5 WHERE friend_id=%s",
+                              (member["friend_id"],))
+                cost = AsyncMock(return_value={"amount": Decimal("5.10")})
+                original_one = call_pool.one
+
+                async def read_cost(sql, params=()):
+                    if "call.friend_month_usd(" in sql:
+                        return await cost(sql, params)
+                    return await original_one(sql, params)
+
+                with patch.object(call_server, "budget_status", new=AsyncMock(return_value="ok")), \
+                     patch.object(call_pool, "one", side_effect=read_cost):
+                    status = await (await client.get("/api/me", headers=by_cookie)).json()
+                    self.assertEqual((status["canCall"], status["blockedReason"]), (False, "budget"))
+                    async with client.ws_connect("/live", headers={**by_cookie, "Origin": origin}) as ws:
+                        self.assertEqual((await ws.receive_json())["type"], "budget_exhausted")
+                    self.assertEqual(cost.await_count, 2)
+                    for lookup in cost.await_args_list:
+                        self.assertEqual(lookup.args[1][0], member["friend_id"])
+                    self.db.admin("UPDATE marong.friend_profiles SET usage_unlimited=true,call_monthly_usd=NULL")
+                    cost.reset_mock()
+                    with patch.object(call_server, "PERSONAL_BUDGET", Decimal("1")):
+                        status = await (await client.get("/api/me", headers=by_cookie)).json()
+                        self.assertTrue(status["canCall"])
+                        async with client.ws_connect("/live", headers={**by_cookie, "Origin": origin}) as ws:
+                            self.assertEqual((await ws.receive_json())["type"], "fixture_call")
+                        cost.assert_not_awaited()
                 self.db.admin("UPDATE call.callers SET enabled=false")
                 self.assertEqual((await client.get("/api/me", headers=by_cookie)).status, 403)
                 self.db.admin("UPDATE call.callers SET enabled=true")

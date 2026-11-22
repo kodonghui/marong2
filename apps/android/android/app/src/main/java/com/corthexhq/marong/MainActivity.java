@@ -11,8 +11,11 @@ import androidx.activity.OnBackPressedCallback;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.CapConfig;
 import com.getcapacitor.Logger;
 import com.google.firebase.messaging.FirebaseMessaging;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 /**
  * The call window (SPEC-101 to SPEC-105). From 0.2.1 the chat opens in its own window above it
@@ -30,6 +33,9 @@ public class MainActivity extends BridgeActivity {
      * check. Without this a cold start from a chat notification opened two chat windows (BUG-107).
      */
     private boolean creating;
+    private String coldRingId;
+    private long coldAnsweredAt;
+    private int answerAttempt;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -37,6 +43,9 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(MarongWindowPlugin.class);
         registerPlugin(MarongCallPlugin.class);
         registerPlugin(MarongPushPlugin.class);
+        if (savedInstanceState == null) {
+            configureColdAnswer(getIntent());
+        }
         creating = true;
         try {
             super.onCreate(savedInstanceState);
@@ -60,8 +69,60 @@ public class MainActivity extends BridgeActivity {
         registerForMessages();
         askForNotificationsOnce();
         // A restored window keeps the page it had: an old tap must not open a page or answer again.
-        if (savedInstanceState == null) {
+        if (savedInstanceState == null && coldRingId == null) {
             openFromIntent(getIntent());
+        }
+    }
+
+    String coldRingScript() {
+        return RingAnswer.coldScript(coldRingId, coldAnsweredAt);
+    }
+
+    private static boolean isAnswer(Intent intent) {
+        return intent != null && Ring.ACTION_ANSWER.equals(intent.getAction())
+            && (intent.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0;
+    }
+
+    private static long answeredAt(Intent intent, long now) {
+        long tap = intent.getLongExtra(Ring.EXTRA_ANSWERED_AT, now);
+        return tap > 0 && tap <= now && now - tap <= PushLinks.RING_MAX_AGE_MS ? tap : now;
+    }
+
+    /** Capacitor applies server.appStartPath before loading its first WebView document. */
+    @SuppressWarnings("deprecation")
+    private void configureColdAnswer(Intent intent) {
+        if (!isAnswer(intent) || CallControl.isActive()) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        String ringId = intent.getStringExtra(Ring.EXTRA_RING_ID);
+        if (!PushLinks.isRingId(ringId)) {
+            return;
+        }
+        String asset = MarongWindowPlugin.readAsset(this, "capacitor.config.json");
+        if (asset == null) {
+            return;
+        }
+        try {
+            JSONObject document = new JSONObject(asset);
+            JSONObject server = document.getJSONObject("server");
+            String serverUrl = server.getString("url");
+            server.put("url", PushLinks.pageUrl(serverUrl, ""));
+            server.put("appStartPath", "/?ring=" + ringId);
+            boolean debuggable = (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+            JSONObject android = document.getJSONObject("android");
+            if (!android.has("webContentsDebuggingEnabled")) {
+                android.put("webContentsDebuggingEnabled", debuggable);
+            }
+            CapConfig ringConfig = new CapConfig(getAssets(), document);
+            if (PushState.answerRing(this, ringId, now)) {
+                Ring.cancel(this);
+                coldRingId = ringId;
+                coldAnsweredAt = answeredAt(intent, now);
+                config = ringConfig;
+            }
+        } catch (JSONException invalidConfig) {
+            Logger.warn("MarongRing", "ring_start_config_failed");
         }
     }
 
@@ -119,13 +180,14 @@ public class MainActivity extends BridgeActivity {
         }
         if (Ring.ACTION_ANSWER.equals(intent.getAction())) {
             String ringId = intent.getStringExtra(Ring.EXTRA_RING_ID);
+            long now = System.currentTimeMillis();
             // Only a ring this phone received, once: another app cannot start a call this way.
-            if (!PushState.answerRing(this, ringId, System.currentTimeMillis())) {
+            if (!PushState.answerRing(this, ringId, now)) {
                 return;
             }
             Ring.cancel(this);
             if (!CallControl.isActive()) {
-                webView.loadUrl(PushLinks.ringUrl(appUrl, ringId));
+                answerLoadedRing(webView, appUrl, ringId, answeredAt(intent, now));
             }
             return;
         }
@@ -135,6 +197,21 @@ public class MainActivity extends BridgeActivity {
         } else if (path != null && !CallControl.isActive()) {
             webView.loadUrl(PushLinks.pageUrl(appUrl, path));
         }
+    }
+
+    private void answerLoadedRing(WebView webView, String appUrl, String ringId, long answeredAt) {
+        int attempt = ++answerAttempt;
+        String fallback = PushLinks.ringUrl(appUrl, ringId);
+        if (webView.getProgress() != 100 || !AppUrls.isCallPage(webView.getUrl(), appUrl)) {
+            webView.loadUrl(fallback);
+            return;
+        }
+        webView.evaluateJavascript(RingAnswer.answerScript(ringId, answeredAt), result -> {
+            if (!"true".equals(result) && answerAttempt == attempt && !isFinishing() && !isDestroyed()
+                && !CallControl.isActive()) {
+                webView.loadUrl(fallback);
+            }
+        });
     }
 
     /**
