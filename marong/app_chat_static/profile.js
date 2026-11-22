@@ -1,7 +1,7 @@
 'use strict';
 
 (() => {
-  const {node, button, link, request, signal, endLetter} = Unified;
+  const {node, button, link, request, signal, shortDate, endLetter} = Unified;
   const area = document.getElementById('profile');
   const face = document.getElementById('face');
   const groups = document.getElementById('profile-groups');
@@ -116,21 +116,44 @@
 
   function usage() {
     const card = node('div', '', 'card');
+    card.id = 'usage';
     const current = data.usageToday;
-    card.append(node('h2', '오늘 쓴 양'), node('p',
-      '글 답 ' + current.chatTurns + '번 · 통화 ' + Math.floor(current.callSeconds / 60) + '분 · 그림 ' + current.images + '장'));
+    card.append(node('h2', '내 사용량'));
+    if (!current) {
+      card.append(node('p', '지금은 못 불러왔어', 'caption'), button('다시 해 볼게', load, 'btnt'));
+      return card;
+    }
+    card.append(node('p',
+      '오늘 · 글 답 ' + current.chatTurns + '번 · 통화 ' + Math.floor(current.callSeconds / 60) + '분 · 그림 ' + current.images + '장'));
     if (current.limit !== null) {
       const meter = node('progress', '', 'progress');
       meter.max = current.limit;
       meter.value = Math.min(current.units, meter.max);
-      meter.setAttribute('aria-label', '오늘 쓴 양');
-      card.append(meter, node('p', '오늘 ' + current.units + ' / ' + current.limit, 'caption'));
-      if (current.tickets) card.append(node('p', '티켓 ' + current.tickets + '장', 'caption'));
+      meter.setAttribute('aria-label', '하루 한도');
+      card.append(node('p', '하루 한도', 'caption'), meter,
+        node('p', '오늘 ' + current.units + ' / ' + current.limit, 'caption'));
       if (current.units >= current.limit) {
         const line = current.tickets ? '오늘 양을 넘어서 티켓으로 이어 가는 중이야(티켓 ' + current.tickets + '장)' :
           '오늘 쓸 수 있는 양을 다 썼어. 새벽 4시에 다시 채워져';
         card.append(node('p', line, 'caption'));
       }
+    } else {
+      card.append(node('p', '하루 한도 · 무제한', 'caption'));
+    }
+    if (current.tickets) card.append(node('p', '티켓 ' + current.tickets + '장', 'caption'));
+    const month = current.callMonth;
+    if (!month?.limited) {
+      card.append(node('p', '이번 달 통화 · 무제한', 'caption'));
+    } else if (month.percent === null) {
+      card.append(node('p', '이번 달 통화 양은 지금 못 불러왔어', 'caption'));
+    } else {
+      const meter = node('progress', '', 'progress');
+      meter.max = 100;
+      meter.value = Math.min(month.percent, 100);
+      meter.setAttribute('aria-label', '이번 달 통화');
+      const reset = shortDate(month.resetsAt, {wholeHour: true}) + '에 다시 채워져';
+      const line = month.percent >= 100 ? '이번 달 통화를 다 썼어. ' : month.percent + '% 썼어 · ';
+      card.append(node('p', '이번 달 통화', 'caption'), meter, node('p', line + reset, 'caption'));
     }
     return card;
   }

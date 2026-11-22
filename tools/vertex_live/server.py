@@ -4,7 +4,6 @@ import asyncio, hashlib, hmac, json, os, re, secrets, time, uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from mimetypes import guess_type
-from decimal import Decimal, InvalidOperation
 from functools import partial
 from pathlib import Path
 from aiohttp import ClientError, ClientSession, ClientTimeout, WSMsgType, web
@@ -14,6 +13,7 @@ import jwt
 import psycopg
 from marong.app_session import COOKIE as SESSION_COOKIE, SessionError, auth_mode, find_session, identify_request
 from marong.call_voice import call_capacity, chosen_voice
+from marong.usage import configured_call_limit, effective_limits
 from live_session import LiveSession, BUILD
 from call_cost import BLOCKED, budget_status, personal_budget_blocked
 from call_shop import DECLARATION as SHOP_READ, configured_reader
@@ -67,18 +67,12 @@ SHOP=configured_reader()
 WAIT_SOUND=os.getenv('MARONG_CALL_WAIT_SOUND')=='1'
 
 
-def personal_budget(env=os.environ):
-    value=env.get('MARONG_CALL_PERSON_MONTHLY_USD','').strip()
-    if not value:return None
-    try:
-        budget=Decimal(value)
-        if budget.is_finite() and budget>=0:return budget
-    except InvalidOperation:
-        pass
-    raise SystemExit('Invalid MARONG_CALL_PERSON_MONTHLY_USD')
+PERSONAL_BUDGET=configured_call_limit()
 
 
-PERSONAL_BUDGET=personal_budget()
+async def person_budget_blocked(person):
+    _, limit = effective_limits(person.usage_profile, None, PERSONAL_BUDGET)
+    return await personal_budget_blocked(memory_store, person.friend_id, limit)
 
 def read_instruction():
     text=INSTRUCTION_FILE.read_text(encoding='utf-8').strip()
@@ -162,7 +156,8 @@ async def identity(req):
         return {
             "owner": f"friend:{row['friend_id']}",
             "principal": Principal(row["caller_id"], row["friend_id"], row["name"], row["context_revision"],
-                                   unified=True),
+                                   unified=True, usage_profile={key: row[key] for key in
+                                       ("usage_unlimited", "daily_units", "call_monthly_usd")}),
             "voice": row["voice"],
             "bot_name": row["bot_name"],
         }
@@ -217,7 +212,7 @@ async def status(req):
     person=await get_principal(authn)
     blocked = await budget_status(memory_store, 'web') in BLOCKED
     if person and not blocked:
-        blocked = await personal_budget_blocked(memory_store,person.caller_id,PERSONAL_BUDGET)
+        blocked = await person_budget_blocked(person)
     blocked_reason = 'budget' if blocked else None
     if not blocked and person and person.unified and await memory_store.daily_usage.blocked(person.friend_id):
         blocked = True
@@ -347,7 +342,7 @@ async def get_principal(authn):
     if person := authn.get("principal"):
         return person
     if not memory_store or not authn.get('email_hash'):return None
-    try:return await asyncio.wait_for(memory_store.principal(authn['email_hash']),2)
+    try:return await asyncio.wait_for(memory_store.principal(authn['email_hash'], include_limits=True),2)
     except Exception:return None
 
 async def private_principal(req):
@@ -401,7 +396,7 @@ async def live(req):
                 await ws.send_json({'type':'budget_exhausted'})
                 return ws
         browser_resume=resume.get('owner')==authn['owner']
-        if person and not browser_resume and await personal_budget_blocked(memory_store,person.caller_id,PERSONAL_BUDGET):
+        if person and not browser_resume and await person_budget_blocked(person):
             await ws.send_json({'type':'budget_exhausted'})
             return ws
         if person and person.unified and not browser_resume and await memory_store.daily_usage.blocked(person.friend_id):

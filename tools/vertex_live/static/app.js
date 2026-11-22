@@ -177,7 +177,15 @@ function endFallbackNotice(){
   if(intended&&ready)status(micMode?'듣고 있어. 편하게 말해 줘.':'글로 말해도 괜찮아. 목소리로 답할게.');
 }
 const captionNodes=new Map();
-function status(text){$('status').textContent=text;}
+function status(text){
+  const line=$('status');
+  line.textContent=text;
+  if(text!==DAILY_MESSAGE)return;
+  const link=document.createElement('a');
+  link.href='/chat/me';
+  link.textContent='내 사용량 보기';
+  line.append(' ',link);
+}
 const WAIT_TEXT='찾아보는 중…';
 let waitTimer=null,waitCutoff=null,waitSource=null,waitBuffer=null,waiting=false,statusBeforeWait='';
 function stopWaiting(){
