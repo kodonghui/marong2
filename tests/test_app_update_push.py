@@ -221,16 +221,25 @@ class PushWatcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failures, [1, 2, 3])
         self.assertEqual(len(sender.messages), 4)
 
-    async def test_default_off_and_start_requires_fcm(self):
+    async def test_switch_defaults_on_and_only_zero_disables_it(self):
         sender = FakeFCM()
-        for switch, fcm_sender, started in (("0", sender, False), ("1", None, False), ("1", sender, True)):
-            chat = AppChat(self.store, None, None, None, AppPush(self.store, fcm_sender), port=0)
-            with patch.dict(os.environ, {"MARONG_APP_UPDATE_PUSH": switch}), \
-                    patch.object(AppUpdatePush, "run", new_callable=AsyncMock) as task:
+        for switch, fcm_sender, enabled in ((None, sender, True), ("", sender, True), (" 0 ", sender, False),
+                                            ("false", sender, True), ("off", sender, True), (None, None, True)):
+            with self.subTest(switch=switch, fcm=bool(fcm_sender)), patch.dict(os.environ), \
+                    patch.object(AppUpdatePush, "run", new_callable=AsyncMock) as task, \
+                    self.assertLogs("marong.app", level="INFO") as logs:
+                if switch is None:
+                    os.environ.pop("MARONG_APP_UPDATE_PUSH", None)
+                else:
+                    os.environ["MARONG_APP_UPDATE_PUSH"] = switch
+                chat = AppChat(self.store, None, None, None, AppPush(self.store, fcm_sender), port=0)
                 try:
                     await chat.serve()
                     await asyncio.sleep(0)
-                    self.assertEqual(task.await_count, int(started))
+                    self.assertEqual(task.await_count, int(enabled and fcm_sender is not None))
+                    self.assertEqual([message for message in logs.output if "push switch=" in message],
+                                     [f"INFO:marong.app:app_update push switch={'on' if enabled else 'off'} "
+                                      f"fcm={'on' if fcm_sender else 'off'}"])
                 finally:
                     await chat.close()
 
@@ -346,6 +355,23 @@ class UpdateAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.report()).status, 200)
         self.assertEqual((await self.report(appVersion="0.3.2", update=installed)).status, 200)
         self.assertEqual(len(self.events()), 1)
+
+    async def test_tc608_installed_validates_code_against_reported_version(self):
+        entries = self.releases.history()
+        release = next(entry for entry in entries if entry.get("versionCode") == 10)
+        entries.append({**release, "versionCode": 11, "file": "marong-0.3.2-11.apk"})
+        (self.folder / "history.json").write_bytes(app_release.json_bytes({"format": 1, "entries": entries}))
+
+        self.assertEqual((await self.report(1)).status, 201)
+        invalid = {"versionCode": 2_000_000_000, "state": "installed"}
+        self.assertEqual((await self.report(1, appVersion="0.3.2", update=invalid)).status, 200)
+        self.assertEqual(self.events(), [("installed", 11, "0.3.2", None, None)])
+
+        valid = {"versionCode": 10, "state": "installed"}
+        self.assertEqual((await self.report(1, appVersion="0.3.2", update=valid)).status, 200)
+        self.assertEqual((await self.report(2)).status, 201)
+        self.assertEqual((await self.report(2, appVersion="0.3.2", update=valid)).status, 200)
+        self.assertEqual(self.events(), [("installed", 11, "0.3.2", None, None), ("installed", 10, "0.3.2", None, None)])
 
     async def test_tc608_fetched_dedup_and_audit_write_failure(self):
         release = fixture(self.folder, code=10)
@@ -485,11 +511,17 @@ class ReleaseHistoryTests(unittest.TestCase):
         self.assertEqual(self.cli(*self.publish_args()[:-2]).returncode, 2)
         self.notes.unlink()
         self.assertEqual(self.cli(*self.publish_args()).returncode, 2)
-        for invalid in (b"", b"   ", b"a" * 301, b"a\nb", b"valid\n", b"a\r", b"\x00", b"bad\x7f", b"\xff"):
+        for invalid in (b"", b"   ", b"a" * 301, b"a\nb", b"a\rb", b"a\tb", b"\x00", b"bad\x7f", b"\xff"):
             with self.subTest(invalid=invalid):
                 self.notes.write_bytes(invalid)
                 self.assertEqual(self.cli(*self.publish_args()).returncode, 2)
                 self.assertEqual(self.snapshot(), {})
+
+    def test_tc611_trims_outer_whitespace_before_validating(self):
+        self.notes.write_bytes(" \t시험 릴리스\r\n".encode("utf-8"))
+        result = self.cli(*self.publish_args())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(AppReleases(self.folder).history()[0]["notes"], "시험 릴리스")
 
     def test_tc611_shell_transfers_note_as_a_file(self):
         self.apk.with_name("output-metadata.json").write_text(json.dumps({"applicationId": PACKAGE, "elements": [

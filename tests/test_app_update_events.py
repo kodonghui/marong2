@@ -81,6 +81,16 @@ class AppUpdateEventsTests(unittest.TestCase):
                     conn.execute(command)
             conn.rollback()
 
+    def test_hourly_report_count_can_use_partial_index(self):
+        with psycopg.connect(self.db.app_url) as conn:
+            # Prefer usable indexes on an empty fixture, where a sequential scan is normally cheaper.
+            conn.execute("SET LOCAL enable_seqscan = off")
+            plan = conn.execute("""
+                EXPLAIN SELECT count(*) FROM marong.app_update_events
+                WHERE friend_id = %s AND kind IN ('state', 'installed') AND at > now() - interval '1 hour'
+            """, (1,)).fetchall()
+        self.assertIn("app_update_events_reports_idx", "\n".join(line for line, in plan))
+
 
 if __name__ == "__main__":
     unittest.main()

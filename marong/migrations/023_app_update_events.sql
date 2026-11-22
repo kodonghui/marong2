@@ -73,6 +73,9 @@ CREATE INDEX IF NOT EXISTS app_update_events_device_idx ON marong.app_update_eve
 -- The admin read of APK fetches per friend, newest first (SPEC-438). Only fetched rows are read by friend.
 CREATE INDEX IF NOT EXISTS app_update_events_fetched_idx
   ON marong.app_update_events (friend_id, at DESC) WHERE kind = 'fetched';
+-- The hourly API-105 report cap counts only state and installed events (SPEC-434).
+CREATE INDEX IF NOT EXISTS app_update_events_reports_idx
+  ON marong.app_update_events (friend_id, at DESC) WHERE kind IN ('state', 'installed');
 
 GRANT SELECT, INSERT ON marong.app_update_events TO marong;
 -- without a table: TERM-221 (release note) and TERM-222 (version history) live in the release folder's history.json

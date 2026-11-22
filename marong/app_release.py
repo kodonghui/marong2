@@ -40,11 +40,13 @@ def version_parts(name: str) -> tuple[int, ...]:
 
 
 def normalize_notes(notes) -> str | None:
-    if (not isinstance(notes, str) or len(notes.splitlines()) != 1
-            or any(unicodedata.category(char) in ("Cc", "Cs", "Zl", "Zp") for char in notes)):
+    if not isinstance(notes, str):
         return None
     trimmed = notes.strip()
-    return trimmed if 1 <= len(trimmed) <= 300 else None
+    if (not 1 <= len(trimmed) <= 300
+            or any(unicodedata.category(char) in ("Cc", "Cs", "Zl", "Zp") for char in trimmed)):
+        return None
+    return trimmed
 
 
 def utc_timestamp(value) -> datetime:

@@ -813,7 +813,10 @@ class AppChat:
         await self.runner.setup()
         await web.TCPSite(self.runner, host, self.port).start()
         log.info("app_chat_on port=%d", self.port)
-        if self.push and self.push.enabled and os.getenv("MARONG_APP_UPDATE_PUSH", "0").strip() not in ("", "0"):
+        switch_on = os.getenv("MARONG_APP_UPDATE_PUSH", "").strip() != "0"
+        fcm_on = self.push is not None and self.push.enabled
+        log.info("app_update push switch=%s fcm=%s", "on" if switch_on else "off", "on" if fcm_on else "off")
+        if switch_on and fcm_on:
             from .app_update_push import AppUpdatePush
             self._spawn(AppUpdatePush(self.store, self.releases, self.push.fcm, clock=self.clock).run())
         return self.runner

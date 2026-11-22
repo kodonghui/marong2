@@ -84,7 +84,8 @@ class AppStore:
         if before and version_parts(before["app_version"]) < version_parts(app_version):
             codes = [code for code, name in published.items() if name == app_version]
             if codes:
-                code = update["versionCode"] if state == "installed" else max(codes)
+                reported_code = update["versionCode"] if state == "installed" else None
+                code = reported_code if reported_code in codes else max(codes)
                 await self._app_update_event(conn, "installed", friend_id, install_id, code, app_version=app_version)
 
     async def _app_update_event(self, conn, kind, friend_id, install_id, code, *, app_version=None, state=None, status=None):
