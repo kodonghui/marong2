@@ -9,6 +9,7 @@ import re
 import stat
 import threading
 import time
+import unicodedata
 
 log = logging.getLogger("marong.app_release")
 PACKAGE = "com.corthexhq.marong"
@@ -32,6 +33,67 @@ def release_dir() -> Path:
 def valid_version(code, name) -> bool:
     return (type(code) is int and 1 <= code <= VERSION_CODE_MAX and isinstance(name, str)
             and VERSION_NAME.fullmatch(name) is not None)
+
+
+def version_parts(name: str) -> tuple[int, ...]:
+    return tuple(map(int, name.split(".")))
+
+
+def normalize_notes(notes) -> str | None:
+    if (not isinstance(notes, str) or len(notes.splitlines()) != 1
+            or any(unicodedata.category(char) in ("Cc", "Cs", "Zl", "Zp") for char in notes)):
+        return None
+    trimmed = notes.strip()
+    return trimmed if 1 <= len(trimmed) <= 300 else None
+
+
+def utc_timestamp(value) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        raise InvalidRelease("published_at") from None
+    if parsed.utcoffset() != timedelta(0):
+        raise InvalidRelease("published_at")
+    return parsed
+
+
+def parse_history(raw: bytes | None) -> list[dict]:
+    if raw is None:
+        return []
+    try:
+        data = json.loads(raw)
+        if (not isinstance(data, dict) or set(data) != {"format", "entries"}
+                or type(data["format"]) is not int or data["format"] != 1
+                or not isinstance(data["entries"], list)):
+            raise ValueError
+        codes = set()
+        for entry in data["entries"]:
+            utc_timestamp(entry["at"])
+            match entry["kind"]:
+                case "paused" | "resumed":
+                    if set(entry) != {"kind", "at"}:
+                        raise ValueError
+                case "published":
+                    if set(entry) != {"kind", "at", "versionCode", "versionName", "notes",
+                                      "size", "sha256", "file", "backfilled"}:
+                        raise ValueError
+                    code, name = entry["versionCode"], entry["versionName"]
+                    notes = entry["notes"]
+                    if (not valid_version(code, name) or code in codes or notes is None or normalize_notes(notes) != notes
+                            or entry["file"] != f"marong-{name}-{code}.apk"
+                            or type(entry["backfilled"]) is not bool):
+                        raise ValueError
+                    size, digest = entry["size"], entry["sha256"]
+                    if not ((entry["backfilled"] and size is None) or type(size) is int and 1 <= size <= APK_MAX):
+                        raise ValueError
+                    if not ((entry["backfilled"] and digest is None) or isinstance(digest, str) and SHA256.fullmatch(digest)):
+                        raise ValueError
+                    codes.add(code)
+                case _:
+                    raise ValueError
+        return data["entries"]
+    except (KeyError, TypeError, ValueError):
+        raise InvalidRelease("history") from None
 
 
 @dataclass(frozen=True)
@@ -64,12 +126,7 @@ class Release:
                 or not isinstance(digest, str) or not SHA256.fullmatch(digest)):
             raise InvalidRelease("fields")
         published = data.get("publishedAt")
-        try:
-            parsed = datetime.fromisoformat(published)
-        except (TypeError, ValueError):
-            raise InvalidRelease("published_at") from None
-        if parsed.utcoffset() != timedelta(0):
-            raise InvalidRelease("published_at")
+        utc_timestamp(published)
         release = cls(code, name, size, digest, published)
         if data.get("file") != release.file:
             raise InvalidRelease("filename")
@@ -106,12 +163,35 @@ class AppReleases:
                 self.warnings[reason] = now
                 log.warning("app_release invalid reason=%s", reason)
 
-    def latest(self) -> Release | None:
+    def paused(self) -> bool:
         try:
             (self.folder / "paused").lstat()
-            return None
+            return True
         except FileNotFoundError:
-            pass
+            return False
+
+    def manifest(self) -> Release | None:
+        try:
+            return read_manifest(self.folder)
+        except InvalidRelease as error:
+            self.invalid(str(error))
+        except OSError:
+            self.invalid("read")
+        return None
+
+    def history(self) -> list[dict]:
+        try:
+            return parse_history((self.folder / "history.json").read_bytes())
+        except FileNotFoundError:
+            return []
+        except (InvalidRelease, OSError):
+            self.invalid("history")
+            return []
+
+    def latest(self) -> Release | None:
+        try:
+            if self.paused():
+                return None
         except OSError:
             self.invalid("read")
             return None
