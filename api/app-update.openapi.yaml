@@ -208,7 +208,8 @@ paths:
                       sha256: null
                       backfilled: true
                     devices:
-                    - friend: 현경
+                    # D139(2026-11-23): 예시 친구 이름은 합성 이름이에요. 칸 이름·형식·상한은 그대로예요.
+                    - friend: 시험친구 가
                       friendId: 7
                       phone: 1
                       appVersion: 0.3.2
@@ -229,7 +230,7 @@ paths:
                         attempt: 1
                         at: '2026-11-24T05:00:20Z'
                     fetches:
-                    - friend: 현경
+                    - friend: 시험친구 가
                       friendId: 7
                       items:
                       - versionCode: 11

@@ -4,7 +4,7 @@ info:
   title: 마롱이 관리 페이지 API
   version: 0.1.0-draft
   description: |-
-    관리 페이지 다시 만들기(part admin, 2026-11-23 초안)가 새로 더하는 API 두 개예요. 관리 페이지의 나머지 API는 지금 계약 그대로 읽어요: 초대 링크·회원·한도·티켓·로그인 끊기(api/unified.openapi.yaml의 API-235~243), 그림 비용·아이템(api/pet-app.openapi.yaml의 API-263~266), 앱 버전(api/app-update.openapi.yaml의 API-267, PR #101). 그 형식은 이 파일에서 다시 정하지 않아요.
+    관리 페이지 다시 만들기(part admin, 2026-11-23 체크포인트 통과 D135)가 새로 더하는 API 두 개예요. 관리 페이지의 나머지 API는 지금 계약 그대로 읽어요: 초대 링크·회원·한도·티켓·로그인 끊기(api/unified.openapi.yaml의 API-235~243), 그림 비용·아이템(api/pet-app.openapi.yaml의 API-263~266), 앱 버전(api/app-update.openapi.yaml의 API-267, PR #101). 그 형식은 이 파일에서 다시 정하지 않아요.
 
     - 관리자 경로(`/chat/admin/api/`)는 Cloudflare Access 뒤에 있고, 서버가 `Cf-Access-Jwt-Assertion`을 다시 확인한 뒤 그 이메일의 해시가 관리자 해시(`MARONG_ADMIN_EMAIL_SHA256`)와 같은지 봐요(통합 앱 SPEC-395, 지금 `marong/app_admin.py`의 `require_admin`). 아니면 403 `not_allowed`예요. 증명이 없어도 401을 쓰지 않아요(API-267과 같음).
     - 쓰기 요청(POST)은 `Origin`이 `https://marong.corthex-hq.com`이어야 해요. 아니면 403 `cross_site`예요. 본문은 없어요.
@@ -13,7 +13,7 @@ info:
     - 페이지(`/chat/admin/`, `/chat/admin/members`, `/chat/admin/members/{friendId}`, `/chat/admin/invites`, `/chat/admin/app`, `/chat/admin/costs`)는 HTML이라 이 계약에 넣지 않았어요. 화면은 07 사이트맵과 08 화면 정의(docs/08-screens/admin.md)예요.
     - API 282~299번은 이 part를 위해 비워 둬요.
 
-    계약에서 정한 것(Claude 제안, 2026-11-23, 검토 대상).
+    계약에서 정한 것(Claude 제안, 2026-11-23 체크포인트에서 승인 D135).
     1. 개요(API-280)는 다섯 부분(사용량, 통화, 그림, 앱, 초대 링크 만료 수)을 따로 읽어요. 동시에 읽지 않고 연결 하나에서 차례로 읽어요(명세 SPEC-451·3.2). 한 부분이 실패하거나 1초를 넘기면 그 칸만 `null`이고(초대 링크 만료 수는 칸이 없어 주의 항목 `invite_expiring`만 빠짐) 응답은 200이에요. 회원 수조차 읽지 못하거나(DB에 닿지 않음) 연결을 2초 안에 받지 못하면 503이에요.
     2. 돈 값은 소수 둘째 자리 문자열, 비율은 내림한 정수 퍼센트예요(usage-limit 계약과 같음).
     3. 거두기(API-281)는 같은 요청을 두 번 받아도 같은 결과예요(이미 거둔 링크 → 200, `revokedAt` 그대로). 쓴 링크와 기간 지난 링크는 409 `invite_closed`예요. API-281은 동희님이 '초대 링크 거두기'를 더하기로 답한 뒤에만 구현해요(질문 2).
@@ -161,13 +161,13 @@ paths:
   /chat/admin/api/invites/{inviteId}/revoke:
     post:
       operationId: revokeInvite
-      summary: 초대 링크 거두기(제안)
-      description: 초대 링크 화면(SCR-202)이 확인 줄 뒤에 불러요. 열린 초대 링크의 `revoked_at`을 지금(앱 시계, API-240과 같음)으로 정하는 UPDATE 하나예요. 바뀌지 않으면 없음 → 404, 이미 거둠 → 200 그대로(그 뒤 기간이 지났어도), 쓴·기간 지난 링크 → 409 차례로 정해요. 가입·잇기·다시 로그인은 이미 `revoked_at`을 보고 거절해요(SPEC-455). 동희님 답(질문 2) 전에는 구현하지 않아요.
+      summary: 초대 링크 거두기
+      description: 초대 링크 화면(SCR-202)이 확인 줄 뒤에 불러요. 열린 초대 링크의 `revoked_at`을 지금(앱 시계, API-240과 같음)으로 정하는 UPDATE 하나예요. 바뀌지 않으면 없음 → 404, 이미 거둠 → 200 그대로(그 뒤 기간이 지났어도), 쓴·기간 지난 링크 → 409 차례로 정해요. 가입·잇기·다시 로그인은 이미 `revoked_at`을 보고 거절해요(SPEC-455). 2026-11-23 질문 2의 답 '더함'(D137)으로 넣어요.
       security:
       - cfAccess: []
       x-corthex:
         id: API-281
-        status: proposed
+        status: active
         spec:
         - SPEC-455
         omit:

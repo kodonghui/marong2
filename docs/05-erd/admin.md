@@ -1,6 +1,6 @@
 # 마롱이 관리 페이지 다시 만들기: DB 표
 
-상태: 초안(2026-11-23 새벽 KST, Claude 마롱이 봇). 이 PR은 문서만이라 마이그레이션 파일을 만들지 않았어요. 아래 3절의 함수를 TASK-490에서 GPT가 `marong/call/migrations/011_admin_month.sql`로 만들고, 서버 반영 때 적용해요.
+상태: 2026-11-23 체크포인트 통과(D135). 처음 초안은 같은 날 새벽 KST, Claude 마롱이 봇. 이 PR은 문서만이라 마이그레이션 파일을 만들지 않았어요. 아래 3절의 함수를 TASK-490에서 GPT가 `marong/call/migrations/011_admin_month.sql`로 만들고, 서버 반영 때 적용해요.
 입력: [기능 명세](../04-functional-spec/admin.md) SPEC-450\~457(3.4 통화 월 예산 함수), [도메인](../01-domain/admin.md), 통합 앱 표 [unified.md](unified.md)의 TBL-164(`marong.invites`)·167(`marong.friend_profiles`), 사람별 사용 한도 표 [usage-limit.md](usage-limit.md)의 `call.friend_month_usd`, 앱 업데이트 기능 변경(PR #101)의 TBL-182(`app_update_events`, [`docs/05-erd/app-update.md`](app-update.md)에 PR #101이 더함).
 API 계약: [`api/admin.openapi.yaml`](../../api/admin.openapi.yaml)의 API-280·281.
 
@@ -17,7 +17,7 @@ API 계약: [`api/admin.openapi.yaml`](../../api/admin.openapi.yaml)의 API-280�
 
 | 표 | 누가 읽나 | 어떻게 | 화면 |
 | --- | --- | --- | --- |
-| TBL-164 `marong.invites` | API-240(목록), API-235(만들기), API-281(거두기 제안, `revoked_at`만 UPDATE) | 지금 그대로. `revoked_at` 칸과 열린 링크 색인 `invites_open_idx`(`used_at IS NULL AND revoked_at IS NULL`)는 이미 있어요(마이그레이션 020) | SCR-202 |
+| TBL-164 `marong.invites` | API-240(목록), API-235(만들기), API-281(거두기, D137, `revoked_at`만 UPDATE) | 지금 그대로. `revoked_at` 칸과 열린 링크 색인 `invites_open_idx`(`used_at IS NULL AND revoked_at IS NULL`)는 이미 있어요(마이그레이션 020) | SCR-202 |
 | TBL-167 `marong.friend_profiles`, `marong.friends`, `marong.app_sessions`, `marong.usage_daily` | API-236, 243, 237, 241, 그리고 API-280의 회원 수·오늘 사용 합 | 지금 그대로. API-280의 오늘 사용 합은 API-236과 같은 조인에서 합만 내요 | SCR-169, 200, 201 |
 | `marong.diary_ai_runs`, `marong.scene_pictures`, `marong.character_jobs` | API-266과 API-280의 그림 칸 | 지금 API-266의 쿼리 그대로(같은 서버 함수) | SCR-169, 204 |
 | `call.*`(통화 비용 표들) | `call.friend_month_usd`(API-236), 새 `call.month_budget`(API-280) | 함수로만. 앱 서버 역할은 표를 직접 읽지 못해요(지금 그대로) | SCR-169, 201, 204 |

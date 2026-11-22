@@ -8,7 +8,7 @@
 | 번호 | 화면 | 바뀌는 곳 | 절 |
 | --- | --- | --- | --- |
 | SCR-165 | 내 마롱이 | '오늘 쓴 양' 그룹 → '내 사용량' 카드(하루 한도·티켓·이번 달 통화) | [1](#1-scr-165-내-마롱이의-내-사용량) |
-| SCR-169 | 관리자 | 초대 링크 날짜 이름표, 기본 한도 줄, 사람 줄의 계정 한도와 '한도 바꾸기' | [2](#2-scr-169-관리자) |
+| SCR-169 | 관리자(D136 1-6: 날짜 이름표는 SCR-202, 기본 한도 줄은 SCR-200, 계정 한도와 '한도 바꾸기'는 SCR-201로 옮김) | 초대 링크 날짜 이름표, 기본 한도 줄, 사람 줄의 계정 한도와 '한도 바꾸기' | [2](#2-scr-169-관리자) |
 | SCR-107 | 글 대화 | #daily-limit 띠의 링크 이름 '내 사용량 보기' | [3](#3-하루-한도-안내scr-107001) |
 | SCR-001 | 통화 홈 | #daily-limit에 '내 사용량 보기' 링크 | [3](#3-하루-한도-안내scr-107001) |
 
@@ -45,6 +45,8 @@ Purpose: 로그인한 친구가 자기의 오늘 사용량, 하루 한도, 티�
 
 ## 2. SCR-169 관리자
 
+화면 자리 바뀜(D136 1-6, 2026-11-23): 관리 페이지가 여섯 화면으로 나뉘어 이 절의 표시는 초대 링크(SCR-202, 날짜 이름표), 회원(SCR-200, 기본 한도 줄과 사람 줄의 '한도 · …'), 회원 한 사람(SCR-201, 계정 한도와 '한도 바꾸기', 이번 달 통화 비용), 비용(SCR-204, 사람마다 통화 비용)으로 옮겼어요. 이름표와 문구는 한 글자도 바꾸지 않았어요. 상태마다 옮긴 곳을 적었어요 → [admin.md](admin.md) 6절.
+
 Purpose: 동희님이 초대 링크의 만든 때·쓴 때·만료를 구분해 보고, 사람마다 계정 한도를 무제한·기본·직접 가운데 하나로 정하고, 이번 달 통화 비용을 봐요. (FL-179, FL-169, FL-177, REQ-487·431, 동희님 관찰 2026-11-21 15:46 KST)
 
 | Data | Source |
@@ -63,23 +65,23 @@ Purpose: 동희님이 초대 링크의 만든 때·쓴 때·만료를 구분해 
 
 | State | What the user sees and can do | From responses |
 | --- | --- | --- |
-| SCR-169#normal(바뀜) | 초대 링크 줄은 세 줄: '종류 · 메모', 상태('열림'·'씀(쓴 사람)'·'기간 지남'·'거둠'), 날짜 줄(아래 #invite-…). '가입한 사람' 그룹 위에 '기본 한도 · 하루 1000 · 통화 월 $3.00'(비어 있으면 '없음'). 사람 줄에 한 줄 더 '한도 · …'와 '이번 달 통화 $1.23', 버튼 '한도 바꾸기'. '마지막 사용'은 짧은 날짜 모양 | API-240#200, API-236#200 |
-| SCR-169#invite-open | 날짜 줄 '만든 때 11월 21일 오후 2:59 · 만료 11월 28일 오후 2:59(7일 남음)'. 하루가 안 남았으면 '(오늘 끝나요)' | API-240#200(`state=open`) |
-| SCR-169#invite-used | 날짜 줄 '만든 때 11월 21일 오후 2:59 · 쓴 때 11월 21일 오후 3:01' | API-240#200(`state=used`) |
-| SCR-169#invite-expired | 날짜 줄 '만든 때 11월 12일 오후 7:16 · 만료됨 11월 19일 오후 7:16'. 줄 글자가 흐림 | API-240#200(`state=expired`) |
-| SCR-169#invite-revoked | 날짜 줄 '만든 때 11월 12일 오후 7:16 · 거둔 때 11월 13일 오전 9:00'. 줄 글자가 흐림 | API-240#200(`state=revoked`) |
-| SCR-169#created(바뀜) | 끝나는 때 자리에 '만료 11월 28일 오후 2:59(7일 뒤)' | API-235#201 |
-| SCR-169#limit-unlimited | 사람 줄 '한도 · 무제한' | API-236#200(`limits.mode=unlimited`) |
-| SCR-169#limit-default | 사람 줄 '한도 · 기본(하루 1000 · 통화 월 $3.00)'. 기본 한도가 비어 있으면 '없음' | API-236#200(`limits.mode=default`) |
-| SCR-169#limit-custom | 사람 줄 '한도 · 직접(하루 200 · 통화 월 $5.00)'. 비운 쪽은 '기본 따름' | API-236#200(`limits.mode=custom`) |
-| SCR-169#call-month-unknown | 모든 사람 줄의 통화 비용이 '이번 달 통화 —' | API-236#200(`callMonthUsd=null`) |
-| SCR-169#limits-edit | 줄 아래 칸: 칩 셋과 '저장'·'그만두기'. 지금 `mode`의 칩이 골라져 있음 | |
-| SCR-169#limits-custom | 숫자 칸 둘 '하루 사용 단위'(1\~100000), '통화 월 달러'(0.01\~1000)와 안내 '비운 칸은 기본 한도를 따라요'. 둘 다 비었으면 '저장'이 꺼짐 | |
-| SCR-169#limits-saving | 칩·칸·버튼 꺼짐 | |
-| SCR-169#limits-saved | 칸이 닫히고 그 줄의 '한도 · …'가 응답의 `limits`로 바뀌고 띠 '한도를 바꿨어요'. 그 친구의 다음 요청부터 적용돼요 | API-243#200 |
-| SCR-169#limits-invalid | 칸 아래 '숫자를 확인해 주세요(하루 1\~100000, 통화 월 0.01\~1000)', 쓴 값 남김 | API-243#400(`invalid_input`) |
-| SCR-169#limits-missing | '그 사람을 찾을 수 없어요. 목록을 다시 불러올게요' → API-236 다시 | API-243#404(`not_found`) |
-| SCR-169#error(늘어남) | 공통 규칙('잠깐 문제가 생겼어요. 다시 해 볼까요?') | API-243#403(`cross_site`), API-243#503(`db_unavailable`), API-243#default |
+| SCR-169#normal(바뀜. D136 1-6 → 초대 링크 줄 SCR-202#normal, 기본 한도 줄과 사람 줄 SCR-200#normal) | 초대 링크 줄은 세 줄: '종류 · 메모', 상태('열림'·'씀(쓴 사람)'·'기간 지남'·'거둠'), 날짜 줄(아래 #invite-…). '가입한 사람' 그룹 위에 '기본 한도 · 하루 1000 · 통화 월 $3.00'(비어 있으면 '없음'). 사람 줄에 한 줄 더 '한도 · …'와 '이번 달 통화 $1.23', 버튼 '한도 바꾸기'. '마지막 사용'은 짧은 날짜 모양 | API-240#200, API-236#200 |
+| SCR-169#invite-open(D136 1-6 → SCR-202#invite-open) | 날짜 줄 '만든 때 11월 21일 오후 2:59 · 만료 11월 28일 오후 2:59(7일 남음)'. 하루가 안 남았으면 '(오늘 끝나요)' | API-240#200(`state=open`) |
+| SCR-169#invite-used(D136 1-6 → SCR-202#invite-used) | 날짜 줄 '만든 때 11월 21일 오후 2:59 · 쓴 때 11월 21일 오후 3:01' | API-240#200(`state=used`) |
+| SCR-169#invite-expired(D136 1-6 → SCR-202#invite-expired) | 날짜 줄 '만든 때 11월 12일 오후 7:16 · 만료됨 11월 19일 오후 7:16'. 줄 글자가 흐림 | API-240#200(`state=expired`) |
+| SCR-169#invite-revoked(D136 1-6 → SCR-202#invite-revoked) | 날짜 줄 '만든 때 11월 12일 오후 7:16 · 거둔 때 11월 13일 오전 9:00'. 줄 글자가 흐림 | API-240#200(`state=revoked`) |
+| SCR-169#created(바뀜. D136 1-6 → SCR-202#created) | 끝나는 때 자리에 '만료 11월 28일 오후 2:59(7일 뒤)' | API-235#201 |
+| SCR-169#limit-unlimited(D136 1-6 → SCR-200#normal·SCR-201#normal의 '한도 · …' 줄) | 사람 줄 '한도 · 무제한' | API-236#200(`limits.mode=unlimited`) |
+| SCR-169#limit-default(D136 1-6 → SCR-200#normal·SCR-201#normal의 '한도 · …' 줄) | 사람 줄 '한도 · 기본(하루 1000 · 통화 월 $3.00)'. 기본 한도가 비어 있으면 '없음' | API-236#200(`limits.mode=default`) |
+| SCR-169#limit-custom(D136 1-6 → SCR-200#normal·SCR-201#normal의 '한도 · …' 줄) | 사람 줄 '한도 · 직접(하루 200 · 통화 월 $5.00)'. 비운 쪽은 '기본 따름' | API-236#200(`limits.mode=custom`) |
+| SCR-169#call-month-unknown(D136 1-6 → SCR-201#call-month-unknown, SCR-204#person-unknown) | 모든 사람 줄의 통화 비용이 '이번 달 통화 —' | API-236#200(`callMonthUsd=null`) |
+| SCR-169#limits-edit(D136 1-6 → SCR-201#limits-edit) | 줄 아래 칸: 칩 셋과 '저장'·'그만두기'. 지금 `mode`의 칩이 골라져 있음 | |
+| SCR-169#limits-custom(D136 1-6 → SCR-201#limits-custom) | 숫자 칸 둘 '하루 사용 단위'(1\~100000), '통화 월 달러'(0.01\~1000)와 안내 '비운 칸은 기본 한도를 따라요'. 둘 다 비었으면 '저장'이 꺼짐 | |
+| SCR-169#limits-saving(D136 1-6 → SCR-201#limits-saving) | 칩·칸·버튼 꺼짐 | |
+| SCR-169#limits-saved(D136 1-6 → SCR-201#limits-saved) | 칸이 닫히고 그 줄의 '한도 · …'가 응답의 `limits`로 바뀌고 띠 '한도를 바꿨어요'. 그 친구의 다음 요청부터 적용돼요 | API-243#200 |
+| SCR-169#limits-invalid(D136 1-6 → SCR-201#limits-invalid) | 칸 아래 '숫자를 확인해 주세요(하루 1\~100000, 통화 월 0.01\~1000)', 쓴 값 남김 | API-243#400(`invalid_input`) |
+| SCR-169#limits-missing(D136 1-6 → SCR-201#missing) | '그 사람을 찾을 수 없어요. 목록을 다시 불러올게요' → API-236 다시 | API-243#404(`not_found`) |
+| SCR-169#error(늘어남. D136 1-6 → 공통#error) | 공통 규칙('잠깐 문제가 생겼어요. 다시 해 볼까요?') | API-243#403(`cross_site`), API-243#503(`db_unavailable`), API-243#default |
 
 권한: Access를 지나지 못하면 이 화면이 열리지 않아요(API-243도 403 `not_allowed`). 대화 글, 토큰은 이 화면에 없어요. 달러 값은 이 화면에만 있어요. 오래된 데이터: 한도를 바꾼 뒤에는 응답 값으로 그 줄만 바꾸고, 화면이 다시 보일 때 목록 전체를 다시 읽어요.
 
@@ -103,6 +105,6 @@ Purpose: 동희님이 초대 링크의 만든 때·쓴 때·만료를 구분해 
 와이어프레임은 아래를 눌러 바꿔 보게 그렸어요(전화 폭 390px, 관리자는 넓은 폭도).
 
 1. SCR-165 '내 사용량' 카드: 무제한 계정(#usage-unlimited·#call-month-unlimited), 한도 있음(#usage-limit·#tickets·#call-month), 넘음(#usage-over·#call-month-over), 통화 합 못 읽음(#call-month-unknown), 카드 오류(#usage-error).
-2. SCR-169 초대 링크 줄 넷(#invite-open·used·expired·revoked)과 지금 화면(이름표 없는 날짜) 비교.
-3. SCR-169 사람 줄과 '한도 바꾸기' 칸(#limit-…, #limits-edit·custom·invalid·saved).
+2. SCR-169 초대 링크 줄 넷(#invite-open·used·expired·revoked)과 지금 화면(이름표 없는 날짜) 비교. 2026-11-23부터 이 줄은 SCR-202에 있어요(D136 1-6).
+3. SCR-169 사람 줄과 '한도 바꾸기' 칸(#limit-…, #limits-edit·custom·invalid·saved). 2026-11-23부터 사람 줄은 SCR-200·201, '한도 바꾸기'는 SCR-201에 있어요(D136 1-6).
 4. SCR-107·001 #daily-limit의 '내 사용량 보기' 링크.

@@ -1,6 +1,6 @@
 # 관리 페이지 다시 만들기: 화면 상태(08)
 
-상태: 초안(2026-11-23 새벽 KST, Claude 마롱이 봇). 아직 만들지 않았어요. 새 화면 다섯(SCR-200\~204)과 바뀌는 화면 둘(SCR-169 개요, SCR-186 탭 줄)이에요.
+상태: 2026-11-23 체크포인트 통과(D135). 처음 초안은 같은 날 새벽 KST, Claude 마롱이 봇. 아직 만들지 않았어요. 새 화면 다섯(SCR-200\~204)과 바뀌는 화면 둘(SCR-169 개요, SCR-186 탭 줄)이에요.
 입력: [사이트맵](../07-sitemap/sitemap.yaml)의 SCR-169·186·200\~204, [기능 명세](../04-functional-spec/admin.md) SPEC-450\~457과 3.1\~3.6절, API 계약 [`api/admin.openapi.yaml`](../../api/admin.openapi.yaml)(API-280·281), [`api/unified.openapi.yaml`](../../api/unified.openapi.yaml)(API-235\~243), [`api/pet-app.openapi.yaml`](../../api/pet-app.openapi.yaml)(API-263\~266), 앱 업데이트 PR #101의 `api/app-update.openapi.yaml`(API-267), 지금 화면 정의 [unified.md](unified.md)의 SCR-169, [usage-limit.md](usage-limit.md)의 SCR-169, [pet-app.md](pet-app.md)의 SCR-186.
 바탕: 지금 관리자 화면의 문구는 한 글자도 바꾸지 않고 옮겨요(아래 6절의 대응표). 새 문구는 [새 제안]이에요. 토큰과 부품은 [`design/README.md`](../../design/README.md)와 지금 `unified.css`·`chat.css`를 따르고 새 토큰은 더하지 않아요(D67, 09 단계).
 와이어프레임: [`design/admin-wireframe.html`](../../design/admin-wireframe.html)(회색, 시스템 글꼴, 상태마다 한 칸, 폭 360px와 430px 나란히). 숫자와 이름은 지어낸 값이에요.
@@ -142,21 +142,21 @@ Purpose: 한 사람의 한도·사용량·로그인·폰을 한 화면에서 보
 
 ## 5. SCR-202 초대 링크
 
-Purpose: 새 초대 링크를 만들고, 링크가 열렸는지·쓰였는지·끝났는지 이름표로 봐요. 열린 링크를 거둘 수 있어요(제안). (FL-169·170·171, FL-200, REQ-576·583·430·431)
+Purpose: 새 초대 링크를 만들고, 링크가 열렸는지·쓰였는지·끝났는지 이름표로 봐요. 열린 링크를 거둘 수 있어요(D137). (FL-169·170·171, FL-200, REQ-576·583·430·431)
 
 | Data | Source |
 | --- | --- |
 | 초대 링크 목록(종류, 메모, 상태, 만든 때·만료·쓴 때·거둔 때, 쓴 사람). 토큰과 주소는 없음 | API-240 |
 | `link`·`relogin`에서 고를 사람 | API-236(`members`, `unlinked`) |
 | 새 링크의 주소와 만료(한 번만) | API-235 |
-| 거둔 링크 | API-281(제안) |
+| 거둔 링크 | API-281 |
 
 | Action | Result | Failure |
 | --- | --- | --- |
 | 새 링크 만들기 | 지금 SCR-169의 만들기 칸 그대로(#creating) → API-235 → #created | 400 → #invite-invalid, 404 → #member-missing |
 | 주소 복사 | '복사했어요'(지금 그대로) | 복사 실패 → 주소 글자를 골라 둠 |
 | 칩 '열림'·'전체' | 그 상태만 보임 | 없음 |
-| 거두기(제안, 열린 줄) | 확인 줄 → '거두기' → API-281 → #revoked-now | 409 → #invite-closed, 404 → 목록 다시 읽기 |
+| 거두기(열린 줄, D137) | 확인 줄 → '거두기' → API-281 → #revoked-now | 409 → #invite-closed, 404 → 목록 다시 읽기 |
 
 | State | What the user sees and can do | From responses |
 | --- | --- | --- |
@@ -174,14 +174,14 @@ Purpose: 새 초대 링크를 만들고, 링크가 열렸는지·쓰였는지·�
 | SCR-202#created | 지금 SCR-169#created와 usage-limit의 '만료 …(7일 뒤)' 그대로 | API-235#201 |
 | SCR-202#invite-invalid | 지금 SCR-169#invite-invalid 그대로 | API-235#400(`invalid_input`) |
 | SCR-202#member-missing | 지금 SCR-169#member-missing 그대로 → API-236 다시 | API-235#404(`not_found`) |
-| SCR-202#revoke-confirm | (제안) 줄 아래 '이 링크를 거둬요. 받은 사람이 열어도 쓸 수 없어요'와 '거두기'·'그만두기' | |
-| SCR-202#revoked-now | (제안) 그 줄이 '거둠'과 '만든 때 · 거둔 때 …'로 바뀌고 띠 '링크를 거뒀어요'. 칩 '열림'이면 줄이 빠짐 | API-281#200 |
-| SCR-202#invite-closed | (제안) 띠 '이미 쓰였거나 기간이 지난 링크예요'와 목록 다시 읽기 | API-281#409(`invite_closed`) |
+| SCR-202#revoke-confirm | 줄 아래 '이 링크를 거둬요. 받은 사람이 열어도 쓸 수 없어요'와 '거두기'·'그만두기' | |
+| SCR-202#revoked-now | 그 줄이 '거둠'과 '만든 때 · 거둔 때 …'로 바뀌고 띠 '링크를 거뒀어요'. 칩 '열림'이면 줄이 빠짐 | API-281#200 |
+| SCR-202#invite-closed | 띠 '이미 쓰였거나 기간이 지난 링크예요'와 목록 다시 읽기 | API-281#409(`invite_closed`) |
 | SCR-202#error | 공통#error | API-240#500·503, API-235#403(`cross_site`)·500, API-281#403(`cross_site`)·500·503 |
 
 ## 6. 지금 SCR-169 상태가 가는 곳
 
-지금 관리자 화면(한 장)의 상태와 문구는 아래 새 상태로 옮겨요. 문구는 그대로예요. 동희님이 [기능 변경 목록](../02-prd/admin.md#승인된-항목이-바뀌는-곳기능-변경-목록) 5·6을 '바꿈'으로 답하시기 전까지 unified·usage-limit 문서의 표는 고치지 않아요.
+지금 관리자 화면(한 장)의 상태와 문구는 아래 새 상태로 옮겨요. 문구는 그대로예요. 동희님이 2026-11-23 체크포인트에서 [기능 변경 목록](../02-prd/admin.md#승인된-항목이-바뀌는-곳기능-변경-목록) 5·6을 '바꿈'으로 답하셔서(D136) unified·usage-limit 문서의 상태 줄마다 옮긴 곳을 적었어요.
 
 | 지금(문서) | 새 상태 |
 | --- | --- |

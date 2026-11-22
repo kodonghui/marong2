@@ -86,7 +86,7 @@ ID 번호: SPEC-406\~429를 써요. 아이 소개는 처음에 405번으로 적�
 
 | ID | Behaviour | From | Preconditions | Main behaviour | Exceptions | Acceptance criteria | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| SPEC-427 | 그림 비용 보기 | REQ-520 | Access를 지난 관리자 | API-266: 이번 달 그림 비용을 종류별(`diary`, `topic`, `reaction`, `character`)로 주고, 예산 둘(일기 `MARONG_DIARY_IMAGE_BUDGET_USD`, 캐릭터 `MARONG_IMAGE_MONTHLY_USD`)은 금액이면 한도·쓴 값·비율, `unlimited`이면 `null`이에요(D119). 관리자 화면(SCR-169)에 한 줄씩 보여요 | 없음 | Given 시험 데이터 일기 2달러·화두 0.5달러·캐릭터 3달러, 일기 예산 `unlimited`, 캐릭터 예산 20, Then 종류별 값이 그대로이고 `budgets.diary`가 null, `budgets.character.ratio`가 0.15 | proposed |
+| SPEC-427 | 그림 비용 보기 | REQ-520 | Access를 지난 관리자 | API-266: 이번 달 그림 비용을 종류별(`diary`, `topic`, `reaction`, `character`)로 주고, 예산 둘(일기 `MARONG_DIARY_IMAGE_BUDGET_USD`, 캐릭터 `MARONG_IMAGE_MONTHLY_USD`)은 금액이면 한도·쓴 값·비율, `unlimited`이면 `null`이에요(D119). 관리 페이지의 비용 화면(SCR-204)에 종류마다 한 줄씩, 합과 예산 비율은 개요 카드(SCR-169)에 보여요(D136 1-11로 바뀜, 2026-11-23) | 없음 | Given 시험 데이터 일기 2달러·화두 0.5달러·캐릭터 3달러, 일기 예산 `unlimited`, 캐릭터 예산 20, Then 종류별 값이 그대로이고 `budgets.diary`가 null, `budgets.character.ratio`가 0.15 | proposed |
 
 ## 3. 자세한 규칙
 
