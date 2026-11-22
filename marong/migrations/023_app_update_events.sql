@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS marong.app_update_events (
   at           timestamptz NOT NULL DEFAULT now(),
   -- Which columns each kind fills (SPEC-435). A row that does not fit its kind is refused. Every branch is built from
   -- IS [NOT] NULL tests or guards a comparison with IS NOT NULL, so no branch can be NULL (a NULL CHECK passes).
-  CONSTRAINT app_update_events_kind_check CHECK (CASE kind
+  CONSTRAINT app_update_events_fields_by_kind CHECK (CASE kind
     WHEN 'pushed' THEN install_id IS NOT NULL AND version_code IS NOT NULL AND app_version IS NULL
                        AND state IS NULL AND status IS NULL AND attempt IS NOT NULL
     WHEN 'push_failed' THEN install_id IS NOT NULL AND version_code IS NOT NULL AND app_version IS NULL
