@@ -18,17 +18,43 @@
           "nexus": "nk_9nnvs4j3xqnt",
           "where": "https://nexus.corthex-hq.com/overview/marong/app-update/01-domain#nk_9nnvs4j3xqnt",
           "date": "2026-11-17"
+        },
+        {
+          "approved": "\"추천안 모두 승인\"(오랑이가 msg_a013b0ee30a5에 답함, 2026-11-23 01시대 KST). 승인한 사람은 사용자님(동희님): 오랑이 채팅에서 \"야 누가 너한테 체크포인트때 뭐 물어보면 추천 모두 승인이라고 해\"(2026-11-23 01시대 KST). 질문 1) 01~10·12 단계를 통과시킬까요? → 통과. 질문 2) API-105 새 폰 상한(친구마다 30일 안 폰 20대, 넘으면 409 too_many_devices)을 넣을까요? → 넣음(D134). 바뀐 승인 항목은 D122~D131(이미 답함)과 D134. 승인한 커밋: PR #101 b54547d",
+          "by": "the maintainer",
+          "where": "Orca: 오랑이 답(msg_a013b0ee30a5에 대한 답), 근거 오랑이 채팅 2026-11-23 01시대 KST 사용자님 말씀",
+          "date": "2026-11-23"
         }
       ],
-      "next": "없음. 요청에 적은 허브 경고는 정리 PR에서 고침. 바뀌면 설계 PR로",
+      "next": "PR #101이 main에 합쳐지면 Codex가 docs/10-wbs/app-update.md의 Codex 인계대로 TASK-475부터 구현해요. 반영 순서는 마이그레이션 023 → 서버(API-105 update와 새 폰 상한 D134, 감시, API-267, 글 대화 배너)·통화 홈·버전 기록 채우기 → 앱 0.3.3. 0.3.3 게시는 TC-614~616(실제 삼성 폰)을 포함한 시험이 모두 통과한 뒤이고, 실제 폰 시험 릴리스와 폰은 TASK-487 전에 여쭤요",
       "checks": [
         {
           "level": "info",
           "message": "CTX-021 앱 자동 업데이트 한 번에 초안(docs/01-domain/app-update.md): TERM-092~100, D40(동희님 11/17 12:18 '좀 자동 업데이트 되게 못하나'). 체크포인트 1~3 대기, 추천안으로 02 진행",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 01: CTX-021의 시간 줄·명령·규칙·의존·핫스팟을 고치고 TERM-219~224, 결정 D122~D130(동희님 Orca 마롱이 항목 2 e17·e32, 2026-11-22)을 9절에 적음",
+          "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 01 고침: D131(글 대화에도 업데이트 배너, 동희님 \"둔다 ㄱㄱ\", Orca 마롱이 Home 채팅 2026-11-22)을 9.3에 더하고 TERM-224 정의·9.4·9.5를 고침. 체크포인트를 받는 곳은 Orca 항목 2와 PR #101(동희님 같은 날 \"지금 nexus 리빌딩하고 있음 넥서스 쓰지 말고 작업해\")",
+          "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "보안 검토 반영(PR #101 댓글, 2026-11-23): 9.4의 06 줄과 9.5 질문 3(승인된 SPEC-115·API-105에 새 폰 상한을 넣을지)을 더함. 결정 번호는 답을 받은 뒤",
+          "at": "2026-11-23"
+        },
+        {
+          "level": "info",
+          "message": "체크포인트 통과(2026-11-23): 9.3에 D134(새 폰 상한), 9.5 질문 3 답함, 9.6에 체크포인트 기록",
+          "at": "2026-11-23"
         }
       ],
-      "updated": "2026-11-17T08:21:59+00:00"
+      "updated": "2026-11-22T15:55:29+00:00"
     },
     "02-prd": {
       "state": "done",
@@ -38,17 +64,33 @@
           "by": "the maintainer",
           "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ4NaazQu3QW45S1NaoCm9d6",
           "date": "2026-11-17"
+        },
+        {
+          "approved": "\"추천안 모두 승인\"(오랑이가 msg_a013b0ee30a5에 답함, 2026-11-23 01시대 KST). 승인한 사람은 사용자님(동희님): 오랑이 채팅에서 \"야 누가 너한테 체크포인트때 뭐 물어보면 추천 모두 승인이라고 해\"(2026-11-23 01시대 KST). 질문 1) 01~10·12 단계를 통과시킬까요? → 통과. 질문 2) API-105 새 폰 상한(친구마다 30일 안 폰 20대, 넘으면 409 too_many_devices)을 넣을까요? → 넣음(D134). 바뀐 승인 항목은 D122~D131(이미 답함)과 D134. 승인한 커밋: PR #101 b54547d",
+          "by": "the maintainer",
+          "where": "Orca: 오랑이 답(msg_a013b0ee30a5에 대한 답), 근거 오랑이 채팅 2026-11-23 01시대 KST 사용자님 말씀",
+          "date": "2026-11-23"
         }
       ],
-      "next": "없음. 요청에 적은 허브 경고는 정리 PR에서 고침. 바뀌면 설계 PR로",
+      "next": "PR #101이 main에 합쳐지면 Codex가 docs/10-wbs/app-update.md의 Codex 인계대로 TASK-475부터 구현해요. 반영 순서는 마이그레이션 023 → 서버(API-105 update와 새 폰 상한 D134, 감시, API-267, 글 대화 배너)·통화 홈·버전 기록 채우기 → 앱 0.3.3. 0.3.3 게시는 TC-614~616(실제 삼성 폰)을 포함한 시험이 모두 통과한 뒤이고, 실제 폰 시험 릴리스와 폰은 TASK-487 전에 여쭤요",
       "checks": [
         {
           "level": "info",
           "message": "CTX-021 요구사항 REQ-306~326(docs/02-prd/app-update.md), 확인 질문 1~3은 추천안으로 proposed. 동희님 11/17 12:38 '설계만 여기서, 구현은 GPT'",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 02: REQ-313·316·319·321·325와 범위 밖 줄을 바꾸고(승인된 글 인용) 새 REQ-553~561",
+          "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 02 고침(D131): REQ-321·325의 바뀐 글과 REQ-560·561이 통화 홈과 글 대화(SCR-107)를 함께 가리킴. 새 REQ 없음",
+          "at": "2026-11-22"
         }
       ],
-      "updated": "2026-11-17T08:19:54+00:00"
+      "updated": "2026-11-22T15:55:29+00:00"
     },
     "03-user-flow": {
       "state": "done",
@@ -58,17 +100,43 @@
           "by": "the maintainer",
           "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ4NaazQu3QW45S1NaoCm9d6",
           "date": "2026-11-17"
+        },
+        {
+          "approved": "\"추천안 모두 승인\"(오랑이가 msg_a013b0ee30a5에 답함, 2026-11-23 01시대 KST). 승인한 사람은 사용자님(동희님): 오랑이 채팅에서 \"야 누가 너한테 체크포인트때 뭐 물어보면 추천 모두 승인이라고 해\"(2026-11-23 01시대 KST). 질문 1) 01~10·12 단계를 통과시킬까요? → 통과. 질문 2) API-105 새 폰 상한(친구마다 30일 안 폰 20대, 넘으면 409 too_many_devices)을 넣을까요? → 넣음(D134). 바뀐 승인 항목은 D122~D131(이미 답함)과 D134. 승인한 커밋: PR #101 b54547d",
+          "by": "the maintainer",
+          "where": "Orca: 오랑이 답(msg_a013b0ee30a5에 대한 답), 근거 오랑이 채팅 2026-11-23 01시대 KST 사용자님 말씀",
+          "date": "2026-11-23"
         }
       ],
-      "next": "없음. 요청에 적은 허브 경고는 정리 PR에서 고침. 바뀌면 설계 PR로",
+      "next": "PR #101이 main에 합쳐지면 Codex가 docs/10-wbs/app-update.md의 Codex 인계대로 TASK-475부터 구현해요. 반영 순서는 마이그레이션 023 → 서버(API-105 update와 새 폰 상한 D134, 감시, API-267, 글 대화 배너)·통화 홈·버전 기록 채우기 → 앱 0.3.3. 0.3.3 게시는 TC-614~616(실제 삼성 폰)을 포함한 시험이 모두 통과한 뒤이고, 실제 폰 시험 릴리스와 폰은 TASK-487 전에 여쭤요",
       "checks": [
         {
           "level": "info",
           "message": "CTX-021 흐름 FL-146 릴리스 올리기, FL-147 앱 업데이트, FL-148 사용자 확인 업데이트",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 03: FL-146·147·148을 바꾸고 새 FL-193(뒤처진 폰 깨우기)·FL-194(업데이트 상태 보고)",
+          "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 03 고침(D131): FL-148에 선톡 알림 → 글 대화(SCR-107) 입구 P2와 두 화면 배너 설명, FL-147의 배너 이름",
+          "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "코드 검토 반영(PR #101 코멘트, 2026-11-23): FL-193은 보내기 전에 기록에 '보냄'을 먼저 남기고 남긴 때만 보냄, FL-194는 '설치됨'을 상태 줄로 남기지 않고 한 폰·앱 버전에 한 줄, 같은 버전·상태·실패 번호만 다시 보내지 않음",
+          "at": "2026-11-23"
+        },
+        {
+          "level": "info",
+          "message": "보안 검토 반영(PR #101 댓글, 2026-11-23): FL-193은 친구마다 최근 20대에서 고르고 한 차례 100개·동시 4개, FL-194는 서버의 기록 상한(버전 기록에 있는 버전만, 되풀이 없음, 친구마다 1시간 30줄)",
+          "at": "2026-11-23"
         }
       ],
-      "updated": "2026-11-17T08:19:54+00:00"
+      "updated": "2026-11-22T15:55:29+00:00"
     },
     "04-functional-spec": {
       "state": "done",
@@ -78,30 +146,88 @@
           "by": "the maintainer",
           "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ4NaazQu3QW45S1NaoCm9d6",
           "date": "2026-11-17"
+        },
+        {
+          "approved": "\"추천안 모두 승인\"(오랑이가 msg_a013b0ee30a5에 답함, 2026-11-23 01시대 KST). 승인한 사람은 사용자님(동희님): 오랑이 채팅에서 \"야 누가 너한테 체크포인트때 뭐 물어보면 추천 모두 승인이라고 해\"(2026-11-23 01시대 KST). 질문 1) 01~10·12 단계를 통과시킬까요? → 통과. 질문 2) API-105 새 폰 상한(친구마다 30일 안 폰 20대, 넘으면 409 too_many_devices)을 넣을까요? → 넣음(D134). 바뀐 승인 항목은 D122~D131(이미 답함)과 D134. 승인한 커밋: PR #101 b54547d",
+          "by": "the maintainer",
+          "where": "Orca: 오랑이 답(msg_a013b0ee30a5에 대한 답), 근거 오랑이 채팅 2026-11-23 01시대 KST 사용자님 말씀",
+          "date": "2026-11-23"
         }
       ],
-      "next": "없음. 요청에 적은 허브 경고는 정리 PR에서 고침. 바뀌면 설계 PR로",
+      "next": "PR #101이 main에 합쳐지면 Codex가 docs/10-wbs/app-update.md의 Codex 인계대로 TASK-475부터 구현해요. 반영 순서는 마이그레이션 023 → 서버(API-105 update와 새 폰 상한 D134, 감시, API-267, 글 대화 배너)·통화 홈·버전 기록 채우기 → 앱 0.3.3. 0.3.3 게시는 TC-614~616(실제 삼성 폰)을 포함한 시험이 모두 통과한 뒤이고, 실제 폰 시험 릴리스와 폰은 TASK-487 전에 여쭤요",
       "checks": [
         {
           "level": "info",
           "message": "CTX-021 기능 명세 SPEC-284~302(docs/04-functional-spec/app-update.md), REQ-306~326 모두 연결",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 04: SPEC-287·296·298·301·302와 3·7절을 바꾸고 새 SPEC-430~442(8절). SPEC-289·294와 4·6절은 PR #100과 겹쳐 8.1·8.8에 적음(합친 뒤 TASK-488)",
+          "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 04 고침(D131): 새 SPEC-443(글 대화 업데이트 배너), SPEC-296·440·442와 8.1·8.7·8.8 고침",
+          "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "코드 검토 반영(PR #101 코멘트, 2026-11-23): SPEC-430 보내기 전 `pushed` 잡기(시도 번호 1~3), SPEC-433 중복 판단에 상태 번호, SPEC-433·434·435 설치됨은 `installed` 한 줄만, SPEC-435 쓰기 실패 규칙, SPEC-437·8.3 `backfilled`는 published 줄에 늘 있음, SPEC-438·8.6 `fetches`는 친구마다 한 칸(items 20줄), `file`은 뺌, 폰 기록은 지금 친구의 줄만. 새 ID 없음",
+          "at": "2026-11-23"
+        },
+        {
+          "level": "info",
+          "message": "보안 검토 반영(PR #101 댓글, 2026-11-23): SPEC-430 감시 상한, SPEC-433 409에서 그만, SPEC-434 기록 상한과 정수 검사(참·거짓 값 거절), SPEC-435 installed는 버전 기록의 버전만·fetched는 1시간 한 줄·1년 정리, SPEC-438 폰 상한·friendId·릴리스 노트 textContent. 8.1에 SPEC-115(승인, 바꾸는 제안)와 새 8.9. 새 ID 없음",
+          "at": "2026-11-23"
+        },
+        {
+          "level": "info",
+          "message": "D134 반영(2026-11-23): docs/app-chat.md의 SPEC-115 행에 새 폰 상한, 8.1 결정 칸과 8.9를 승인된 글로 고침",
+          "at": "2026-11-23"
         }
       ],
-      "updated": "2026-11-17T08:19:54+00:00"
+      "updated": "2026-11-22T15:55:29+00:00"
     },
     "05-erd": {
-      "state": "skipped",
-      "checkpoints": [],
-      "next": "DB 표 없음: 서버는 릴리스 폴더의 release.json·paused 파일, 앱은 SharedPreferences marong_update",
+      "state": "done",
+      "checkpoints": [
+        {
+          "approved": "\"추천안 모두 승인\"(오랑이가 msg_a013b0ee30a5에 답함, 2026-11-23 01시대 KST). 승인한 사람은 사용자님(동희님): 오랑이 채팅에서 \"야 누가 너한테 체크포인트때 뭐 물어보면 추천 모두 승인이라고 해\"(2026-11-23 01시대 KST). 질문 1) 01~10·12 단계를 통과시킬까요? → 통과. 질문 2) API-105 새 폰 상한(친구마다 30일 안 폰 20대, 넘으면 409 too_many_devices)을 넣을까요? → 넣음(D134). 바뀐 승인 항목은 D122~D131(이미 답함)과 D134. 승인한 커밋: PR #101 b54547d",
+          "by": "the maintainer",
+          "where": "Orca: 오랑이 답(msg_a013b0ee30a5에 대한 답), 근거 오랑이 채팅 2026-11-23 01시대 KST 사용자님 말씀",
+          "date": "2026-11-23"
+        }
+      ],
+      "next": "PR #101이 main에 합쳐지면 Codex가 docs/10-wbs/app-update.md의 Codex 인계대로 TASK-475부터 구현해요. 반영 순서는 마이그레이션 023 → 서버(API-105 update와 새 폰 상한 D134, 감시, API-267, 글 대화 배너)·통화 홈·버전 기록 채우기 → 앱 0.3.3. 0.3.3 게시는 TC-614~616(실제 삼성 폰)을 포함한 시험이 모두 통과한 뒤이고, 실제 폰 시험 릴리스와 폰은 TASK-487 전에 여쭤요",
       "checks": [
         {
           "level": "info",
           "message": "CTX-021 앱 자동 업데이트는 DB 표가 없음(TBL 안 씀): 서버는 릴리스 폴더의 release.json·paused 파일(SPEC 3.1), 앱은 SharedPreferences marong_update(SPEC 3.4)",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 05(D126): 건너뜀에서 새 표 TBL-182 marong.app_update_events(docs/05-erd/app-update.md, marong/migrations/023_app_update_events.sql, 적용 안 함). pglast로 9문장 파싱 통과, DB 적용 시험은 안 함(TASK-475)",
+          "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 05: D131은 DB를 바꾸지 않음. 사람 보기 줄에서 NEXUS를 빼고 검토 자리를 Orca 항목 2와 PR #101로 적음",
+          "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "코드 검토 반영(PR #101 코멘트, 2026-11-23): TBL-182에 `attempt` 칸, `push_failed`의 NULL `status` 막음, `state` 칸에서 `installed` 뺌, 유일 인덱스 `app_update_events_push_attempt`·`app_update_events_installed_once`, `fetched` 부분 인덱스 `app_update_events_fetched_idx`, 친구가 바뀐 폰의 규칙. pglast로 10문장 파싱 통과, DB 적용 시험은 안 함(TASK-475)",
+          "at": "2026-11-23"
+        },
+        {
+          "level": "info",
+          "message": "보안 검토 반영(PR #101 댓글, 2026-11-23): 서버가 지키는 기록 상한, 보관과 정리(1년, 표 소유 역할 marong_owner가 매달), 읽는 곳 표에 app_devices_friend_idx·device_idx·fetched_idx 쓰임, 권한 표에 marong_owner. 마이그레이션은 바뀌지 않음(pglast 10문장 다시 통과)",
+          "at": "2026-11-23"
         }
       ],
-      "updated": "2026-11-17T05:49:16+00:00"
+      "updated": "2026-11-22T15:55:29+00:00"
     },
     "06-api": {
       "state": "done",
@@ -111,17 +237,43 @@
           "by": "the maintainer",
           "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ4NaazQu3QW45S1NaoCm9d6",
           "date": "2026-11-17"
+        },
+        {
+          "approved": "\"추천안 모두 승인\"(오랑이가 msg_a013b0ee30a5에 답함, 2026-11-23 01시대 KST). 승인한 사람은 사용자님(동희님): 오랑이 채팅에서 \"야 누가 너한테 체크포인트때 뭐 물어보면 추천 모두 승인이라고 해\"(2026-11-23 01시대 KST). 질문 1) 01~10·12 단계를 통과시킬까요? → 통과. 질문 2) API-105 새 폰 상한(친구마다 30일 안 폰 20대, 넘으면 409 too_many_devices)을 넣을까요? → 넣음(D134). 바뀐 승인 항목은 D122~D131(이미 답함)과 D134. 승인한 커밋: PR #101 b54547d",
+          "by": "the maintainer",
+          "where": "Orca: 오랑이 답(msg_a013b0ee30a5에 대한 답), 근거 오랑이 채팅 2026-11-23 01시대 KST 사용자님 말씀",
+          "date": "2026-11-23"
         }
       ],
-      "next": "없음. 요청에 적은 허브 경고는 정리 PR에서 고침. 바뀌면 설계 PR로",
+      "next": "PR #101이 main에 합쳐지면 Codex가 docs/10-wbs/app-update.md의 Codex 인계대로 TASK-475부터 구현해요. 반영 순서는 마이그레이션 023 → 서버(API-105 update와 새 폰 상한 D134, 감시, API-267, 글 대화 배너)·통화 홈·버전 기록 채우기 → 앱 0.3.3. 0.3.3 게시는 TC-614~616(실제 삼성 폰)을 포함한 시험이 모두 통과한 뒤이고, 실제 폰 시험 릴리스와 폰은 TASK-487 전에 여쭤요",
       "checks": [
         {
           "level": "info",
           "message": "CTX-021 계약 api/app-update.openapi.yaml: API-141 GET /chat/api/app/release(200·204·401·403·500·503), API-142 GET /chat/app/{file}(200·401·403·404 no_release·500·503). openapi-spec-validator 통과, 예시 19개가 스키마에 맞음. 깨지는 변경 없음",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 06: API-105에 선택 칸 update(UpdateState, 400 bad-update 예시), 새 API-267 GET /chat/admin/api/app-versions(200·403·500·503). 두 계약 openapi-spec-validator 통과, 새 예시가 스키마에 맞음. 깨지는 변경 없음(옛 서버는 update를 400으로 거절하므로 서버 먼저, SPEC-442)",
+          "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "코드 검토 반영(PR #101 코멘트, 2026-11-23): API-267 `fetches`를 친구마다 한 칸(`items` 20줄까지), VersionHistoryEntry 설명에 `file`을 뺀다고 적음, `backfilled`는 published 줄에 늘 있음(8.3과 같음), AppUpdateEvent에 `attempt`, `state`에서 `installed` 뺌. API-105 설명에 설치됨 규칙. 두 파일 openapi-spec-validator 통과, API-267 두 예시가 스키마에 맞음",
+          "at": "2026-11-23"
+        },
+        {
+          "level": "info",
+          "message": "보안 검토 반영(PR #101 댓글, 2026-11-23): API-267에 friendId(폰과 받아 감), devices 200·fetches 100 상한, 릴리스 노트 textContent. API-105에 409 too_many_devices(승인된 SPEC-115를 바꾸는 제안, 체크포인트 질문)와 오류 코드. 두 파일 openapi-spec-validator 통과, 예시가 스키마에 맞음",
+          "at": "2026-11-23"
+        },
+        {
+          "level": "info",
+          "message": "D134 반영(2026-11-23): API-105 409 too_many_devices의 제안 표시를 지움(설명, 409 응답, 오류 코드, 바뀐 점 10). openapi-spec-validator 통과",
+          "at": "2026-11-23"
         }
       ],
-      "updated": "2026-11-17T08:19:54+00:00"
+      "updated": "2026-11-22T15:55:29+00:00"
     },
     "07-sitemap": {
       "state": "done",
@@ -131,9 +283,15 @@
           "by": "the maintainer",
           "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ4NaazQu3QW45S1NaoCm9d6",
           "date": "2026-11-17"
+        },
+        {
+          "approved": "\"추천안 모두 승인\"(오랑이가 msg_a013b0ee30a5에 답함, 2026-11-23 01시대 KST). 승인한 사람은 사용자님(동희님): 오랑이 채팅에서 \"야 누가 너한테 체크포인트때 뭐 물어보면 추천 모두 승인이라고 해\"(2026-11-23 01시대 KST). 질문 1) 01~10·12 단계를 통과시킬까요? → 통과. 질문 2) API-105 새 폰 상한(친구마다 30일 안 폰 20대, 넘으면 409 too_many_devices)을 넣을까요? → 넣음(D134). 바뀐 승인 항목은 D122~D131(이미 답함)과 D134. 승인한 커밋: PR #101 b54547d",
+          "by": "the maintainer",
+          "where": "Orca: 오랑이 답(msg_a013b0ee30a5에 대한 답), 근거 오랑이 채팅 2026-11-23 01시대 KST 사용자님 말씀",
+          "date": "2026-11-23"
         }
       ],
-      "next": "없음. 요청에 적은 허브 경고는 정리 PR에서 고침. 바뀌면 설계 PR로",
+      "next": "PR #101이 main에 합쳐지면 Codex가 docs/10-wbs/app-update.md의 Codex 인계대로 TASK-475부터 구현해요. 반영 순서는 마이그레이션 023 → 서버(API-105 update와 새 폰 상한 D134, 감시, API-267, 글 대화 배너)·통화 홈·버전 기록 채우기 → 앱 0.3.3. 0.3.3 게시는 TC-614~616(실제 삼성 폰)을 포함한 시험이 모두 통과한 뒤이고, 실제 폰 시험 릴리스와 폰은 TASK-487 전에 여쭤요",
       "checks": [
         {
           "level": "info",
@@ -144,9 +302,19 @@
           "level": "info",
           "message": "CTX-021 사이트맵 줄은 되돌림: sitemap.yaml·sitemap.md는 일기 스레드(PR #25)만 씀(docs/10-wbs/README.md 겹치는 파일). SCR-109 줄·SCR-130은 그쪽 번호표(design/README.md 5절)에 올라감",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 07: SCR-001에 FL-148, CTX-021, TERM-224를 더함. 새 화면 없음. sitemap.md 목록과 머리말을 다시 씀(보드는 바뀌지 않음)",
+          "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 07 고침(D131): SCR-107에 FL-148, CTX-021, TERM-224를 더함. 새 화면 없음. sitemap.md 머리말 고침",
+          "at": "2026-11-22"
         }
       ],
-      "updated": "2026-11-17T08:19:54+00:00"
+      "updated": "2026-11-22T15:55:29+00:00"
     },
     "08-screen-states": {
       "state": "done",
@@ -156,17 +324,33 @@
           "by": "the maintainer",
           "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ4NaazQu3QW45S1NaoCm9d6",
           "date": "2026-11-17"
+        },
+        {
+          "approved": "\"추천안 모두 승인\"(오랑이가 msg_a013b0ee30a5에 답함, 2026-11-23 01시대 KST). 승인한 사람은 사용자님(동희님): 오랑이 채팅에서 \"야 누가 너한테 체크포인트때 뭐 물어보면 추천 모두 승인이라고 해\"(2026-11-23 01시대 KST). 질문 1) 01~10·12 단계를 통과시킬까요? → 통과. 질문 2) API-105 새 폰 상한(친구마다 30일 안 폰 20대, 넘으면 409 too_many_devices)을 넣을까요? → 넣음(D134). 바뀐 승인 항목은 D122~D131(이미 답함)과 D134. 승인한 커밋: PR #101 b54547d",
+          "by": "the maintainer",
+          "where": "Orca: 오랑이 답(msg_a013b0ee30a5에 대한 답), 근거 오랑이 채팅 2026-11-23 01시대 KST 사용자님 말씀",
+          "date": "2026-11-23"
         }
       ],
-      "next": "없음. 요청에 적은 허브 경고는 정리 PR에서 고침. 바뀌면 설계 PR로",
+      "next": "PR #101이 main에 합쳐지면 Codex가 docs/10-wbs/app-update.md의 Codex 인계대로 TASK-475부터 구현해요. 반영 순서는 마이그레이션 023 → 서버(API-105 update와 새 폰 상한 D134, 감시, API-267, 글 대화 배너)·통화 홈·버전 기록 채우기 → 앱 0.3.3. 0.3.3 게시는 TC-614~616(실제 삼성 폰)을 포함한 시험이 모두 통과한 뒤이고, 실제 폰 시험 릴리스와 폰은 TASK-487 전에 여쭤요",
       "checks": [
         {
           "level": "info",
           "message": "CTX-021 화면 상태 docs/08-screens/app-update.md: SCR-109#update-on·off·none, SCR-130#shown·locked·none. 새 토큰 없음",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 08: SCR-001#update-ready·installing·busy·failed·off·none(docs/08-screens/app-update.md). 공통 규칙 두 줄과 '바뀌지 않는 화면'의 통화 홈 줄을 바꿈(승인된 글 인용)",
+          "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 08 고침(D131): 새 상태 SCR-107#update-ready·installing·busy·failed·off·none(SCR-001과 같은 여섯), '바뀌지 않는 화면'의 글 대화 줄 바꿈(승인된 글 인용)",
+          "at": "2026-11-22"
         }
       ],
-      "updated": "2026-11-17T08:19:55+00:00"
+      "updated": "2026-11-22T15:55:29+00:00"
     },
     "09-mockup": {
       "state": "done",
@@ -176,17 +360,33 @@
           "by": "the maintainer",
           "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJVsU16GXHgrv9AYR6fstwBT",
           "date": "2026-11-17"
+        },
+        {
+          "approved": "\"추천안 모두 승인\"(오랑이가 msg_a013b0ee30a5에 답함, 2026-11-23 01시대 KST). 승인한 사람은 사용자님(동희님): 오랑이 채팅에서 \"야 누가 너한테 체크포인트때 뭐 물어보면 추천 모두 승인이라고 해\"(2026-11-23 01시대 KST). 질문 1) 01~10·12 단계를 통과시킬까요? → 통과. 질문 2) API-105 새 폰 상한(친구마다 30일 안 폰 20대, 넘으면 409 too_many_devices)을 넣을까요? → 넣음(D134). 바뀐 승인 항목은 D122~D131(이미 답함)과 D134. 승인한 커밋: PR #101 b54547d",
+          "by": "the maintainer",
+          "where": "Orca: 오랑이 답(msg_a013b0ee30a5에 대한 답), 근거 오랑이 채팅 2026-11-23 01시대 KST 사용자님 말씀",
+          "date": "2026-11-23"
         }
       ],
-      "next": "없음. 토큰 값을 바꾸려면 설계 PR과 동희님 확인",
+      "next": "PR #101이 main에 합쳐지면 Codex가 docs/10-wbs/app-update.md의 Codex 인계대로 TASK-475부터 구현해요. 반영 순서는 마이그레이션 023 → 서버(API-105 update와 새 폰 상한 D134, 감시, API-267, 글 대화 배너)·통화 홈·버전 기록 채우기 → 앱 0.3.3. 0.3.3 게시는 TC-614~616(실제 삼성 폰)을 포함한 시험이 모두 통과한 뒤이고, 실제 폰 시험 릴리스와 폰은 TASK-487 전에 여쭤요. 배너 대지는 TASK-484에서 웹 구현 전에 그려요",
       "checks": [
         {
           "level": "info",
           "message": "CTX-021은 따로 목업을 만들지 않고 '마롱이의 일기 설계하기' 스레드의 목업 한 벌에 두 상태(SCR-109 줄, SCR-130 알림)를 넘김(동희님 11/17 12:36). 새 토큰 없음",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 09: 토큰 바뀌지 않음. 배너 대지는 아직 없음(TASK-484에서 웹 구현 전에 그림)",
+          "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 09 고침(D131): 토큰 바뀌지 않음. TASK-484 대지에 글 대화 C021-107-update-ready·off를 더함",
+          "at": "2026-11-22"
         }
       ],
-      "updated": "2026-11-17T08:29:14+00:00"
+      "updated": "2026-11-22T15:55:29+00:00"
     },
     "10-wbs": {
       "state": "done",
@@ -196,37 +396,99 @@
           "by": "the maintainer",
           "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ4NaazQu3QW45S1NaoCm9d6",
           "date": "2026-11-17"
+        },
+        {
+          "approved": "\"추천안 모두 승인\"(오랑이가 msg_a013b0ee30a5에 답함, 2026-11-23 01시대 KST). 승인한 사람은 사용자님(동희님): 오랑이 채팅에서 \"야 누가 너한테 체크포인트때 뭐 물어보면 추천 모두 승인이라고 해\"(2026-11-23 01시대 KST). 질문 1) 01~10·12 단계를 통과시킬까요? → 통과. 질문 2) API-105 새 폰 상한(친구마다 30일 안 폰 20대, 넘으면 409 too_many_devices)을 넣을까요? → 넣음(D134). 바뀐 승인 항목은 D122~D131(이미 답함)과 D134. 승인한 커밋: PR #101 b54547d",
+          "by": "the maintainer",
+          "where": "Orca: 오랑이 답(msg_a013b0ee30a5에 대한 답), 근거 오랑이 채팅 2026-11-23 01시대 KST 사용자님 말씀",
+          "date": "2026-11-23"
         }
       ],
-      "next": "없음. GPT가 인계 절대로 구현. 요청에 적은 허브 경고는 정리 PR에서 고침",
+      "next": "PR #101이 main에 합쳐지면 Codex가 docs/10-wbs/app-update.md의 Codex 인계대로 TASK-475부터 구현해요. 반영 순서는 마이그레이션 023 → 서버(API-105 update와 새 폰 상한 D134, 감시, API-267, 글 대화 배너)·통화 홈·버전 기록 채우기 → 앱 0.3.3. 0.3.3 게시는 TC-614~616(실제 삼성 폰)을 포함한 시험이 모두 통과한 뒤이고, 실제 폰 시험 릴리스와 폰은 TASK-487 전에 여쭤요",
       "checks": [
         {
           "level": "info",
           "message": "CTX-021 WBS docs/10-wbs/app-update.md: GPT 인계 절(PR #29 형식), TASK-179~193, Owner GPT. CTX-020 call-first.md에 GPT 인계 절과 실제 폰 TC-180~184 더함",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 10: 새 TASK-475~488과 Codex 인계 절(반영 순서 서버 먼저, 실제 삼성 폰 시험 전에는 게시하지 않음)",
+          "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 10 고침(D131): 새 TASK-489(글 대화 배너), TASK-483·484·486과 인계 절 고침",
+          "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "코드 검토 반영(PR #101 코멘트, 2026-11-23): TASK-475·478·479·480 글을 고친 설계에 맞춤. 새 TASK 없음",
+          "at": "2026-11-23"
+        },
+        {
+          "level": "info",
+          "message": "보안 검토 반영(PR #101 댓글, 2026-11-23): TASK-478 감시 상한, TASK-479 기록 상한과 API-105 새 폰 상한(답을 받은 뒤), TASK-480 상한과 friendId, TASK-486 정리 명령과 매달 타이머. 새 TASK 없음",
+          "at": "2026-11-23"
+        },
+        {
+          "level": "info",
+          "message": "D134 반영(2026-11-23): TASK-479의 새 폰 상한을 조건 없이 구현할 일로. ID 범위 표(README)에 이 변경의 줄과 다른 작업이 잡아 둔 번호와 겹친 것을 적음",
+          "at": "2026-11-23"
         }
       ],
-      "updated": "2026-11-17T08:19:55+00:00"
+      "updated": "2026-11-22T15:55:29+00:00"
     },
     "12-qa": {
-      "state": "in_progress",
+      "state": "done",
       "checkpoints": [
         {
           "approved": "프로젝트 채팅 '모두 승인'(2026-11-17 17:18:41 KST). NEXUS 체크포인트 요청 다섯 개(반려동물 01과 예전 기능 넷 묶음)에 대한 답. 이 기능의 요청 nc_wd1v9ekggyeq는 설계 01~04·06~08·10·12를 한 번에 확인하고 통과하면 모두 이 통과로 기록한다고 적음",
           "by": "the maintainer",
           "where": "https://claude.ai/code/project/chan_01PMykBBBsPwAiN2XmgXbxsJ?thread=cmsg_01PMykBBBsPwAiN2XmgXbxsJ4NaazQu3QW45S1NaoCm9d6",
           "date": "2026-11-17"
+        },
+        {
+          "approved": "\"추천안 모두 승인\"(오랑이가 msg_a013b0ee30a5에 답함, 2026-11-23 01시대 KST). 승인한 사람은 사용자님(동희님): 오랑이 채팅에서 \"야 누가 너한테 체크포인트때 뭐 물어보면 추천 모두 승인이라고 해\"(2026-11-23 01시대 KST). 질문 1) 01~10·12 단계를 통과시킬까요? → 통과. 질문 2) API-105 새 폰 상한(친구마다 30일 안 폰 20대, 넘으면 409 too_many_devices)을 넣을까요? → 넣음(D134). 바뀐 승인 항목은 D122~D131(이미 답함)과 D134. 승인한 커밋: PR #101 b54547d",
+          "by": "the maintainer",
+          "where": "Orca: 오랑이 답(msg_a013b0ee30a5에 대한 답), 근거 오랑이 채팅 2026-11-23 01시대 KST 사용자님 말씀",
+          "date": "2026-11-23"
         }
       ],
-      "next": "시험 계획 승인됨. 시험 계획 TC-200~229(docs/12-qa/app-update.md). 시험 코드·실행은 GPT",
+      "next": "PR #101이 main에 합쳐지면 Codex가 docs/10-wbs/app-update.md의 Codex 인계대로 TASK-475부터 구현해요. 반영 순서는 마이그레이션 023 → 서버(API-105 update와 새 폰 상한 D134, 감시, API-267, 글 대화 배너)·통화 홈·버전 기록 채우기 → 앱 0.3.3. 0.3.3 게시는 TC-614~616(실제 삼성 폰)을 포함한 시험이 모두 통과한 뒤이고, 실제 폰 시험 릴리스와 폰은 TASK-487 전에 여쭤요",
       "checks": [
         {
           "level": "info",
           "message": "CTX-021 시험 계획 docs/12-qa/app-update.md: TC-200~229(계약 응답 12개·화면 상태 6개·흐름 3개 모두), 실행은 GPT, 아직 0개 돌림",
           "at": "2026-11-17"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 12: 새 TC-599~617(TC-597·598은 PR #100이 먼저 씀). 실제 삼성 폰 TC-614~616을 게시 조건으로",
+          "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 12 고침(D131): 새 TC-618(글 대화 배너, e2e)·TC-619(선톡 알림으로 연 글 대화에서 지금 설치, 에뮬레이터), TC-616에 글 대화 배너",
+          "at": "2026-11-22"
+        },
+        {
+          "level": "info",
+          "message": "코드 검토 반영(PR #101 코멘트, 2026-11-23): TC-599·600·606·607·608·612·613의 기대 결과를 고친 설계에 맞춤. 새 TC 없음",
+          "at": "2026-11-23"
+        },
+        {
+          "level": "info",
+          "message": "보안 검토 반영(PR #101 댓글, 2026-11-23): TC-599 감시 상한, TC-607 참·거짓 값 400·기록 건너뜀·409 새 폰 상한, TC-608 installed·fetched 상한과 정리, TC-613 friendId와 폰 상한. 새 TC 없음",
+          "at": "2026-11-23"
+        },
+        {
+          "level": "info",
+          "message": "D134 반영(2026-11-23): TC-607의 SPEC-115를 바뀐 행으로",
+          "at": "2026-11-23"
         }
       ],
-      "updated": "2026-11-17T08:19:55+00:00"
+      "updated": "2026-11-22T15:55:29+00:00"
     }
   }
 }
