@@ -102,11 +102,12 @@ test('TC-546/548: claim an item, wear it, and display its layer at 360 px', {ski
   }
 });
 
-test('TC-535/551/553: diary writer and sticker editing at 360 px', {skip: !chromium}, async t => {
+test('TC-535/551/553: diary writer and sticker editing at 360 and 430 px', {skip: !chromium}, async t => {
   const browser = await chromium.launch();
   try {
-    const page = await browser.newPage({viewport: {width: 360, height: 780}, isMobile: true});
-    const date = '2026-11-20';
+    const page = await browser.newPage({viewport: {width: 360, height: 780}, isMobile: true, hasTouch: true});
+    const dates = ['2026-11-18', '2026-11-19', '2026-11-20'];
+    const date = dates.at(-1);
     const imageUrl = '/chat/decor/v1/star-sticker/sticker.webp';
     const base = '/chat/diary/api/days/' + date;
     let saved = [];
@@ -115,9 +116,13 @@ test('TC-535/551/553: diary writer and sticker editing at 360 px', {skip: !chrom
       const url = new URL(route.request().url());
       assert.equal(url.origin, BASE);
       const address = url.pathname;
-      if (address === base) {
-        return route.fulfill({json: {date, state: 'ready', prev: null, next: null, diary: {
-          title: '콩이 일기', body: '누나와 이야기를 나누고 하루를 마무리했다. '.repeat(3), revision: 1,
+      const dayIndex = dates.findIndex(day => address === '/chat/diary/api/days/' + day);
+      if (dayIndex !== -1) {
+        const visibleDate = dates[dayIndex];
+        return route.fulfill({json: {date: visibleDate, state: 'ready',
+          prev: dates[dayIndex - 1] ?? null, next: dates[dayIndex + 1] ?? null, diary: {
+          title: visibleDate === date ? '콩이 일기' : '일기 ' + visibleDate,
+          body: '누나와 이야기를 나누고 하루를 마무리했다. '.repeat(3), revision: 1,
           weather: 'sunny', drawing: {kind: 'placeholder', id: null}, busy: null, hidden: false,
           stampedAt: null, fix: {left: 5, blocked: null}, redraw: {left: 2, blocked: null, last: null},
           writer: {id: 9, name: '콩이', kind: 'dog', active: false, faceUrl: '/chat/api/characters/9/images/smile'},
@@ -126,6 +131,9 @@ test('TC-535/551/553: diary writer and sticker editing at 360 px', {skip: !chrom
       if (address === base + '/stickers') {
         if (route.request().method() === 'PUT') saved = route.request().postDataJSON().stickers;
         return route.fulfill({json: {date, stickers: saved.map(sticker => ({...sticker, imageUrl}))}});
+      }
+      if (dates.some(day => address === '/chat/diary/api/days/' + day + '/stickers')) {
+        return route.fulfill({json: {date: address.split('/').at(-2), stickers: []}});
       }
       if (address === '/chat/api/closet') {
         return route.fulfill({json: {items: [{kind: 'sticker', id: 'star-sticker', name: '별', thumbUrl: imageUrl}]}});
@@ -137,7 +145,8 @@ test('TC-535/551/553: diary writer and sticker editing at 360 px', {skip: !chrom
           paper: {id: 'starter-paper', imageUrl: null, style: 'manuscript'},
           font: {id: 'starter-font', fontUrl: null, family: 'Gaegu'},
         }});
-        return route.fulfill({json: {paper: {imageUrl: '/chat/decor/v1/ivory-paper/paper.webp'},
+        return route.fulfill({json: {background: {imageUrl: '/chat/decor/v1/blue-background/bg.webp'},
+          paper: {imageUrl: '/chat/decor/v1/ivory-paper/paper.webp'},
           font: {fontUrl: '/chat/decor/v1/poorstory-font/font.woff2'}}});
       }
       if (address === '/chat/diary/Gaegu-Regular.woff2') {
@@ -174,6 +183,21 @@ test('TC-535/551/553: diary writer and sticker editing at 360 px', {skip: !chrom
     await page.reload();
     await page.getByText('오늘은 그림을 못 그렸어요').waitFor();
     assert.equal(await page.getByRole('button', {name: /다시 그리기/}).count(), 0);
+    const previousDay = page.locator('#pages button').first();
+    const nextDay = page.locator('#pages button').last();
+    async function expectSharedStyle(title) {
+      await page.getByRole('heading', {name: title, exact: true}).waitFor();
+      await page.locator('#day[style*="blue-background/bg.webp"]').waitFor();
+      await page.locator('.paper[style*="ivory-paper/paper.webp"][style*="MarongDiary"]').waitFor();
+    }
+    await expectSharedStyle('콩이 일기');
+    for (const previousDate of [dates[1], dates[0]]) {
+      await previousDay.click();
+      await expectSharedStyle('일기 ' + previousDate);
+    }
+    await nextDay.click();
+    await nextDay.click();
+    await expectSharedStyle('콩이 일기');
     await page.getByRole('button', {name: '스티커', exact: true}).click();
     await page.getByRole('button', {name: '별', exact: true}).click();
     await page.getByRole('button', {name: '다 했어', exact: true}).click();
@@ -197,6 +221,29 @@ test('TC-535/551/553: diary writer and sticker editing at 360 px', {skip: !chrom
     await page.getByRole('heading', {name: '스티커 붙이기'}).waitFor({state: 'hidden'});
     assert.equal(saved.length, 1);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 360);
+
+    await page.setViewportSize({width: 430, height: 850});
+    await page.getByRole('button', {name: '스티커', exact: true}).click();
+    await sticker.scrollIntoViewIfNeeded();
+    const touchBounds = await sticker.boundingBox();
+    const x = touchBounds.x + touchBounds.width / 2;
+    const y = touchBounds.y + touchBounds.height / 2;
+    const devtools = await page.context().newCDPSession(page);
+    await devtools.send('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: [
+      {id: 1, x: x - 5, y},
+      {id: 2, x: x + 5, y},
+    ]});
+    await devtools.send('Input.dispatchTouchEvent', {type: 'touchMove', touchPoints: [
+      {id: 1, x: x - 7, y: y - 6},
+      {id: 2, x: x + 7, y: y + 6},
+    ]});
+    await devtools.send('Input.dispatchTouchEvent', {type: 'touchEnd', touchPoints: []});
+    await page.getByRole('button', {name: '다 했어', exact: true}).click();
+    await page.locator('.paper .diary-sticker').waitFor();
+    assert.equal(saved.length, 1);
+    assert.ok(saved[0].scale >= 165 && saved[0].scale <= 200, 'the pinch enlarges the sticker');
+    assert.ok(saved[0].rotation >= 30 && saved[0].rotation <= 50, 'the pinch rotates the sticker');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 430);
   } finally {
     await browser.close();
   }
