@@ -7,6 +7,7 @@
 // The foreign-task mode uses a fixture whose MainActivity launchMode is standard.
 // Call modes use UpdateFixtureReceiver in a test-only APK. The reopen-at-commit
 // fixture calls its pauseBeforeCommit() on the worker just before the final commit decision.
+// See docs/12-qa/app-update.md for the BUG-112 fixture build steps.
 // node test/support/app-update-emulator.cjs <emulator-serial> <old.apk> <new.apk> <mode>
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
@@ -21,11 +22,12 @@ const PORT = 18787;
 const APK_PATH = '/chat/app/marong-0.3.2-10.apk';
 const INSTALL_JOB = 2212;
 const LIMIT_MS = 15 * 60 * 1000;
+const BUSY_RETRY_MS = 2 * 60 * 1000;
 const [serial, oldApk, newApk, mode = 'normal'] = process.argv.slice(2);
 
 assert.match(serial ?? '', /^emulator-\d+$/);
 assert.ok(oldApk && newApk, 'Supply version-code 9 and 10 debug APKs');
-assert.match(mode, /^(normal|idle|rare|restricted|rare-idle|restricted-idle|fallback|fallback-idle|lock|visible-alarm|foreign-task|no-backup|call|call-no-permission|call-dismissed|ring|reopen-at-commit)$/);
+assert.match(mode, /^(normal|idle|rare|restricted|rare-idle|restricted-idle|fallback|fallback-idle|fallback-busy-idle|lock|visible-alarm|foreign-task|no-backup|call|call-no-permission|call-dismissed|ring|reopen-at-commit)$/);
 const fallback = mode.startsWith('fallback');
 const call = mode.startsWith('call');
 const logMarker = `tc222_${process.pid}_${Date.now()}`;
@@ -126,6 +128,24 @@ async function waitFor(probe, timeoutMs, description, interval = 500) {
   assert.fail(description);
 }
 
+async function assertBusyAlarm(uid) {
+  const held = await waitFor(() => /alarm_busy|committed code=10/.test(updateLogs()),
+    8 * 60_000, 'The alarm did not inspect the busy app', 2_000);
+  const logs = updateLogs();
+  assert.match(logs, /alarm_busy/);
+  assert.equal(version(), 9, 'A busy alarm must leave the staged update uninstalled');
+  assert.doesNotMatch(jobHistory(uid), /\/2215\b/, 'A busy alarm must not start the install job');
+  const delays = [...logs.matchAll(/update_install alarm_armed delay_ms=(\d+)/g)];
+  assert.equal(delays.length, 2, 'The first busy alarm must arm one follow-up');
+  const nextDelay = Number(delays[1][1]);
+  const alarm = adb('shell', `dumpsys alarm | grep -A 1 -F 'tag=*walarm*:${PACKAGE}.APP_UPDATE_RETRY' || true`)
+    .match(/\btype=ELAPSED_WAKEUP origWhen=([^\s]+) window=([^\s]+)/);
+  assert.ok(alarm, 'Android must retain the new wakeup alarm');
+  console.log(`busy_wait_seconds=${(held / 1000).toFixed(3)} version=9 alarm_job_started=false next_alarm_ms=${nextDelay}`);
+  console.log(`alarm_requested_in=${alarm[1]} alarm_window=${alarm[2]}`);
+  assert.equal(nextDelay, BUSY_RETRY_MS, 'TC-222: the process-independent retry must use the short delay');
+}
+
 async function main() {
   assert.equal(adb('shell', 'getprop', 'ro.build.version.sdk'), '36');
   assert.equal(adb('shell', 'getprop', 'ro.kernel.qemu'), '1');
@@ -210,14 +230,12 @@ async function main() {
       adb('shell', 'cmd', 'jobscheduler', 'cancel', PACKAGE, String(INSTALL_JOB));
       assert.equal(jobState(INSTALL_JOB), 'absent', 'The ordinary backup job must be absent');
     }
-    if (mode === 'visible-alarm' || mode === 'foreign-task') {
-      const held = await waitFor(() => /alarm_busy/.test(updateLogs()),
-        8 * 60_000, 'The app stayed on screen without the alarm reaching its visibility check', 2_000);
-      assert.equal(version(), 9, 'The visible window must still prevent installation');
-      assert.equal(updateLogs().match(/update_install alarm_armed/g)?.length, 2, 'The alarm must be armed again');
-      assert.match(updateLogs(), /alarm_armed delay_ms=600000/);
-      assert.doesNotMatch(jobHistory(uid), /\/2215\b/, 'A busy alarm must not start the install job');
-      console.log(`held_seconds=${(held / 1000).toFixed(3)} version=9 alarm_job_started=false next_alarm_ms=600000`);
+    if (mode === 'visible-alarm' || mode === 'foreign-task' || mode === 'fallback-busy-idle') {
+      await assertBusyAlarm(uid);
+    }
+    if (mode === 'fallback-busy-idle') {
+      assert.match(adb('shell', 'dumpsys', 'activity', 'activities'), /topResumedActivity=.*com\.corthexhq\.marong/,
+        'The app must still be on screen when the first alarm defers');
     }
     if (mode === 'lock') {
       assert.match(adb('shell', 'locksettings', 'set-pin', '3179'), /set to/);
@@ -251,6 +269,9 @@ async function main() {
       // Isolate the durable fallback by simulating process reclamation during the transition.
       // Killing this PID, unlike force-stop, retains the job and the downloaded APK.
       adb('shell', `run-as ${PACKAGE} kill -STOP ${pid} && input keyevent KEYCODE_HOME; run-as ${PACKAGE} kill -9 ${pid}`);
+      await waitFor(() => adb('shell', `pidof ${PACKAGE} || true`) !== pid,
+        5_000, 'The original app process was not reclaimed');
+      console.log('original_process_reclaimed=true');
       assertNoFastInstall(uid);
       await site.close();
       siteClosed = true;
@@ -267,13 +288,7 @@ async function main() {
       await delay(8_000);
       assert.equal(version(), 9, 'TC-222: installed while the microphone service was active');
       if (mode === 'call-no-permission') {
-        await waitFor(() => /alarm_busy|committed code=10/.test(updateLogs()), 5 * 60_000,
-          'The fallback alarm did not inspect the active call', 2_000);
-        assert.match(updateLogs(), /alarm_busy/);
-        assert.match(updateLogs(), /alarm_armed delay_ms=600000/);
-        assert.doesNotMatch(jobHistory(uid), /\/2215\b/);
-        assert.equal(version(), 9, 'TC-222: the fallback installed during the active call');
-        console.log('busy_alarm=true alarm_job_started=false next_alarm_ms=600000');
+        await assertBusyAlarm(uid);
       }
       assert.ok(foregroundCall());
       assert.equal(callNotification(), mode === 'call');

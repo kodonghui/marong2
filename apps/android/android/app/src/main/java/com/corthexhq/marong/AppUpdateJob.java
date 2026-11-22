@@ -67,7 +67,6 @@ public final class AppUpdateJob extends JobService {
     private static final long BACKOFF_MS = 15 * 60_000L;
     private static final long FIRST_ALARM_MS = 2 * 60_000L;
     private static final long NEXT_ALARM_MS = 5 * 60_000L;
-    private static final long BUSY_ALARM_MS = 10 * 60_000L;
     private static final int ALARM_FLAGS = PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_ONE_SHOT;
     private static final int BUFFER_SIZE = 65536;
     static final Object STATE_LOCK = new Object();
@@ -146,7 +145,8 @@ public final class AppUpdateJob extends JobService {
                 synchronized (STATE_LOCK) {
                     if (!hasStagedInstall(context)) return;
                     Log.i(TAG, "update_install alarm_fired");
-                    armBackupAlarmLocked(context, ready ? NEXT_ALARM_MS : BUSY_ALARM_MS);
+                    // The process can be reclaimed as soon as the app stops being busy.
+                    armBackupAlarmLocked(context, ready ? NEXT_ALARM_MS : FIRST_ALARM_MS);
                     if (!ready) {
                         Log.i(TAG, "update_install alarm_busy");
                         return;
