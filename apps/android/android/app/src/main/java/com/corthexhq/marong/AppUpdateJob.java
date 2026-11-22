@@ -1,6 +1,6 @@
 package com.corthexhq.marong;
 
-import android.app.Activity;
+import android.app.ActivityManager;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.job.JobInfo;
@@ -60,7 +60,6 @@ public final class AppUpdateJob extends JobService {
     static final long DEFER_MS = 14 * 60_000L;
     private static final int BUFFER_SIZE = 65536;
     static final Object STATE_LOCK = new Object();
-    private static final Set<Activity> VISIBLE_ACTIVITIES = new HashSet<>();
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -79,38 +78,28 @@ public final class AppUpdateJob extends JobService {
         schedule(context, DAILY_JOB, true);
     }
 
-    static void activityStarted(Activity activity) {
-        synchronized (STATE_LOCK) {
-            VISIBLE_ACTIVITIES.add(activity);
-        }
-    }
-
-    static void activityStopped(Activity activity) {
-        synchronized (STATE_LOCK) {
-            VISIBLE_ACTIVITIES.remove(activity);
-        }
-        scheduleQuietInstall(activity.getApplicationContext());
-    }
-
     static void retryWhenQuiet(Context source) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return;
         Context context = source.getApplicationContext();
-        // Android can remove the service notification after its lifecycle callback returns.
+        if (scheduleQuietInstall(context)) return;
+        // Android can update process importance and notifications after the callback returns.
         new Handler(Looper.getMainLooper()).postDelayed(() -> scheduleQuietInstall(context), 900);
     }
 
-    private static void scheduleQuietInstall(Context context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return;
+    private static boolean scheduleQuietInstall(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false;
         JobScheduler scheduler = context.getSystemService(JobScheduler.class);
-        if (scheduler == null || scheduler.getPendingJob(INSTALL_JOB) == null
-                || scheduler.getPendingJob(QUIET_INSTALL_JOB) != null || !quiet(context)) return;
+        if (scheduler == null || scheduler.getPendingJob(INSTALL_JOB) == null) return false;
+        if (scheduler.getPendingJob(QUIET_INSTALL_JOB) != null) return true;
+        if (!quiet(context)) return false;
         Candidate cached = candidate(preferences(context));
-        if (cached == null || !apk(context, cached.release.code).isFile()) return;
+        if (cached == null || !apk(context, cached.release.code).isFile()) return false;
         JobInfo job = new JobInfo.Builder(QUIET_INSTALL_JOB, new ComponentName(context, AppUpdateJob.class))
             .setExpedited(true).build();
         int result = scheduler.schedule(job);
         Log.i(TAG, result == JobScheduler.RESULT_SUCCESS
             ? "update_install expedited_scheduled" : "update_install expedited_unavailable");
+        return result == JobScheduler.RESULT_SUCCESS;
     }
 
     static void observeRingExpiry(Context context) {
@@ -174,7 +163,7 @@ public final class AppUpdateJob extends JobService {
                     if (retryInstall) {
                         schedule(this, INSTALL_JOB, job == INSTALL_JOB);
                         // The last activity may have stopped before the backup job was registered.
-                        if (job != QUIET_INSTALL_JOB) scheduleQuietInstall(this);
+                        if (job != QUIET_INSTALL_JOB) retryWhenQuiet(this);
                     }
                 });
             }
@@ -361,6 +350,9 @@ public final class AppUpdateJob extends JobService {
     }
 
     private static boolean quiet(Context context) {
+        ActivityManager.RunningAppProcessInfo process = new ActivityManager.RunningAppProcessInfo();
+        ActivityManager.getMyMemoryState(process);
+        boolean visible = process.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE;
         NotificationManager manager = context.getSystemService(NotificationManager.class);
         if (manager == null) return false;
         boolean calling = false;
@@ -369,9 +361,7 @@ public final class AppUpdateJob extends JobService {
             calling |= notification.getId() == CallService.NOTIFICATION_ID;
             ringing |= notification.getId() == Ring.NOTIFICATION_ID;
         }
-        synchronized (STATE_LOCK) {
-            return AppUpdate.quiet(calling, ringing, !VISIBLE_ACTIVITIES.isEmpty());
-        }
+        return AppUpdate.quiet(calling, ringing, visible);
     }
 
     private boolean install(Candidate candidate, File apk, CancellationSignal cancel) {

@@ -127,15 +127,9 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    public void onStart() {
-        AppUpdateJob.activityStarted(this);
-        super.onStart();
-    }
-
-    @Override
     public void onStop() {
         super.onStop();
-        AppUpdateJob.activityStopped(this);
+        AppUpdateJob.retryWhenQuiet(this);
     }
 
     @Override
