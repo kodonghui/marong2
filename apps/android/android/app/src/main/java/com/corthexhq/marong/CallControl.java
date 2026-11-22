@@ -29,7 +29,9 @@ final class CallControl {
     }
 
     static void setActive(boolean value) {
-        active = value;
+        synchronized (AppUpdateJob.STATE_LOCK) {
+            active = value;
+        }
     }
 
     /** Asks the open page to end its call. False when no page is open. */
