@@ -32,18 +32,6 @@ from marong.scene_picture import ScenePictures
 
 MAX_COST = Decimal("3")
 MODEL = "gpt-image-2.5-flare"
-TOPICS = (
-    "The pet character sits beside a snowman.",
-    "The pet character looks up at falling cherry blossoms.",
-    "The pet character curls up beside a soft blanket.",
-    "The pet character sits on a hill under a starry sky.",
-    "The pet character looks at a patch of autumn leaves.",
-    "The pet character wears a soft striped scarf.",
-    "The pet character looks out of a rainy window.",
-    "The pet character naps next to a small flowerpot.",
-    "The pet character sits beside a little sled.",
-    "The pet character watches snow fall outside.",
-)
 DIARIES = (
     ("sunny", "The pet character sits in a warm sunny room."),
     ("cloudy", "The pet character looks at the clouds from a window."),
@@ -51,6 +39,15 @@ DIARIES = (
     ("snow", "The pet character watches falling snow near a wooden bench."),
     ("rainbow", "The pet character sits beside a flowerpot in the sunshine."),
 )
+
+
+def topic_cases():
+    manifest = ROOT / "marong" / "topics" / "v1" / "topics.json"
+    rows = json.loads(manifest.read_text(encoding="utf-8"))["pictures"]
+    topics = [("sunny", row["scene"]) for row in rows if row["status"] == "reviewed" and row.get("petScene", True)]
+    if len(topics) < 10:
+        raise RuntimeError("not enough reviewed pet topics")
+    return topics[:10]
 
 
 class Meter:
@@ -159,7 +156,7 @@ async def draw_reference(kind, path, out, number, vision, editor, templates, met
     art = ScenePictures(SimpleNamespace(pool=SimpleNamespace(connection=local_connection)),
                         LocalMedia(refs), models, MODEL)
     character = {"id": number, "kind": kind, "template": template, "traits": traits}
-    for purpose, cases in (("topic", [("sunny", scene) for scene in TOPICS]), ("diary", DIARIES)):
+    for purpose, cases in (("topic", topic_cases()), ("diary", DIARIES)):
         for index, (weather, scene) in enumerate(cases, 1):
             result = await art.draw(purpose, character, (), scene, weather=weather)
             if not result.picture:

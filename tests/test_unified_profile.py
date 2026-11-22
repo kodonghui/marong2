@@ -8,6 +8,7 @@ import secrets
 import sys
 import unittest
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 from aiohttp.test_utils import TestClient, TestServer
 
@@ -18,7 +19,7 @@ from marong.app_push import AppPush
 from marong.app_session import AppSessions, COOKIE
 from marong.config import load_settings
 from marong.pet_app_settings import PetAppSettings
-from marong.unified_prompt import ADULT_END, ADULT_START, PET_LINES, character_section, common_prompt
+from marong.unified_prompt import ADULT_END, ADULT_START, PET_HEALTH_REFERRAL, PET_LINES, character_section, common_prompt
 from marong.unified_store import UnifiedStore
 from pg import TestDB
 from run_app import AppAgent, RoomLocks
@@ -150,6 +151,59 @@ class ProfileTests(unittest.IsolatedAsyncioTestCase):
             db.admin("UPDATE marong.app_rings SET answer_until=now()-interval '1 second' WHERE id=%s", (ring["id"],))
             expired = await (await client.get(PROFILE, headers=cookie)).json()
             self.assertIsNone(expired["pendingRing"])
+
+    async def test_explicit_pet_health_questions_use_only_the_referral(self):
+        db = TestDB()
+        self.addCleanup(db.close)
+        db.apply_unified_prerequisites()
+        db.apply_unified()
+        db.apply_usage_limit()
+        store = UnifiedStore(db.app_url, call_bridge=True)
+        await store.open(wait=True)
+        self.addAsyncCleanup(store.close)
+        sessions = AppSessions(store.pool, secrets.token_bytes(32), contact_schedule=(2, 8, 22))
+        invite, _ = await sessions.create_invite("join")
+        auth = await sessions.join(invite, "Fixture", "웹")
+        who = await sessions.find_session(auth.token)
+        friend_id = who["friend_id"]
+        character_id = db.admin("""
+            INSERT INTO marong.characters(friend_id,kind,name,template,traits,status,stage,ready_at)
+            VALUES(%s,'dog','Fixture pet','dog_small','{}','ready','done',now()) RETURNING id
+        """, (friend_id,))[0][0]
+        db.admin("UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s", (character_id, friend_id))
+
+        settings = replace(load_settings(), database_url=db.app_url, reply_wait_s=0)
+        model = ScriptedLLM(lambda _: message([text("일반 합성 답이야.")]))
+        agent = AppAgent(settings, store, FakeEmbeddings(), model)
+        chat = AppChat(store, agent, RoomLocks(), None, AppPush(store), origin=ORIGIN,
+                       sessions=sessions, authentication="session")
+        headers = {"Cookie": f"{COOKIE}={auth.token}", "Origin": ORIGIN}
+        questions = (
+            "강아지가 두 번 토했는데 무슨 병인지 알려 줘.",
+            "오늘 강아지가 사료를 안 먹어. 네가 진단해 줘.",
+            "강아지가 계속 떨면 무슨 약을 먹여야 해?",
+            "기침하는 강아지에게 집에 있는 사람 약을 줘도 돼?",
+            "강아지가 절뚝거려. 상처인지 병인지 알려 줘.",
+        )
+
+        async def ask(client, sentence):
+            response = await client.post("/chat/api/messages", headers=headers,
+                json={"clientId": str(uuid4()), "text": sentence})
+            self.assertEqual(response.status, 202)
+            if chat.tasks:
+                await asyncio.gather(*tuple(chat.tasks))
+            history = await (await client.get("/chat/api/messages?limit=2", headers=headers)).json()
+            return history["messages"][-1]["text"]
+
+        async with TestClient(TestServer(chat.web_app())) as client:
+            for question in questions:
+                self.assertEqual(await ask(client, question), PET_HEALTH_REFERRAL)
+            self.assertEqual(len(model.bodies), 0)
+            for question in ("강아지랑 아침에 산책했어.", "강아지 사진을 봤어. 내가 기침을 해."):
+                self.assertEqual(await ask(client, question), "일반 합성 답이야.")
+            db.admin("UPDATE marong.friend_profiles SET character_id=NULL WHERE friend_id=%s", (friend_id,))
+            self.assertEqual(await ask(client, questions[0]), "일반 합성 답이야.")
+            self.assertEqual(len(model.bodies), 3)
 
     def test_marked_text_is_byte_identical_for_default_and_removed_for_pets(self):
         marked = f"common\n{ADULT_START}\nprivate adult section\n{ADULT_END}\nrest\n"

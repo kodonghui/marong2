@@ -66,7 +66,7 @@ async def one(conn, sql, params=()):
 
 MEMBER_COLUMNS = f"""
     f.id AS friend_id, f.name, p.friend_id AS profile_id, COALESCE(p.bot_name,'마롱이') AS bot_name,
-    p.character_id, p.voice,
+    p.character_id, p.voice, p.usage_unlimited, p.daily_units, p.call_monthly_usd,
     c.id AS caller_id, c.enabled AS call_enabled, c.context_revision,
     {writing_room_key('f.id')} AS room_key,
     {writing_user_key('f.id')} AS user_key

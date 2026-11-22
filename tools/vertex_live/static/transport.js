@@ -1,13 +1,29 @@
 'use strict';
 // Network and PCM transfer run independently of captions, animation and UI work.
 let ws,output,microphone,ready=false,epoch=0,lastAudio=0,openTurn=false,maxGap=0;
-function media(message,transfer=[]){output?.postMessage(message,transfer);}
-self.onmessage=({data})=>{
-  if(data.type==='connect'){
-    output=data.output;microphone=data.microphone;
-    if(microphone)microphone.onmessage=({data:m})=>{
+let firstPCM=false;
+const pending=[];
+function media(message,transfer=[]){
+  if(output){output.postMessage(message,transfer);return;}
+  if(message.type==='clear')pending.length=0;
+  if(pending.length<500)pending.push([message,transfer]);
+}
+function bind(data){
+  if(data.output){
+    output=data.output;
+    for(const [message,transfer] of pending)output.postMessage(message,transfer);
+    pending.length=0;
+  }
+  if(data.microphone){
+    microphone=data.microphone;
+    microphone.onmessage=({data:m})=>{
       if(ready&&ws?.readyState===WebSocket.OPEN&&ws.bufferedAmount<64000)ws.send(m.pcm);
     };
+  }
+}
+self.onmessage=({data})=>{
+  if(data.type==='connect'){
+    bind(data);
     ws=new WebSocket(data.url);ws.binaryType='arraybuffer';
     ws.onopen=()=>self.postMessage({type:'open'});
     ws.onerror=()=>self.postMessage({type:'error'});
@@ -20,6 +36,7 @@ self.onmessage=({data})=>{
         if(packetEpoch>epoch){epoch=packetEpoch;media({type:'clear',epoch});openTurn=false;}
         const now=performance.now();if(openTurn)maxGap=Math.max(maxGap,Math.round(now-lastAudio));
         lastAudio=now;openTurn=true;
+        if(!firstPCM){firstPCM=true;self.postMessage({type:'first_pcm'});}
         const pcm=payload.slice(24);media({type:'pcm',pcm,turn:h.getUint32(8),epoch},[pcm]);
         return;
       }
@@ -33,7 +50,8 @@ self.onmessage=({data})=>{
       }
       self.postMessage({type:'message',data:payload});
     };
-  }else if(data.type==='send'&&ws?.readyState===WebSocket.OPEN)ws.send(data.data);
+  }else if(data.type==='bind')bind(data);
+  else if(data.type==='send'&&ws?.readyState===WebSocket.OPEN)ws.send(data.data);
   else if(data.type==='close'){ready=false;if(ws)ws.close();else self.close();}
 };
 setInterval(()=>self.postMessage({type:'transport_stats',maxArrivalGapMs:maxGap,bufferedAmount:ws?.bufferedAmount||0}),1000);

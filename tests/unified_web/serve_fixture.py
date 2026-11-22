@@ -29,6 +29,7 @@ async def serve(port):
     try:
         db.apply_unified_prerequisites()
         db.apply_unified()
+        db.apply_usage_limit()
         await store.open(wait=True)
         origin = f"http://127.0.0.1:{port}"
         admin_hash = hashlib.sha256(b"test-browser").hexdigest()

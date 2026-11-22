@@ -15,7 +15,7 @@ from .usage import usage_day
 
 
 class AppProfile:
-    def __init__(self, chat, *, character=None, friends=None, google=False, voices=None, daily_limit=None,
+    def __init__(self, chat, *, character=None, friends=None, google=False, voices=None,
                  voice_samples=None):
         self.chat = chat
         self.features = {"character": bool(character), "friends": bool(friends), "decor": chat.pet_app_settings.decor}
@@ -23,7 +23,6 @@ class AppProfile:
             self.features["scenePictures"] = True
         self.google = google
         self.voices = voices or configured_voices()
-        self.daily_limit = chat.usage.limit if chat.usage else daily_limit
         self.voice_samples = Path(voice_samples) if voice_samples else None
 
     async def who(self, req, *, write=False):
@@ -33,10 +32,12 @@ class AppProfile:
         return who
 
     async def read(self, friend):
-        day = usage_day(self.chat.sessions.now(), self.chat.tz)
+        now = self.chat.sessions.now()
+        day = usage_day(now)
         record = await self.chat.store._one("""
             SELECT f.name,f.share,p.bot_name,p.voice,p.friend_code,p.tickets,c.id AS character_id,
-                   c.name AS character_name,c.kind,c.template,c.intro_at,coalesce(u.chat_turns,0) AS chat_turns,
+                   p.usage_unlimited,p.daily_units,p.call_monthly_usd,
+                                      c.name AS character_name,c.kind,c.template,c.intro_at,coalesce(u.chat_turns,0) AS chat_turns,
                    coalesce(u.call_seconds,0) AS call_seconds,coalesce(u.images,0) AS images,
                    coalesce(u.units,0) AS units,r.id AS ring_id,r.answer_until
             FROM marong.friends f JOIN marong.friend_profiles p ON p.friend_id=f.id
@@ -67,9 +68,7 @@ class AppProfile:
         return {"friendName": record["name"], "botName": record["bot_name"], "character": character,
                 "voice": record["voice"], "friendCode": record["friend_code"], "share": record["share"],
                 "features": self.features, "google": google, "pendingRing": ringing,
-                "usageToday": {"day": day.isoformat(), "chatTurns": record["chat_turns"],
-                               "callSeconds": record["call_seconds"], "images": record["images"],
-                               "units": record["units"], "tickets": record["tickets"], "limit": self.daily_limit}}
+                "usageToday": await self.chat.usage.summary(friend, now, day, record)}
 
     async def get(self, req):
         who = await self.who(req)

@@ -43,13 +43,25 @@ async def main():
 
     character = {"bot_name": "콩이", "kind": "dog", "owner_call": "누나", "personality": ["먹보"]}
     with patch.object(server, "PET_VOICE", False):
-        assert server.setup(bot_name="콩이", character=character) == server.setup(bot_name="콩이")
-        default_setup = server.setup(bot_name="마롱이")
+        baseline = server.setup(bot_name="콩이", character=character)["setup"]["systemInstruction"]["parts"]
+        assert baseline[1]["text"] == server.character_section(character)
+        default_setup = server.setup(bot_name="마롱이", character={"bot_name": "마롱이", "kind": None})
     with patch.object(server, "PET_VOICE", True):
         parts = server.setup(bot_name="콩이", character=character)["setup"]["systemInstruction"]["parts"]
         assert parts[1]["text"] == server.character_section(character, pet_voice=True)
         assert "누나랑 함께 사는 강아지야" in parts[1]["text"]
-        assert server.setup(bot_name="마롱이", character={"kind": None}) == default_setup
+        assert server.setup(bot_name="마롱이", character={"bot_name": "마롱이", "kind": None}) == default_setup
+
+    base = "Fixture common\n<!-- adult:start -->\nFixture adult\n<!-- adult:end -->\n"
+    profile = {"bot_name": "보리", "kind": "dog", "tone": "짧게", "traits": {"coatColors": ["크림"]},
+               "has_friends": True}
+    with patch.object(server, "instruction", return_value=base):
+        parts = server.setup(character=profile)["setup"]["systemInstruction"]["parts"]
+        assert parts[0]["text"].startswith("Fixture common\n")
+        assert "Fixture adult" not in parts[0]["text"]
+        assert all(word in parts[1]["text"] for word in ("보리", "강아지", "짧게", "크림"))
+        parts = server.setup(character=dict(profile, kind=None))["setup"]["systemInstruction"]["parts"]
+        assert parts[0]["text"].startswith("Fixture common\nFixture adult\n")
 
     voices = {1: "Aoede", 2: "Sulafat", 3: "Removed"}
 
