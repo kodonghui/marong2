@@ -26,6 +26,7 @@ public class RingActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        AppUpdateWindows.track(this);
         super.onCreate(savedInstanceState);
         ringId = getIntent().getStringExtra(Ring.EXTRA_RING_ID);
         long shownAt = getIntent().getLongExtra(Ring.EXTRA_SHOWN_AT, 0L);
