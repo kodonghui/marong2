@@ -19,6 +19,8 @@ LIMIT = ((IMAGE_MAX + 2) // 3) * 4 + 64 * 1024
 PROMPT_VERSION = "pet-artwork-v2"
 FRONT_PROMPT = """Draw the pet in the first picture as a character in the warm hand-drawn style of the third picture.
 Use the sitting front pose and body position of the second picture.
+Keep the second picture's overall silhouette and margins on the 1024x1024 canvas. Match the position and size of the head,
+body, paws, ears and tail to that pose without moving or scaling the character. Place the real pet's markings within it.
 It must look like this exact pet, not a generic one: keep its coat colors and shade, where its markings are,
 its ear shape, its eye color, its eye shape and its usual expression from the photo.
 Do not make the eyes bigger or rounder than in the photo. Draw markings as fur patterns, never as letters.
