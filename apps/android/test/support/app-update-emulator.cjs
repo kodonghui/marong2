@@ -2,6 +2,8 @@
 
 // Run only on an isolated Android 16 AVD using same-key debug APKs built with
 // server.url=http://10.0.2.2:18787 and cleartext enabled in the fixture copy.
+// Leave at least 35 seconds between runs on the same AVD so Android's silent
+// update throttling does not turn the next install into a confirmation test.
 // node test/support/app-update-emulator.cjs <emulator-serial> <old.apk> <new.apk> <mode>
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
@@ -43,8 +45,7 @@ function version() {
 }
 
 function installJob() {
-  const jobs = adb('shell', 'dumpsys', 'jobscheduler', PACKAGE);
-  return jobs.match(new RegExp(`  JOB #.*?/${INSTALL_JOB}:.*(?:\\n(?!  JOB #).*)*`))?.[0] ?? '';
+  return adb('shell', `dumpsys jobscheduler ${PACKAGE} | grep -A 24 '  JOB #.*/${INSTALL_JOB}:'`);
 }
 
 async function waitFor(probe, timeoutMs, description, interval = 500) {
@@ -65,6 +66,7 @@ async function main() {
     release: null, apk, mode: 'redirect'
   };
   const site = await startEmulatorSite({ port: PORT, update });
+  let siteClosed = false;
   const launch = (...extras) => adb('shell', 'am', 'start', '-a', 'android.intent.action.MAIN',
     '-n', PACKAGE + '/.MainActivity', ...extras);
   try {
@@ -114,14 +116,24 @@ async function main() {
       // Killing this PID, unlike force-stop, retains the job and the downloaded APK.
       adb('shell', `run-as ${PACKAGE} kill -STOP ${pid} && input keyevent KEYCODE_HOME; run-as ${PACKAGE} kill -9 ${pid}`);
       assert.equal(jobState(2213), 'absent', 'Fast job ran during the backup-only trial');
+      await site.close();
+      siteClosed = true;
     } else {
       adb('shell', 'input', 'keyevent', 'KEYCODE_HOME');
     }
-    console.log(`bucket=${adb('shell', 'am', 'get-standby-bucket', PACKAGE)} idle=${adb('shell', 'cmd', 'deviceidle', 'get', 'deep')}`);
+    if (bucket === 'rare' || bucket === 'restricted') {
+      adb('shell', 'am', 'set-standby-bucket', PACKAGE, bucket);
+    }
+    const appliedBucket = adb('shell', 'am', 'get-standby-bucket', PACKAGE);
+    const idle = adb('shell', 'cmd', 'deviceidle', 'get', 'deep');
+    console.log(`bucket=${appliedBucket} idle=${idle}`);
+    if (bucket === 'rare') assert.equal(appliedBucket, '40');
+    if (bucket === 'restricted') assert.equal(appliedBucket, '45');
+    if (mode.endsWith('idle')) assert.equal(idle, 'IDLE');
     try {
-      if (mode === 'normal') {
+      if (mode === 'normal' || mode.endsWith('idle')) {
         await waitFor(() => jobState(2213) !== 'absent' || version() === 10, 60_000,
-          'TC-222: leaving the app should enqueue the fast install in the active bucket');
+          'TC-222: leaving the app should enqueue the fast install when ordinary work may be delayed');
       }
       await waitFor(() => version() === 10, LIMIT_MS - (performance.now() - backgrounded),
         'TC-222: no natural 9 → 10 install within 15 minutes of leaving the app', 2_000);
@@ -145,7 +157,7 @@ async function main() {
     } catch (error) {
       console.error('AVD cleanup failed:', error.message);
     } finally {
-      await site.close();
+      if (!siteClosed) await site.close();
     }
   }
 }

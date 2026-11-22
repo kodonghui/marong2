@@ -16,7 +16,8 @@
 - 선톡은 `notice()`에서 알림과 데이터를 함께 보내요. [Firebase Android 수신 규칙](https://firebase.google.com/docs/cloud-messaging/android/receive-messages#handling_messages)에 따라 백그라운드에선 알림함으로 전달되고 데이터는 누른 뒤 런처 인텐트로 들어와요. 이 경우 `onMessageReceived()`의 확인 호출은 실행되지 않아요. 운영에서 앱을 연 시점과 전송의 인과 관계는 추정이에요.
 - 원인 단계는 04 기능 명세(SPEC-294). 기존 예비 작업은 최소 지연 15분에 작업 기한이 없었고, QA에서 17분 45.651초에도 실행되지 않았어요(TC-222). REQ-313·319·320·321과 FL-147의 적용 범위는 그대로예요.
 - 기존 `74d6451`에서 앱을 내릴 때 프로세스 회수를 재현하자 다운로드 1회 뒤 빠른 작업이 등록되지 않았어요. 홈으로 나간 뒤 900.803초에 코드 9였고, 기한이 없는 예비 작업은 `waiting`이었어요. 설치 작업 강제 실행은 없었어요(TC-598).
-- 수정 중 시도한 Activity 개수 판정(`5d2f721`)은 되돌렸어요. 통화 화면에서 홈으로 나갔다가 곧바로 알림 인텐트로 글 대화를 열고 다시 홈으로 나갔을 때, Android 이벤트에 글 대화의 `onStop`만 기록되고 통화 화면은 `makeInvisible` 뒤 `onStop`이 전달되지 않았어요. 화면 판단은 프로세스 중요도를 유지하고, 종료 콜백에서 즉시 확인하며 Android 반영이 늦으면 900ms 뒤 한 번 더 확인해요.
+- 수정 중 시도한 Activity 개수 판정(`5d2f721`)은 되돌렸어요. 통화 화면에서 홈으로 나갔다가 곧바로 알림 인텐트로 글 대화를 열고 다시 홈으로 나갔을 때, Android 이벤트에 글 대화의 `onStop`만 기록되고 관찰 중 통화 화면은 `makeInvisible` 뒤 `onStop`이 전달되지 않았어요.
+- 프로세스 중요도 방식(`33a92d0`)도 Android 16 강제 Doze에서 같은 상태를 잘못 분류했어요. 창 관리자에서 마롱이 작업은 `visible=false`와 `visibleRequested=false`였고, 프로세스는 `TOP (pause-activity)`에 남았어요. 화면의 `onStop` 뒤에도 빠른 작업 2213이 등록되지 않았고 예비 작업 2212는 `WAIT:DEV_NOT_DOZING`이었어요. Android 12L 이상에선 앱 자체 작업의 표시 여부(`TaskInfo.isVisible()`)를 검사하고, 기존 프로세스 기준은 작업 상태를 확인할 수 없을 때 사용해요. [Android TaskInfo](https://developer.android.com/reference/android/app/TaskInfo#isVisible())
 - 기존 코드 `74d6451`의 Android 16 시험에서 설치 출처가 허용된 상태로 APK를 실제로 내려받고 화면에 표시된 동안 코드 9와 예비 작업 2212를 확인했어요. 대기 버킷 45(`restricted`)와 강제 Doze 상태에서 화면을 내린 뒤 작업 2213이 자연 실행됐고 코드 10으로 바뀌었어요. 앱이 표시된 동안에는 작업 2212의 `Deadline=N/A`를 확인했어요. 이 시험에서 검증 실패와 설치 확인 요청은 관찰되지 않았어요. 삼성 폰의 지연 원인은 기기 로그 확인 전까지 열려 있어요.
 
 ## 시험 목록
