@@ -85,6 +85,7 @@ test('TC-535/551/553: diary writer and sticker editing at 360 px', {skip: !chrom
     const imageUrl = '/chat/decor/v1/star-sticker/sticker.webp';
     const base = '/chat/diary/api/days/' + date;
     let saved = [];
+    let styleMode = 'off';
     await page.route('**/*', async route => {
       const url = new URL(route.request().url());
       assert.equal(url.origin, BASE);
@@ -105,8 +106,17 @@ test('TC-535/551/553: diary writer and sticker editing at 360 px', {skip: !chrom
         return route.fulfill({json: {items: [{kind: 'sticker', id: 'star-sticker', name: '별', thumbUrl: imageUrl}]}});
       }
       if (address === '/chat/diary/api/decor') {
+        if (styleMode === 'off') return route.fulfill({status: 404, json: {code: 'not_found'}});
+        if (styleMode === 'starter') return route.fulfill({json: {
+          background: {id: 'starter-background', imageUrl: null},
+          paper: {id: 'starter-paper', imageUrl: null, style: 'manuscript'},
+          font: {id: 'starter-font', fontUrl: null, family: 'Gaegu'},
+        }});
         return route.fulfill({json: {paper: {imageUrl: '/chat/decor/v1/ivory-paper/paper.webp'},
           font: {fontUrl: '/chat/decor/v1/poorstory-font/font.woff2'}}});
+      }
+      if (address === '/chat/diary/Gaegu-Regular.woff2') {
+        return route.fulfill({contentType: 'font/woff2', body: await readFile(path.join(STATIC, 'diary', 'Gaegu-Regular.woff2'))});
       }
       if (address.endsWith('/font.woff2')) {
         const font = path.join(STATIC, '..', 'decor', 'v1', 'poorstory-font', 'font.woff2');
@@ -127,6 +137,16 @@ test('TC-535/551/553: diary writer and sticker editing at 360 px', {skip: !chrom
     await page.goto(BASE + '/chat/diary/' + date);
     await page.getByRole('heading', {name: '콩이 일기'}).waitFor();
     t.diagnostic('First diary content in routed Chromium: ' + Math.round(performance.now() - started) + ' ms');
+    await page.evaluate(() => document.fonts.ready);
+    const baseline = await page.locator('.paper').screenshot({animations: 'disabled'});
+    styleMode = 'starter';
+    await page.reload();
+    await page.getByRole('button', {name: '스티커', exact: true}).waitFor();
+    await page.evaluate(() => document.fonts.ready);
+    const starter = await page.locator('.paper').screenshot({animations: 'disabled'});
+    assert.deepEqual(starter, baseline, 'the diary card with starter decor matches the disabled feature');
+    styleMode = 'custom';
+    await page.reload();
     await page.getByText('오늘은 그림을 못 그렸어요').waitFor();
     assert.equal(await page.getByRole('button', {name: /다시 그리기/}).count(), 0);
     await page.getByRole('button', {name: '스티커', exact: true}).click();

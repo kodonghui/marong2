@@ -175,6 +175,8 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
         auth = await sessions.join((await sessions.create_invite("join"))[0], "시험친구", "웹")
         friend = (await sessions.find_session(auth.token))["friend_id"]
         member = {"Cookie": f"{COOKIE}={auth.token}", "Origin": ORIGIN}
+        joined = await sessions.join((await sessions.create_invite("join"))[0], "다른시험친구", "웹")
+        other = {"Cookie": f"{COOKIE}={joined.token}", "Origin": ORIGIN}
         admin = {"Cf-Access-Jwt-Assertion": "fixture", "Origin": ORIGIN}
         access = SimpleNamespace(check=AsyncMock(return_value=("ok", "a" * 64)))
         chat = AppChat(store, SimpleNamespace(friend_cards=None), RoomLocks(), access, AppPush(store),
@@ -252,6 +254,14 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             await reactions.finish(due, "sent", scene)
             self.assertEqual(db.admin("SELECT fallback,state,cost_usd FROM marong.scene_pictures WHERE id=%s", (scene,)),
                              [(True, "done", 0)])
+            db.admin("UPDATE marong.outfit_firsts SET state='waiting', finished_at=NULL, next_at=now() WHERE item_id='top-fixture'")
+            delayed, = await reactions.due(friend)
+            await reactions.defer(delayed, sessions.now() - timedelta(seconds=1))
+            delayed, = await reactions.due(friend)
+            self.assertEqual(delayed["attempts"], 1)
+            await reactions.defer(delayed, sessions.now() + timedelta(hours=1))
+            self.assertEqual(db.admin("SELECT state, attempts FROM marong.outfit_firsts WHERE item_id='top-fixture'"),
+                             [("blocked", 1)])
             style = {"backgroundId": "starter-background", "paperId": "starter-paper", "fontId": "starter-font"}
             self.assertEqual((await client.put("/chat/diary/api/decor", headers=member, json=style)).status, 200)
             self.assertEqual((await client.post("/chat/api/shop/sticker-fixture/claim", headers=member)).status, 201)
@@ -275,6 +285,13 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             origin_mismatch = {**member, "Origin": "https://other.invalid"}
             self.assertEqual((await client.put(path, headers=origin_mismatch, json={"stickers": [sticker]})).status, 403)
             self.assertEqual((await client.put(path, headers=member, json={"stickers": [sticker] * 11})).status, 409)
+            self.assertEqual((await client.get(path, headers=other)).status, 404)
+            self.assertEqual((await client.put(path, headers=other, json={"stickers": [sticker]})).status, 404)
+            for key, value in (("x", 1001), ("y", -1), ("scale", 49), ("rotation", 181)):
+                with self.subTest(key=key):
+                    response = await client.put(path, headers=member, json={"stickers": [{**sticker, key: value}]})
+                    self.assertEqual(response.status, 400)
+            db.admin("UPDATE marong.diaries SET hidden=true WHERE id=%s", (diary,))
             self.assertEqual((await client.put(path, headers=member, json={"stickers": [sticker]})).status, 200)
             self.assertEqual((await (await client.get(path, headers=member)).json())["stickers"][0]["x"], 100)
             await client.put(path, headers=member, json={"stickers": []})
