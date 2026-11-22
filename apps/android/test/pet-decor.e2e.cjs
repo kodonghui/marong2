@@ -5,6 +5,7 @@ const {readFile} = require('node:fs/promises');
 const path = require('node:path');
 const {test} = require('node:test');
 const {performance} = require('node:perf_hooks');
+const {startCallSite} = require('./support/call-site.cjs');
 
 let chromium;
 try { ({chromium} = require('playwright')); } catch {}
@@ -12,6 +13,30 @@ try { ({chromium} = require('playwright')); } catch {}
 const BASE = 'http://127.0.0.1:41798';
 const STATIC = path.join(__dirname, '..', '..', '..', 'marong', 'app_chat_static');
 const BLANK = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aLhcAAAAASUVORK5CYII=', 'base64');
+
+test('TC-548: call portrait layers draw in order and a missing asset leaves the rest visible', {skip: !chromium}, async () => {
+  const site = await startCallSite();
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage({viewport: {width: 360, height: 780}, isMobile: true});
+    const source = id => '/chat/decor/v1/' + id + '/dog_small.png';
+    const body = source('blue-top'), neck = source('lost-scarf'), head = source('berry-beanie');
+    await page.route('**/chat/api/profile', route => route.fulfill({json: {
+      botName: '콩이', character: {id: 9, outfit: {body: {layerUrl: body}, neck: {layerUrl: neck}, head: {layerUrl: head}}},
+    }}));
+    await page.route('**/chat/decor/**', route => new URL(route.request().url()).pathname === neck
+      ? route.fulfill({status: 404}) : route.fulfill({contentType: 'image/png', body: BLANK}));
+    await page.goto(site.url);
+    await page.locator(`.outfit-layer[src="${head}"]`).waitFor();
+    await page.waitForFunction(() => document.querySelectorAll('.outfit-layer').length === 2);
+    const layers = await page.locator('.outfit-layer').evaluateAll(images => images.map(image => image.getAttribute('src')));
+    assert.deepEqual(layers, [body, head]);
+    assert.equal(await page.locator('#face').isVisible(), true);
+  } finally {
+    await browser.close();
+    await site.close();
+  }
+});
 
 test('TC-546/548: claim an item, wear it, and display its layer at 360 px', {skip: !chromium}, async () => {
   const browser = await chromium.launch();
@@ -155,6 +180,14 @@ test('TC-535/551/553: diary writer and sticker editing at 360 px', {skip: !chrom
     await page.locator('.paper .diary-sticker').waitFor();
     assert.deepEqual(saved, [{itemId: 'star-sticker', x: 500, y: 500, scale: 100, rotation: 0}]);
     await page.getByRole('button', {name: '스티커', exact: true}).click();
+    const sticker = page.locator('.sticker-movable').first();
+    const bounds = await sticker.boundingBox();
+    const board = await page.locator('.paper').boundingBox();
+    await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(board.x - 20, bounds.y + bounds.height / 2, {steps: 4});
+    await page.mouse.up();
+    assert.equal(await sticker.evaluate(element => element.style.left), '0%');
     await page.getByRole('button', {name: '별', exact: true}).click();
     page.once('dialog', async dialog => {
       assert.equal(dialog.message(), '안 남기고 나갈까?');

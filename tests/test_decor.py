@@ -89,6 +89,14 @@ def assets(root):
 
 
 class DecorTests(unittest.IsolatedAsyncioTestCase):
+    def test_all_shipped_items_pass_the_same_catalog_validation(self):
+        catalog = DecorCatalog()
+        self.assertEqual(len(catalog.items), 48)
+        self.assertEqual(sum(item.starter for item in catalog.items.values()), 3)
+        for item in catalog.items.values():
+            with self.subTest(item=item.id):
+                self.assertEqual(catalog.check(item), [])
+
     async def test_reaction_respects_daily_cap_and_precedes_a_topic(self):
         now = datetime(2026, 11, 22, 12, tzinfo=KST)
         room = dict(friend_id=1, room_key="fixture", opted_in_at=now-timedelta(days=2),
@@ -184,6 +192,8 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
         async with TestClient(TestServer(chat.web_app())) as client:
             self.assertEqual((await client.get("/chat/api/shop", headers=member)).status, 404)
             self.assertEqual((await client.get("/chat/diary/api/decor", headers=member)).status, 404)
+            image = "/chat/decor/v1/hat-fixture/dog_small.png"
+            self.assertEqual((await client.get(image, headers=member)).status, 404)
             chat.decor.catalog = catalog
             await chat.decor.seed()
             await chat.decor.seed()
@@ -203,7 +213,6 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
                     with self.subTest(path=path, origin=headers.get("Origin")):
                         error = await method(path, headers=headers, json={})
                         self.assertEqual((error.status, (await error.json())["code"]), (403, "cross_site"))
-            image = "/chat/decor/v1/hat-fixture/dog_small.png"
             self.assertEqual((await client.get(image)).status, 401)
             response = await client.get(image, headers=member)
             self.assertEqual((response.status, response.content_type), (200, "image/png"))
@@ -226,6 +235,11 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(sorted(response.status for response in claims), [200, 201])
             self.assertEqual((await client.post("/chat/admin/api/items/hat-fixture/unlist", headers=admin)).status, 200)
             self.assertEqual((await client.post(path, headers=member)).status, 404)
+            listed = await client.post("/chat/admin/api/items/hat-fixture/list", headers=admin)
+            self.assertEqual((listed.status, (await listed.json())["state"]), (200, "listed"))
+            missing_item = await client.post("/chat/admin/api/items/absent-fixture/list", headers=admin)
+            self.assertEqual(missing_item.status, 404)
+            self.assertEqual((await client.post("/chat/admin/api/items/hat-fixture/unlist", headers=admin)).status, 200)
             self.assertEqual((await client.post("/chat/api/shop/top-fixture/claim", headers=member)).status, 201)
             character = db.admin("""
                 INSERT INTO marong.characters(friend_id,kind,status,stage,ready_at,template,name,traits)
@@ -243,6 +257,14 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             closet = await (await client.get("/chat/api/closet", headers=member)).json()
             self.assertEqual(closet["characterId"], character)
             self.assertIn("hat-fixture", [row["id"] for row in closet["items"]])
+            starter_closet = await (await client.get("/chat/api/closet", headers=other)).json()
+            self.assertIsNone(starter_closet["outfit"])
+            self.assertEqual({row["kind"] for row in starter_closet["items"]}, {"background", "paper", "font"})
+            misplaced = await client.put(outfit, headers=member, json={**picks, "head": "top-fixture"})
+            self.assertEqual((misplaced.status, (await misplaced.json())["code"]), (400, "invalid_input"))
+            unowned = await client.put(outfit, headers=member, json={**picks, "head": "unknown-fixture"})
+            self.assertEqual((unowned.status, (await unowned.json())["code"]), (409, "not_owned"))
+            self.assertEqual((await client.put(outfit, headers=other, json=picks)).status, 404)
             db.admin("UPDATE marong.outfit_firsts SET next_at=now() WHERE state='waiting'")
             expression = BytesIO()
             Image.new("RGBA", (1024, 1024), "#e6ac87").save(expression, "PNG")
@@ -264,6 +286,11 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
                              [("blocked", 1)])
             style = {"backgroundId": "starter-background", "paperId": "starter-paper", "fontId": "starter-font"}
             self.assertEqual((await client.put("/chat/diary/api/decor", headers=member, json=style)).status, 200)
+            style_path = "/chat/diary/api/decor"
+            no_ownership = await client.put(style_path, headers=other, json={**style, "fontId": "unknown-fixture"})
+            self.assertEqual((no_ownership.status, (await no_ownership.json())["code"]), (409, "not_owned"))
+            wrong_kind = await client.put(style_path, headers=other, json={**style, "fontId": "starter-background"})
+            self.assertEqual((wrong_kind.status, (await wrong_kind.json())["code"]), (400, "invalid_input"))
             self.assertEqual((await client.post("/chat/api/shop/sticker-fixture/claim", headers=member)).status, 201)
             day = sessions.now().astimezone(KST).date() - timedelta(days=1)
             diary = db.admin("""
