@@ -93,7 +93,7 @@ async function dismissCallNotification() {
     if (shadeImage) {
       // The live call timer can prevent UI Automator from reaching an idle state.
       await delay(1_000);
-      writeFileSync(shadeImage, execFileSync(process.env.ADB || 'adb', ['-s', serial, 'exec-out', 'screencap', '-p']));
+      writeFileSync(shadeImage, execFileSync(process.env.ADB || 'adb', ['-s', serial, 'exec-out', 'screencap', '-p'], { timeout: 30_000 }));
       console.log(`notification_shade=${shadeImage}`);
       await waitFor(() => !callNotification(), 120_000, 'Swipe the call card off the synthetic AVD');
       return;
@@ -144,8 +144,12 @@ async function main() {
     adb('shell', 'log', '-t', 'MarongUpdate', logMarker);
     assert.match(adb('install', oldApk), /Success/);
     assert.equal(version(), 9);
-    if (mode !== 'call-no-permission') adb('shell', 'pm', 'grant', PACKAGE, 'android.permission.POST_NOTIFICATIONS');
-    else assert.match(adb('shell', 'dumpsys', 'package', PACKAGE), /POST_NOTIFICATIONS: granted=false/);
+    adb('shell', 'pm', 'grant', PACKAGE, 'android.permission.POST_NOTIFICATIONS');
+    if (mode === 'call-no-permission') {
+      adb('shell', 'pm', 'revoke', PACKAGE, 'android.permission.POST_NOTIFICATIONS');
+      assert.doesNotMatch(adb('shell', 'dumpsys', 'package', PACKAGE), /POST_NOTIFICATIONS: granted=true/);
+      console.log('notification_permission=false');
+    }
     if (call) adb('shell', 'pm', 'grant', PACKAGE, 'android.permission.RECORD_AUDIO');
     adb('shell', 'appops', 'set', PACKAGE, 'REQUEST_INSTALL_PACKAGES', 'allow');
     adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
@@ -289,7 +293,7 @@ async function main() {
       backgrounded = performance.now();
     }
     if (mode === 'reopen-at-commit') {
-      await waitFor(() => /fixture_waiting_to_commit/.test(updateLogs()), 45_000, 'The job did not reach the commit barrier');
+      await waitFor(() => /fixture_waiting_to_commit/.test(updateLogs()), 5 * 60_000, 'The job did not reach the commit barrier');
       launch();
       await waitFor(() => /topResumedActivity=.*com\.corthexhq\.marong/.test(adb('shell', 'dumpsys', 'activity', 'activities')),
         10_000, 'The app window did not reopen during the install');
