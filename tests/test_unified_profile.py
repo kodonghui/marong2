@@ -114,6 +114,7 @@ class ProfileTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(db.close)
         db.apply_unified_prerequisites()
         db.apply_unified()
+        db.apply_usage_limit()
         store = UnifiedStore(db.app_url, call_bridge=True)
         await store.open(wait=True)
         self.addAsyncCleanup(store.close)
