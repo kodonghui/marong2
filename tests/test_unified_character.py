@@ -19,8 +19,9 @@ from marong.app_chat import AppChat
 from marong.app_push import AppPush
 from marong.app_session import AppSessions, COOKIE
 from marong.character.artwork import PROMPT_VERSION, ImageEditor
-from marong.character.graphics import EXPRESSIONS, TEMPLATE_IDS, Templates, alpha, fit_score, head_in_box
+from marong.character.graphics import EXPRESSIONS, TEMPLATE_IDS, InvalidArtwork, Templates, alpha, fit_score, head_in_box
 from marong.character.http import CharacterAPI
+from marong.character.traits import MAX_COAT_COLORS, TEXT_LIMITS, output_schema, valid_result
 from marong.character.worker import CharacterWorker, photo_selection
 from marong.unified_store import UnifiedStore
 from pg import TestDB
@@ -43,6 +44,25 @@ class TestCharacter(unittest.IsolatedAsyncioTestCase):
             picked = photo_selection(21, ["photo_1", "photo_2"], 2, [0.9, 0.9, 0.5, 0.5])
         self.assertEqual(picked, {"photo": "photo_1", "box": [0, 0, 1, 1]})
         self.assertIn("pet_box_fallback character=21", logs.output[0])
+
+    async def test_retries_a_returned_image_without_transparency(self):
+        templates = Templates()
+        front = templates.front("dog_small")
+        draw = AsyncMock(side_effect=[InvalidArtwork("unexpected_alpha"), front])
+        result = await CharacterWorker.fitted(None, draw, templates.mask("dog_small"), .75)
+        self.assertEqual(result, front)
+        self.assertEqual(draw.await_count, 2)
+
+    def test_vision_schema_explains_limits_enforced_after_parsing(self):
+        fields = output_schema()["properties"]
+        for field, max_length in TEXT_LIMITS.items():
+            self.assertIn(f"{max_length}자 이하", fields[field]["description"])
+            self.assertTrue(valid_result(dict(OBSERVED, **{field: "가" * max_length})))
+            self.assertFalse(valid_result(dict(OBSERVED, **{field: "가" * (max_length + 1)})))
+
+        self.assertEqual(fields["coatColors"]["minItems"], 1)
+        self.assertIn(f"1개에서 {MAX_COAT_COLORS}개까지", fields["coatColors"]["description"])
+        self.assertFalse(valid_result(dict(OBSERVED, coatColors=["크림", "크림"])))
 
     def test_all_five_templates_match_their_masks(self):
         templates = Templates()

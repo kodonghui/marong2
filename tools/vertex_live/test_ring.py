@@ -112,7 +112,13 @@ class Store:
             raise self.error
         return dict(self.ring) if self.ring else None
 
-    async def start_segment(self, p, call_id, client_id, model):
+    async def segment_ready(self, segment):
+        pass
+
+    async def record_connection(self, segment, **report):
+        pass
+
+    async def start_segment(self, p, call_id, client_id, model, **options):
         return 'segment-1'
 
     async def seed(self, p, call_id):
@@ -286,7 +292,7 @@ async def check_http(server):
                         break
                     await asyncio.sleep(.01)
             page = await (await client.get('/')).text()
-            assert '/app.js?v=20261119-call-wait1' in page
+            assert f'/app.js?v={server.ASSET_VERSIONS["app.js"]}' in page
             script = await (await client.get('/app.js')).text()
             assert '03-listening' not in script and "faceNames={1:'01-neutral',4:'04-thinking',15:" in script  # 삐뚤어진 '듣는 얼굴'을 다시 쓰지 않음
     assert seen == [RING_ID, None, None], seen

@@ -1,5 +1,6 @@
 package com.corthexhq.marong;
 
+import android.content.Context;
 import android.webkit.WebView;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
@@ -32,8 +33,11 @@ public class MarongWindowPlugin extends Plugin {
         // Only the call window holds calls; the chat window asks for no microphone.
         installChromeClient(!chatWindow);
         String appUrl = bridge.getServerUrl();
-        String script = readAsset(PAGE_SCRIPT_ASSET);
+        String script = readAsset(getContext(), PAGE_SCRIPT_ASSET);
         if (appUrl != null && script != null) {
+            if (getActivity() instanceof MainActivity activity) {
+                script = activity.coldRingScript() + script;
+            }
             installPageScript(bridge.getWebView(), appUrl, script);
         } else {
             Logger.error(TAG, "Page script not installed", null);
@@ -73,8 +77,8 @@ public class MarongWindowPlugin extends Plugin {
         );
     }
 
-    private String readAsset(String name) {
-        try (InputStream in = getContext().getAssets().open(name); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+    static String readAsset(Context context, String name) {
+        try (InputStream in = context.getAssets().open(name); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             byte[] buffer = new byte[8192];
             int read;
             while ((read = in.read(buffer)) != -1) {

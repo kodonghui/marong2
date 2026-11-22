@@ -48,10 +48,15 @@ class TestDB:
             ROOT / "marong" / "call" / "migrations" / "008_unified.sql",
         )
 
+    def apply_usage_limit(self) -> None:
+        self.apply_sql(
+            ROOT / "marong" / "migrations" / "021_usage_limit.sql",
+            ROOT / "marong" / "call" / "migrations" / "009_usage_limit.sql",
+        )
+
     def apply_pet_app_prerequisites(self) -> None:
-        bot = ROOT / "marong" / "migrations"
-        call = ROOT / "marong" / "call" / "migrations"
-        self.apply_sql(bot / "021_usage_limit.sql", call / "009_usage_limit.sql", call / "010_call_connect.sql")
+        self.apply_usage_limit()
+        self.apply_sql(ROOT / "marong" / "call" / "migrations" / "010_call_connect.sql")
 
     def apply_pet_app(self) -> None:
         self.apply_sql(ROOT / "marong" / "migrations" / "022_pet_app.sql")
