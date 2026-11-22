@@ -20,6 +20,7 @@ from .llm import text_of
 
 WEATHER = ("sunny", "cloudy", "rain", "snow", "rainbow")
 PROMPT_VERSION = "diary-v1"
+PET_PROMPT_VERSION = "pet-diary-v1"
 MAX_IMAGE = 5 * 1024 * 1024
 IMAGE_MODEL = "gpt-image-2.5-flare"
 IMAGE_URL = "https://api.openai.com/v1/images/edits"
@@ -58,9 +59,19 @@ def _friend_rule(has_look):
             "친구나 다른 사람은 넣지 말고 마롱이와 물건·장소·날씨만 그려.")
 
 
-def write_prompt(name: str, has_look: bool, persona: Path) -> str:
+def write_prompt(name: str, has_look: bool, persona: Path, *, character=None) -> str:
     name = " ".join((name or "").split())[:40] or "친구"
     prompt = WRITE_PROMPT.format(name=name, friend_rule=_friend_rule(has_look))
+    if character:
+        from .unified_prompt import PET_LINES, clean
+        pet_name = clean(character["name"], 12)
+        kind = "강아지" if character["kind"] == "dog" else "고양이"
+        owner = clean(character.get("owner_call"), 10)
+        prompt = prompt.replace("너는 마롱이야", f"너는 {pet_name}({kind})이야", 1)
+        prompt = prompt.replace("마롱이 1인칭(나)", f"{pet_name} 1인칭(나)", 1)
+        if owner:
+            prompt += f"\n- 친구를 부를 때는 '{owner}'라고 불러."
+        return prompt + "\n" + "\n".join(f"- {line}" for line in PET_LINES)
     try:
         source = persona.read_text(encoding="utf-8")
     except (OSError, UnicodeError):
@@ -197,8 +208,8 @@ class DiaryModels:
         await self.text.close()
         await self.http.aclose()
 
-    async def write(self, name, has_look, bundle, *, previous=None, reason=None) -> ModelResult:
-        system = write_prompt(name, has_look, self.prompt_path)
+    async def write(self, name, has_look, bundle, *, previous=None, reason=None, character=None) -> ModelResult:
+        system = write_prompt(name, has_look, self.prompt_path, character=character)
         if reason and reason.startswith("scene:"):
             system += "\n이번에는 글과 제목은 이미 정해졌어. 실패 코드에 맞춰 장면만 다시 써."
             data = bundle + "\n" + json.dumps({"previous_output": previous, "validation_code": reason},

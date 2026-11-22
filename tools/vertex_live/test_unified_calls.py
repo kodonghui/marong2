@@ -41,6 +41,17 @@ async def main():
     with tempfile.TemporaryDirectory() as directory, patch.object(Path, "home", return_value=Path(directory)):
         import server
 
+    character = {"bot_name": "콩이", "kind": "dog", "owner_call": "누나", "personality": ["먹보"]}
+    with patch.object(server, "PET_VOICE", False):
+        baseline = server.setup(bot_name="콩이", character=character)["setup"]["systemInstruction"]["parts"]
+        assert baseline[1]["text"] == server.character_section(character)
+        default_setup = server.setup(bot_name="마롱이", character={"bot_name": "마롱이", "kind": None})
+    with patch.object(server, "PET_VOICE", True):
+        parts = server.setup(bot_name="콩이", character=character)["setup"]["systemInstruction"]["parts"]
+        assert parts[1]["text"] == server.character_section(character, pet_voice=True)
+        assert "누나랑 함께 사는 강아지야" in parts[1]["text"]
+        assert server.setup(bot_name="마롱이", character={"bot_name": "마롱이", "kind": None}) == default_setup
+
     base = "Fixture common\n<!-- adult:start -->\nFixture adult\n<!-- adult:end -->\n"
     profile = {"bot_name": "보리", "kind": "dog", "tone": "짧게", "traits": {"coatColors": ["크림"]},
                "has_friends": True}

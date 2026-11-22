@@ -258,6 +258,18 @@
     groups.replaceChildren(nameGroup(), link('통화 목소리 · ' + (data.voiceLabel || data.voice || '기본'),
       '/chat/me/voice', 'btn2'), codes(), usage());
     if (data.features.character) groups.insertBefore(wardrobe(), groups.children[1]);
+    if (data.character) {
+      const introPath = '/chat/character/' + data.character.id + '/intro';
+      const intro = node('div', '', 'card');
+      intro.append(link('아이 소개', introPath, 'btn2'));
+      if (data.character.introMissing) {
+        const name = data.character.name;
+        intro.append(node('p', name + '에 대해 알려 주면 ' + endLetter(name, '이가', '가') + ' 직접 말할게', 'caption'),
+          link('알려 주기', introPath, 'btnt'));
+      }
+      if (data.features.decor) intro.append(link('꾸미기', '/chat/closet', 'btn2'));
+      groups.insertBefore(intro, groups.children[1]);
+    }
     if (data.google !== 'off') {
       const connected = data.google === 'connected' ? '연결됨' : '연결 안 됨';
       groups.append(link('구글 캘린더 · ' + connected, '/google/', 'btn2'));
@@ -273,6 +285,13 @@
       if (!editing) {
         data = reply.body;
         render();
+        try {
+          const saved = sessionStorage.getItem('marong.intro.saved');
+          if (saved) {
+            sessionStorage.removeItem('marong.intro.saved');
+            signal(notice, endLetter(saved, '이가', '가') + ' 새로 기억했어');
+          }
+        } catch {}
         const voices = await request('/chat/api/voices');
         const selected = voices.body?.voices?.find((voice) => voice.name === data.voice)
           || voices.body?.voices?.find((voice) => voice.default);

@@ -13,7 +13,9 @@ import jwt
 import psycopg
 from marong.app_session import COOKIE as SESSION_COOKIE, SessionError, auth_mode, find_session, identify_request
 from marong.call_voice import call_capacity, chosen_voice
-from marong.unified_prompt import CHARACTER_PROFILE, character_section, clean, common_prompt, marker_positions, particle
+from marong.pet_app_settings import pet_voice_enabled
+from marong.unified_prompt import (ACCEPTED_FRIENDSHIPS, CHARACTER_PROFILE, PET_INTRO_COLUMNS, character_section, clean,
+                                  common_prompt, marker_positions, particle)
 from marong.usage import configured_call_limit, effective_limits
 from live_session import LiveSession, BUILD
 from call_cost import BLOCKED, budget_status, personal_budget_blocked
@@ -66,6 +68,7 @@ INSTRUCTION_FILE=HERE/'call_instruction.md'
 SEARCH=call_search.from_env()
 SHOP=configured_reader()
 WAIT_SOUND=os.getenv('MARONG_CALL_WAIT_SOUND')=='1'
+PET_VOICE=pet_voice_enabled(os.environ)
 
 
 PERSONAL_BUDGET=configured_call_limit()
@@ -297,7 +300,8 @@ def setup(handle=None,seed='',memory=False,hangup=False,search=None,ring=None,tu
       'contextWindowCompression':{'triggerTokens':8192,'slidingWindow':{'targetTokens':4096}},
       'sessionResumption':resume,'inputAudioTranscription':{},'outputAudioTranscription':{},'explicitVadSignal':True}}
     if character is not None:
-        result['setup']['systemInstruction']['parts'].append({'text': character_section(character)})
+        result["setup"]["systemInstruction"]["parts"].append(
+            {"text": character_section(character, pet_voice=PET_VOICE)})
     elif bot_name and bot_name != '마롱이':
         name = clean(bot_name, 12)
         if name:
@@ -421,9 +425,11 @@ async def live(req):
             resumed_voice=await memory_store.resume_voice(person,client_id)
         voice=resumed_voice or chosen_voice(authn.get('voice'))
         bot_name=resume.get('bot_name') or authn.get('bot_name')
-        character = resume.get('character')
-        if 'character' not in resume and person and person.unified:
-            character = await memory_store.one(CHARACTER_PROFILE, (os.getenv('MARONG_FRIENDS') == '1', person.friend_id))
+        character = resume.get("character")
+        if "character" not in resume and person and person.unified:
+            columns = PET_INTRO_COLUMNS if PET_VOICE else ""
+            query = CHARACTER_PROFILE.format(intro_columns=columns, has_friends=ACCEPTED_FRIENDSHIPS)
+            character = await memory_store.one(query, (os.getenv("MARONG_FRIENDS") == "1", person.friend_id))
         configure=partial(setup,voice=voice,bot_name=bot_name,character=character)
         session=LiveSession(ws,authn['owner'],memory_store,person,configure,google_headers,resume,{},LOCATION,MODEL,voice,client_id,search=SEARCH,ring=ring)
         session.shop=SHOP

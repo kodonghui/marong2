@@ -64,6 +64,8 @@ paths:
           $ref: '#/components/responses/LoginRequired'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/NotReady'
         '500':
           $ref: '#/components/responses/Internal'
         '503':

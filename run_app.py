@@ -52,6 +52,7 @@ log = logging.getLogger("marong.runtime")
 
 class AppAgent(PrivateChatAgent):
     schedule_source = "app"
+    pet_voice = False
     direct_system = (
         "지금은 앱과 웹에서 마롱이와 하는 개인 대화야. 다른 친구의 기록을 찾아 주겠다고 말하지 마. "
         "친구처럼 바로 이야기하고, 사용법이나 먼저 연락하는 설정을 먼저 설명하지 마. "
@@ -91,13 +92,15 @@ class AppAgent(PrivateChatAgent):
 
     async def _friend_system(self, system, friend, room, *, private):
         if private and friend:
-            profile = await asyncio.wait_for(self.store.character_prompt(friend, os.getenv("MARONG_FRIENDS") == "1"), .5)
+            profile = await asyncio.wait_for(self.store.character_prompt(
+                friend, os.getenv("MARONG_FRIENDS") == "1", pet_voice=self.pet_voice), .5)
             if profile:
                 if profile["kind"]:
                     pet_prompt = await asyncio.to_thread(self.persona, pet=True)
                     if system and system[0].get("cache_control"):
                         system = [{**system[0], "text": pet_prompt}, *system[1:]]
-                system = [*system[:-1], {"type": "text", "text": character_section(profile)}, system[-1]]
+                section = character_section(profile, pet_voice=self.pet_voice)
+                system = [*system[:-1], {"type": "text", "text": section}, system[-1]]
         return await super()._friend_system(system, friend, room, private=private)
 
 
@@ -158,6 +161,7 @@ async def serve(settings, credentials, options, secret, authentication, home, st
             worker = MemoryWorker(settings, memory_store, emb, llm)
         agent = AppAgent(settings, store, emb, llm, on_saved=worker.kick if worker else None,
                          first_replies=greeting_settings(), google=google, shop=shop, web=web)
+        agent.pet_voice = pet_settings.pet_voice
         agent.route = route
         agent.ring = options["ring"]
         if warm:
@@ -234,7 +238,7 @@ async def serve(settings, credentials, options, secret, authentication, home, st
             jobs.update(proactive=proactive.run, reminders=reminders.run)
             if diary_enabled:
                 diary = DiaryWorker(store, diary_models, delivery, pet_settings.diary_image_budget,
-                                    unified=True)
+                                    unified=True, pet_voice=pet_settings.pet_voice)
                 jobs["diary"] = diary.run
             call_texts = await store._one("SELECT to_regclass('marong.call_texts') IS NOT NULL AS ready")
             if call_texts["ready"]:
