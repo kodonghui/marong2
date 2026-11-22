@@ -1,6 +1,6 @@
 # 마롱이 앱 자동 업데이트: DB 표
 
-상태: 초안(2026-11-22 KST, Claude 마롱이 봇, 기능 변경. 2026-11-23 코드 검토 반영, PR #101 코멘트). 마이그레이션은 파일로만 있고 서버 DB에는 적용하지 않았어요. 적용은 구현 뒤 서버 반영(SPEC-442 ①)이에요.
+상태: 초안(2026-11-22 KST, Claude 마롱이 봇, 기능 변경. 2026-11-23 코드 검토와 보안 검토 반영, PR #101 댓글). 마이그레이션은 파일로만 있고 서버 DB에는 적용하지 않았어요. 적용은 구현 뒤 서버 반영(SPEC-442 ①)이에요.
 원본: [`marong/migrations/023_app_update_events.sql`](../../marong/migrations/023_app_update_events.sql). 이 그림은 그 파일에서 손으로 옮긴 것이고, 다르면 SQL이 맞아요.
 입력: [기능 명세](../04-functional-spec/app-update.md#8-2026-11-22-기능-변경-게시-즉시-업데이트와-업데이트-상태) SPEC-430\~438, [도메인](../01-domain/app-update.md) CTX-021, TERM-219\~224, 결정 D126(05 단계에 새 표).
 사람 보기: GitHub의 Mermaid 그림으로 봐요. 이 변경의 검토와 체크포인트는 Orca 마롱이 항목 2와 설계 PR #101에서 해요(동희님 2026-11-22, [도메인 9.3](../01-domain/app-update.md#93-결정)).
@@ -59,6 +59,16 @@ DB 제약 `app_update_events_kind_check`가 이 표와 다른 줄을 막아요. 
 - 한 폰·버전·시도에 업데이트 데이터 메시지는 많아야 한 번(REQ-553): 감시가 보내기 전에 `pushed` 줄을 먼저 더하고, 유일 인덱스 `app_update_events_push_attempt`(설치 ID, 버전 코드, 시도 번호, 종류. `pushed`·`push_failed` 줄만)가 한 줄만 받아요. 줄을 더하지 못하면 보내지 않아서, 봇이 다시 시작하거나 기록 쓰기가 실패해도 두 번 보내지 않아요. 보낸 뒤 실패를 적기 전에 멈추면 그 시도는 보낸 것으로 쳐요(SPEC-430). 시도는 3번까지예요.
 - 설치됨은 한 곳에만(SPEC-435): `state` 칸에 `installed`가 없고, `installed` 줄은 유일 인덱스 `app_update_events_installed_once`(설치 ID, 앱 버전)로 한 폰·앱 버전에 한 줄이에요. 웹 페이지 보고와 앱의 `installed` 보고가 둘 다 새 버전을 실어 와도 한 줄이에요.
 - 친구가 바뀐 폰(SPEC-438): `friend_id`는 그 일이 있던 때의 친구예요. TBL-101의 `friend_id`는 폰이 다른 친구로 다시 로그인하면 바뀌어요(기기 보고의 `ON CONFLICT (install_id) DO UPDATE SET friend_id = …`, `marong/app_store.py`). 그래서 관리자 읽기는 폰의 줄 가운데 `friend_id`가 지금 친구와 같은 줄만 보여 주고, 앞 친구 때의 줄은 지우지 않고 표에 남겨요. 감시의 한 번 규칙은 설치 ID로만 봐요(같은 폰, 같은 FCM 설치 ID라 친구가 바뀌어도 다시 보내지 않음).
+- 서버가 지키는 기록 상한(SPEC-434·435, 2026-11-23 보안 검토): 버전 기록에 없는 버전 코드와 버전 이름은 남기지 않고, 같은 폰·버전의 마지막 상태·번호와 같은 `state` 줄은 건너뛰고, API-105가 남기는 줄은 친구마다 1시간에 30줄, `fetched`는 친구·버전마다 1시간에 한 줄이에요. DB 제약이 아니라 봇 코드의 규칙이에요.
+- 보관과 정리: `at`이 1년보다 오래된 줄은 매달 한 번 지워요. 봇 계정 `marong`은 지울 수 없어서, 정리는 표 소유 역할 `marong_owner`로 바꿀 수 있는 관리자 계정이 서버 타이머로 돌려요(TASK-486). 지금 최신 릴리스 버전 코드 이상의 `pushed`·`push_failed` 줄은 남겨요(지우면 감시가 다시 보냄).
+
+```sql
+-- 매달 한 번, 관리자 계정으로(봇 계정 아님). :latest 는 release.json의 버전 코드
+SET ROLE marong_owner;
+DELETE FROM marong.app_update_events
+ WHERE at < now() - interval '1 year'
+   AND NOT (kind IN ('pushed', 'push_failed') AND version_code >= :latest);
+```
 - 기록은 더하기만(REQ-556): 봇 계정 `marong`에 `SELECT`, `INSERT`만 줘요. 고치기·지우기 권한이 없어요.
 - 기기 식별자 밖의 개인 정보 없음(REQ-312, REQ-559): FID, 이메일, 이름, 릴리스 노트, 대화 글을 넣는 칸이 없어요. 관리자 읽기(API-267)는 설치 ID도 주지 않고 친구 이름과 폰 순번으로 바꿔 줘요.
 
@@ -66,6 +76,9 @@ DB 제약 `app_update_events_kind_check`가 이 표와 다른 줄을 막아요. 
 
 | 읽기 | 인덱스 |
 | --- | --- |
+| 감시·관리자 읽기: 친구마다 `seen_at`이 최근인 20대 고르기(SPEC-430·438) | TBL-101 `app_devices_friend_idx`(친구, `seen_at` 내림차순, 014에 있음) |
+| 기기 보고: 그 폰·버전의 마지막 `state` 줄(SPEC-434) | `app_update_events_device_idx` |
+| 받아 감: 같은 친구·버전의 1시간 안 `fetched`(SPEC-435) | `app_update_events_fetched_idx` |
 | 감시: 그 폰·버전의 마지막 시도와 그 시도의 `push_failed`, 보내기 전에 `pushed` 잡기(SPEC-430) | `app_update_events_push_attempt`(유일, `pushed`·`push_failed`만) |
 | 기기 보고: 설치됨 한 줄(SPEC-435) | `app_update_events_installed_once`(유일, `installed`만) |
 | 관리자 읽기: 폰마다 최근 20줄, 지금 친구의 줄만(SPEC-438) | `app_update_events_device_idx`(설치 ID, 때 내림차순) |
@@ -78,6 +91,7 @@ DB 제약 `app_update_events_kind_check`가 이 표와 다른 줄을 막아요. 
 | 역할 | 할 수 있는 것 | 근거 |
 | --- | --- | --- |
 | `marong`(봇, 글 대화 서버) | 읽기·더하기 | SPEC-430, 434, 435, 438 |
+| `marong_owner`(표 소유) | 모두. 매달 1년 넘은 줄 정리(관리자 계정이 이 역할로 바꿔 돌림) | 2절 보관과 정리, TASK-486 |
 | `marong_call`(통화 서버) | 없음 | 통화는 업데이트 기록을 쓰지 않아요 |
 | `PUBLIC` | 없음 | |
 
