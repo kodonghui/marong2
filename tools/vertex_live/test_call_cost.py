@@ -11,7 +11,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
-from pg import ROOT, TestDB
+from pg import TestDB
 
 from call_cost import personal_budget_blocked
 from call_memory import MemoryStore, Principal
@@ -66,12 +66,19 @@ async def scenario(db, store):
         (1, 10_000, 1, True, Decimal("0.030000")), (2, 1000, 0, True, Decimal("0.006000")),
     ]
     other_friend, = db.admin("INSERT INTO marong.friends(name) VALUES ('fixture-usage-other') RETURNING id")[0]
-    other_caller, = db.admin("INSERT INTO call.callers(friend_id) VALUES (%s) RETURNING id", (other_friend,))[0]
-    assert await personal_budget_blocked(store, caller, Decimal("0.036"), at=AT)
-    assert not await personal_budget_blocked(store, caller, Decimal("0.037"), at=AT)
-    assert not await personal_budget_blocked(store, caller, None, at=AT)
-    assert not await personal_budget_blocked(store, other_caller, Decimal("0.036"), at=AT)
-    assert not await personal_budget_blocked(store, caller, Decimal("0.036"), at=AT.replace(month=12))
+    db.admin("INSERT INTO call.callers(friend_id) VALUES (%s)", (other_friend,))
+    assert await personal_budget_blocked(store, friend, Decimal("0.036"), at=AT)
+    assert not await personal_budget_blocked(store, friend, Decimal("0.037"), at=AT)
+    with patch.object(store, "one", side_effect=AssertionError("unlimited must not query usage")) as lookup:
+        assert not await personal_budget_blocked(store, friend, None, at=AT)
+        lookup.assert_not_called()
+    assert not await personal_budget_blocked(store, other_friend, Decimal("0.036"), at=AT)
+    assert not await personal_budget_blocked(store, friend, Decimal("0.036"), at=AT.replace(month=12))
+    async def slow(*_):
+        await asyncio.sleep(2)
+
+    with patch.object(store, "one", side_effect=slow):
+        assert not await personal_budget_blocked(store, friend, Decimal("0.036"), at=AT)
 
     parsed, missing, fixed = decode({
         "promptTokenCount": 13,
@@ -358,13 +365,9 @@ async def check_handoff():
 def main():
     db = TestDB()
     try:
-        call = ROOT / "marong/call"
-        bot = ROOT / "marong/migrations"
-        db.admin((call / "schema.sql").read_text(encoding="utf-8"), None)
-        paths = (*sorted((call / "migrations").glob("00[2-4]*.sql")), *sorted(bot.glob("01[0-3]*.sql")),
-                 *sorted((call / "migrations").glob("00[5-7]*.sql")))
-        for path in paths:
-            db.admin(path.read_text(encoding="utf-8"), None)
+        db.apply_unified_prerequisites()
+        db.apply_unified()
+        db.apply_usage_limit()
         asyncio.run(test(db))
     finally:
         db.close()

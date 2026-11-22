@@ -28,6 +28,14 @@ final class AppUrls {
         );
     }
 
+    static boolean isCallPage(String url, String appUrl) {
+        if (!isAppPage(url, appUrl)) {
+            return false;
+        }
+        String path = parse(url).getRawPath();
+        return path.isEmpty() || "/".equals(path);
+    }
+
     /** "https://host[:port]" for a full URL, used as the injection origin rule. */
     static String origin(String url) {
         URI uri = parse(url);

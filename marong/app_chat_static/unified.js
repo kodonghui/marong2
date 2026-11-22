@@ -67,5 +67,21 @@ const Unified = (() => {
     timeZone: 'Asia/Seoul', dateStyle: 'short', timeStyle: 'short',
   }).format(new Date(iso)) : '—';
 
-  return {node, button, link, request, signal, date, endLetter};
+  const koreanDateTime = new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul', year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true,
+  });
+
+  function shortDate(iso, {wholeHour = false} = {}) {
+    if (!iso) return '—';
+    const parts = value => Object.fromEntries(
+      koreanDateTime.formatToParts(value).filter(part => part.type !== 'literal').map(part => [part.type, part.value]),
+    );
+    const {year, month, day, dayPeriod, hour, minute} = parts(new Date(iso));
+    const prefix = year === parts(new Date()).year ? '' : year + '년 ';
+    const time = wholeHour && Number(minute) === 0 ? hour + '시' : hour + ':' + minute;
+    return prefix + month + '월 ' + day + '일 ' + dayPeriod + ' ' + time;
+  }
+
+  return {node, button, link, request, signal, date, shortDate, endLetter};
 })();

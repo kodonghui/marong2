@@ -18,6 +18,7 @@ from marong.app_push import AppPush
 from marong.app_session import AppSessions, COOKIE
 from marong.config import load_settings
 from marong.unified_store import UnifiedStore
+from marong.usage import configured_limit
 from pg import TestDB
 from run_app import AppAgent, RoomLocks
 
@@ -26,6 +27,14 @@ ORIGIN = "https://fixture.invalid"
 
 
 class UsageTests(IsolatedAsyncioTestCase):
+    def test_daily_default_limit_matches_admin_range(self):
+        for text, expected in (("", None), ("1", 1), ("100000", 100_000)):
+            with self.subTest(text=text):
+                self.assertEqual(configured_limit({"MARONG_DAILY_UNITS": text}), expected)
+        for text in ("0", "-1", "100001", "1.5", "１００"):
+            with self.subTest(text=text), self.assertRaisesRegex(ValueError, "MARONG_DAILY_UNITS"):
+                configured_limit({"MARONG_DAILY_UNITS": text})
+
     async def test_chat_and_call_meter_day_boundary_and_overflow(self):
         db = TestDB()
         self.addCleanup(db.close)
@@ -82,16 +91,25 @@ class UsageTests(IsolatedAsyncioTestCase):
             await chat.usage.record(friend, images=1, searches=1, shop_reads=1)
             totals = await read()
             self.assertEqual(totals, {"day": "2026-11-18", "chatTurns": 2, "callSeconds": 90, "images": 1,
-                                      "units": 87, "limit": None, "tickets": 0})
+                                      "units": 87, "limit": None, "tickets": 0,
+                                      "callMonth": {"limited": False, "percent": None, "resetsAt": None}})
             profile = await (await http.get("/chat/api/profile", headers=login)).json()
             self.assertEqual(profile["usageToday"], totals)
             self.assertEqual(db.admin("SELECT searches,shop_reads FROM marong.usage_daily WHERE friend_id=%s",
                                       (friend,)), [(1, 1)])
             self.assertEqual((await chat.usage.get(other))["units"], 0)
+            await chat.usage.record(other, chat=5000)
+            self.assertFalse(await chat.usage.blocked(other))
+            chat.usage.limit = 5000
+            db.admin("UPDATE marong.friend_profiles SET tickets=2 WHERE friend_id=%s", (other,))
+            self.assertFalse(await chat.usage.blocked(other))
+            await chat.usage.record(other, chat=1)
+            self.assertEqual((await chat.usage.get(other))["tickets"], 1)
+            chat.usage.limit = None
             moment += timedelta(minutes=1)
             self.assertEqual((await read())["day"], "2026-11-19")
             self.assertEqual((await read())["units"], 0)
-            chat.usage.limit = 1
+            db.admin("UPDATE marong.friend_profiles SET daily_units=1 WHERE friend_id=%s", (friend,))
             await send(202)
             await send(429)
             db.admin("UPDATE marong.friend_profiles SET tickets=2 WHERE friend_id=%s", (friend,))
@@ -106,7 +124,6 @@ class UsageTests(IsolatedAsyncioTestCase):
 
             async def identify(_):
                 return {"owner": "fixture", "principal": voice}
-            calls.daily_usage.limit = 1
             with patch.object(server, "memory_store", calls), patch.object(server, "identity", identify):
                 async with TestClient(TestServer(server.app)) as relay:
                     origin = str(relay.make_url("/")).rstrip("/")
@@ -115,6 +132,16 @@ class UsageTests(IsolatedAsyncioTestCase):
                     ws = await relay.ws_connect("/live", headers={"Origin": origin})
                     self.assertEqual((await ws.receive_json())["type"], "daily_limit")
                     await ws.close()
+
+            chat.usage.limit = 10
+            db.admin("""UPDATE marong.friend_profiles SET usage_unlimited=true,daily_units=NULL,tickets=5
+                        WHERE friend_id=%s""", (friend,))
+            await chat.usage.record(friend, chat=50)
+            self.assertFalse(await chat.usage.blocked(friend))
+            await send(202)
+            self.assertEqual((await read())["tickets"], 5)
+            self.assertEqual(db.admin("SELECT tickets_used FROM marong.usage_daily WHERE friend_id=%s AND day='2026-11-19'",
+                                      (friend,)), [(2,)])
 
 
 if __name__ == "__main__":

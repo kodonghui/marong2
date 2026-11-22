@@ -2,8 +2,8 @@
 from __future__ import annotations
 import asyncio, hashlib, hmac, json, os, re, secrets, time, uuid
 from dataclasses import dataclass
-from datetime import timezone, timedelta
-from decimal import Decimal, InvalidOperation
+from datetime import datetime, timezone, timedelta
+from mimetypes import guess_type
 from functools import partial
 from pathlib import Path
 from aiohttp import ClientError, ClientSession, ClientTimeout, WSMsgType, web
@@ -14,8 +14,9 @@ import psycopg
 from marong.app_session import COOKIE as SESSION_COOKIE, SessionError, auth_mode, find_session, identify_request
 from marong.call_voice import call_capacity, chosen_voice
 from marong.pet_app_settings import pet_voice_enabled
-from marong.unified_prompt import (CHARACTER_PROFILE, PET_INTRO_COLUMNS, character_section, clean,
+from marong.unified_prompt import (ACCEPTED_FRIENDSHIPS, CHARACTER_PROFILE, PET_INTRO_COLUMNS, character_section, clean,
                                   common_prompt, marker_positions, particle)
+from marong.usage import configured_call_limit, effective_limits
 from live_session import LiveSession, BUILD
 from call_cost import BLOCKED, budget_status, personal_budget_blocked
 from call_shop import DECLARATION as SHOP_READ, configured_reader
@@ -25,6 +26,21 @@ import call_search
 import rtc_transport
 
 HERE=Path(__file__).resolve().parent
+STATIC=HERE/'static'
+ASSET_NAMES=('app.js','style.css','capture.js','playback.js','worker-socket.js','transport.js',
+             'rtc-client.js','livekit-client.js','wait-tone.wav')
+def load_assets():
+    assets={}
+    for name in ASSET_NAMES:
+        try:assets[name]=(STATIC/name).read_bytes()
+        except OSError:print('asset_hash_failed',flush=True)
+    return assets
+
+
+ASSET_CONTENT=load_assets()
+ASSET_VERSIONS={name:hashlib.sha256(content).hexdigest()[:12] for name,content in ASSET_CONTENT.items()}
+ASSET_CACHE='private, max-age=31536000, immutable'
+INDEX_HTML=(STATIC/'index.html').read_text(encoding='utf-8')
 ROOT=Path.home()/'marong-vertex-test'
 CONFIG=Path.home()/'.config/marong-call'
 PROJECT='project-bc2d15a4-11c0-476b-ae8'
@@ -55,18 +71,12 @@ WAIT_SOUND=os.getenv('MARONG_CALL_WAIT_SOUND')=='1'
 PET_VOICE=pet_voice_enabled(os.environ)
 
 
-def personal_budget(env=os.environ):
-    value=env.get('MARONG_CALL_PERSON_MONTHLY_USD','').strip()
-    if not value:return None
-    try:
-        budget=Decimal(value)
-        if budget.is_finite() and budget>=0:return budget
-    except InvalidOperation:
-        pass
-    raise SystemExit('Invalid MARONG_CALL_PERSON_MONTHLY_USD')
+PERSONAL_BUDGET=configured_call_limit()
 
 
-PERSONAL_BUDGET=personal_budget()
+async def person_budget_blocked(person):
+    _, limit = effective_limits(person.usage_profile, None, PERSONAL_BUDGET)
+    return await personal_budget_blocked(memory_store, person.friend_id, limit)
 
 def read_instruction():
     text=INSTRUCTION_FILE.read_text(encoding='utf-8').strip()
@@ -150,7 +160,8 @@ async def identity(req):
         return {
             "owner": f"friend:{row['friend_id']}",
             "principal": Principal(row["caller_id"], row["friend_id"], row["name"], row["context_revision"],
-                                   unified=True),
+                                   unified=True, usage_profile={key: row[key] for key in
+                                       ("usage_unlimited", "daily_units", "call_monthly_usd")}),
             "voice": row["voice"],
             "bot_name": row["bot_name"],
         }
@@ -180,7 +191,12 @@ async def security_headers(req,handler):
     if not isinstance(res,web.WebSocketResponse):
         if res.status < 400:
             refresh_session_cookie(req,res)
-        res.headers.update({'Cache-Control':'public, max-age=31536000, immutable' if req.path.startswith('/face/v1/') and res.status==200 else 'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY',
+        cache='no-store'
+        if res.status==200 and req.path.startswith('/face/v1/'):
+            cache='public, max-age=31536000, immutable'
+        elif res.status==200 and req.path[1:] in ASSET_VERSIONS and req.query.getall('v',[])==[ASSET_VERSIONS[req.path[1:]]]:
+            cache=ASSET_CACHE
+        res.headers.update({'Cache-Control':cache,'Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY',
           'Permissions-Policy':'microphone=(self), camera=()',
           'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; media-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"})
     return res
@@ -200,7 +216,7 @@ async def status(req):
     person=await get_principal(authn)
     blocked = await budget_status(memory_store, 'web') in BLOCKED
     if person and not blocked:
-        blocked = await personal_budget_blocked(memory_store,person.caller_id,PERSONAL_BUDGET)
+        blocked = await person_budget_blocked(person)
     blocked_reason = 'budget' if blocked else None
     if not blocked and person and person.unified and await memory_store.daily_usage.blocked(person.friend_id):
         blocked = True
@@ -215,10 +231,24 @@ async def health(req):return web.json_response({'ok':True,'route':'Vertex AI','m
 
 async def static(req):
     name=req.match_info.get('file','index.html')
-    if name=="index.html" and AUTHENTICATION!="access" and not await identity(req):
-        raise web.HTTPFound("/chat/login")
-    if name not in ('index.html','app.js','style.css','capture.js','playback.js','worker-socket.js','transport.js','rtc-client.js','livekit-client.js','livekit-client.LICENSE.txt','wait-tone.wav'):raise web.HTTPNotFound()
-    return web.FileResponse(HERE/'static'/name)
+    if name=="index.html":
+        if AUTHENTICATION!="access" and not await identity(req):
+            raise web.HTTPFound("/chat/login")
+        theme='chestnut' if 8<=datetime.now(KST).hour<20 else 'night'
+        html=INDEX_HTML.replace('data-theme="night"',f'data-theme="{theme}"',1)
+        if theme=='chestnut':
+            html=html.replace('name="theme-color" content="#121729"','name="theme-color" content="#fbf6ee"')
+            html=html.replace('name="color-scheme" content="dark"','name="color-scheme" content="light"')
+        html=html.replace("data-assets='{}'","data-assets='"+json.dumps(ASSET_VERSIONS,separators=(',',':'))+"'",1)
+        for asset,version in ASSET_VERSIONS.items():
+            html=html.replace(f'="/{asset}"',f'="/{asset}?v={version}"')
+        return web.Response(text=html,content_type='text/html')
+    if name in ASSET_CONTENT:
+        kind='text/javascript' if name.endswith('.js') else guess_type(name)[0]
+        return web.Response(body=ASSET_CONTENT[name],content_type=kind)
+    if name in ASSET_NAMES or name=='livekit-client.LICENSE.txt':
+        if (STATIC/name).is_file():return web.FileResponse(STATIC/name)
+    raise web.HTTPNotFound()
 
 async def face(req):
     name=req.match_info['name']
@@ -261,17 +291,17 @@ def setup(handle=None,seed='',memory=False,hangup=False,search=None,ring=None,tu
     resume={'transparent':True}
     if handle:resume['handle']=handle
     base_instruction = instruction()
-    speaking_pet = PET_VOICE and character is not None and character["kind"] in {"dog", "cat"}
-    if speaking_pet and marker_positions(base_instruction.splitlines()) is not None:
-        base_instruction = common_prompt(base_instruction, pet=True)
+    if character is not None and marker_positions(base_instruction.splitlines()) is not None:
+        base_instruction = common_prompt(base_instruction, pet=bool(character["kind"]))
     result={'setup':{'model':f'projects/{PROJECT}/locations/{LOCATION}/publishers/google/models/{MODEL}',
       'generationConfig':{'responseModalities':['AUDIO'],'maxOutputTokens':1024,'speechConfig':{'languageCode':'ko-KR','voiceConfig':{'prebuiltVoiceConfig':{'voiceName':voice or VOICE}}}},
       'systemInstruction':{'parts':[{'text':base_instruction}]},
       'realtimeInputConfig':{'automaticActivityDetection':{'silenceDurationMs':700,'prefixPaddingMs':100}},
       'contextWindowCompression':{'triggerTokens':8192,'slidingWindow':{'targetTokens':4096}},
       'sessionResumption':resume,'inputAudioTranscription':{},'outputAudioTranscription':{},'explicitVadSignal':True}}
-    if speaking_pet:
-        result["setup"]["systemInstruction"]["parts"].append({"text": character_section(character, pet_voice=True)})
+    if character is not None:
+        result["setup"]["systemInstruction"]["parts"].append(
+            {"text": character_section(character, pet_voice=PET_VOICE)})
     elif bot_name and bot_name != '마롱이':
         name = clean(bot_name, 12)
         if name:
@@ -321,7 +351,7 @@ async def get_principal(authn):
     if person := authn.get("principal"):
         return person
     if not memory_store or not authn.get('email_hash'):return None
-    try:return await asyncio.wait_for(memory_store.principal(authn['email_hash']),2)
+    try:return await asyncio.wait_for(memory_store.principal(authn['email_hash'], include_limits=True),2)
     except Exception:return None
 
 async def private_principal(req):
@@ -364,6 +394,7 @@ async def live(req):
         except ValueError:ring=None
         refresh_session_cookie(req,ws)
         await ws.prepare(req)
+        ws_opened=time.monotonic()
         resume=recent_resume(owner,client_id)
         if await budget_status(memory_store, 'web') in BLOCKED:
             if person:
@@ -374,7 +405,7 @@ async def live(req):
                 await ws.send_json({'type':'budget_exhausted'})
                 return ws
         browser_resume=resume.get('owner')==authn['owner']
-        if person and not browser_resume and await personal_budget_blocked(memory_store,person.caller_id,PERSONAL_BUDGET):
+        if person and not browser_resume and await person_budget_blocked(person):
             await ws.send_json({'type':'budget_exhausted'})
             return ws
         if person and person.unified and not browser_resume and await memory_store.daily_usage.blocked(person.friend_id):
@@ -395,13 +426,16 @@ async def live(req):
         voice=resumed_voice or chosen_voice(authn.get('voice'))
         bot_name=resume.get('bot_name') or authn.get('bot_name')
         character = resume.get("character")
-        if PET_VOICE and "character" not in resume and person and person.unified:
-            query = CHARACTER_PROFILE.format(intro_columns=PET_INTRO_COLUMNS, has_friends="false")
-            character = await memory_store.one(query, (person.friend_id,))
+        if "character" not in resume and person and person.unified:
+            columns = PET_INTRO_COLUMNS if PET_VOICE else ""
+            query = CHARACTER_PROFILE.format(intro_columns=columns, has_friends=ACCEPTED_FRIENDSHIPS)
+            character = await memory_store.one(query, (os.getenv("MARONG_FRIENDS") == "1", person.friend_id))
         configure=partial(setup,voice=voice,bot_name=bot_name,character=character)
         session=LiveSession(ws,authn['owner'],memory_store,person,configure,google_headers,resume,{},LOCATION,MODEL,voice,client_id,search=SEARCH,ring=ring)
         session.shop=SHOP
         session.wait_enabled=WAIT_SOUND
+        session.ws_opened=ws_opened
+        session.hold_requested=req.query.get('hold')=='1'
         slot.session=session
         # Previously loaded pages used headerless PCM. Keep their wire format
         # until the page refreshes, so headers never become audible clicks.
@@ -410,7 +444,7 @@ async def live(req):
         session.hangup=req.query.get('hangup')=='1'
         bridge=rtc_transport.bridges.get(client_id)
         if bridge and not bridge.closed and bridge.owner==authn['owner'] and req.query.get('rtc')=='1':
-            session.rtc=bridge;bridge.session=session
+            session.offer_rtc(bridge)
         elif bridge and bridge.owner==authn['owner']:await bridge.close()
         await session.run()
     except CallBusy:
@@ -462,7 +496,7 @@ async def rtc_config(req):
         if slot.client_id!=client or (session and session.pcm_forced):
             await bridge.close();raise web.HTTPConflict()
         if session:
-            session.rtc=bridge;bridge.session=session
+            session.offer_rtc(bridge)
     return json_response({'url':'wss://'+req.host,'token':bridge.token(),'room':bridge.name})
 
 async def rtc_signal(req):

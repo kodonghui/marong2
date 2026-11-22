@@ -20,6 +20,7 @@ from call_search import queries as search_queries
 from call_shop import FAILED as SHOP_FAILED, LIMIT as SHOP_LIMIT, READS as SHOP_READS
 from quiet_mic import QuietMic, level
 from tool_trace import step as trace_step
+from connect_reports import playback_report,timing_report
 
 BUILD='20261117-hello'
 FRAME=struct.Struct('!4sIIIII')
@@ -41,6 +42,7 @@ OUTPUT_RATE=24000
 # A call Marong placed at a time the friend set (docs/app-ring.md): the friend's answer opens it with this text,
 # once, on the connection that answered the ring. It is not a turn of the friend's and is never recorded.
 RING_ANSWERED_TEXT='(전화 연결됨)'
+CALL_GREETING_TEXT='통화를 막 시작했어. 한국어로 짧고 편안하게 인사해 줘.'
 BUDGET_GOODBYE='(이번 달 통화를 더 할 수 없어서 곧 끊어야 해. 금액은 말하지 말고, 다음에 또 얘기하자고 한 문장으로 인사해.)'
 RING_CLAIM_S=1
 # The picture a hello call carries (docs/04-functional-spec/call-first.md SPEC-268): served by the bot under /chat/.
@@ -92,6 +94,47 @@ class LiveSession:
         self.ring_id=ring;self.ring_info=None;self.ring_greet=False;self.ring_topic=None
         self.call_safety=None
         self.safety_queue=asyncio.Queue(maxsize=32)
+        self.ws_opened=time.monotonic()
+        self.server_timing={'wsOpen':0}
+        self.client_timing=None;self.timing_segment=None;self.playback_reports={}
+        self.hold_requested=False;self.hold_greeting=False;self.ready_sent=asyncio.Event()
+        self.audio_ready=asyncio.Event();self.audio_path_ready=None;self.greeting_queued=False
+        self.rtc_pending=None;self.pcm_turn=None;self.pcm_drain_until=0.
+
+    def mark(self, name):
+        self.server_timing.setdefault(name,min(600000,max(0,round((time.monotonic()-self.ws_opened)*1000))))
+
+    def offer_rtc(self, bridge):
+        bridge.session=self
+        if self.hold_requested:self.rtc_pending=bridge
+        else:self.rtc=bridge
+
+    def promote_rtc(self):
+        bridge=self.rtc_pending
+        if (not self.rtc and bridge and not bridge.closed and not self.pcm_forced
+                and self.audio_path_ready=='webrtc' and self.pcm_turn is None
+                and time.monotonic()>=self.pcm_drain_until):
+            self.rtc=bridge;self.rtc_pending=None
+            self.log_transport('webrtc','start')
+
+    async def queue_greeting(self, control):
+        if self.greeting_queued:return
+        self.greeting_queued=True
+        if self.hold_greeting:
+            await self.ready_sent.wait()
+            try:await asyncio.wait_for(self.audio_ready.wait(),3)
+            except TimeoutError:pass
+        if not self.stop.is_set():
+            await self.controls.put(control)
+            self.available.set()
+            if self.entry_transport!='discord':self.mark('greetingSent')
+
+    async def flush_connection_reports(self):
+        if self.timing_segment:
+            await self.store.record_connection(self.timing_segment,timing={
+                'v':1,'client':self.client_timing or {},'server':self.server_timing})
+        for segment,report in self.playback_reports.items():
+            await self.store.record_connection(segment,playback=report)
 
     def log_transport(self,mode,reason):
         self.d['audioPath']=mode
@@ -111,6 +154,10 @@ class LiveSession:
         # This runs only in browser_writer: ACK, pending samples and new audio
         # share one ordered writer. Neither the microphone nor Google reconnects.
         self.pcm_forced=True;bridge=self.rtc;self.rtc=None
+        if self.rtc_pending:
+            self.rtc_pending.session=None
+            self.background(self.rtc_pending.close())
+            self.rtc_pending=None
         pending=[];path_epoch=bridge.epoch if bridge else self.epoch
         if bridge:
             bridge.session=None;pending=bridge.take_pending()
@@ -201,13 +248,24 @@ class LiveSession:
                         await asyncio.wait_for(self.ws.send_json({'type':'hangup','epoch':data,'pendingMs':pending,'callId':self.call_id}),5)
                     elif kind=='bytes':
                         if self.rtc and self.rtc.closed:await self.switch_pcm('rtc_server_lost')
+                        self.promote_rtc()
+                        _,epoch,turn,_,offset,count=FRAME.unpack(data[:24])
                         if self.rtc:
-                            _,epoch,turn,_,offset,_=FRAME.unpack(data[:24]);self.rtc.feed(data[24:],epoch,turn,offset)
-                        else:await asyncio.wait_for(self.ws.send_bytes(data[24:] if self.legacy_pcm else data),5)
+                            self.rtc.feed(data[24:],epoch,turn,offset)
+                        else:
+                            self.pcm_turn=(epoch,turn)
+                            self.pcm_drain_until=max(time.monotonic(),self.pcm_drain_until)+count/OUTPUT_RATE
+                            await asyncio.wait_for(self.ws.send_bytes(data[24:] if self.legacy_pcm else data),5)
+                        if self.entry_transport!='discord':self.mark('firstAudioOut')
                     else:
-                        if self.rtc and data.get('type') in ('audio_reset','interrupted'):self.rtc.reset(data['epoch'])
-                        elif self.rtc and data.get('type')=='audio_end':self.rtc.finish(data['epoch'],data['turn'])
+                        if data.get('type') in ('audio_reset','interrupted'):
+                            self.pcm_turn=None;self.pcm_drain_until=0.
+                            if self.rtc:self.rtc.reset(data['epoch'])
+                        elif data.get('type')=='audio_end':
+                            self.pcm_turn=None
+                            if self.rtc:self.rtc.finish(data['epoch'],data['turn'])
                         await asyncio.wait_for(self.ws.send_json(data),5)
+                        if data.get('type')=='ready':self.ready_sent.set()
                 finally:self.output.task_done()
                 self.d['maxBrowserSendWaitMs']=max(self.d.get('maxBrowserSendWaitMs',0),round((time.monotonic()-before)*1000))
         finally:self.stop.set()
@@ -235,15 +293,36 @@ class LiveSession:
                     if not isinstance(item,dict):continue
                     if item.get('type')=='stop':self.explicit=True;return
                     if self.entry_transport=='discord':continue
+                    if item.get('type')=='timing':
+                        if len(msg.data.encode('utf-8'))>4096:print('timing_rejected reason=size',flush=True)
+                        elif self.client_timing is None:self.client_timing=timing_report(item)
+                        continue
+                    if item.get('type')=='audio_ready':
+                        path=item.get('path')
+                        if path in ('webrtc','pcm') and not self.audio_ready.is_set():
+                            self.audio_path_ready=path;self.audio_ready.set()
+                        continue
+                    if item.get('type')=='playback':
+                        report=playback_report(item)
+                        if report is not None and self.segment:
+                            report['changes']=self.playback_reports.get(self.segment,{}).get('changes',0)+1
+                            self.playback_reports[self.segment]=report
+                        continue
                     if item.get('type')=='playback_stats':self.stats(item);continue
                     if item.get('type')=='audio_transport' and item.get('mode')=='pcm':
                         reason=item.get('reason')
-                        if reason not in {'rtc_disconnected','rtc_reconnecting','rtc_media_stalled','rtc_track_lost','rtc_no_media','control_reconnect','network_change','server_pcm'}:reason='rtc_disconnected'
+                        if reason not in ('rtc_disconnected','rtc_reconnecting','rtc_media_stalled','rtc_track_lost',
+                                          'rtc_no_media','control_reconnect','network_change','server_pcm','rtc_silent'):
+                            reason='rtc_disconnected'
                         await self.request_pcm(reason);continue
                     if item.get('type')=='text':
                         if self.close_reason=='budget_hard_stop':continue
                         text=str(item.get('text',''))[:2000]
                         if not text:continue
+                        if self.hold_greeting and text==CALL_GREETING_TEXT:
+                            if not self.greeting_queued:self.background(self.queue_greeting({
+                                'clientContent':{'turns':[{'role':'user','parts':[{'text':text}]}],'turnComplete':True}}))
+                            continue
                         key=str(item.get('id') or uuid.uuid4())[:100]
                         self.consent.note('user','text:'+key,text);self.activity_at=time.monotonic()
                         try:await asyncio.wait_for(self.recorder.text(text,'text:'+key),3)
@@ -276,6 +355,7 @@ class LiveSession:
             self.call_id,self.logical_resumed=await self.store.start_call(
                 self.p,self.client_id,self.voice,BUILD,
                 entrypoint='discord' if self.entry_transport=='discord' else 'web')
+            self.mark('callRow')
             if getattr(self.store, "friend_marks", False):
                 self.revision = await self.store.revision(self.p)
             await self.claim_ring()
@@ -289,6 +369,7 @@ class LiveSession:
         self.log_transport(self.entry_transport or ('webrtc' if self.rtc else 'pcm'),'start')
         if self.resume.get('owner')==self.owner and self.resume.get('call_id')==self.call_id and time.time()-self.resume.get('updated',0)<600 and self.resume.get('revision')==self.revision:
             self.handle=self.resume.get('handle')
+        self.hold_greeting=self.hold_requested and not self.logical_resumed and not self.handle
         self.recorder=TranscriptRecorder(self.save,self.caption)
         running=[asyncio.create_task(self.browser_writer()),asyncio.create_task(self.browser_input()),asyncio.create_task(self.google_loop()),asyncio.create_task(self.watch_revision())]
         if self.call_safety:running.append(asyncio.create_task(self.safety_loop()))
@@ -307,12 +388,18 @@ class LiveSession:
             if self.store and self.p:
                 try:await asyncio.wait_for(self.flush_transport(),4)
                 except Exception:self.d['transportLogFailed']=True
+                if self.timing_segment or self.playback_reports:
+                    try:await asyncio.wait_for(self.flush_connection_reports(),1)
+                    except Exception:print('call_connect_report_write_error',flush=True)
                 try:await asyncio.wait_for(self.store.finish(self.p,self.call_id,self.explicit,client_id=self.client_id,reason=self.close_reason),4)
                 except Exception:self.d['memoryCloseFailed']=True
             if self.explicit:self.resume.clear()
             if self.rtc:
                 self.rtc.session=None;self.rtc.idle_at=time.monotonic()
                 if self.explicit:await self.rtc.close()
+            if self.rtc_pending:
+                self.rtc_pending.session=None
+                await self.rtc_pending.close()
             self.d['endedAt']=time.time();self.d['memoryWriteFailures']=self.recorder.failed+self.d.get('memoryWriteFailures',0)
 
     async def claim_ring(self):
@@ -422,8 +509,9 @@ class LiveSession:
         self.logical_resumed=True
         if self.ring_greet:
             self.ring_greet=False
-            await self.controls.put({'clientContent':{'turns':[{'role':'user','parts':[{'text':RING_ANSWERED_TEXT}]}],'turnComplete':True}})
-            self.available.set()
+            greeting={'clientContent':{'turns':[{'role':'user','parts':[{'text':RING_ANSWERED_TEXT}]}],'turnComplete':True}}
+            if self.hold_greeting:self.background(self.queue_greeting(greeting))
+            else:await self.queue_greeting(greeting)
 
     async def run_provider(self,upstream,ledger,usage_mode,tuning,lead_in):
         if not usage_mode or not self.segment:
@@ -482,6 +570,8 @@ class LiveSession:
                         if self.store and self.p:
                             try:
                                 segment_options={'tuning':tuning['name']} if tuning else {}
+                                if self.entry_transport!='discord':
+                                    segment_options['await_provider']=True
                                 memory_options={'memory_limit':tuning['seed_call_memories']} if tuning else {}
                                 self.segment=await asyncio.wait_for(self.store.start_segment(
                                     self.p,self.call_id,self.client_id,self.model,**segment_options),3)
@@ -492,9 +582,19 @@ class LiveSession:
                         try:
                             upstream=await self.open_provider(stack,self.handle,seed,bool(self.p and self.segment),
                                                               tuning,mode,ring=self.ring_info)
-                        except ConnectionError as error:
-                            if str(error)=='setup_rejected' and self.handle:self.handle=None;self.pending.clear()
+                        except Exception as error:
+                            if isinstance(error, ConnectionError) and str(error)=='setup_rejected' and self.handle:
+                                self.handle=None;self.pending.clear()
+                            if self.segment and self.entry_transport!='discord':
+                                try:await asyncio.wait_for(self.store.segment_start_failed(self.segment), .4)
+                                except Exception:print('segment_start_failed_write_error',flush=True)
                             raise
+                        if self.segment and self.entry_transport!='discord':
+                            self.mark('providerReady')
+                            try:await asyncio.wait_for(self.store.segment_ready(self.segment), .4)
+                            except Exception:print('segment_ready_write_error',flush=True)
+                            self.timing_segment=self.timing_segment or self.segment
+                        if self.entry_transport!='discord':self.mark('providerReady')
                     self.search_live=mode=='on'
                     self.configure_mic(tuning)
                     await self.ready_message();delay=1

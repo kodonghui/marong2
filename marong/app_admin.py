@@ -1,7 +1,10 @@
 """Access-protected account administration (SPEC-395)."""
 
-from datetime import datetime, timedelta
+import asyncio
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 import hmac
+import logging
 import re
 
 from aiohttp import web
@@ -9,12 +12,23 @@ from aiohttp import web
 from .app_chat import Problem
 from .app_session import one
 from .diary import KST
-from .pet.cost import month_bounds
+from .pet.cost import month_bounds as picture_month_bounds
+from .usage import effective_limits, month_bounds, usage_day
 
 
 HASH = re.compile(r"[a-f0-9]{64}")
 FRIEND_ID = re.compile(r"[0-9]{1,19}")
 ADMIN_PATH = "/chat/admin"
+USD = re.compile(r"[0-9]{1,4}(?:\.[0-9]{1,2})?")
+log = logging.getLogger(__name__)
+
+
+def usd(value):
+    return format(value, ".2f") if value is not None else None
+
+
+def limit_amounts(daily, monthly):
+    return {"dailyUnits": daily, "callMonthlyUsd": usd(monthly)}
 
 
 class AppAdmin:
@@ -46,7 +60,7 @@ class AppAdmin:
 
     async def image_costs(self, req):
         await self.require_admin(req)
-        start, end = month_bounds(datetime.now(KST))
+        start, end = picture_month_bounds(datetime.now(KST))
         costs = await self.chat.store._one("""
             WITH diary AS (
                 SELECT coalesce(sum(cost_usd),0) AS total,
@@ -91,7 +105,7 @@ class AppAdmin:
         await self.require_admin(req)
         async with self.chat.store.pool.connection() as conn:
             rows = await (await conn.execute("""
-                SELECT i.id,i.kind,i.note,i.expires_at,i.used_by,f.name,
+                SELECT i.id,i.kind,i.note,i.expires_at,i.created_at,i.used_at,i.revoked_at,i.used_by,f.name,
                        CASE WHEN i.used_at IS NOT NULL THEN 'used' WHEN i.revoked_at IS NOT NULL THEN 'revoked'
                             WHEN i.expires_at<=%s THEN 'expired' ELSE 'open' END AS state
                 FROM marong.invites i LEFT JOIN marong.friends f ON f.id=i.used_by
@@ -100,6 +114,9 @@ class AppAdmin:
         return self.chat._json(200, {"invites": [
             {"id": r["id"], "kind": r["kind"], "note": r["note"], "state": r["state"],
              "expiresAt": r["expires_at"].isoformat(),
+             "createdAt": r["created_at"].isoformat(),
+             "usedAt": r["used_at"].isoformat() if r["used_at"] else None,
+             "revokedAt": r["revoked_at"].isoformat() if r["revoked_at"] else None,
              "usedBy": {"friendId": r["used_by"], "name": r["name"]} if r["used_by"] is not None else None}
             for r in rows
         ]})
@@ -107,10 +124,11 @@ class AppAdmin:
     async def list_members(self, req):
         await self.require_admin(req)
         now = self.chat.sessions.now()
-        day = (now.astimezone(self.chat.tz) - timedelta(hours=4)).date()
+        day = usage_day(now)
         async with self.chat.store.pool.connection() as conn:
             rows = await (await conn.execute("""
                 SELECT f.id,f.name,p.friend_id AS profile_id,p.bot_name,p.tickets,s.sessions,s.last_seen,
+                       p.usage_unlimited,p.daily_units,p.call_monthly_usd,
                        coalesce(u.chat_turns,0) AS chat_turns,coalesce(u.call_seconds,0) AS call_seconds,
                        coalesce(u.images,0) AS images,coalesce(u.units,0) AS units
                 FROM marong.friends f
@@ -123,6 +141,7 @@ class AppAdmin:
                 ORDER BY p.created_at NULLS LAST,f.id
             """, (day, now))).fetchall()
         members, unlinked = [], []
+        month_costs = await self.month_costs([r["id"] for r in rows if r["profile_id"] is not None], now)
         for r in rows:
             member = {"friendId": r["id"], "name": r["name"]}
             if r["profile_id"] is None:
@@ -130,11 +149,36 @@ class AppAdmin:
             else:
                 last_seen = r["last_seen"]
                 members.append({**member, "botName": r["bot_name"], "sessions": r["sessions"], "tickets": r["tickets"],
-                                "lastSeenAt": last_seen.isoformat() if last_seen else None, "usageToday": {
+                                "lastSeenAt": last_seen.isoformat() if last_seen else None,
+                                **self.limit_status(r), "callMonthUsd": usd(month_costs.get(r["id"])),
+                                "usageToday": {
                                     "chatTurns": r["chat_turns"], "callSeconds": r["call_seconds"],
                                     "images": r["images"], "units": r["units"],
                                 }})
-        return self.chat._json(200, {"members": members, "unlinked": unlinked})
+        return self.chat._json(200, {"members": members, "unlinked": unlinked,
+                                     "defaults": limit_amounts(self.chat.usage.limit, self.chat.usage.call_limit)})
+
+    async def month_costs(self, friends, now):
+        if not friends:
+            return {}
+        start, end = month_bounds(now.astimezone(timezone.utc))
+        try:
+            async with asyncio.timeout(1), self.chat.store.pool.connection() as conn:
+                rows = await (await conn.execute("""
+                    SELECT friend, call.friend_month_usd(friend,%s,%s) AS usd
+                    FROM unnest(%s::bigint[]) AS ids(friend)
+                """, (start, end, friends))).fetchall()
+            return {row["friend"]: row["usd"] for row in rows}
+        except Exception:
+            log.warning("admin_call_month_unknown")
+            return {}
+
+    def limit_status(self, row):
+        daily, monthly = row["daily_units"], row["call_monthly_usd"]
+        mode = "unlimited" if row["usage_unlimited"] else (
+            "custom" if daily is not None or monthly is not None else "default")
+        effective = effective_limits(row, self.chat.usage.limit, self.chat.usage.call_limit)
+        return {"limits": {"mode": mode, **limit_amounts(daily, monthly)}, "effective": limit_amounts(*effective)}
 
     @staticmethod
     def friend_id(req):
@@ -173,6 +217,42 @@ class AppAdmin:
             raise Problem("not_found")
         return self.chat._json(200, {"tickets": row["tickets"]})
 
+    async def set_limits(self, req):
+        await self.require_admin(req, write=True)
+        friend = self.friend_id(req)
+        body = await self.chat._session_body(req, "mode", ("dailyUnits", "callMonthlyUsd"))
+        mode = body["mode"]
+        daily = monthly = None
+        if mode == "custom":
+            if len(body) == 1:
+                raise Problem("invalid_input")
+            if "dailyUnits" in body:
+                daily = body["dailyUnits"]
+                if type(daily) is not int or not 1 <= daily <= 100000:
+                    raise Problem("invalid_input")
+            if "callMonthlyUsd" in body:
+                raw = body["callMonthlyUsd"]
+                if not isinstance(raw, str) or not USD.fullmatch(raw):
+                    raise Problem("invalid_input")
+                monthly = Decimal(raw)
+                if not Decimal("0.01") <= monthly <= 1000:
+                    raise Problem("invalid_input")
+        elif mode not in ("unlimited", "default") or len(body) != 1:
+            raise Problem("invalid_input")
+        unlimited = mode == "unlimited"
+        row = await self.chat.store._one("""
+            UPDATE marong.friend_profiles SET
+                usage_unlimited=%s, daily_units=%s, call_monthly_usd=%s,
+                updated_at=CASE WHEN (usage_unlimited,daily_units,call_monthly_usd) IS DISTINCT FROM
+                    (%s, %s::integer, %s::numeric) THEN now() ELSE updated_at END
+            WHERE friend_id=%s
+            RETURNING usage_unlimited,daily_units,call_monthly_usd
+        """, (unlimited, daily, monthly, unlimited, daily, monthly, friend))
+        if row is None:
+            raise Problem("not_found")
+        log.info("admin_limits friend=%d mode=%s", friend, mode)
+        return self.chat._json(200, self.limit_status(row))
+
     def register(self, router):
         router.add_get(ADMIN_PATH + "/", self.page)
         router.add_get(ADMIN_PATH + "/api/image-costs", self.image_costs)
@@ -181,3 +261,4 @@ class AppAdmin:
         router.add_get(ADMIN_PATH + "/api/members", self.list_members)
         router.add_post(ADMIN_PATH + "/api/members/{friendId}/revoke", self.revoke)
         router.add_post(ADMIN_PATH + "/api/members/{friendId}/tickets", self.add_tickets)
+        router.add_put(ADMIN_PATH + "/api/members/{friendId}/limits", self.set_limits)

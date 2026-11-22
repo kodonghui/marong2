@@ -2,6 +2,7 @@
 
 
 COLORS = ("흰색", "검은색", "갈색", "크림", "회색", "황토", "주황", "은색")
+MAX_COAT_COLORS = 3
 
 
 CHOICES = {
@@ -36,7 +37,7 @@ def valid_edits(data):
                                    or "\x00" in value):
             return False
         if key == "coatColors" and (
-            not isinstance(value, list) or not 1 <= len(value) <= 3
+            not isinstance(value, list) or not 1 <= len(value) <= MAX_COAT_COLORS
             or any(color not in COLORS for color in value) or len(set(value)) != len(value)
         ):
             return False
@@ -51,11 +52,23 @@ def valid_result(data):
 
 
 def output_schema():
-    # The server enforces string lengths, array lengths and uniqueness after parsing.
+    # The provider supports minItems but leaves maximum lengths and uniqueness to the server.
+    # Describe those constraints in the schema so the model can satisfy the same checks.
     fields = {key: {"type": "string", "enum": list(values)} for key, values in CHOICES.items()}
-    fields.update({key: {"type": "string"} for key in TEXT_LIMITS})
+    fields.update({
+        key: {
+            "type": "string",
+            "description": f"공백과 문장 부호를 포함해 {limit}자 이하로 써. 잘 모르겠으면 빈 문자열을 줘.",
+        }
+        for key, limit in TEXT_LIMITS.items()
+    })
     fields.update({key: {"type": "boolean"} for key in FLAGS})
-    fields["coatColors"] = {"type": "array", "items": {"type": "string", "enum": list(COLORS)}}
+    fields["coatColors"] = {
+        "type": "array",
+        "minItems": 1,
+        "items": {"type": "string", "enum": list(COLORS)},
+        "description": f"가장 두드러진 색부터 서로 다른 색을 1개에서 {MAX_COAT_COLORS}개까지 골라.",
+    }
     fields["confidence"] = {"type": "string", "enum": list(CONFIDENCE)}
     fields["bestPhoto"] = {"type": "integer", "description": "아이가 가장 크고 또렷하게 나온 사진 번호, 1부터"}
     fields["petBox"] = {"type": "array", "items": {"type": "number"},

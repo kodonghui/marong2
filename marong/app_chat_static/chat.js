@@ -635,7 +635,7 @@ function dailyLimit() {
   notice('오늘 쓸 수 있는 양을 다 썼어. 새벽 4시에 다시 채워져');
   const link = document.createElement('a');
   link.href = '/chat/me';
-  link.textContent = '내 마롱이에서 보기';
+  link.textContent = '내 사용량 보기';
   ui.notice.append(' ', link);
   syncSend();
 }

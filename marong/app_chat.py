@@ -146,8 +146,9 @@ class AppChat:
         self.authentication = auth_mode(authentication)
         self.delivery = None
         self.internal_shop = None
-        from .usage import Usage, configured_limit
-        self.usage = Usage(store.pool, configured_limit(), sessions.now) if sessions else None
+        from .usage import Usage, configured_call_limit, configured_limit
+        self.usage = Usage(store.pool, configured_limit(), sessions.now,
+                           call_limit=configured_call_limit()) if sessions else None
         if self.usage is not None and hasattr(agent, "usage"):
             agent.usage = self.usage
         self.tick = asyncio.Event()          # set and replaced whenever a message is saved in this process
