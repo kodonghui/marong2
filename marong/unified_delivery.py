@@ -171,6 +171,12 @@ class AppProactive(PrivateProactive):
                 text = made[0].strip() if made and made[0] else ""
                 if not text or len(text) > 60 or "\n" in text:
                     text = f"나 {item.name} 생겼어! 어때?"
+                if not await self.still_current(room, begin):
+                    return None
+                current = await self.reactions.due(room["friend_id"])
+                if not any(job["id"] == row["id"] and job["active"] for job in current):
+                    await self.reactions.finish(row, "skipped")
+                    return None
                 result = await self.delivery.say(row["friend_id"], text, kind="proactive", ttl_s=PROACTIVE_APP_TTL_S,
                     meta={"proactive": True, "reaction": row["item_id"], "scene": str(scene),
                           "sceneAlt": row["name"] + "의 새 차림", "reactionName": item.name},

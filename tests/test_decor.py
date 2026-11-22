@@ -4,7 +4,7 @@ import asyncio
 import csv
 from dataclasses import replace
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 import secrets
@@ -27,6 +27,7 @@ from marong.character.graphics import TEMPLATE_IDS
 from marong.decor import DecorCatalog
 from marong.decor_reactions import DecorReactions
 from marong.diary import KST
+from marong.unified_delivery import AppProactive
 from marong.unified_store import UnifiedStore
 from pg import TestDB
 from run_app import RoomLocks
@@ -88,6 +89,49 @@ def assets(root):
 
 
 class DecorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reaction_respects_daily_cap_and_precedes_a_topic(self):
+        now = datetime(2026, 11, 22, 12, tzinfo=KST)
+        room = dict(friend_id=1, room_key="fixture", opted_in_at=now-timedelta(days=2),
+                    last_incoming_at=None, per_day=2, start_hour=8, end_hour=22,
+                    quiet_for=timedelta(hours=10), sent_ago=None, failures=0)
+        row = dict(id=3, friend_id=1, active=True, item_id="hat-fixture", name="콩이", attempts=0)
+        outbox = SimpleNamespace(push=None, say=AsyncMock(return_value=True))
+        store = SimpleNamespace(proactive_rooms=AsyncMock(return_value=[room]), proactive_count=AsyncMock(return_value=1),
+                                hello_count=AsyncMock(return_value=0), topic_answers=AsyncMock(return_value=[]),
+                                claim_slot=AsyncMock(return_value=True), record_delivery=AsyncMock())
+        agent = SimpleNamespace(proactive_allowed=AsyncMock(return_value=True), proactive_message=AsyncMock(return_value=None))
+        topics = SimpleNamespace(today=AsyncMock(return_value=SimpleNamespace(at=now)), choose=AsyncMock())
+        settings = SimpleNamespace(proactive_hours=(8,22), proactive_per_day=2, proactive_daily_max=1)
+        due = [row]
+        async def change_state(*args):
+            due.clear()
+        reactions = SimpleNamespace(due=AsyncMock(side_effect=lambda *args: list(due)),
+             catalog=SimpleNamespace(items={"hat-fixture": SimpleNamespace(name="털모자")}),
+             scene=AsyncMock(return_value="fixture-scene"), finish=AsyncMock(side_effect=change_state), defer=AsyncMock())
+        loop = AppProactive(settings, store, agent, RoomLocks(), outbox, reactions=reactions, topics=topics,
+                            clock=lambda: now, rng=lambda: 0)
+        self.assertEqual(await loop.step(now), 0)
+        reactions.defer.assert_awaited_once_with(row, now.replace(hour=15))
+        outbox.say.assert_not_awaited()
+
+        store.proactive_count.return_value = 0
+        self.assertEqual(await loop.step(now), 1)
+        self.assertEqual(outbox.say.await_args.args, (1, "나 털모자 생겼어! 어때?"))
+        self.assertEqual(outbox.say.await_args.kwargs["meta"]["scene"], "fixture-scene")
+        reactions.finish.assert_awaited_once_with(row, "sent", "fixture-scene")
+        store.record_delivery.assert_awaited_once()
+        topics.choose.assert_not_awaited()
+
+        due.append(row)
+        async def remove_item(*args, **kwargs):
+            row["active"] = False
+            return "나 털모자 새로 입었어", {}
+        agent.proactive_message.side_effect = remove_item
+        loop.reaction_friends = {1}
+        self.assertIsNone(await loop.priority(room, loop._slot(room, now)[0]))
+        reactions.finish.assert_awaited_with(row, "skipped")
+        self.assertEqual(outbox.say.await_count, 1)
+
     def test_layer_bounds_and_font_license_explain_why_assets_are_rejected(self):
         with tempfile.TemporaryDirectory() as root:
             assets(root)
