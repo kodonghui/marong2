@@ -181,6 +181,57 @@ class AppStore:
             ON CONFLICT DO NOTHING RETURNING id
         """, {**target, "code": code, "status": status})
 
+    async def admin_app_devices(self) -> list[dict]:
+        return await self._all("""
+            WITH recent AS (
+                SELECT install_id, friend_id, app_version, notifications, seen_at, created_at,
+                       row_number() OVER (PARTITION BY friend_id ORDER BY seen_at DESC, install_id) AS rank
+                FROM marong.app_devices WHERE seen_at > now() - interval '90 days'
+            ), visible AS (
+                SELECT d.*, f.name AS friend,
+                       row_number() OVER (PARTITION BY d.friend_id ORDER BY d.created_at, d.install_id) AS phone
+                FROM recent d JOIN marong.friends f ON f.id = d.friend_id WHERE d.rank <= 20
+                ORDER BY f.name, d.friend_id, phone LIMIT 200
+            )
+            SELECT d.friend, d.friend_id, d.phone, d.app_version, d.seen_at, d.notifications,
+                   coalesce(events.items, '[]'::jsonb) AS events
+            FROM visible d
+            LEFT JOIN LATERAL (
+                SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
+                    'kind', kind, 'versionCode', version_code, 'appVersion', app_version,
+                    'state', state, 'status', status, 'attempt', attempt, 'at', at
+                )) ORDER BY at DESC, id DESC) AS items
+                FROM (
+                    SELECT id, kind, version_code, app_version, state, status, attempt, at
+                    FROM marong.app_update_events WHERE install_id = d.install_id AND friend_id = d.friend_id
+                    ORDER BY at DESC, id DESC LIMIT 20
+                ) e
+            ) events ON true
+            ORDER BY d.friend, d.friend_id, d.phone
+        """)
+
+    async def admin_app_fetches(self) -> list[dict]:
+        return await self._all("""
+            WITH visible AS (
+                SELECT f.id AS friend_id, f.name AS friend FROM marong.friends f
+                WHERE EXISTS (SELECT FROM marong.app_update_events e WHERE e.friend_id = f.id
+                              AND e.kind = 'fetched' AND e.at > now() - interval '90 days')
+                ORDER BY f.name, f.id LIMIT 100
+            )
+            SELECT f.friend, f.friend_id, events.items
+            FROM visible f
+            CROSS JOIN LATERAL (
+                SELECT jsonb_agg(jsonb_build_object('versionCode', version_code, 'at', at)
+                                 ORDER BY at DESC, id DESC) AS items
+                FROM (
+                    SELECT id, version_code, at FROM marong.app_update_events WHERE friend_id = f.friend_id
+                        AND kind = 'fetched' AND at > now() - interval '90 days'
+                    ORDER BY at DESC, id DESC LIMIT 20
+                ) e
+            ) events
+            ORDER BY f.friend, f.friend_id
+        """)
+
     # ── in-app chat history (API-102, API-104) ─────────────────
 
     async def app_message(self, room_key: str, kakao_id: str) -> dict | None:

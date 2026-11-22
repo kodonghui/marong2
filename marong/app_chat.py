@@ -769,6 +769,7 @@ class AppChat:
         diary.register(app)
         AppListen(self).register(app)
         app.router.add_get("/chat/healthz", self.health)
+        app.router.add_get("/chat/admin/api/app-versions", self.admin.app_versions)
         if self.internal_shop is not None:
             from .internal_shop import LOOKUP_PATH
             app.router.add_post(LOOKUP_PATH, self.internal_shop.read)

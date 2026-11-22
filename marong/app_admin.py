@@ -10,6 +10,7 @@ import re
 from aiohttp import web
 
 from .app_chat import Problem
+from .app_release import utc_timestamp, version_parts
 from .app_session import one
 from .diary import KST
 from .decor import KINDS, SLOTS
@@ -46,6 +47,29 @@ class AppAdmin:
             raise Problem("not_allowed")
         if write:
             self.chat._require_app_origin(req)
+
+    async def app_versions(self, req):
+        """API-267: read the release history and the current owners' device records."""
+        await self.require_admin(req)
+        releases = self.chat.releases
+        latest, paused, history = await asyncio.gather(
+            asyncio.to_thread(releases.manifest), asyncio.to_thread(releases.paused), asyncio.to_thread(releases.history))
+        devices, fetches = await asyncio.gather(self.chat.store.admin_app_devices(), self.chat.store.admin_app_fetches())
+        current = version_parts(latest.name) if latest else None
+        ordered = sorted(reversed(history), key=lambda entry: utc_timestamp(entry["at"]), reverse=True)
+        return self.chat._json(200, {
+            "latest": {"versionCode": latest.code, "versionName": latest.name,
+                       "publishedAt": latest.published_at} if latest else None,
+            "paused": paused,
+            "releases": [{key: value for key, value in entry.items() if key != "file"} for entry in ordered],
+            "devices": [{"friend": row["friend"], "friendId": row["friend_id"], "phone": row["phone"],
+                         "appVersion": row["app_version"], "seenAt": row["seen_at"].isoformat(),
+                         "notifications": row["notifications"], "events": row["events"],
+                         "behind": current is not None and version_parts(row["app_version"]) < current}
+                        for row in devices],
+            "fetches": [{"friend": row["friend"], "friendId": row["friend_id"], "items": row["items"]}
+                        for row in fetches],
+        })
 
     async def page(self, req):
         await self.require_admin(req)

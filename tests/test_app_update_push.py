@@ -386,6 +386,77 @@ class UpdateAPITests(unittest.IsolatedAsyncioTestCase):
         finally:
             self.db.admin("GRANT INSERT ON marong.app_update_events TO marong")
 
+    async def test_tc613_admin_access_empty_response_and_database_failure(self):
+        path = "/chat/admin/api/app-versions"
+        await problem(await self.http.get(path), 403, "not_allowed")
+        await problem(await self.http.get(path, headers=auth(STRANGER)), 403, "not_allowed")
+        with patch.object(self.chat.admin, "email_hash", email_hash(STRANGER)):
+            await problem(await self.http.get(path, headers=self.headers), 403, "not_allowed")
+        (self.folder / "history.json").unlink()
+        r = await self.http.get(path, headers=self.headers)
+        self.assertEqual(r.status, 200)
+        self.assertEqual(r.headers["Cache-Control"], "no-store")
+        self.assertIn("script-src 'self'", r.headers["Content-Security-Policy"])
+        self.assertEqual(await r.json(), {"latest": None, "paused": False, "releases": [], "devices": [], "fetches": []})
+        with patch.object(self.store, "admin_app_devices", side_effect=psycopg.OperationalError):
+            await problem(await self.http.get(path, headers=self.headers), 503, "db_unavailable")
+        with patch.object(self.store, "admin_app_devices", side_effect=RuntimeError):
+            await problem(await self.http.get(path, headers=self.headers), 500, "internal")
+
+    async def test_tc613_admin_limits_and_current_friend_only(self):
+        release = fixture(self.folder, code=13)
+        (self.folder / "paused").touch()
+        self.db.admin("UPDATE marong.friends SET name='Fixture 001' WHERE id IN (1, 2)")
+        self.addCleanup(self.db.admin, "UPDATE marong.friends SET name=CASE id WHEN 1 THEN 'Fixture A' "
+                                       "ELSE 'Fixture B' END WHERE id IN (1, 2)")
+        self.db.admin("""INSERT INTO marong.friends(id, name) OVERRIDING SYSTEM VALUE
+                       SELECT n, 'Fixture ' || lpad(n::text, 3, '0') FROM generate_series(3, 103) n
+                       ON CONFLICT DO NOTHING""")
+        self.db.admin("""INSERT INTO marong.app_devices (install_id, friend_id, fid, notifications, app_version, seen_at, created_at)
+                       SELECT md5(n::text)::uuid, 1, 'fixture-device-fid-' || n, 'denied',
+                              CASE WHEN n=30 THEN '0.2.9' ELSE '0.2.11' END,
+                              now() - make_interval(secs => 30 - n), now() - make_interval(days => 30 - n)
+                       FROM generate_series(1, 30) n""")
+        self.db.admin("""INSERT INTO marong.app_devices (install_id, friend_id, notifications, app_version, seen_at)
+                       VALUES (md5('older-phone')::uuid, 1, 'denied', '0.1.0', now() - interval '91 days')""")
+        self.db.admin("""INSERT INTO marong.app_devices (install_id, friend_id, notifications, app_version)
+                       SELECT md5((100 * f + n)::text)::uuid, f, 'denied', '0.2.10'
+                       FROM generate_series(2, 12) f CROSS JOIN generate_series(1, 20) n""")
+        self.db.admin("""INSERT INTO marong.app_update_events(kind, friend_id, install_id, version_code, state, status)
+                       SELECT 'state', 1, md5('30')::uuid, 10, 'failed', n FROM generate_series(1, 25) n""")
+        self.db.admin("""INSERT INTO marong.app_update_events(kind, friend_id, install_id, version_code, state)
+                       VALUES ('state', 2, md5('30')::uuid, 10, 'waiting_quiet')""")
+        self.db.admin("""INSERT INTO marong.app_update_events(kind, friend_id, version_code, at)
+                       SELECT 'fetched', 1, n, now() - make_interval(secs => 26-n) FROM generate_series(1, 26) n""")
+        self.db.admin("""INSERT INTO marong.app_update_events(kind, friend_id, version_code, at)
+                       SELECT 'fetched', n, 11, now() FROM generate_series(2, 102) n
+                       UNION ALL SELECT 'fetched', 103, 12, now() - interval '91 days'""")
+        r = await self.http.get("/chat/admin/api/app-versions", headers=self.headers)
+        self.assertEqual(r.status, 200)
+        data = await r.json()
+        self.assertEqual(data["latest"], {"versionCode": 13, "versionName": "0.2.10", "publishedAt": release.published_at})
+        self.assertTrue(data["paused"])
+        self.assertEqual([entry["versionCode"] for entry in data["releases"]], list(range(10, 4, -1)))
+        self.assertEqual(set(data["releases"][0]), {"kind", "versionCode", "versionName", "at", "notes", "size",
+                                                    "sha256", "backfilled"})
+        self.assertTrue(data["releases"][0]["backfilled"])
+        self.assertEqual(len(data["devices"]), 200)
+        first_friend = [row for row in data["devices"] if row["friendId"] == 1]
+        self.assertEqual([row["phone"] for row in first_friend], list(range(1, 21)))
+        self.assertEqual([row["behind"] for row in first_friend], [False] * 19 + [True])
+        self.assertEqual(set(first_friend[0]), {"friend", "friendId", "phone", "appVersion", "seenAt", "notifications",
+                                               "events", "behind"})
+        self.assertEqual([event["status"] for event in first_friend[-1]["events"]], list(range(25, 5, -1)))
+        self.assertEqual(data["devices"][20]["friendId"], 2)
+        self.assertEqual(data["devices"][20]["friend"], data["devices"][19]["friend"])
+        self.assertFalse(any(row["appVersion"] == "0.1.0" for row in data["devices"]))
+        self.assertEqual(len(data["fetches"]), 100)
+        self.assertEqual([row["friendId"] for row in data["fetches"]], list(range(1, 101)))
+        self.assertEqual([item["versionCode"] for item in data["fetches"][0]["items"]], list(range(26, 6, -1)))
+        raw = json.dumps(data)
+        for secret in ("install_id", "installId", "fid", "email", "waiting_quiet"):
+            self.assertNotIn(secret, raw)
+
 
 class ReleaseHistoryTests(unittest.TestCase):
     def setUp(self):
