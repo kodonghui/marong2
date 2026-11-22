@@ -40,7 +40,8 @@
 1. PR마다 리뷰는 Claude가 해요. Claude Code `/code-review`를 돌리고, 인증·권한·비밀값·외부 입력·결제가 걸린 변경이면 `/security-review`도 돌려요. 발견한 것과 처리 결과(고침, 또는 고치지 않음과 이유)를 PR 댓글로 남겨요.
 2. Codex 리뷰는 병합 직전에 한 번만 받아요. 합치는 쪽이 PR에 `@codex review` 댓글을 달아요. 한도에 걸려 리뷰가 실패하면 기다리지 않고 Claude 리뷰 결과로 판단하고, 실패했다는 사실을 PR에 적어요.
 3. GPT(Codex)는 PR을 열 때 Codex 리뷰를 부르지 않아요. Claude 리뷰 댓글이 오면 고치거나 이유를 답하고 보고해요.
-4. Codex 자동 리뷰(chatgpt-codex-connector)는 끄는 중이에요. 꺼지기 전에 자동 리뷰가 붙으면 그대로 두고, 그 내용도 처리해요.
+4. Codex 자동 리뷰(chatgpt-codex-connector)는 2026-11-23 00시대 KST에 껐어요. 그 전에 붙은 자동 리뷰는 그대로 두고, 그 내용도 처리해요.
+5. Codex 멘션(@ 다음에 codex)은 2번의 리뷰 요청 댓글에만 써요. PR 제목·설명·커밋 메시지·다른 댓글에 쓰면 connector가 작업 요청으로 읽고 'create an environment' 답을 달아요. 설명할 때는 멘션 없이 'Codex 리뷰'라고 써요.
 
 ## 계약과 다를 때
 
