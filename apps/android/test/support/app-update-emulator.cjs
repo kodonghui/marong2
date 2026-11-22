@@ -112,12 +112,17 @@ async function main() {
     if (mode === 'fallback') {
       // Isolate the durable fallback by simulating process reclamation during the transition.
       // Killing this PID, unlike force-stop, retains the job and the downloaded APK.
-      adb('shell', `input keyevent KEYCODE_HOME; run-as ${PACKAGE} kill -9 ${pid}`);
+      adb('shell', `run-as ${PACKAGE} kill -STOP ${pid} && input keyevent KEYCODE_HOME; run-as ${PACKAGE} kill -9 ${pid}`);
+      assert.equal(jobState(2213), 'absent', 'Fast job ran during the backup-only trial');
     } else {
       adb('shell', 'input', 'keyevent', 'KEYCODE_HOME');
     }
     console.log(`bucket=${adb('shell', 'am', 'get-standby-bucket', PACKAGE)} idle=${adb('shell', 'cmd', 'deviceidle', 'get', 'deep')}`);
     try {
+      if (mode === 'normal') {
+        await waitFor(() => jobState(2213) !== 'absent' || version() === 10, 60_000,
+          'TC-222: leaving the app should enqueue the fast install in the active bucket');
+      }
       await waitFor(() => version() === 10, LIMIT_MS - (performance.now() - backgrounded),
         'TC-222: no natural 9 → 10 install within 15 minutes of leaving the app', 2_000);
     } finally {
@@ -126,7 +131,7 @@ async function main() {
       const logs = adb('logcat', '-d', '-s', 'MarongUpdate:I');
       console.log(logs.split('\n').filter((line) => /update_(install|verify|download)/.test(line)).slice(-20).join('\n'));
     }
-    assert.ok(deadline, 'BUG-112: the backup install job has no execution deadline');
+    assert.equal(deadline, 'Max execution delay: +14m0s0ms', 'BUG-112: backup job deadline');
     await waitFor(() => jobState(2211) !== 'absent', 30_000, 'The replacement did not rearm the daily check');
     await waitFor(() => !adb('shell', 'run-as', PACKAGE, 'find', 'cache', '-name', 'marong-10.apk'),
       30_000, 'The staged APK was not cleaned');
