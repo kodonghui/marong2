@@ -19,6 +19,8 @@ LIMIT = ((IMAGE_MAX + 2) // 3) * 4 + 64 * 1024
 PROMPT_VERSION = "pet-artwork-v2"
 FRONT_PROMPT = """Draw the pet in the first picture as a character in the warm hand-drawn style of the third picture.
 Use the sitting front pose and body position of the second picture.
+Keep the second picture's overall silhouette and margins on the 1024x1024 canvas. Match the position and size of the head,
+body, paws, ears and tail to that pose without moving or scaling the character. Place the real pet's markings within it.
 It must look like this exact pet, not a generic one: keep its coat colors and shade, where its markings are,
 its ear shape, its eye color, its eye shape and its usual expression from the photo.
 Do not make the eyes bigger or rounder than in the photo. Draw markings as fur patterns, never as letters.
@@ -78,7 +80,10 @@ class ImageEditor:
         prompt = (
             f"같은 캐릭터의 표정만 '{EXPRESSION_TEXT[expression]}'으로 조금 바꿔. "
             "이 아이의 눈매와 얼굴 느낌은 그대로 두고 입과 눈을 조금만 움직여.\n"
-            "머리 위치와 몸 모양을 바꾸지 마. 털의 색과 무늬, 크기, 자세, 투명 배경은 유지하고 새 물건, 글자, 사람을 넣지 마."
+            "눈·입 주변만 수정해. 원본 1024×1024 캔버스에서 머리·몸·발·꼬리의 위치와 윤곽을 그대로 유지해. "
+            "그림을 확대하거나 가운데로 옮기거나 자르지 마. 털의 색과 무늬, 자세는 그대로 유지해. "
+            "Preserve the transparent pixels outside the original silhouette. Do not fill the background. "
+            "새 물건, 글자, 사람을 넣지 마."
         )
         return await self.request("expression", model, prompt, (("chosen.png", front, "image/png"),), job)
 

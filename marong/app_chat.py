@@ -163,6 +163,7 @@ class AppChat:
                 '<a class="icon-button" href="/chat/persona/" aria-label="친구 약속">나</a>'.encode("utf-8")), "text/html")
         self.runner = None
         self.diary_models = diary_models
+        self.diary_scenes = None
         from .pet_app_settings import PetAppSettings
         self.pet_app_settings = pet_app_settings if pet_app_settings is not None else PetAppSettings.from_env(os.environ)
         from .app_persona import AppPersona
@@ -413,7 +414,15 @@ class AppChat:
         out = {"id": row["id"], "from": "me" if row["role"] == "user" else "marong",
                "text": (row["content"] or "").replace(LINK_MARK, "(일회용 링크)")[:20_000],
                "at": row["created_at"].astimezone(self.tz).isoformat(timespec="seconds"), "via": via, "kind": kind}
-        picture = self._picture(meta.get("topic")) if row["role"] == "assistant" else None
+        picture = None
+        if row["role"] == "assistant":
+            scene = meta.get("scene")
+            if isinstance(scene, str) and UUID.fullmatch(scene):
+                alt = meta.get("sceneAlt")
+                picture = {"src": f"/chat/api/scenes/{scene}",
+                           "alt": alt[:60] if isinstance(alt, str) and alt else "반려동물 캐릭터의 그림"}
+            else:
+                picture = self._picture(meta.get("topic"))
         if picture:
             out["picture"] = picture
         return out
@@ -735,7 +744,9 @@ class AppChat:
             self.friends.register(app.router)
             self.characters.register(app.router)
             from .pet_intro import PetIntro
+            from .app_scenes import AppScenes
             PetIntro(self).register(app.router)
+            AppScenes(self).register(app.router)
         app.router.add_get("/chat", self.home)
         app.router.add_get("/chat/", self.page)
         app.router.add_get("/chat/{name:chat\\.(?:js|css)}", self.page)

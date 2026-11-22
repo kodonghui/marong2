@@ -330,7 +330,7 @@ function drawPicture(diary) {
   const caption = element("figcaption");
   const status = element("div");
   const busy = diary.busy === "redraw";
-  const alt = `마롱이가 그린 '${diary.title}' 그림`;
+  const alt = `${diary.writer?.name || "마롱이"}의 '${diary.title}' 그림`;
 
   function picture(reload = false) {
     status.replaceChildren();
@@ -346,6 +346,9 @@ function drawPicture(diary) {
         caption.textContent = "기본 그림";
         status.replaceChildren(button("그림 다시 보기", () => picture(true), "text-button"));
       }, { once: true });
+    } else if (diary.writer) {
+      img = element("div", "placeholder writer-placeholder", "오늘은 그림을 못 그렸어요");
+      caption.textContent = "";
     } else {
       img = fallbackArt();
       caption.textContent = "기본 그림";
@@ -356,8 +359,11 @@ function drawPicture(diary) {
     img.classList.toggle("faded", busy);
     frame.replaceChildren(img);
     if (busy) {
+      const writer = diary.writer?.name || "마롱이";
+      const syllable = writer.charCodeAt(writer.length - 1) - 0xac00;
+      const subject = writer + (syllable >= 0 && syllable <= 11171 && syllable % 28 ? "이" : "가");
       const words = Date.now() - busySince >= 120000
-        ? "오래 걸리네. 조금 있다가 다시 열어 줘" : "마롱이가 다시 그리는 중이야";
+        ? "오래 걸리네. 조금 있다가 다시 열어 줘" : `${subject} 다시 그리는 중이야`;
       frame.append(element("p", "over-picture", words));
       if (Date.now() - busySince >= 120000) {
         status.append(button("새로 보기", () => {
@@ -409,15 +415,25 @@ function drawReady(diary) {
   }
   const title = element("div", "title-line");
   title.append(element("small", "", "제목"), element("h2", "", diary.title));
+  if (diary.writer) {
+    const who = element("p", "diary-writer");
+    const face = element("img", "");
+    face.alt = "";
+    face.src = diary.writer.faceUrl;
+    face.addEventListener("error", () => face.remove(), {once: true});
+    who.append(face, document.createTextNode(diary.writer.name));
+    paper.append(who);
+  }
   paper.append(title, drawPicture(diary));
   const feedback = diary.redraw.last?.result;
-  if (newScene && !diary.redraw.blocked && !diary.busy) {
+  const canRedraw = diary.writer?.active !== false;
+  if (newScene && canRedraw && !diary.redraw.blocked && !diary.busy) {
     const note = element("p", "paper-note", "글이 바뀌어서 그림이랑 조금 다를 수 있어. 다시 그려 볼래?");
     note.append(button("다시 그리기", () => openSheet("redraw"), "text-button"));
     paper.append(note);
   } else if (feedback === "scene_rejected") {
     const note = element("p", "paper-note", "그 말로는 그릴 수 없어. 이름이나 숫자는 빼고 적어 줘");
-    if (!diary.redraw.blocked) note.append(button("다시 적기", () => openSheet("redraw"), "text-button"));
+    if (canRedraw && !diary.redraw.blocked) note.append(button("다시 적기", () => openSheet("redraw"), "text-button"));
     paper.append(note);
   } else if (feedback === "draw_failed" || feedback === "draw_refused") {
     paper.append(element("p", "paper-note", "지금은 못 그렸어. 조금 있다가 다시 해 볼래?"));
@@ -441,6 +457,7 @@ function drawReady(diary) {
   paper.append(stamping);
   const actions = element("div", "work-actions");
   for (const [kind, label] of [["fix", "말로 고치기"], ["redraw", "다시 그리기"]]) {
+    if (kind === "redraw" && !canRedraw) continue;
     const slot = element("div");
     const action = button(label, () => openSheet(kind));
     action.setAttribute("aria-label", `${label} · ${diary[kind].left}번 남음`);

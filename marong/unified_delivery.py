@@ -99,9 +99,10 @@ class UnifiedDelivery:
 
 
 class AppProactive(PrivateProactive):
-    def __init__(self, settings, store, agent, locks, delivery, **kwargs):
+    def __init__(self, settings, store, agent, locks, delivery, *, scenes=None, **kwargs):
         super().__init__(settings, store, agent, locks, app=delivery.push, **kwargs)
         self.delivery = delivery
+        self.scenes = scenes
 
     def ready(self):
         return True
@@ -118,30 +119,70 @@ class AppProactive(PrivateProactive):
             "friend_id", "opted_in_at", "last_incoming_at", "per_day", "start_hour", "end_hour",
         ))
 
+    async def _topic(self, room, begin, choice):
+        return await super()._topic({**room, "topic_choice": choice}, begin, choice)
+
+    async def _topic_scene(self, room, choice, *, wait):
+        if not (self.scenes and choice and choice.at and choice.prefs["pictures"]):
+            return None
+        try:
+            job = await self.scenes.topic_job(room["friend_id"], choice.picture.key, choice.at,
+                                              queue=wait and choice.kind != "call")
+            if wait and choice.kind != "call":
+                return await self.scenes.wait_for_topic(job)
+            return job["id"] if job and job["state"] == "done" else None
+        except Exception as error:
+            log.warning("scene_topic_error friend=%s error=%s", room["friend_id"], type(error).__name__)
+            return None
+
+    async def _link_scene(self, choice, scene):
+        await self.store._one("UPDATE marong.topic_sends SET scene_picture_id=%s WHERE id=%s RETURNING id",
+                              (scene, choice.topic_id))
+
     async def _send(self, room, begin, text, meta, *, app_text=None, picture=None):
         result = None
         if await self.still_current(room, begin):
+            scene = None
+            choice = room.get("topic_choice")
             if room.get("wearing_character"):
                 meta = {key: value for key, value in meta.items() if key != "topic"}
                 app_text = None
+                if picture:
+                    scene = await self._topic_scene(room, choice, wait=True)
+                    if scene:
+                        meta["scene"] = str(scene)
+                        name = await self.store.app_bot_name(room["friend_id"])
+                        meta["sceneAlt"] = picture.alt.replace("마롱이", name or "반려동물 캐릭터")
+                        if meta.get("topic_fallback") and name:
+                            text = text.replace("마롱이", name)
+                    if self.scenes and not await self.still_current(room, begin):
+                        return {"text": None, "ok": False, "code": None, "via": None}
             result = await self.delivery.say(room["friend_id"], text, kind="proactive", ttl_s=PROACTIVE_APP_TTL_S,
                                              app_text=app_text, meta={**meta, "proactive": True},
                                              key=f"app-proactive:{begin.isoformat()}")
             await self.store.record_delivery(room, begin, result is not None)
+            if result and scene:
+                await self._link_scene(choice, scene)
         return {"text": text if result else None, "ok": bool(result), "code": None, "via": "app" if result else None}
 
     async def _hello(self, room, choice):
         if not await self.delivery.notifications_allowed(room["friend_id"]):
             return False
         if room.get("wearing_character"):
-            choice = replace(choice, prefs={**choice.prefs, "pictures": False})
+            scene = await self._topic_scene(room, choice, wait=False)
+            with_scene = replace(choice, prefs={**choice.prefs, "pictures": False}, scene_id=scene)
+            sent = await super()._hello(room, with_scene)
+            if sent and scene:
+                await self._link_scene(choice, scene)
+            return sent
         return await super()._hello(room, choice)
 
 
 class AppReminders(PrivateReminders):
-    def __init__(self, settings, store, agent, delivery, **kwargs):
+    def __init__(self, settings, store, agent, delivery, *, scenes=False, **kwargs):
         super().__init__(settings, store, agent, None, app=delivery.push, **kwargs)
         self.delivery = delivery
+        self.scenes = scenes
 
     def ready(self):
         return True
@@ -193,7 +234,8 @@ class AppReminders(PrivateReminders):
 
     async def sweep_rings(self):
         noted = 0
-        for ring in await self.store.rings_missed():
+        options = {"with_scenes": True} if self.scenes else {}
+        for ring in await self.store.rings_missed(**options):
             if ring["via"] != "app":
                 continue
             hello = ring["reason"] == "hello"
@@ -202,7 +244,14 @@ class AppReminders(PrivateReminders):
             choices = HELLO_MISSED_LINES if hello else MISSED_LINES
             text = picture.missed() if picture else choices[int(self.rng() * len(choices)) % len(choices)]
             meta = {"ring": ring["id"], "missed": True, **({"hello": True} if hello else {})}
-            if picture:
+            if ring.get("scene_picture_id"):
+                meta["scene"] = str(ring["scene_picture_id"])
+                name = await self.store.app_bot_name(ring["friend_id"])
+                if picture:
+                    meta["sceneAlt"] = picture.alt.replace("마롱이", name or "반려동물 캐릭터")
+                if name:
+                    text = text.replace("마롱이", name)
+            elif picture:
                 meta["topic"] = picture.key
             result = await self.delivery.say(ring["friend_id"], text, kind="missed_call", meta=meta,
                                              app_text=MISSED_NOTE if picture else None,

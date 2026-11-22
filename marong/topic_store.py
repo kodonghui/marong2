@@ -137,13 +137,17 @@ class TopicStore:
         return row["n"]
 
     async def hello_add(self, friend_id: int, caller_id: int, title: str, say: str, topic: str | None,
-                        answer_for: timedelta) -> dict | None:
+                        answer_for: timedelta, *, scene_id=None) -> dict | None:
         """A ringing hello call without a schedule (SPEC-266 ①). None while another ring of this friend is ringing."""
         try:
+            extra_column = ", scene_picture_id" if scene_id else ""
+            extra_value = ", %s" if scene_id else ""
+            params = (friend_id, caller_id, title, say, topic, answer_for)
             return await self._one(
                 "INSERT INTO marong.app_rings (schedule_id, friend_id, caller_id, via, status, title, say, reason, "
-                "  topic, answer_until) VALUES (NULL, %s, %s, 'app', 'ringing', %s, %s, 'hello', %s, now() + %s) "
+                f"  topic, answer_until{extra_column}) "
+                f"VALUES (NULL, %s, %s, 'app', 'ringing', %s, %s, 'hello', %s, now() + %s{extra_value}) "
                 "RETURNING id::text AS id, via, status, answer_until",
-                (friend_id, caller_id, title, say, topic, answer_for))
+                (*params, scene_id) if scene_id else params)
         except errors.UniqueViolation:
             return None

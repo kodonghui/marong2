@@ -3251,6 +3251,9 @@ components:
             decor:
               type: boolean
               description: MARONG_DECOR가 켜져 있으면 true(pet-app SPEC-417~424). 반려동물 part가 더한 칸이라 그 전 서버는 보내지 않아요. 없으면 false로 봐요
+            scenePictures:
+              type: boolean
+              description: 반려동물 장면 그림이 켜져 있으면 true(SPEC-411). 없으면 false로 봐요
           description: 서버에서 켜진 기능. 화면은 꺼진 기능의 메뉴를 그리지 않아요(명세 공통 규칙 9)
         google:
           type: string

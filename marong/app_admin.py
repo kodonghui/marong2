@@ -1,7 +1,7 @@
 """Access-protected account administration (SPEC-395)."""
 
 import asyncio
-from datetime import timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import hmac
 import logging
@@ -11,6 +11,8 @@ from aiohttp import web
 
 from .app_chat import Problem
 from .app_session import one
+from .diary import KST
+from .pet.cost import month_bounds as picture_month_bounds
 from .usage import effective_limits, month_bounds, usage_day
 
 
@@ -55,6 +57,41 @@ class AppAdmin:
             display = f'<p class="caption">이번 달 그림 예산 사용률 {percent}%</p>'
             response.body = response.body.replace(b"<!-- image-budget -->", display.encode("utf-8"))
         return response
+
+    async def image_costs(self, req):
+        await self.require_admin(req)
+        start, end = picture_month_bounds(datetime.now(KST))
+        costs = await self.chat.store._one("""
+            WITH diary AS (
+                SELECT coalesce(sum(cost_usd),0) AS total,
+                       coalesce(sum(cost_usd) FILTER (WHERE prompt_version<>'scene-v1'),0) AS metered
+                FROM marong.diary_ai_runs WHERE kind='draw' AND sent_at >= %(start)s AND sent_at < %(end)s
+            ), scenes AS (
+                SELECT coalesce(sum(cost_usd) FILTER (WHERE purpose='topic'),0) AS topic,
+                       coalesce(sum(cost_usd) FILTER (WHERE purpose='reaction'),0) AS reaction
+                FROM marong.scene_pictures WHERE finished_at >= %(start)s AND finished_at < %(end)s
+            ), characters AS (
+                SELECT coalesce(sum(cost_usd),0) AS amount FROM marong.character_jobs
+                WHERE finished_at >= %(start)s AND finished_at < %(end)s
+            )
+            SELECT diary.total AS diary, diary.metered AS diary_metered, scenes.topic, scenes.reaction,
+                   characters.amount AS character FROM diary CROSS JOIN scenes CROSS JOIN characters
+        """, {"start": start, "end": end})
+
+        def budget(limit, spent):
+            if limit is None:
+                return None
+            return {"limitUsd": round(float(limit), 2), "usedUsd": round(float(spent), 2),
+                    "ratio": float(spent / limit) if limit else 0}
+
+        return self.chat._json(200, {
+            "month": start.strftime("%Y-%m"),
+            "byKind": {name: round(float(costs[name]), 2) for name in ("diary", "topic", "reaction", "character")},
+            "budgets": {
+                "diary": budget(self.chat.pet_app_settings.diary_image_budget, costs["diary_metered"]),
+                "character": budget(self.chat.characters.budget, costs["character"]),
+            },
+        })
 
     async def create_invite(self, req):
         await self.require_admin(req, write=True)
@@ -218,6 +255,7 @@ class AppAdmin:
 
     def register(self, router):
         router.add_get(ADMIN_PATH + "/", self.page)
+        router.add_get(ADMIN_PATH + "/api/image-costs", self.image_costs)
         router.add_get(ADMIN_PATH + "/api/invites", self.list_invites)
         router.add_post(ADMIN_PATH + "/api/invites", self.create_invite)
         router.add_get(ADMIN_PATH + "/api/members", self.list_members)

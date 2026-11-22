@@ -418,8 +418,11 @@ class LiveSession:
             # A new Gemini session that carries the promise: never resume a handle left from before the ring.
             self.ring_greet=True;self.handle=None;self.pending.clear();self.resume.clear()
             topic,title=got.get('topic'),got['title']
-            if reason=='hello' and isinstance(topic,str) and TOPIC_KEY.fullmatch(topic) and 1<=len(title or '')<=20:
-                self.ring_topic={'picture':f'/chat/topics/{topic}.webp','title':title}
+            if reason=='hello' and 1<=len(title or '')<=20:
+                if got.get('scene_picture_id'):
+                    self.ring_topic={'picture':f'/chat/api/scenes/{got["scene_picture_id"]}','title':title}
+                elif isinstance(topic,str) and TOPIC_KEY.fullmatch(topic):
+                    self.ring_topic={'picture':f'/chat/topics/{topic}.webp','title':title}
             print('ring_answered',f"wait_s={int(got['waited'].total_seconds())}",f'reason={reason}',
                   f'topic={int(self.ring_topic is not None)}',flush=True)
 

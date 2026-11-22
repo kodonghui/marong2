@@ -192,12 +192,13 @@ class CharacterWorker:
             return None, drawings, None
         async with self.pool.connection() as conn:
             front = await self.api.media.read(conn, ident, "front")
+        front_mask = await asyncio.to_thread(alpha, front)
         drawings = {}
         head = self.templates.head(template)
         for slot in EXPRESSIONS:
             async def generate():
                 return await self.editor.expression(model=model, template=template, front=front, expression=slot, job=job)
-            drawings[slot] = await self.fitted(generate, reference, .85, head)
+            drawings[slot] = await self.fitted(generate, front_mask, .85, head)
         return None, drawings, None
 
     async def fitted(self, draw, reference, threshold, box=None):

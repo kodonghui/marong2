@@ -22,6 +22,7 @@ import os
 from pathlib import Path
 import random
 import re
+from uuid import UUID
 
 log = logging.getLogger("marong.topics")
 
@@ -89,6 +90,7 @@ class Picture:
     months: tuple[int, ...]
     hours: tuple[int, int]
     path: Path
+    pet_scene: bool = True
 
     @property
     def key(self) -> str:
@@ -130,6 +132,9 @@ def picture_of(item: dict, set_name: str, folder: Path) -> Picture:
     scene = _text(item, "scene", 1, 300)
     if not scene.isascii():
         raise ValueError("scene")
+    pet_scene = item.get("petScene", True)
+    if type(pet_scene) is not bool:
+        raise ValueError("petScene")
     ask = _text(item, "ask", 1, 40)
     if not ask.endswith("?"):
         raise ValueError("ask")
@@ -153,7 +158,7 @@ def picture_of(item: dict, set_name: str, folder: Path) -> Picture:
     if head[:4] != b"RIFF" or head[8:12] != b"WEBP" or size > PICTURE_BYTES:
         raise ValueError("file")
     return Picture(set_name, name, _text(item, "title", 1, 20), status, scene, _text(item, "line", 1, 40), ask,
-                   preview, _text(item, "alt", 1, 60), tuple(months), (hours[0], hours[1]), path)
+                   preview, _text(item, "alt", 1, 60), tuple(months), (hours[0], hours[1]), path, pet_scene)
 
 
 class PictureSet:
@@ -315,16 +320,19 @@ class Choice:
     topic_id: int
     prefs: dict
     call: dict | None
+    at: datetime | None = None
+    scene_id: UUID | None = None
 
 
 class Topics:
-    def __init__(self, settings, store, app=None, *, pictures: PictureSet | None = None, rng=random.random):
+    def __init__(self, settings, store, app=None, *, pictures: PictureSet | None = None, rng=random.random, scenes=None):
         from zoneinfo import ZoneInfo
         self.s = settings
         self.store = store
         self.app = app                       # app_push.AppPush or None (no app on this server)
         self.pictures = pictures if pictures is not None else picture_set()
         self.rng = rng
+        self.scenes = scenes
         self.tz = ZoneInfo(settings.timezone)
 
     @property
@@ -357,7 +365,12 @@ class Topics:
                 return "no_time"
         midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
         at = midnight + timedelta(minutes=topic_minute(friend, day, *span))
-        return Today(prefs, {h["picture"] for h in history if h["status"] != "failed"}, call, at)
+        today = Today(prefs, {h["picture"] for h in history if h["status"] != "failed"}, call, at)
+        if self.scenes and room.get("wearing_character") and call and prefs["pictures"] and now < at:
+            picture = await self.pick_for(room, today, now)
+            if picture:
+                await self.scenes.topic_job(friend, picture.key, at)
+        return today
 
     async def _callable(self, friend: int, day: date) -> dict | None:
         """SPEC-265 ①~③, ⑤: what holds all day. The moment's conditions are in choose()."""
@@ -376,16 +389,7 @@ class Topics:
                 return None
         return {"caller": caller, "devices": devices}
 
-    async def choose(self, room: dict, now: datetime, slot_end: datetime) -> Choice | None:
-        """In a proactive turn whose slot was claimed: a topic for it, recorded before anything is sent, or None for
-        an ordinary proactive message."""
-        today = await self.today(room, now)
-        if isinstance(today, str):
-            if today != "today":
-                log.info("topic_skipped reason=%s", today)
-            return None
-        if slot_end <= today.at:  # a later slot holds the topic time
-            return None
+    async def pick_for(self, room, today, now):
         pictures = self.pictures.pickable
         if os.getenv("MARONG_FRIEND_CARD") == "on":
             rules = await self.store._all("""SELECT text FROM marong.friend_rules
@@ -393,7 +397,22 @@ class Topics:
             pictures = tuple(picture for picture in pictures if not any(
                 rule["text"] in " ".join((picture.title, picture.scene, picture.line, picture.ask, picture.alt))
                 for rule in rules))
-        picture = pick(pictures, now, today.used, self.rng)
+        if self.scenes and room.get("wearing_character"):
+            pet_pictures = tuple(picture for picture in pictures if picture.pet_scene)
+            seeded = random.Random(f"{room['friend_id']}:{today.at.date()}")
+            return pick(pet_pictures, today.at, today.used, seeded.random)
+        return pick(pictures, now, today.used, self.rng)
+
+    async def choose(self, room: dict, now: datetime, slot_end: datetime) -> Choice | None:
+        """In a proactive turn whose slot was claimed: reserve the day's topic before delivery."""
+        today = await self.today(room, now)
+        if isinstance(today, str):
+            if today != "today":
+                log.info("topic_skipped reason=%s", today)
+            return None
+        if slot_end <= today.at:
+            return None
+        picture = await self.pick_for(room, today, now)
         if picture is None:
             log.info("topic_skipped reason=no_picture")
             return None
@@ -413,7 +432,7 @@ class Topics:
         if topic_id is None:  # another turn took today's topic first
             return None
         log.info("topic_chosen kind=%s picture=%s", kind, picture.key)
-        return Choice(kind, picture, topic_id, today.prefs, today.call)
+        return Choice(kind, picture, topic_id, today.prefs, today.call, today.at)
 
 
 def topic_text(text: str | None, picture: Picture) -> tuple[str, bool]:

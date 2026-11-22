@@ -135,7 +135,7 @@ async def drawing_allowed_in(conn, budget: Decimal | None, now: datetime) -> boo
     start = now.astimezone(KST).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     cursor = await conn.execute(
         "SELECT COALESCE(sum(cost_usd),0) AS usd FROM marong.diary_ai_runs "
-        "WHERE kind='draw' AND sent_at >= %s AND sent_at <= %s",
+        "WHERE kind='draw' AND prompt_version<>'scene-v1' AND sent_at >= %s AND sent_at <= %s",
         (start, now),
     )
     row = await cursor.fetchone()
