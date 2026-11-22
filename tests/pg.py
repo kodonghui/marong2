@@ -48,6 +48,12 @@ class TestDB:
             ROOT / "marong" / "call" / "migrations" / "008_unified.sql",
         )
 
+    def apply_usage_limit(self) -> None:
+        self.apply_sql(
+            ROOT / "marong" / "migrations" / "021_usage_limit.sql",
+            ROOT / "marong" / "call" / "migrations" / "009_usage_limit.sql",
+        )
+
     def admin(self, sql: str, params=()) -> list[tuple]:
         """슈퍼유저로 읽기(시험 확인용)."""
         with psycopg.connect(self.admin_url, autocommit=True) as c:
