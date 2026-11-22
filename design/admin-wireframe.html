@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>마롱이 관리 페이지 와이어프레임</title>
+<style>
+/* 08 단계 와이어프레임: 회색, 시스템 글꼴, 자리표시 글. 색과 토큰은 09 단계(지금 unified.css·chat.css와 design/base.tokens.json)에서 와요.
+   원본은 docs/08-screens/admin.md. 상태마다 한 칸, 폭 360px와 430px를 나란히 그려요. 숫자와 이름은 지어낸 값이에요. */
+:root { --page:#f4f4f4; --surface:#fff; --line:#cfcfcf; --text:#222; --muted:#666; --fill:#e6e6e6; --strong:#444 }
+* { box-sizing: border-box }
+body { margin:0; background:var(--page); color:var(--text); font:14px/1.5 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; padding:24px 16px 48px }
+h1 { font-size:22px; margin:0 0 4px }
+.lead { color:var(--muted); margin:0 0 16px; max-width:72ch }
+nav.jump { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 24px }
+nav.jump a { color:var(--text); border:1px solid var(--line); background:var(--surface); padding:4px 10px; border-radius:999px; text-decoration:none; font-size:13px }
+section.screen { margin:0 0 40px }
+section.screen > h2 { font-size:18px; margin:0 0 4px }
+section.screen > p { margin:0 0 12px; color:var(--muted) }
+.state { margin:0 0 20px }
+.state h3 { font:600 13px/1.4 ui-monospace, Consolas, monospace; margin:0 0 6px }
+.pair { display:flex; flex-wrap:wrap; gap:16px; align-items:flex-start }
+.frame { background:var(--surface); border:1px solid var(--line); border-radius:12px; overflow:hidden; flex:none }
+.frame .w { font:11px ui-monospace, Consolas, monospace; color:var(--muted); padding:4px 8px; border-bottom:1px dashed var(--line) }
+.frame.w360 { width:360px } .frame.w430 { width:430px }
+@media (max-width: 860px) { .frame.w430 { display:none } }
+@media (max-width: 400px) { .frame.w360 { width:100% } }
+.scr { padding:12px 16px 16px; display:grid; gap:8px }
+.title { font-weight:700; font-size:15px }
+.tabs { display:flex; gap:4px; overflow-x:auto; border-bottom:1px solid var(--line); margin:0 -16px; padding:0 16px; scrollbar-width:none }
+.tabs span { flex:none; padding:10px 8px; min-height:44px; color:var(--muted); font-size:14px }
+.tabs span.on { color:var(--text); font-weight:700; border-bottom:2px solid var(--strong) }
+.g { font-size:12px; color:var(--muted); margin-top:6px }
+.row { border:1px solid var(--line); border-radius:8px; padding:8px 10px; display:flex; gap:8px; align-items:center }
+.row .t { flex:1; min-width:0; overflow-wrap:anywhere } .row .t div + div { color:var(--muted); font-size:13px }
+.row.dim { opacity:.55 } .row.bold .t div:first-child { font-weight:700 }
+.card { background:var(--fill); border-radius:8px; padding:10px 12px; overflow-wrap:anywhere }
+.btn { display:inline-block; border:1px solid var(--strong); border-radius:8px; padding:8px 12px; min-height:40px; text-align:center }
+.btn.danger { border-width:2px; font-weight:700 }
+.chips { display:flex; gap:6px; flex-wrap:wrap } .chips span { border:1px solid var(--line); border-radius:999px; padding:4px 10px } .chips span.on { border-color:var(--strong); font-weight:700 }
+.skel { height:40px; background:var(--fill); border-radius:8px }
+.band { border-left:4px solid var(--strong); background:var(--fill); padding:8px 10px }
+.warnb { border:2px dashed var(--strong); padding:8px 10px; border-radius:8px }
+.input { border:1px solid var(--strong); border-radius:6px; padding:8px 10px; color:var(--muted) }
+.empty { color:var(--muted); padding:12px 0; text-align:center }
+.att { display:flex; gap:8px; align-items:flex-start; padding:6px 0; border-bottom:1px solid var(--line); overflow-wrap:anywhere }
+.att::before { content:"●"; color:#999 } .att.d { font-weight:700 } .att.d::before { color:#222 }
+.bar { height:8px; background:var(--fill); border-radius:4px; overflow:hidden } .bar i { display:block; height:100%; background:var(--strong) }
+.small { font-size:12px; color:var(--muted) }
+</style>
+</head>
+<body>
+<h1>마롱이 관리 페이지 와이어프레임</h1>
+<p class="lead">docs/08-screens/admin.md의 상태마다 한 칸이에요(공통 상태는 한 번만). 왼쪽 360px, 오른쪽 430px(좁은 화면에서는 360px만). 회색과 시스템 글꼴만 써요. 숫자·이름은 지어낸 값이고, 지금 문구를 옮긴 곳은 그 문구 그대로예요.</p>
+<nav class="jump" id="jump"></nav>
+<main id="out"></main>
+<script>
+// 블록 문법: T 탭(지금 탭 이름) · H 머리 · G 그룹 이름 · R 줄(| 로 줄 나눔, R> 오른쪽 화살표, R- 흐림, R* 굵게) · C 카드 · B 단추 · B! 빨간 단추
+// K 칩(* 골라짐) · S 회색 자리(개수) · N 띠 · W 주의 띠 · I 입력 칸 · E 빈 글 · A 주의 항목(A! 빨강) · P 막대(퍼센트) · X 작은 글
+const TABS = ["개요", "회원", "초대 링크", "앱 버전", "비용", "아이템"];
+const SCREENS = [
+ ["common", "공통", "모든 관리 화면", [
+  ["공통#forbidden", ["H:마롱이 관리", "E:관리자만 볼 수 있어요"]],
+  ["공통#error", ["T:개요", "W:잠깐 문제가 생겼어요. 다시 해 볼까요?", "B:다시 해 볼게요", "X:추적 4bf92f3577b34da6"]],
+  ["공통#stale", ["T:회원", "P:40", "R>:시험친구 나 · 마롱이|한도 · 무제한|오늘 320단위 · 티켓 3장"]],
+  ["공통#not-found", ["T:개요", "E:없는 화면이에요", "B:개요로"]],
+ ]],
+ ["scr169", "SCR-169 개요", "/chat/admin/ · API-280", [
+  ["SCR-169#loading", ["T:개요", "G:손볼 일", "S:1", "S:5"]],
+  ["SCR-169#attention", ["T:개요", "G:손볼 일", "A:통화 월 예산 80% 썼어요", "A:그림 예산 85% 썼어요", "A!:설치가 멈춘 폰 1대 · 확인 창 기다림이나 실패", "A:24시간 안에 끝나는 초대 링크 1개", "A:아직 잇지 않은 기존 친구 1명", "G:지금", "C:회원 3명 · 잇지 않은 친구 1명", "C:오늘 단위 420 · 글 41 · 통화 21분 · 그림 2", "C:통화 11월(UTC) $121.40 / $150.00 · 80%", "P:80", "C:그림 11월 $21.10 · 예산 85%", "C:앱 최신 0.3.3 · 폰 2대 중 1대 뒤처짐"]],
+  ["SCR-169#calm", ["T:개요", "G:손볼 일", "E:지금 손볼 일 없어요", "G:지금", "C:회원 3명 · 잇지 않은 친구 0명", "C:오늘 단위 12 · 글 12 · 통화 0분 · 그림 0", "C:통화 11월(UTC) $30.00 / $150.00 · 20%", "P:20", "C:그림 11월 $2.00 · 예산 10%", "C:앱 최신 0.3.3 · 폰 2대 모두 최신"]],
+  ["SCR-169#cards", ["T:개요", "G:지금", "C:회원 3명 · 잇지 않은 친구 1명", "C:오늘 단위 420 · 글 41 · 통화 21분 · 그림 2", "C:통화 11월(UTC) $121.40 / $150.00 · 80%", "P:80", "C:그림 11월 $21.10 · 예산 85%", "C:앱 · 업데이트 멈춤 중"]],
+  ["SCR-169#card-unknown", ["T:개요", "G:손볼 일", "E:지금 손볼 일 없어요", "G:지금", "C:회원 3명 · 잇지 않은 친구 0명", "C:오늘 단위 12 · 글 12 · 통화 0분 · 그림 0", "C:통화 · 지금 못 불러왔어요", "C:그림 11월 $2.00", "C:앱 · 지금 못 불러왔어요"]],
+  ["SCR-169#no-release", ["T:개요", "G:지금", "C:앱 · 아직 올린 버전이 없어요"]],
+  ["SCR-169#error", ["T:개요", "W:잠깐 문제가 생겼어요. 다시 해 볼까요?", "B:다시 해 볼게요"]],
+  ["SCR-169#forbidden", ["H:마롱이 관리", "E:관리자만 볼 수 있어요"]],
+ ]],
+ ["scr200", "SCR-200 회원", "/chat/admin/members · API-236", [
+  ["SCR-200#loading", ["T:회원", "S:1", "S:3"]],
+  ["SCR-200#normal", ["T:회원", "X:기본 한도 · 하루 1000 · 통화 월 $3.00", "R>:시험친구 나 · 마롱이|한도 · 무제한|오늘 320단위 · 티켓 3장 · 마지막 11월 24일 오후 2:03", "R>:시험친구 가 · 시험 마롱|한도 · 기본(하루 1000 · 통화 월 $3.00)|오늘 40단위 · 티켓 0장 · 마지막 11월 24일 오전 9:10", "R>:시험 메모 · 보리|한도 · 직접(하루 200 · 통화 월 $5.00)|오늘 0단위 · 티켓 1장 · 마지막 11월 20일 오후 7:16"]],
+  ["SCR-200#unlinked", ["T:회원", "R>:시험친구 나 · 마롱이|한도 · 무제한|오늘 320단위 · 티켓 3장", "G:아직 잇지 않은 기존 친구", "R:동호", "B:잇기 링크 만들기"]],
+  ["SCR-200#empty", ["T:회원", "X:기본 한도 · 없음", "E:아직 가입한 사람이 없어요"]],
+  ["SCR-200#error", ["T:회원", "W:잠깐 문제가 생겼어요. 다시 해 볼까요?", "B:다시 해 볼게요"]],
+  ["SCR-200#forbidden", ["H:마롱이 관리", "E:관리자만 볼 수 있어요"]],
+ ]],
+ ["scr201", "SCR-201 회원 한 사람", "/chat/admin/members/:friendId · API-236·237·241·243·267", [
+  ["SCR-201#loading", ["T:회원", "S:1", "S:4"]],
+  ["SCR-201#normal", ["T:회원", "X:‹ 회원", "H:시험친구 가 · 시험 마롱", "G:한도", "R:한도 · 기본(하루 1000 · 통화 월 $3.00)|유효 · 하루 1000 · 통화 월 $3.00|이번 달 통화 $1.23", "B:한도 바꾸기", "G:오늘", "R:320단위 · 글 12 · 통화 5분 · 그림 1|티켓 3장", "B:티켓 넣기", "G:로그인", "R:로그인 2개 · 마지막 11월 24일 오후 2:03", "B:다시 로그인 링크 만들기", "B!:로그인 끊기", "G:이 사람의 폰", "R:폰 1 · 0.3.2 · 뒤처짐|마지막 보고 11월 24일 오후 2:03", "B:앱 버전에서 보기"]],
+  ["SCR-201#missing", ["T:회원", "E:그 사람을 찾을 수 없어요", "B:회원 목록으로"]],
+  ["SCR-201#call-month-unknown", ["T:회원", "G:한도", "R:한도 · 무제한|유효 · 없음|이번 달 통화 —"]],
+  ["SCR-201#limits-edit", ["T:회원", "G:한도", "K:무제한|기본 한도*|직접 정하기", "B:저장", "B:그만두기"]],
+  ["SCR-201#limits-custom", ["T:회원", "G:한도", "K:무제한|기본 한도|직접 정하기*", "I:하루 사용 단위(1~100000)", "I:통화 월 달러(0.01~1000)", "X:비운 칸은 기본 한도를 따라요", "B:저장", "B:그만두기"]],
+  ["SCR-201#limits-saving", ["T:회원", "G:한도", "K:무제한|기본 한도|직접 정하기*", "R-:저장하는 중"]],
+  ["SCR-201#limits-saved", ["T:회원", "N:한도를 바꿨어요", "G:한도", "R:한도 · 직접(하루 200 · 통화 월 $5.50)|유효 · 하루 200 · 통화 월 $5.50|이번 달 통화 $1.23"]],
+  ["SCR-201#limits-invalid", ["T:회원", "G:한도", "K:무제한|기본 한도|직접 정하기*", "I:0", "X:숫자를 확인해 주세요(하루 1~100000, 통화 월 0.01~1000)"]],
+  ["SCR-201#ticket", ["T:회원", "G:오늘", "R:320단위 · 글 12 · 통화 5분 · 그림 1|티켓 3장", "I:1~1000", "B:넣기"]],
+  ["SCR-201#ticket-invalid", ["T:회원", "G:오늘", "I:0", "X:1부터 1000까지 넣어 주세요"]],
+  ["SCR-201#ticket-added", ["T:회원", "N:티켓을 넣었어요", "G:오늘", "R:320단위 · 글 12 · 통화 5분 · 그림 1|티켓 8장"]],
+  ["SCR-201#revoke-confirm", ["T:회원", "G:로그인", "W:이 사람의 모든 기기 로그인을 끊어요. 다시 들어오려면 다시 로그인 링크가 필요해요", "B!:끊기", "B:그만두기"]],
+  ["SCR-201#revoked", ["T:회원", "N:로그인을 끊었어요", "G:로그인", "R:로그인 0개 · 마지막 11월 24일 오후 2:03"]],
+  ["SCR-201#phones", ["T:회원", "G:이 사람의 폰", "R:폰 1 · 0.3.2 · 뒤처짐|마지막 보고 11월 24일 오후 2:03", "R:폰 2 · 0.3.3|마지막 보고 11월 23일 오후 11:40", "B:앱 버전에서 보기"]],
+  ["SCR-201#phones-none", ["T:회원", "G:이 사람의 폰", "E:90일 안에 보고한 폰이 없어요"]],
+  ["SCR-201#phones-cap", ["T:회원", "G:이 사람의 폰", "R:폰 19 · 0.3.3|마지막 보고 11월 24일 오후 1:10", "R:폰 20 · 0.3.3|마지막 보고 11월 24일 오후 1:12", "X:최근 보고한 20대만 보여요", "B:앱 버전에서 보기", "X:(devices 200줄이고 이 사람 폰 0대면: 폰이 많아 일부만 보여요)"]],
+  ["SCR-201#phones-unknown", ["T:회원", "G:이 사람의 폰", "E:지금 못 불러왔어요"]],
+  ["SCR-201#error", ["T:회원", "W:잠깐 문제가 생겼어요. 다시 해 볼까요?", "B:다시 해 볼게요"]],
+ ]],
+ ["scr202", "SCR-202 초대 링크", "/chat/admin/invites · API-240·235·236, 거두기 API-281", [
+  ["SCR-202#loading", ["T:초대 링크", "S:1", "S:3"]],
+  ["SCR-202#normal", ["T:초대 링크", "B:새 링크 만들기", "K:열림*|전체", "R:join · 시험 메모|열림|만든 때 11월 21일 오후 2:59 · 만료 11월 28일 오후 2:59(5일 남음)"]],
+  ["SCR-202#all", ["T:초대 링크", "B:새 링크 만들기", "K:열림|전체*", "R:join · 시험 메모|열림|만든 때 11월 21일 오후 2:59 · 만료 11월 28일 오후 2:59(5일 남음)", "R:join · 시험친구 나|씀(시험친구 나)|만든 때 11월 21일 오후 2:59 · 쓴 때 11월 21일 오후 3:01", "R-:relogin · 시험친구 가|기간 지남|만든 때 11월 12일 오후 7:16 · 만료됨 11월 19일 오후 7:16", "R-:link · 동호|거둠|만든 때 11월 12일 오후 7:16 · 거둔 때 11월 13일 오전 9:00"]],
+  ["SCR-202#invite-open", ["T:초대 링크", "R:join · 시험 메모|열림|만든 때 11월 21일 오후 2:59 · 만료 11월 28일 오후 2:59(7일 남음)"]],
+  ["SCR-202#invite-used", ["T:초대 링크", "R:join · 시험친구 나|씀(시험친구 나)|만든 때 11월 21일 오후 2:59 · 쓴 때 11월 21일 오후 3:01"]],
+  ["SCR-202#invite-expired", ["T:초대 링크", "R-:relogin · 시험친구 가|기간 지남|만든 때 11월 12일 오후 7:16 · 만료됨 11월 19일 오후 7:16"]],
+  ["SCR-202#invite-revoked", ["T:초대 링크", "R-:link · 동호|거둠|만든 때 11월 12일 오후 7:16 · 거둔 때 11월 13일 오전 9:00"]],
+  ["SCR-202#open-empty", ["T:초대 링크", "B:새 링크 만들기", "K:열림*|전체", "E:열린 초대 링크가 없어요", "B:전체 보기"]],
+  ["SCR-202#empty", ["T:초대 링크", "B:새 링크 만들기", "K:열림|전체*", "E:만든 초대 링크가 없어요"]],
+  ["SCR-202#creating", ["T:초대 링크", "G:새 링크 만들기", "K:join 새 사람*|link 기존 계정 연결|relogin 다시 로그인", "I:메모(40자, 선택)", "B:만들기"]],
+  ["SCR-202#prefilled", ["T:초대 링크", "G:새 링크 만들기", "K:join 새 사람|link 기존 계정 연결|relogin 다시 로그인*", "I:사람: 시험친구 가", "I:메모(40자, 선택)", "B:만들기"]],
+  ["SCR-202#created", ["T:초대 링크", "G:새 링크", "C:https://marong.corthex-hq.com/chat/join#…", "B:복사", "X:이 주소는 지금만 보여요. 복사해서 직접 전해 주세요", "X:만료 11월 30일 오후 2:00(7일 뒤)", "B:닫기"]],
+  ["SCR-202#invite-invalid", ["T:초대 링크", "G:새 링크 만들기", "K:join 새 사람|link 기존 계정 연결*|relogin 다시 로그인", "X:입력을 확인해 주세요"]],
+  ["SCR-202#member-missing", ["T:초대 링크", "N:그 사람을 찾을 수 없어요. 목록을 다시 불러올게요"]],
+  ["SCR-202#revoke-confirm", ["T:초대 링크", "R:join · 시험 메모|열림|만든 때 11월 21일 오후 2:59 · 만료 11월 28일 오후 2:59(5일 남음)", "W:이 링크를 거둬요. 받은 사람이 열어도 쓸 수 없어요", "B!:거두기", "B:그만두기", "X:(제안 · 질문 2)"]],
+  ["SCR-202#revoked-now", ["T:초대 링크", "N:링크를 거뒀어요", "K:열림|전체*", "R-:join · 시험 메모|거둠|만든 때 11월 21일 오후 2:59 · 거둔 때 11월 23일 오후 3:10"]],
+  ["SCR-202#invite-closed", ["T:초대 링크", "N:이미 쓰였거나 기간이 지난 링크예요"]],
+  ["SCR-202#error", ["T:초대 링크", "W:잠깐 문제가 생겼어요. 다시 해 볼까요?", "B:다시 해 볼게요"]],
+ ]],
+ ["scr203", "SCR-203 앱 버전", "/chat/admin/app · API-267만(PR #101)", [
+  ["SCR-203#loading", ["T:앱 버전", "S:1", "S:2", "S:3"]],
+  ["SCR-203#normal", ["T:앱 버전", "H:최신 0.3.3(11) · 11월 24일 오후 2:00에 올림", "G:폰", "R*>:시험친구 가 · 폰 1|0.3.2 · 뒤처짐|마지막 보고 11월 24일 오후 2:03", "R>:시험친구 나 · 폰 1|0.3.3|마지막 보고 11월 24일 오후 2:10", "G:버전 기록", "R:0.3.3(11) 올림 · 11월 24일 오후 2:00|게시하면 폰이 바로 새 버전을 받아요", "R:0.3.2(10) 올림 · 11월 22일 오후 4:21 · 기록에서 채움|벨을 받을 때 통화 화면을 다시 읽지 않아요", "X:릴리스 노트는 textContent로만 넣어요(<b> 같은 글도 글자 그대로)"]],
+  ["SCR-203#paused", ["T:앱 버전", "W:업데이트 멈춤 중 · 폰이 새로 받지 않아요", "H:최신 0.3.3(11) · 11월 24일 오후 2:00에 올림", "G:버전 기록", "R:멈춤 · 11월 24일 오후 3:00"]],
+  ["SCR-203#device-open", ["T:앱 버전", "G:폰", "R*:시험친구 가 · 폰 1|0.3.2 · 뒤처짐|마지막 보고 11월 24일 오후 2:03", "X:확인 창 기다림 · 앱을 열어 지금 설치를 눌러야 해요 · 11월 24일 오후 2:03", "X:받음 · 11월 24일 오후 2:03", "X:받아 감 (11) · 11월 24일 오후 2:03", "X:보냄 0.3.3(11) · 1번째 · 11월 24일 오후 2:00"]],
+  ["SCR-203#backfilled", ["T:앱 버전", "G:버전 기록", "R:0.3.2(10) 올림 · 11월 22일 오후 4:21 · 기록에서 채움|벨을 받을 때 통화 화면을 다시 읽지 않아요"]],
+  ["SCR-203#no-release", ["T:앱 버전", "E:아직 올린 버전이 없어요"]],
+  ["SCR-203#no-devices", ["T:앱 버전", "H:최신 0.3.3(11) · 11월 24일 오후 2:00에 올림", "G:폰", "E:90일 안에 보고한 폰이 없어요"]],
+  ["SCR-203#unknown-value", ["T:앱 버전", "G:폰", "R*:시험친구 가 · 폰 1|0.3.2 · 뒤처짐|마지막 보고 11월 24일 오후 2:03", "X:foo · 11월 24일 오후 2:03"]],
+  ["SCR-203#same-name", ["T:앱 버전", "G:폰", "R>:시험친구 가(7) · 폰 1|0.3.3|마지막 보고 11월 24일 오후 2:03", "R>:시험친구 가(9) · 폰 1|0.3.3|마지막 보고 11월 23일 오후 8:40"]],
+  ["SCR-203#cap", ["T:앱 버전", "G:폰", "X:폰이 많아 200대까지만 보여요", "R>:시험 메모 · 폰 19|0.3.3|마지막 보고 11월 24일 오후 1:10", "R>:시험 메모 · 폰 20|0.3.3|마지막 보고 11월 24일 오후 1:12", "X:이 사람은 최근 보고한 20대만 보여요", "G:받아 감", "X:받아 간 사람이 많아 100명까지만 보여요"]],
+  ["SCR-203#error", ["T:앱 버전", "W:잠깐 문제가 생겼어요. 다시 해 볼까요?", "B:다시 해 볼게요"]],
+  ["SCR-203#forbidden", ["H:마롱이 관리", "E:관리자만 볼 수 있어요"]],
+ ]],
+ ["scr204", "SCR-204 비용", "/chat/admin/costs · API-280·236·266", [
+  ["SCR-204#loading", ["T:비용", "S:2", "S:3", "S:4"]],
+  ["SCR-204#normal", ["T:비용", "G:통화 · 11월(UTC)", "C:$121.40 / $150.00 · 80% · 80% 넘음", "P:80", "G:사람마다 통화", "R>:시험친구 나 · $1.23", "R>:시험친구 가 · $0.40", "G:그림 · 11월", "R:일기 $2.00", "R:화두 $0.50", "R:반응 $0.10", "R:캐릭터 $3.00 / $20.00 · 15%"]],
+  ["SCR-204#call-warn", ["T:비용", "G:통화 · 11월(UTC)", "C:$121.40 / $150.00 · 80% · 80% 넘음", "P:80"]],
+  ["SCR-204#call-danger", ["T:비용", "G:통화 · 11월(UTC)", "C:$152.00 / $150.00 · 101% · 다 씀", "P:100", "X:새 통화가 막혀요"]],
+  ["SCR-204#call-unknown", ["T:비용", "G:통화 · 11월(UTC)", "E:지금 못 불러왔어요", "G:사람마다 통화", "R>:시험친구 나 · $1.23"]],
+  ["SCR-204#person-unknown", ["T:비용", "G:사람마다 통화", "R>:시험친구 나 · —", "R>:시험친구 가 · —"]],
+  ["SCR-204#images-unknown", ["T:비용", "G:그림 · 11월", "W:잠깐 문제가 생겼어요. 다시 해 볼까요?", "B:다시 해 볼게요"]],
+  ["SCR-204#error", ["T:비용", "W:잠깐 문제가 생겼어요. 다시 해 볼까요?", "B:다시 해 볼게요"]],
+  ["SCR-204#forbidden", ["H:마롱이 관리", "E:관리자만 볼 수 있어요"]],
+ ]],
+ ["scr186", "SCR-186 아이템(탭 줄만 바뀜)", "/chat/admin/items · 상태는 pet-app.md 그대로", [
+  ["SCR-186#default", ["T:아이템", "K:전체*|새것|올림|내림", "R:리본 · 착용|올림 · 받은 사람 2", "B:내리기"]],
+ ]],
+];
+function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+function block(spec) {
+  const i = spec.indexOf(":"); const k = spec.slice(0, i); const v = spec.slice(i + 1);
+  if (k === "T") { const t = el("div", "tabs"); TABS.forEach(x => { const s = el("span", x === v ? "on" : "", x); t.append(s); }); const w = el("div"); w.append(el("div", "title", "마롱이 관리"), t); return w; }
+  if (k === "H") return el("div", "title", v);
+  if (k === "G") return el("div", "g", v);
+  if (k[0] === "R") { const r = el("div", "row" + (k.includes("-") ? " dim" : "") + (k.includes("*") ? " bold" : "")); const t = el("div", "t"); v.split("|").forEach(x => t.append(el("div", "", x))); r.append(t); if (k.includes(">")) r.append(el("span", "", "›")); return r; }
+  if (k === "C") return el("div", "card", v);
+  if (k === "B") return el("div", "btn", v);
+  if (k === "B!") return el("div", "btn danger", v);
+  if (k === "K") { const c = el("div", "chips"); v.split("|").forEach(x => c.append(el("span", x.endsWith("*") ? "on" : "", x.replace(/\*$/, "")))); return c; }
+  if (k === "S") { const w = el("div"); w.style.display = "grid"; w.style.gap = "8px"; for (let n = 0; n < +v; n++) w.append(el("div", "skel")); return w; }
+  if (k === "N") return el("div", "band", v);
+  if (k === "W") return el("div", "warnb", v);
+  if (k === "I") return el("div", "input", v);
+  if (k === "E") return el("div", "empty", v);
+  if (k === "A") return el("div", "att", v);
+  if (k === "A!") return el("div", "att d", v);
+  if (k === "P") { const b = el("div", "bar"); const f = el("i"); f.style.width = Math.min(100, +v) + "%"; b.append(f); return b; }
+  if (k === "X") return el("div", "small", v);
+  return el("div", "", spec);
+}
+const out = document.getElementById("out"), jump = document.getElementById("jump");
+let count = 0;
+SCREENS.forEach(([id, name, note, states]) => {
+  const a = el("a", "", name); a.href = "#" + id; jump.append(a);
+  const s = el("section", "screen"); s.id = id; s.append(el("h2", "", name), el("p", "", note));
+  states.forEach(([sid, blocks]) => {
+    count++;
+    const st = el("div", "state"); st.append(el("h3", "", sid));
+    const pair = el("div", "pair");
+    [360, 430].forEach(w => { const f = el("div", "frame w" + w); f.append(el("div", "w", w + "px")); const scr = el("div", "scr"); blocks.forEach(b => scr.append(block(b))); f.append(scr); pair.append(f); });
+    st.append(pair); s.append(st);
+  });
+  out.append(s);
+});
+document.title = "마롱이 관리 페이지 와이어프레임";
+document.getElementById("out").dataset.states = String(count);
+</script>
+</body>
+</html>

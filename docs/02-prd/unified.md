@@ -47,7 +47,7 @@ D90\~D104는 모두 2026-11-19 KST, 설계 논의 스레드에서 동희님이 �
 | REQ-435 | 시스템은 초대 링크·로그인 토큰·기기 추가 코드의 해시만 저장해야 한다. | non-functional | Must | CTX-026 | 새 제안 | active |
 | REQ-436 | 앱 서버와 통화 서버는 같은 로그인을 인정해야 하고, 로그인이 없는 요청은 로그인 화면으로 보내야 한다. | functional | Must | CTX-026, CTX-005 | D97 | active |
 | REQ-437 | 로그인된 친구는 10분 동안 한 번 쓰는 기기 추가 코드를 만들 수 있어야 하고, 한 주소에서 틀린 코드가 10분에 5번 들어오면 시스템은 그 주소를 10분 동안 막아야 한다. | functional | Must | CTX-026 | D97, 새 제안(10분, 5번) | active |
-| REQ-438 | 관리자 화면(초대 링크, 회원 목록, 로그인 끊기, 티켓 넣기)은 Cloudflare Access 뒤에 있어야 한다. | non-functional | Must | CTX-026 | D97, 기존(Access) | active |
+| REQ-438 | 관리 페이지의 모든 화면과 API(`/chat/admin/` 아래)는 Cloudflare Access와 관리자 확인 뒤에 있어야 한다. | non-functional | Must | CTX-026 | D97, 기존(Access), D136 1-2로 바뀜(2026-11-23) | active |
 
 ### 내 마롱이와 캐릭터(CTX-027)
 

@@ -15,7 +15,7 @@
 | SCR-166 | 입혀 보기 | `/chat/character/:id/try` | [5](#scr-166-입혀-보기) |
 | SCR-167 | 목소리 고르기 | `/chat/me/voice` | [6](#scr-167-목소리-고르기) |
 | SCR-168 | 친구 | `/chat/friends` | [7](#scr-168-친구) |
-| SCR-169 | 관리자 | `/chat/admin/` | [8](#scr-169-관리자) |
+| SCR-169 | 관리자 개요(D136 1-12. 자식 SCR-200\~204·186) | `/chat/admin/` | [8](#scr-169-관리자) |
 | SCR-170 | 캐릭터 만들기(사진) | `/chat/character/new` | [9](#scr-170-캐릭터-만들기사진) |
 | SCR-171 | 특징표 고치기 | `/chat/character/:id/traits` | [10](#scr-171-특징표-고치기) |
 | SCR-172 | 미리 보기 | `/chat/character/:id/preview` | [11](#scr-172-미리-보기) |
@@ -28,8 +28,8 @@
 
 모든 화면에 쓰여요. 화면 절에는 이 규칙과 다른 것만 적어요. [08 화면 정의 README](README.md)의 통화·`/chat/` 공통 규칙 가운데 테마와 폭 규칙은 그대로 따라요.
 
-- 문(로그인): 가입(SCR-163)·로그인(SCR-164)·관리자(SCR-169)를 뺀 화면은 로그인 쿠키 `marong_session`이 있는 기기에서만 열려요. 어느 API든 401 `login_required`가 오면 쓰던 글과 지금 주소를 `sessionStorage`에 남기고 로그인(SCR-164)으로 가요. 로그인하면 그 주소로 돌아와 글을 칸에 다시 넣고 지워요. 화면 절의 상태 표에는 401을 따로 적지 않아요.
-- 관리자(SCR-169)는 Cloudflare Access 뒤예요(REQ-438). 로그인 쿠키를 쓰지 않아요.
+- 문(로그인): 가입(SCR-163)·로그인(SCR-164)·관리 페이지(`/chat/admin/` 아래, D136 1-5)를 뺀 화면은 로그인 쿠키 `marong_session`이 있는 기기에서만 열려요. 어느 API든 401 `login_required`가 오면 쓰던 글과 지금 주소를 `sessionStorage`에 남기고 로그인(SCR-164)으로 가요. 로그인하면 그 주소로 돌아와 글을 칸에 다시 넣고 지워요. 화면 절의 상태 표에는 401을 따로 적지 않아요.
+- 관리 페이지(SCR-169 개요와 SCR-200\~204·186)는 Cloudflare Access와 관리자 확인 뒤예요(REQ-438, D136 1-2). 로그인 쿠키를 쓰지 않아요.
 - 글: 반말이고 마롱이 말투예요(REQ-021, 있는 `/chat/` 화면과 같음). 짧게 쓰고 사람을 탓하지 않아요. 관리자 화면만 동희님이 보는 화면이라 '-요'로 끝나는 꾸밈없는 글이에요.
 - 마롱이 이름: 화면에 보이는 마롱이 이름은 그 사람의 `botName`(API-216)이에요. 아래 문구의 `{이름}` 자리예요. 조사는 이름 끝 글자의 받침에 맞춰 화면이 골라요(이랑·랑, 이가·가, 을·를, 이야·야). 로그인 전 화면(SCR-163의 가입 전, SCR-164)은 기본 이름 '마롱이'예요. `{내 이름}`은 가입 때 넣은 이름(`friendName`), `{친구 이름}`은 친구 목록의 이름이에요.
 - 얼굴: 쓰는 캐릭터가 있으면 그 캐릭터의 정면 그림(API-242 `front`), 없으면 기본 마롱이 얼굴(01)이에요. 그림은 꾸밈이라 `alt=""`이고 이름은 글로 따로 읽혀요.
@@ -278,6 +278,8 @@ Purpose: 내 친구 코드를 보여 주고, 상대의 코드로 요청을 보�
 
 초대 링크 날짜와 가입한 사람의 한도 표시 및 변경. 바뀜 → [usage-limit.md](usage-limit.md) SCR-169.
 
+화면 짜임 바뀜(D136 1-5, 2026-11-23): 한 장이던 관리자 화면이 관리 페이지 여섯 화면으로 나뉘었어요. 이 화면은 관리자 개요가 되고, 아래 상태는 줄마다 적은 새 상태로 옮겼어요. 문구는 그대로예요 → [admin.md](admin.md) 6절.
+
 Purpose: 동희님이 초대 링크를 만들고, 가입한 사람과 로그인 수·오늘 쓴 양을 보고, 로그인을 끊고, 티켓을 넣어요. Cloudflare Access 뒤에 있어요. (FL-169, FL-170, FL-171, FL-177)
 
 | Data | Source |
@@ -297,20 +299,20 @@ Purpose: 동희님이 초대 링크를 만들고, 가입한 사람과 로그인 
 
 | State | What the user sees and can do | From responses |
 | --- | --- | --- |
-| SCR-169#loading | 그룹 둘(초대 링크, 가입한 사람)의 줄 자리에 회색 | |
-| SCR-169#normal | 그룹 '초대 링크': '새 링크 만들기'와 목록(줄마다 종류, 메모, 상태 '열림'·'씀(쓴 사람)'·'기간 지남', 끝나는 때). 그룹 '가입한 사람': 줄마다 이름, 마롱이 이름, 로그인 수, 마지막으로 쓴 때, 오늘 쓴 양, 티켓, '로그인 끊기'·'티켓 넣기' | API-240#200, API-236#200 |
-| SCR-169#invites-empty | 초대 링크 그룹에 '만든 초대 링크가 없어요' | API-240#200(`invites` 빈 목록) |
-| SCR-169#members-empty | 가입한 사람 그룹에 '아직 가입한 사람이 없어요' | API-236#200(`members` 빈 목록) |
-| SCR-169#creating | 만들기 칸이 열림: 종류 칩, 사람 고르기(`link`·`relogin`), 메모, '만들기' | |
-| SCR-169#created | 새 주소와 '복사', '이 주소는 지금만 보여요. 복사해서 직접 전해 주세요', 끝나는 때. 칸을 닫으면 주소는 다시 볼 수 없음 | API-235#201 |
-| SCR-169#invite-invalid | 그 칸 아래 '입력을 확인해 주세요'(예: `link`인데 사람을 고르지 않음, 메모 40자 넘음) | API-235#400(`invalid_input`) |
-| SCR-169#member-missing | '그 사람을 찾을 수 없어요. 목록을 다시 불러올게요' | API-235#404(`not_found`) |
-| SCR-169#revoke-confirm | 확인 줄 '이 사람의 모든 기기 로그인을 끊어요. 다시 들어오려면 다시 로그인 링크가 필요해요'와 '끊기'·'그만두기' | |
-| SCR-169#revoked | 그 줄의 로그인 수가 0이 되고 띠 '로그인을 끊었어요' | API-241#204 |
-| SCR-169#ticket | 숫자 칸(1\~1000)과 '넣기' | |
-| SCR-169#ticket-invalid | 칸 아래 '1부터 1000까지 넣어 주세요' | API-237#400(`invalid_input`) |
-| SCR-169#ticket-added | 그 줄의 티켓이 새 잔액이 되고 띠 '티켓을 넣었어요' | API-237#200 |
-| SCR-169#error | 공통 규칙('잠깐 문제가 생겼어요. 다시 해 볼까요?') | API-240#default, API-236#default, API-235#403(`cross_site`), API-235#default, API-241#403(`cross_site`), API-241#404(`not_found`), API-241#default, API-237#403(`cross_site`), API-237#404(`not_found`), API-237#default |
+| SCR-169#loading(D136 1-5 → SCR-169#loading, SCR-200#loading, SCR-202#loading) | 그룹 둘(초대 링크, 가입한 사람)의 줄 자리에 회색 | |
+| SCR-169#normal(D136 1-5 → 초대 링크 그룹 SCR-202#normal, 가입한 사람 그룹 SCR-200#normal, 그림 예산 비율 SCR-169#cards·SCR-204#normal) | 그룹 '초대 링크': '새 링크 만들기'와 목록(줄마다 종류, 메모, 상태 '열림'·'씀(쓴 사람)'·'기간 지남', 끝나는 때). 그룹 '가입한 사람': 줄마다 이름, 마롱이 이름, 로그인 수, 마지막으로 쓴 때, 오늘 쓴 양, 티켓, '로그인 끊기'·'티켓 넣기' | API-240#200, API-236#200 |
+| SCR-169#invites-empty(D136 1-5 → SCR-202#empty) | 초대 링크 그룹에 '만든 초대 링크가 없어요' | API-240#200(`invites` 빈 목록) |
+| SCR-169#members-empty(D136 1-5 → SCR-200#empty) | 가입한 사람 그룹에 '아직 가입한 사람이 없어요' | API-236#200(`members` 빈 목록) |
+| SCR-169#creating(D136 1-5 → SCR-202#creating) | 만들기 칸이 열림: 종류 칩, 사람 고르기(`link`·`relogin`), 메모, '만들기' | |
+| SCR-169#created(D136 1-5 → SCR-202#created) | 새 주소와 '복사', '이 주소는 지금만 보여요. 복사해서 직접 전해 주세요', 끝나는 때. 칸을 닫으면 주소는 다시 볼 수 없음 | API-235#201 |
+| SCR-169#invite-invalid(D136 1-5 → SCR-202#invite-invalid) | 그 칸 아래 '입력을 확인해 주세요'(예: `link`인데 사람을 고르지 않음, 메모 40자 넘음) | API-235#400(`invalid_input`) |
+| SCR-169#member-missing(D136 1-5 → SCR-202#member-missing) | '그 사람을 찾을 수 없어요. 목록을 다시 불러올게요' | API-235#404(`not_found`) |
+| SCR-169#revoke-confirm(D136 1-5 → SCR-201#revoke-confirm) | 확인 줄 '이 사람의 모든 기기 로그인을 끊어요. 다시 들어오려면 다시 로그인 링크가 필요해요'와 '끊기'·'그만두기' | |
+| SCR-169#revoked(D136 1-5 → SCR-201#revoked) | 그 줄의 로그인 수가 0이 되고 띠 '로그인을 끊었어요' | API-241#204 |
+| SCR-169#ticket(D136 1-5 → SCR-201#ticket) | 숫자 칸(1\~1000)과 '넣기' | |
+| SCR-169#ticket-invalid(D136 1-5 → SCR-201#ticket-invalid) | 칸 아래 '1부터 1000까지 넣어 주세요' | API-237#400(`invalid_input`) |
+| SCR-169#ticket-added(D136 1-5 → SCR-201#ticket-added) | 그 줄의 티켓이 새 잔액이 되고 띠 '티켓을 넣었어요' | API-237#200 |
+| SCR-169#error(D136 1-5 → 공통#error) | 공통 규칙('잠깐 문제가 생겼어요. 다시 해 볼까요?') | API-240#default, API-236#default, API-235#403(`cross_site`), API-235#default, API-241#403(`cross_site`), API-241#404(`not_found`), API-241#default, API-237#403(`cross_site`), API-237#404(`not_found`), API-237#default |
 
 권한: Access를 지나지 못한 사람에게는 Cloudflare의 로그인 화면이 보이고 이 화면은 열리지 않아요. 대화 글, 기억, 초대 토큰, 로그인 토큰은 이 화면에 없어요. 오래된 데이터: 링크가 쓰였는지와 로그인 수는 화면이 다시 보일 때 다시 읽어요.
 
