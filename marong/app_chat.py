@@ -52,7 +52,9 @@ UNIFIED_FILES = {"account.html": "text/html", "admin.html": "text/html", "unifie
                  "profile.html": "text/html", "profile.js": "text/javascript",
                  "voice.html": "text/html", "voice.js": "text/javascript", "friends.html": "text/html",
                  "friends.js": "text/javascript",
-                 "character.html": "text/html", "character.js": "text/javascript"}
+                 "character.html": "text/html", "character.js": "text/javascript",
+                 "decor.html": "text/html", "decor.js": "text/javascript",
+                 "admin-items.html": "text/html", "admin-items.js": "text/javascript"}
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 FID = re.compile(r"[A-Za-z0-9_-]{16,200}\Z")
 VERSION = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\Z")
@@ -90,6 +92,9 @@ PROBLEMS = {
     "too_many_messages": (429, "1분에 20번 넘게 보냄"),
     "no_picture": (404, "그 이름의 그림이 없음"),
     "not_ready": (409, "아직 준비되지 않음"),
+    "not_owned": (409, "보관함에 없는 아이템"),
+    "item_invalid": (409, "아이템 파일이나 설정을 확인해야 함"),
+    "too_many_stickers": (409, "한 페이지에는 스티커를 10개까지 붙일 수 있음"),
     "stale_revision": (409, "보낸 판 번호가 지금 판과 다름"),
     "busy": (409, "이 일기를 고치거나 다시 그리는 중"),
     "fix_limit": (409, "고치기 다섯 번을 다 씀"),
@@ -118,10 +123,11 @@ HEADERS = {
 
 
 class Problem(Exception):
-    def __init__(self, code: str, errors: list | None = None, headers: dict | None = None, *, title=None):
+    def __init__(self, code: str, errors: list | None = None, headers: dict | None = None, *, title=None, missing=None):
         super().__init__(code)
         self.code, self.errors, self.headers = code, errors or [], headers or {}
         self.title = title
+        self.missing = missing
 
 
 def bad(*errors) -> Problem:
@@ -170,8 +176,10 @@ class AppChat:
         self.persona = AppPersona(self)
         from .app_admin import AppAdmin
         from .app_profile import AppProfile
+        from .app_decor import AppDecor
         self.admin = AppAdmin(self, admin_email_hash)
         self.profile = AppProfile(self)
+        self.decor = AppDecor(self)
         self.characters = None
         if sessions is not None:
             from .character.http import CharacterAPI
@@ -200,6 +208,8 @@ class AppChat:
                 "code": p.code, "traceId": trace}
         if p.errors:
             body["errors"] = p.errors
+        if p.missing is not None:
+            body["missing"] = p.missing
         return web.Response(status=status, text=json.dumps(body, ensure_ascii=False),
                             content_type="application/problem+json", charset="utf-8", headers=p.headers)
 
@@ -421,6 +431,9 @@ class AppChat:
                 alt = meta.get("sceneAlt")
                 picture = {"src": f"/chat/api/scenes/{scene}",
                            "alt": alt[:60] if isinstance(alt, str) and alt else "반려동물 캐릭터의 그림"}
+                name = meta.get("reactionName")
+                if isinstance(name, str) and 1 <= len(name) <= 20:
+                    picture["reaction"] = name
             else:
                 picture = self._picture(meta.get("topic"))
         if picture:
@@ -723,7 +736,11 @@ class AppChat:
         from .app_listen import AppListen
 
         app = web.Application(client_max_size=BODY_MAX, middlewares=[self.guard])
-        AppDiary(self).register(app)
+        diary = AppDiary(self)
+        if self.sessions is not None:
+            from .diary_decor import DiaryDecor
+            DiaryDecor(diary).register(app.router)
+        diary.register(app)
         AppListen(self).register(app)
         app.router.add_get("/chat/healthz", self.health)
         if self.internal_shop is not None:
@@ -732,7 +749,7 @@ class AppChat:
         if self.sessions is not None:
             app.router.add_get("/chat/join/{token}", self.account_page)
             app.router.add_get("/chat/login", self.account_page)
-            app.router.add_get("/chat/{name:unified\\.(?:css|js)|(?:account|admin|profile|voice|friends|character)\\.js}", self.page)
+            app.router.add_get("/chat/{name:unified\\.(?:css|js)|(?:account|admin|admin-items|profile|voice|friends|character|decor)\\.js}", self.page)
             app.router.add_get("/chat/api/invites/{token}", self.check_invite)
             app.router.add_post("/chat/api/join", self.join_with_invite)
             app.router.add_post("/chat/api/login/code", self.login_with_device_code)
@@ -747,6 +764,7 @@ class AppChat:
             from .app_scenes import AppScenes
             PetIntro(self).register(app.router)
             AppScenes(self).register(app.router)
+            self.decor.register(app.router)
         app.router.add_get("/chat", self.home)
         app.router.add_get("/chat/", self.page)
         app.router.add_get("/chat/{name:chat\\.(?:js|css)}", self.page)

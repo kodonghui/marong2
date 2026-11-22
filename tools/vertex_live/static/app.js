@@ -244,6 +244,16 @@ async function refreshProfile(){
     if(brand?.firstChild?.nodeType===Node.TEXT_NODE)brand.firstChild.textContent=botName;
     document.title=botName+' · 너의 이야기 곁에';
     characterId=profile.character?.id||null;
+    const face=$('face');
+    face.parentElement.querySelectorAll('.outfit-layer').forEach(layer=>layer.remove());
+    for(const slot of ['body','neck','head']){
+      const url=profile.character?.outfit?.[slot]?.layerUrl;
+      if(typeof url!=='string'||!/^\/chat\/decor\/v[0-9]{1,3}\/[a-z0-9-]{3,40}\/[a-z_]+\.png$/.test(url))continue;
+      const layer=new Image();
+      layer.className='outfit-layer';layer.src=url;layer.alt='';
+      layer.addEventListener('error',()=>layer.remove(),{once:true});
+      $('topic-picture').before(layer);
+    }
     const pending=profile.pendingRing;
     if(!ringId&&pending&&UUID_RE.test(pending.ringId)&&Date.parse(pending.until)>Date.now())ringId=pending.ringId;
   }catch{/* older chat servers may not have a profile API */}

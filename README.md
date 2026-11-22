@@ -60,6 +60,16 @@ bash deploy/ovh.sh logs          # 로그 보기(Ctrl+C 로 나옴)
 
 ## 말투·인사·참고 자료 바꾸기
 
+| 설정 | 기본값 | 동작 |
+| --- | --- | --- |
+| `MARONG_PET_VOICE` | `0` | `1`이면 반려동물 캐릭터의 1인칭 지시문 사용 |
+| `MARONG_VOICE_RECOMMEND` | 빈 JSON | 템플릿별 목소리 추천. 값이 없으면 목록의 기본 목소리 사용 |
+| `MARONG_SCENE_PICTURES` | `0` | `1`이면 반려동물의 화두·일기 장면 그림 생성 |
+| `MARONG_SCENE_MODEL` | `gpt-image-2.5-flare` | 장면 그림 모델 |
+| `MARONG_DIARY_IMAGE_BUDGET_USD` | `5` | 일기 그림 월 예산(달러). `unlimited`로 예산 제한 해제 |
+| `MARONG_DECOR` | `0` | `1`이면 상점·보관함·차림·일기장 꾸미기 사용 |
+
+
 - `prompt.md`: 마롱이 성격·취향(좋아하는 음식·간식·취미)·말투·규칙
 - `welcome.txt`: 채팅방에 들어왔을 때 인사(`---` 아래 줄은 버튼)
 - `knowledge/`: 친구들 사이에서 알아 둘 자료(.md·.txt·.csv). `_` 로 시작하는 파일은 안 읽어요

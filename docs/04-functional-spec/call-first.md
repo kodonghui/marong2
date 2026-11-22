@@ -46,6 +46,8 @@
 
 ### 3.1 그림 세트 목록(`topics.json`)
 
+- 바뀜 → [pet-app.md](pet-app.md#37-기존-명세가-바뀌는-곳) SPEC-411에서 반려동물 캐릭터의 장면 그림과 그림 세트의 petScene을 정의해요.
+
 ```json
 {"set": "v1", "pictures": [
   {"name": "winter-hat", "title": "털모자", "status": "reviewed",

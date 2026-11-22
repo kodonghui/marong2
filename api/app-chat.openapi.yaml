@@ -959,6 +959,11 @@ components:
           minLength: 1
           maxLength: 60
           description: 그림 설명(대체 글)
+        reaction:
+          type: string
+          minLength: 1
+          maxLength: 20
+          description: 반응 선톡의 아이템 이름
       additionalProperties: false
     MessagePage:
       type: object
