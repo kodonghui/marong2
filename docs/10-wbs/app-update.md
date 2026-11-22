@@ -52,7 +52,7 @@ cd apps/android/android && ./gradlew testDebugUnitTest lintDebug assembleDebug  
 
 ## 확인
 
-- Must 명세(SPEC-284\~299, 301, 302)마다 작업이 있어요. SPEC-300(proposed)은 TASK-183이에요.
+- Must 명세(SPEC-284\~299, 301, 302)마다 작업이 있어요. SPEC-300은 TASK-183이에요.
 - API-141·142를 만지는 작업(TASK-180)은 계약의 모든 응답에 시험이 있어야 끝나요.
 - 의존에 고리가 없어요. 모든 작업이 번호가 더 작은 작업에만 기대요(서버 179→180·181→182, 183 따로, 179\~183→191, 앱 184→185·186·188→187→189→190, 190·191→192→193).
 
@@ -120,7 +120,7 @@ cd apps/android/android && ./gradlew testDebugUnitTest lintDebug assembleDebug  
 | TASK-476 | 릴리스 노트와 버전 기록: 서버 도구 `publish --notes-file`(1\~300자 한 줄), `history.json`(8.3) 쓰기와 실패 때 되돌리기, `pause`·`resume` 줄, `history`·`backfill` 명령. 노트북 `deploy/ovh.sh app-release publish <APK> --notes "<노트>"`는 노트를 `notes.txt`로 보냄 | SPEC-287, SPEC-436, SPEC-437 | `tools/app_release.py`, `marong/app_release.py`(기록 읽기), `deploy/ovh.sh` | 없음 | Codex | 0.5 | TC-611·612 통과, `bash -n deploy/ovh.sh` 통과 |
 | TASK-477 | 업데이트 데이터 메시지 만들기 `fcm.app_update(fid, version_code)` | SPEC-431 | `marong/fcm.py` | 없음 | Codex | 0.1 | TC-601의 서버 쪽 통과 |
 | TASK-478 | 릴리스 감시 `AppUpdatePush`: 30초 읽기, 바뀜·시작·10분 차례, 보낼 폰 고르기(친구마다 최근 20대), 한 차례 100개·동시 4개 상한과 다음 30초 차례에 이어 보내기, 보내기 전에 `pushed`(시도 번호)를 잡고 잡힌 때만 보내기, 실패면 같은 시도의 `push_failed`, `MARONG_APP_UPDATE_PUSH` 스위치, 로그 한 줄 | SPEC-430 | 새 `marong/app_update_push.py`, 봇 시작 코드, `marong/store`(쿼리) | TASK-475, TASK-477 | Codex | 0.75 | TC-599·600 통과(가짜 FCM·가짜 시계) |
-| TASK-479 | 기기 보고 `update` 칸 받기(정수는 `type(x) is int`)와 `state` 기록(`installed` 밖, 버전 기록에 있는 버전 코드만, 마지막 상태와 같으면 건너뜀, 친구마다 1시간 30줄), 앱 버전이 올라갈 때 `installed` 한 줄(버전 기록에 있는 버전 이름만, `ON CONFLICT DO NOTHING`), API-142의 `fetched` 기록(친구·버전마다 1시간에 한 줄). 체크포인트에서 답을 받으면 API-105 새 폰 상한(SPEC-115를 바꿈, 기능 명세 8.9) | SPEC-434, SPEC-435, SPEC-115(바꾸는 제안) | `marong/app_chat.py`(`device`, `app_apk`), `marong/app_store.py`(`app_device_put`) | TASK-475 | Codex | 0.5 | TC-607·608 통과, 계약 API-105 응답 시험 그대로 통과 |
+| TASK-479 | 기기 보고 `update` 칸 받기(정수는 `type(x) is int`)와 `state` 기록(`installed` 밖, 버전 기록에 있는 버전 코드만, 마지막 상태와 같으면 건너뜀, 친구마다 1시간 30줄), 앱 버전이 올라갈 때 `installed` 한 줄(버전 기록에 있는 버전 이름만, `ON CONFLICT DO NOTHING`), API-142의 `fetched` 기록(친구·버전마다 1시간에 한 줄). API-105 새 폰 상한(D134로 SPEC-115 바뀜, 기능 명세 8.9) | SPEC-434, SPEC-435, SPEC-115(D134로 바뀜) | `marong/app_chat.py`(`device`, `app_apk`), `marong/app_store.py`(`app_device_put`) | TASK-475 | Codex | 0.5 | TC-607·608 통과, 계약 API-105 응답 시험 그대로 통과 |
 | TASK-480 | 관리자 읽기 `GET /chat/admin/api/app-versions`(API-267): 버전 기록(`file` 뺌), 폰은 친구마다 최근 20대·모두 200대, `friendId`, 폰별 기록 20줄(지금 친구의 줄만), 친구마다 받아 감 20줄·100명까지, 90일 | SPEC-438 | `marong/app_admin.py` | TASK-476, TASK-479 | Codex | 0.5 | TC-613 통과(응답에 설치 ID·FID·이메일 없음) |
 | TASK-481 | 앱: 업데이트 데이터 메시지 처리(`kind=app_update`, 버전 비교, `forcedAt` 10분, 빠른 작업, 거절되면 보통 작업, 알림 없음) | SPEC-432, SPEC-289 | `MarongMessagingService.java`, `AppUpdateJob.java`, `AppUpdate.java` | PR #100 합침 | Codex | 0.5 | TC-603·604 통과 |
 | TASK-482 | 앱: 업데이트 상태 보고 `AppUpdateReport`(네트워크 조건 작업, 네 칸 + `update`, `Origin`·쿠키, `reported`·`pendingReport`, 15분 다시·24시간까지, 400이면 그만), 상태가 바뀌는 다섯 곳에서 부르기 | SPEC-433, SPEC-298 | 새 `AppUpdateReport.java`, `AppUpdateJob.java`, `AppUpdateReceiver.java`, `PushState.java`, 매니페스트 | TASK-481 | Codex | 0.75 | TC-606 통과(앱 화면을 열지 않고 기록이 남고 벨 칸 그대로) |
