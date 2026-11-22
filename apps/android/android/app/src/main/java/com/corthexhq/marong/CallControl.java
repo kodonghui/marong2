@@ -44,4 +44,11 @@ final class CallControl {
         plugin.hangUpFromNotification();
         return true;
     }
+
+    static synchronized void prepareForRing() {
+        MarongCallPlugin plugin = current.get();
+        if (!active && plugin != null) {
+            plugin.prepareForRing();
+        }
+    }
 }

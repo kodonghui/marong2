@@ -86,12 +86,14 @@ describe('call page inside the app', { skip }, () => {
 
     await page.click('#start');
     await page.waitForFunction(() => document.body.classList.contains('in-call') && document.getElementById('status').textContent === '듣고 있어. 편하게 말해 줘.');
+    await page.waitForFunction(() => window.__nativeCalls.some(c => c.plugin === 'MarongCall' && c.method === 'callStarted'));
     assert.deepEqual((await calls('MarongCall')).map((c) => c.method), ['callStarted']);
     assert.equal(await page.evaluate(() => window.__marongApp.isCallActive()), true);
     await shot(page, 'call-active');
 
     assert.equal(await page.evaluate(() => window.__marongApp.endCall()), true);
     await page.waitForFunction(() => !document.body.classList.contains('in-call'));
+    await page.waitForFunction(() => window.__nativeCalls.some(c => c.plugin === 'MarongCall' && c.method === 'callEnded'));
     assert.deepEqual((await calls('MarongCall')).map((c) => c.method), ['callStarted', 'callEnded']);
     assert.equal(await page.evaluate(() => window.__marongApp.isCallActive()), false);
     // The page ended the call its own way: it told the server to stop.
