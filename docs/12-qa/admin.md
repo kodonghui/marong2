@@ -19,7 +19,7 @@
 | ID | Case | From | Runs as | Data | Steps | Expected | Last result |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | TC-622 | 개요의 숫자와 주의 항목 다섯 | SPEC-451, REQ-572, REQ-573, API-280#200 | api(`tests/test_admin.py`) | 회원 3, 프로필 없는 친구 1, 오늘 단위 합 420(한국 시각 04:00 뒤 행만), 통화 합 121.40·예산 150, 캐릭터 그림 17/20달러, 가짜 앱 함수(최신 0.3.3을 30시간 전에 올림, 0.3.2 폰 1·0.3.3 폰 1), 23시간 뒤 만료되는 열린 링크 1 | API-280 | 숫자가 그대로(`spentUsd` `"121.40"`, `percent` 80, `state` `warn`, `images.budgetPercent` 85, `app.devices` 2, `behind` 1). `attention`이 `call_budget`(80), `image_budget`(85), `app_behind`(1), `invite_expiring`(1), `unlinked_friend`(1) 차례. `Cache-Control: no-store` | |
-| TC-623 | 손볼 일 없음과 한 부분 실패 | SPEC-451, API-280#200 | api(`tests/test_admin.py`) | (가) 문턱 아래 자료 (나) 통화 함수가 2초 걸리게 함 (다) 앱 함수가 없음(PR #101 전) (라) 그림 함수가 예외 (마) 초대 링크 만료 수 쿼리가 2초 걸림 | 각각 API-280, 로그 읽기 | (가) `attention` 빈 목록 (나) 200이고 `callMonth` null, 다른 부분은 값, 로그 `admin_overview part=call result=failed` 한 줄 (다) `app` null (라) `images` null (마) `invite_expiring` 줄만 빠지고 로그 `part=invites`. 어느 경우도 503이 아님 | |
+| TC-623 | 손볼 일 없음과 한 부분 실패 | SPEC-451, API-280#200 | api(`tests/test_admin.py`) | (가) 문턱 아래 자료 (나) 통화 함수가 2초 걸리게 함 (다) 앱 함수가 없음(앱 업데이트 TASK-480 전) (라) 그림 함수가 예외 (마) 초대 링크 만료 수 쿼리가 2초 걸림 | 각각 API-280, 로그 읽기 | (가) `attention` 빈 목록 (나) 200이고 `callMonth` null, 다른 부분은 값, 로그 `admin_overview part=call result=failed` 한 줄 (다) `app` null (라) `images` null (마) `invite_expiring` 줄만 빠지고 로그 `part=invites`. 어느 경우도 503이 아님 | |
 | TC-624 | 권한·DB 없음·실리지 않는 것 | SPEC-451, REQ-580, API-280#403, API-280#500, API-280#503 | api(`tests/test_admin.py`) | TC-622 자료, 다른 이메일 JWT | 다른 이메일로 API-280 → DB를 내리고 API-280 → 회원 수 쿼리가 예외를 내게 하고 API-280 → 관리자로 응답 전체를 문자열로 검사 | 403 `not_allowed`, 503 `db_unavailable`, 500 `internal`(Problem 모양). 응답 글에 설치 ID·FID·이메일·토큰·초대 링크 주소·친구 이름이 없음(주의 항목은 개수만) | |
 | TC-625 | 주의 항목 문턱의 경계 | SPEC-451 3.3 | unit(`tests/test_admin.py`) | 주의 항목 계산 함수에 넣는 값 | 통화 79·80·100·120% → 그림 79·80·100% → 앱: 올린 지 23·25시간, 마지막 상태 `needs_confirm`·`failed`, 멈춤 → 링크: 만료까지 23·25시간, 쓴 링크 → 잇지 않은 친구 0·1 | 통화 79 없음, 80 `warn`, 100·120 `danger`. 그림 79 없음, 80 `warn`, 100 `danger`. 앱 23시간 없음, 25시간 `warn`, `needs_confirm`·`failed`는 시간과 상관없이 `danger`, 멈춤이면 `app_behind` 없음과 `app_paused`. 링크 23시간만 셈. 친구 0 없음. 차례는 늘 3.3 | |
 
@@ -60,7 +60,7 @@
 
 | ID | Case | From | Runs as | Data | Steps | Expected | Last result |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| TC-639 | 반영한 서버에서 화면 걷기와 동희님 확인 | SPEC-450\~457, REQ-570\~583 | server와 device | 운영 서버(읽기만) | GPT: 동희님 Access로 화면 경로 일곱 GET, 증명 없이 일곱 GET, API-280의 각 부분이 null인지만 확인, 로그 5분. 그다음 브라우저(Aside CLI, D65)로 화면 일곱을 360·430px로 걸으며 스크린샷을 PR에 붙임(이름·금액은 가림). 동희님: 아이폰과 노트북에서 화면 여섯을 열어 봄 | 200 일곱, 403 일곱, `callMonth`·`images`·`app`·`usageToday`가 null이 아님(PR #101 전이면 `app`만 null), 로그에 오류 없음, 스크린샷에 가로 넘침 없음. 동희님 말을 그 자리와 때와 함께 기록 | |
+| TC-639 | 반영한 서버에서 화면 걷기와 동희님 확인 | SPEC-450\~457, REQ-570\~583 | server와 device | 운영 서버(읽기만) | GPT: 동희님 Access로 화면 경로 일곱 GET, 증명 없이 일곱 GET, API-280의 각 부분이 null인지만 확인, 로그 5분. 그다음 브라우저(Aside CLI, D65)로 화면 일곱을 360·430px로 걸으며 스크린샷을 PR에 붙임(이름·금액은 가림). 동희님: 아이폰과 노트북에서 화면 여섯을 열어 봄 | 200 일곱, 403 일곱, `callMonth`·`images`·`app`·`usageToday`가 null이 아님(앱 업데이트 TASK-480 반영 전이면 `app`만 null), 로그에 오류 없음, 스크린샷에 가로 넘침 없음. 동희님 말을 그 자리와 때와 함께 기록 | |
 
 ## 범위 확인
 
