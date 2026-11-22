@@ -38,10 +38,17 @@ public class MarongCallPlugin extends Plugin {
     private final Runnable releaseAfterHangUp = () -> setCallActive(false);
     private boolean callActive;
     private String callName;
+    private CallAudio audio;
+    private boolean destroyed;
 
     @Override
     public void load() {
         CallControl.attach(this);
+        CallAudioPhone phone = new CallAudioPhone(getActivity(), main, bridge.getWebView());
+        audio = new CallAudio(phone, phone);
+        if (!CallControl.isActive()) {
+            audio.restoreLeftover();
+        }
     }
 
     @PluginMethod
@@ -85,11 +92,15 @@ public class MarongCallPlugin extends Plugin {
 
     private void setCallActive(boolean active) {
         main.removeCallbacks(releaseAfterHangUp);
+        if (destroyed) {
+            return;
+        }
         Activity activity = getActivity();
         if (activity == null || activity.isFinishing()) {
             callActive = false;
             CallControl.setActive(false);
             CallService.hide(getContext());
+            audio.end();
             return;
         }
         if (active == callActive) {
@@ -106,12 +117,14 @@ public class MarongCallPlugin extends Plugin {
                 webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
             }
             CallService.show(getContext(), callName);
+            audio.start();
         } else {
             activity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && webView != null) {
                 webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true);
             }
             CallService.hide(getContext());
+            audio.end();
         }
     }
 
@@ -144,10 +157,12 @@ public class MarongCallPlugin extends Plugin {
 
     @Override
     protected void handleOnDestroy() {
+        destroyed = true;
         main.removeCallbacks(releaseAfterHangUp);
         callActive = false;
         CallControl.setActive(false);
         CallService.hide(getContext());
+        audio.end();
         CallControl.detach(this);
         super.handleOnDestroy();
     }
