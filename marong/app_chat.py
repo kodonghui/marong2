@@ -24,10 +24,10 @@ import psycopg
 
 from tools.vertex_live.tool_trace import app_delivery, app_step, step as trace_step
 
-from .app_release import AppReleases
+from .app_release import AppReleases, VERSION_CODE_MAX
 from .app_session import COOKIE, SessionError, auth_mode, device_label, identify_request
 from .character.records import CharacterError
-from .app_store import APP_KEY
+from .app_store import APP_KEY, AppDeviceLimit
 from .discord_dm import DEFAULT_ORIGIN, DiscordIncoming, proactive_preference
 from .google_calendar import LINK_MARK, command as google_command
 from .topics import KEY as TOPIC_KEY, NAME as PICTURE_NAME, SET_NAME, phrase as topic_phrase, picture_set
@@ -103,6 +103,7 @@ PROBLEMS = {
     "fix_failed": (503, "고치기 모델이 실패함"),
     "stale_test": (409, "화면이 연 시험과 지금 시험 묶음이 다름"),
     "no_release": (404, "지금 받을 수 있는 앱 파일이 아님"),
+    "too_many_devices": (409, "이 친구의 30일 안 폰이 이미 20대"),
     "feature_off": (403, "이 기능이 꺼져 있음"),
     "needs_owner": (403, "선톡을 늘리는 요청은 동희님이 정함"),
     "not_found": (404, "이 계정으로 찾을 수 없음"),
@@ -342,7 +343,7 @@ class AppChat:
         return self._json(200, release.public()) if release else web.Response(status=204)
 
     async def app_apk(self, req):
-        await self._who(req, require_dm=False)
+        who = await self._who(req, require_dm=False)
         opened = await asyncio.to_thread(self.releases.open, req.match_info["file"])
         if opened is None:
             raise Problem("no_release")
@@ -358,6 +359,10 @@ class AppChat:
             except ConnectionError:
                 return res  # the phone disconnected, so no complete download was served
         log.info("app_release apk sent code=%d", release.code)
+        try:
+            await self.store.app_update_fetched(who["friend_id"], release.code)
+        except (psycopg.Error, TimeoutError):
+            log.warning("app_update record failed kind=fetched")
         return res
 
     @staticmethod
@@ -691,6 +696,18 @@ class AppChat:
         self._note_http_delivery(rows, "poll")
         return response
 
+    @staticmethod
+    def _valid_device_update(update) -> bool:
+        if not isinstance(update, dict) or set(update) - {"versionCode", "state", "status"}:
+            return False
+        code, state = update.get("versionCode"), update.get("state")
+        if type(code) is not int or not 1 <= code <= VERSION_CODE_MAX:
+            return False
+        if state == "failed":
+            status = update.get("status")
+            return type(status) is int and 1 <= status <= 999
+        return state in ("downloaded", "waiting_quiet", "needs_confirm", "installed") and "status" not in update
+
     async def device(self, req):
         """API-105: this phone's notification state (SPEC-115, SPEC-139)."""
         who = await self._who(req, write=True)
@@ -698,7 +715,7 @@ class AppChat:
         if not UUID.fullmatch(install_id):
             raise bad(("installId", "bad_format"))
         body = await self._body(req)
-        errors = [("body", "bad_format")] if set(body) - {"fid", "notifications", "appVersion", "ring"} else []
+        errors = [("body", "bad_format")] if set(body) - {"fid", "notifications", "appVersion", "ring", "update"} else []
         fid = body.get("fid")
         if "fid" not in body:
             errors.append(("fid", "required"))
@@ -719,10 +736,19 @@ class AppChat:
                                      and ring["channel"] in ("enabled", "disabled")
                                      and ring["fullScreen"] in ("granted", "denied")):
             errors.append(("body", "bad_format"))
+        update = body.get("update")
+        if "update" in body and not self._valid_device_update(update):
+            errors.append(("update", "bad_format"))
         if errors:
             raise bad(*errors)
-        created = await self.store.app_device_put(install_id, who["friend_id"], fid, notifications, version,
-                                                  ring and ring["channel"], ring and ring["fullScreen"])
+        published = {entry["versionCode"]: entry["versionName"]
+                     for entry in await asyncio.to_thread(self.releases.history) if entry["kind"] == "published"}
+        try:
+            created = await self.store.app_device_put(install_id, who["friend_id"], fid, notifications, version,
+                                                      ring and ring["channel"], ring and ring["fullScreen"],
+                                                      published=published, update=update)
+        except AppDeviceLimit:
+            raise Problem("too_many_devices") from None
         devices = await self.store.app_devices(who["friend_id"], install_id)
         log.info("app_device %s fid=%s notifications=%s ring=%s", "added" if created else "updated", bool(fid),
                  notifications, ring["channel"] if ring else "none")

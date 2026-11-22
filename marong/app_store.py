@@ -2,16 +2,25 @@
 in-app chat history and the calls Marong places at a time a friend set. Mixed into DiscordStore (self._one, _all,
 pool, _call_guard), like ScheduleStore and GoogleStore."""
 from datetime import timedelta
+import logging
 
+import psycopg
 from psycopg import errors
+
+from .app_release import version_parts
 
 DEVICE_FRESH = timedelta(days=30)       # a phone that has not reported for longer gets nothing (SPEC-116)
 RING_GAP = timedelta(minutes=10)        # no new ring this soon after the last one (REQ-132)
 RECENT = timedelta(seconds=60)          # the wait also returns messages this recent (late commits, SPEC-114)
 APP_KEY = "app:"                        # kakao_id of a message sent from the in-app chat (SPEC-112)
+log = logging.getLogger("marong.app")
 
 MESSAGE_COLUMNS = """m.id, m.role, m.content, m.created_at, m.kakao_id, m.meta, m.reply_to,
        (SELECT q.kakao_id FROM marong.messages q WHERE q.id = m.reply_to) AS reply_key"""
+
+
+class AppDeviceLimit(Exception):
+    """This friend's recent device slots are all occupied (D134)."""
 
 
 class AppStore:
@@ -30,11 +39,23 @@ class AppStore:
             "WHERE l.email_sha256 = %s", (email_sha256,))
 
     async def app_device_put(self, install_id: str, friend_id: int, fid: str | None, notifications: str,
-                             app_version: str, ring_channel: str | None, full_screen: str | None) -> bool:
+                             app_version: str, ring_channel: str | None, full_screen: str | None,
+                             *, published: dict[int, str] | None = None, update: dict | None = None) -> bool:
         """Add or update a phone (SPEC-115). Another phone row with the same FID loses it; an install id seen with
         another friend moves to this one. True when the row is new."""
         async with self.pool.connection() as c:
             async with c.transaction():
+                # A phone can change friend, so serialize reports for the installation as well as the destination.
+                for lock in (f"marong.app-install:{install_id}", f"marong.app-devices:{friend_id}"):
+                    await c.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (lock,))
+                before = await (await c.execute(
+                    "SELECT friend_id, app_version, seen_at > now() - %s AS fresh FROM marong.app_devices "
+                    "WHERE install_id = %s", (DEVICE_FRESH, install_id))).fetchone()
+                if not before or before["friend_id"] != friend_id or not before["fresh"]:
+                    cur = await c.execute("SELECT count(*) AS recent FROM marong.app_devices "
+                                          "WHERE friend_id = %s AND seen_at > now() - %s", (friend_id, DEVICE_FRESH))
+                    if (await cur.fetchone())["recent"] >= 20:
+                        raise AppDeviceLimit
                 if fid:
                     await c.execute("UPDATE marong.app_devices SET fid = NULL WHERE fid = %s AND install_id <> %s",
                                     (fid, install_id))
@@ -46,7 +67,64 @@ class AppStore:
                     "  dropped_at = NULL, ring_channel = EXCLUDED.ring_channel, full_screen = EXCLUDED.full_screen "
                     "RETURNING (xmax = 0) AS created",
                     (install_id, friend_id, fid, notifications, app_version, ring_channel, full_screen))
-                return (await cur.fetchone())["created"]
+                created = (await cur.fetchone())["created"]
+                if published is not None:
+                    await self._app_update_report(c, friend_id, install_id, before, app_version, published, update)
+                return created
+
+    async def _app_update_report(self, conn, friend_id, install_id, before, app_version, published, update):
+        state = update["state"] if update else None
+        if state and state != "installed":
+            code = update["versionCode"]
+            if code in published:
+                await self._app_update_event(conn, "state", friend_id, install_id, code,
+                                             state=state, status=update.get("status"))
+            else:
+                log.info("app_update record skipped reason=unknown_version")
+        if before and version_parts(before["app_version"]) < version_parts(app_version):
+            codes = [code for code, name in published.items() if name == app_version]
+            if codes:
+                code = update["versionCode"] if state == "installed" else max(codes)
+                await self._app_update_event(conn, "installed", friend_id, install_id, code, app_version=app_version)
+
+    async def _app_update_event(self, conn, kind, friend_id, install_id, code, *, app_version=None, state=None, status=None):
+        try:
+            # A failed audit write must leave the phone report in the outer transaction intact.
+            async with conn.transaction():
+                if kind == "state":
+                    rows = await conn.execute("""
+                        SELECT state, status FROM marong.app_update_events WHERE kind = 'state'
+                            AND install_id = %s AND version_code = %s
+                        ORDER BY at DESC, id DESC LIMIT 1
+                    """, (install_id, code))
+                    if await rows.fetchone() == {"state": state, "status": status}:
+                        log.info("app_update record skipped reason=duplicate")
+                        return
+                rows = await conn.execute("""
+                    SELECT count(*) AS recent FROM marong.app_update_events
+                    WHERE friend_id = %s AND kind IN ('state', 'installed') AND at > now() - interval '1 hour'
+                """, (friend_id,))
+                if (await rows.fetchone())["recent"] >= 30:
+                    log.info("app_update record skipped reason=rate_limit")
+                    return
+                await conn.execute("""
+                    INSERT INTO marong.app_update_events (kind, friend_id, install_id, version_code, app_version, state, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING
+                """, (kind, friend_id, install_id, code, app_version, state, status))
+        except (psycopg.Error, TimeoutError):
+            log.warning("app_update record failed kind=%s", kind)
+
+    async def app_update_fetched(self, friend_id: int, code: int) -> None:
+        async with self.pool.connection() as conn, conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                               (f"marong.app-fetched:{friend_id}:{code}",))
+            await conn.execute("""
+                INSERT INTO marong.app_update_events (kind, friend_id, version_code)
+                SELECT 'fetched', %(friend)s, %(code)s WHERE NOT EXISTS (
+                    SELECT FROM marong.app_update_events WHERE kind = 'fetched' AND friend_id = %(friend)s
+                        AND version_code = %(code)s AND at > now() - interval '1 hour'
+                )
+            """, {"friend": friend_id, "code": code})
 
     async def app_devices(self, friend_id: int, install_id: str | None = None) -> list[dict]:
         """The friend's phones, last reported first. fresh: reported within 30 days."""

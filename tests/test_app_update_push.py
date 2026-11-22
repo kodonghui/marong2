@@ -12,10 +12,13 @@ from uuid import UUID
 
 import httpx
 import psycopg
+from aiohttp.test_utils import TestClient, TestServer
 
 from pg import TestDB
 from test_app_update import ROOT, apk, fixture
+from test_app_chat import AUD, HK_EMAIL, ORIGIN, STRANGER, TEAM, Certs, auth, prepare, problem
 from marong import fcm
+from marong.access import AccessConfig, AccessVerifier, email_hash
 from marong.app_chat import AppChat
 from marong.app_push import AppPush
 from marong.app_release import PACKAGE, AppReleases
@@ -230,6 +233,158 @@ class PushWatcherTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(task.await_count, int(started))
                 finally:
                     await chat.close()
+
+
+class UpdateAPITests(unittest.IsolatedAsyncioTestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.db = TestDB()
+        cls.addClassCleanup(cls.db.close)
+        prepare(cls.db)
+        cls.db.apply_sql(ROOT / "marong/migrations/023_app_update_events.sql")
+        cls.db.admin("UPDATE marong.discord_dm_links SET channel_id = '123456789012345678', last_incoming_at = now() "
+                     "WHERE friend_id = 2")
+
+    async def asyncSetUp(self):
+        self.db.admin("TRUNCATE marong.app_devices, marong.app_update_events")
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.folder = Path(directory.name)
+        self.releases = AppReleases(self.folder)
+        self.store = DiscordStore(self.db.app_url, call_bridge=True)
+        self.addAsyncCleanup(self.store.close)
+        await self.store.open(wait=True)
+        httpx_client = httpx.AsyncClient(transport=httpx.MockTransport(Certs()))
+        self.addAsyncCleanup(httpx_client.aclose)
+        config = AccessConfig(TEAM, AUD, frozenset({HK_EMAIL}))
+        self.chat = AppChat(self.store, None, None, AccessVerifier(config, httpx_client),
+                            AppPush(self.store, FakeFCM(), ring_enabled=True), origin=ORIGIN, releases=self.releases,
+                            admin_email_hash=email_hash(HK_EMAIL))
+        self.http = TestClient(TestServer(self.chat.web_app()))
+        self.addAsyncCleanup(self.http.close)
+        await self.http.start_server()
+        app_release.backfill(self.folder)
+        self.headers = auth(write=True)
+
+    def report(self, ident=1, headers=None, **changes):
+        body = {"fid": fid(ident), "notifications": "granted", "appVersion": "0.3.1",
+                "ring": {"channel": "enabled", "fullScreen": "granted"}, **changes}
+        return self.http.put(f"/chat/api/devices/{phone(ident)}", json=body,
+                             headers=self.headers if headers is None else headers)
+
+    def events(self):
+        return self.db.admin("SELECT kind, version_code, app_version, state, status FROM marong.app_update_events ORDER BY id")
+
+    async def test_tc607_validation_and_legacy_api105_responses(self):
+        r = await self.report()
+        self.assertEqual(r.status, 201)
+        self.assertEqual(await r.json(), {"delivery": {"to": "app", "reason": "app_on"},
+                                         "ring": {"to": "app", "reason": "app_on", "fullScreen": True}})
+        self.assertEqual((await self.report()).status, 200)
+        self.assertEqual(self.events(), [])
+        original = self.db.admin("SELECT * FROM marong.app_devices")
+        for update in (None, {}, {"versionCode": 10, "state": "failed"},
+                       {"versionCode": 10, "state": "downloaded", "status": 1},
+                       {"versionCode": 10, "state": "unknown"}, {"versionCode": 0, "state": "downloaded"},
+                       {"versionCode": 10, "state": "downloaded", "extra": "not allowed"},
+                       {"versionCode": True, "state": "downloaded"}, {"versionCode": 10, "state": "failed", "status": True},
+                       {"versionCode": 10, "state": "failed", "status": 1000}, {"versionCode": 10.0, "state": []}):
+            with self.subTest(update=update):
+                await problem(await self.report(update=update), 400, "invalid_request", "update", "bad_format")
+                self.assertEqual(self.db.admin("SELECT * FROM marong.app_devices"), original)
+        await problem(await self.report(headers={"Origin": ORIGIN}), 401, "unauthenticated")
+        await problem(await self.report(headers=auth(STRANGER, write=True)), 403, "not_allowed")
+        for error, status, code in ((psycopg.OperationalError, 503, "db_unavailable"), (RuntimeError, 500, "internal")):
+            with patch.object(self.store, "app_device_put", side_effect=error):
+                await problem(await self.report(), status, code)
+
+    async def test_tc607_deduplicates_limits_and_allows_next_hour(self):
+        change = {"versionCode": 10, "state": "failed", "status": 1}
+        self.assertEqual((await self.report(update=change)).status, 201)
+        for value, reason in ((change, "duplicate"), ({**change, "versionCode": 99}, "unknown_version")):
+            with self.assertLogs("marong.app", level="INFO") as logs:
+                self.assertEqual((await self.report(update=value)).status, 200)
+            self.assertEqual(sum(f"record skipped reason={reason}" in line for line in logs.output), 1)
+        for status in range(2, 31):
+            ident = 1 if status < 20 else 2
+            self.assertIn((await self.report(ident, update={**change, "status": status})).status, (200, 201))
+        with self.assertLogs("marong.app", level="INFO") as logs:
+            self.assertEqual((await self.report(2, update={**change, "status": 31})).status, 200)
+        self.assertEqual(sum("record skipped reason=rate_limit" in line for line in logs.output), 1)
+        self.assertEqual([event[-1] for event in self.events()], list(range(1, 31)))
+        self.db.admin("UPDATE marong.app_update_events SET at = now() - interval '61 minutes'")
+        self.assertEqual((await self.report(2, update={**change, "status": 31})).status, 200)
+        self.assertEqual(len(self.events()), 31)
+
+    async def test_tc607_twenty_phone_cap_and_concurrency(self):
+        self.db.admin("""INSERT INTO marong.app_devices (install_id, friend_id, fid, notifications, app_version, seen_at)
+                       SELECT make_uuid, 2, 'synthetic-old-fid-' || n, 'denied', '0.3.1',
+                              CASE WHEN n = 20 THEN now() - interval '31 days' ELSE now() END
+                       FROM unnest(%s::uuid[]) WITH ORDINALITY AS u(make_uuid, n)""",
+                      ([phone(n) for n in range(1, 21)],))
+        responses = await asyncio.gather(self.report(21), self.report(22))
+        self.assertEqual(sorted(r.status for r in responses), [201, 409])
+        rejected = next(r for r in responses if r.status == 409)
+        result = await problem(rejected, 409, "too_many_devices")
+        self.assertEqual(result["title"], "이 친구의 30일 안 폰이 이미 20대")
+        self.assertEqual((await self.report(1)).status, 200)
+        await problem(await self.report(20), 409, "too_many_devices")
+        self.db.admin("""INSERT INTO marong.app_devices (install_id, friend_id, fid, notifications, app_version)
+                       VALUES (%s, 1, %s, 'granted', '0.3.1')""", (phone(23), fid(23)))
+        await problem(await self.report(23), 409, "too_many_devices")
+        self.assertEqual(self.db.admin("SELECT friend_id FROM marong.app_devices WHERE install_id=%s", (phone(23),)), [(1,)])
+        self.assertEqual(self.db.admin("SELECT count(*) FROM marong.app_devices WHERE friend_id=2 AND "
+                                       "seen_at > now() - interval '30 days'"), [(20,)])
+
+    async def test_tc608_installed_only_for_known_upgrades_and_once_per_phone(self):
+        self.assertEqual((await self.report()).status, 201)
+        installed = {"versionCode": 10, "state": "installed"}
+        reports = await asyncio.gather(self.report(appVersion="0.3.2"), self.report(appVersion="0.3.2", update=installed))
+        self.assertEqual([r.status for r in reports], [200, 200])
+        self.assertEqual(self.events(), [("installed", 10, "0.3.2", None, None)])
+        self.assertEqual((await self.report(appVersion="0.9.9", update={**installed, "versionCode": 99})).status, 200)
+        self.assertEqual((await self.report()).status, 200)
+        self.assertEqual((await self.report(appVersion="0.3.2", update=installed)).status, 200)
+        self.assertEqual(len(self.events()), 1)
+
+    async def test_tc608_fetched_dedup_and_audit_write_failure(self):
+        release = fixture(self.folder, code=10)
+        url = f"/chat/app/{release.file}"
+        event = asyncio.Event()
+        write = self.store.app_update_fetched
+
+        async def fetch(friend_id, code):
+            try:
+                await write(friend_id, code)
+            finally:
+                event.set()
+
+        with patch.object(self.store, "app_update_fetched", side_effect=fetch):
+            for _ in range(2):
+                event.clear()
+                r = await self.http.get(url, headers=self.headers)
+                self.assertEqual((r.status, await r.read()), (200, b"fixture bytes"))
+                await asyncio.wait_for(event.wait(), timeout=2)
+        self.assertEqual(self.db.admin("SELECT kind, friend_id, version_code, install_id FROM marong.app_update_events"),
+                         [("fetched", 2, 10, None)])
+
+        self.db.admin("REVOKE INSERT ON marong.app_update_events FROM marong")
+        try:
+            with self.assertLogs("marong.app", level="WARNING") as logs:
+                update = {"versionCode": 10, "state": "downloaded"}
+                self.assertEqual((await self.report(update=update)).status, 201)
+                self.assertEqual((await self.report(appVersion="0.3.2")).status, 200)
+                self.db.admin("UPDATE marong.app_update_events SET at = now() - interval '61 minutes'")
+                event.clear()
+                with patch.object(self.store, "app_update_fetched", side_effect=fetch):
+                    r = await self.http.get(url, headers=self.headers)
+                    self.assertEqual((r.status, await r.read()), (200, b"fixture bytes"))
+                    await asyncio.wait_for(event.wait(), timeout=2)
+            self.assertEqual([line.rsplit("=", 1)[-1] for line in logs.output], ["state", "installed", "fetched"])
+            self.assertEqual(self.db.admin("SELECT app_version, ring_channel FROM marong.app_devices"), [("0.3.2", "enabled")])
+            self.assertEqual(len(self.events()), 1)
+        finally:
+            self.db.admin("GRANT INSERT ON marong.app_update_events TO marong")
 
 
 class ReleaseHistoryTests(unittest.TestCase):
