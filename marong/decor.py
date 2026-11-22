@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 import csv
 import json
+import logging
 from math import ceil, floor
 from pathlib import Path
 import re
@@ -12,6 +13,7 @@ from PIL import Image
 from .character.graphics import TEMPLATE_IDS
 
 
+log = logging.getLogger(__name__)
 ROOT = Path(__file__).with_name("decor")
 TEMPLATES = Path(__file__).resolve().parents[1] / "design" / "pet" / "templates"
 ITEM_ID = re.compile(r"[a-z0-9-]{3,40}\Z")
@@ -53,9 +55,10 @@ class DecorCatalog:
         data = json.loads(manifest.read_text(encoding="utf-8"))
         if not isinstance(data, dict) or data.get("set") != set_name or not isinstance(data.get("items"), list):
             raise ValueError("decor_manifest")
-        for entry in data["items"]:
+        for index, entry in enumerate(data["items"], 1):
             parsed = self._item(entry)
             if parsed is None:
+                log.warning("decor_catalog_rejected row=%s missing=id", index)
                 continue
             if parsed.id in self.items:
                 raise ValueError("decor_duplicate")
@@ -101,17 +104,19 @@ class DecorCatalog:
             missing.append("starter")
         license_row = self.licenses.get(item.license_id) if isinstance(item.license_id, str) else None
         if (not license_row or license_row.get("item_id") != item.id
-                or not all(license_row.get(key) for key in ("file", "source", "author", "license", "terms", "checked_at"))
-                or (item.kind == "font" and license_row.get("license") != "OFL-1.1")):
+                or not all(license_row.get(key) for key in ("file", "source", "author", "license", "terms", "checked_at"))):
             missing.append("license")
+        elif item.kind == "font" and license_row["license"] != "OFL-1.1":
+            missing.append("font_license")
         if item.kind in SLOTS:
             if not isinstance(item.prompt, str) or not 1 <= len(item.prompt) <= 200 or not item.prompt.isascii():
                 missing.append("prompt")
             for template in TEMPLATE_IDS:
                 key = f"{template}.png"
                 path = item.files.get(key)
-                if path is None or not self._layer(path, template, item.slot):
-                    missing.append(f"layer:{template}")
+                issue = self._layer_issue(path, template, item.slot) if path else "layer"
+                if issue:
+                    missing.append(f"{issue}:{template}")
         if item.kind == "sticker":
             required = ["sticker.webp"]
         else:
@@ -145,17 +150,19 @@ class DecorCatalog:
         except (OSError, ValueError, Image.DecompressionBombError):
             return False
 
-    def _layer(self, path, template, slot):
+    def _layer_issue(self, path, template, slot):
         try:
             slots = json.loads((self.templates / f"{template}.json").read_text(encoding="utf-8"))["slots"]
             left, top, right, bottom = slots[slot]
             box = (floor(left * 1024), floor(top * 1024), ceil(right * 1024), ceil(bottom * 1024))
             with Image.open(path, formats=("PNG",)) as image:
                 if image.size != (1024, 1024):
-                    return False
+                    return "layer"
                 ink = image.convert("RGBA").getchannel("A").point(lambda value: 255 if value else 0)
                 total = ink.histogram()[255]
                 inside = ink.crop(box).histogram()[255]
-                return 0 < total < 1024**2 and (total - inside) * 100 <= total * 5
+                if not 0 < total < 1024**2:
+                    return "layer"
+                return "layer_box" if (total - inside) * 100 > total * 5 else None
         except (OSError, ValueError, KeyError, TypeError, Image.DecompressionBombError):
-            return False
+            return "layer"

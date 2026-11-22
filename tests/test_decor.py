@@ -2,6 +2,7 @@
 
 import asyncio
 import csv
+from dataclasses import replace
 import json
 from datetime import timedelta
 from io import BytesIO
@@ -87,6 +88,29 @@ def assets(root):
 
 
 class DecorTests(unittest.IsolatedAsyncioTestCase):
+    def test_layer_bounds_and_font_license_explain_why_assets_are_rejected(self):
+        with tempfile.TemporaryDirectory() as root:
+            assets(root)
+            manifest = Path(root) / "v1" / "items.json"
+            inventory = json.loads(manifest.read_text(encoding="utf-8"))
+            inventory["items"].append({"id": "Bad_ID", "kind": "hat"})
+            manifest.write_text(json.dumps(inventory), encoding="utf-8")
+            with self.assertLogs("marong.decor", "WARNING") as log:
+                catalog = DecorCatalog(root)
+            self.assertIn("missing=id", log.output[0])
+            self.assertNotIn("Bad_ID", catalog.items)
+            item = catalog.items["hat-fixture"]
+            self.assertEqual(catalog.check(replace(item, kind="gacha")), ["kind"])
+            self.assertEqual(catalog.check(replace(item, files={key: value for key, value in item.files.items()
+                                                               if key != "dog_long.png"})), ["layer:dog_long"])
+            canvas = Image.new("RGBA", (1024, 1024))
+            ImageDraw.Draw(canvas).rectangle((6, 950, 94, 1000), fill="#654321")
+            canvas.save(item.files["cat.png"], "PNG")
+            self.assertEqual(catalog.check(item), ["layer_box:cat"])
+            font = catalog.items["starter-font"]
+            catalog.licenses[font.license_id]["license"] = "Proprietary"
+            self.assertEqual(catalog.check(font), ["font_license"])
+
     async def test_catalog_and_account_scoped_actions(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
@@ -118,6 +142,21 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             await chat.decor.seed()
             await chat.decor.seed()
             self.assertEqual(db.admin("SELECT count(*) FROM marong.decor_items"), [(6,)])
+            writes = (
+                (client.put, "/chat/api/characters/1/intro", member),
+                (client.post, "/chat/api/shop/hat-fixture/claim", member),
+                (client.put, "/chat/api/characters/1/outfit", member),
+                (client.put, "/chat/diary/api/decor", member),
+                (client.put, "/chat/diary/api/days/2026-11-20/stickers", member),
+                (client.post, "/chat/admin/api/items/hat-fixture/list", admin),
+                (client.post, "/chat/admin/api/items/hat-fixture/unlist", admin),
+            )
+            for method, path, session in writes:
+                without_origin = {key: value for key, value in session.items() if key != "Origin"}
+                for headers in (without_origin, {**session, "Origin": "https://other.invalid"}):
+                    with self.subTest(path=path, origin=headers.get("Origin")):
+                        error = await method(path, headers=headers, json={})
+                        self.assertEqual((error.status, (await error.json())["code"]), (403, "cross_site"))
             image = "/chat/decor/v1/hat-fixture/dog_small.png"
             self.assertEqual((await client.get(image)).status, 401)
             response = await client.get(image, headers=member)
