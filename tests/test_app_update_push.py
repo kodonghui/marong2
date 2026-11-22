@@ -6,11 +6,27 @@ import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
+
+import httpx
 
 from test_app_update import ROOT, apk
+from marong import fcm
 from marong.app_release import PACKAGE, AppReleases
 from tools import app_release
+
+
+class UpdateMessageTests(unittest.IsolatedAsyncioTestCase):
+    async def test_tc601_data_only_and_no_inline_retry(self):
+        message = fcm.app_update("synthetic-test-fid", 11)
+        self.assertEqual(message, {"fid": "synthetic-test-fid", "data": {"kind": "app_update", "v": "11"},
+                                   "android": {"priority": "HIGH", "ttl": "86400s", "collapse_key": "app_update"}})
+        http = AsyncMock()
+        http.post.return_value = httpx.Response(503)
+        sender = fcm.FCM(fcm.ServiceAccount("unused", "unused", "unused", "synthetic-project"), http=http)
+        with patch.object(sender, "_token", return_value="synthetic-token"):
+            self.assertEqual(await sender.send(message), "failed")
+        http.post.assert_awaited_once()
 
 
 class ReleaseHistoryTests(unittest.TestCase):
