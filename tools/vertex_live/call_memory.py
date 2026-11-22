@@ -8,7 +8,7 @@ import logging
 import os
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from psycopg import Error
@@ -31,6 +31,7 @@ class Principal:
     revision: int = 0
     private_rooms: tuple[str, str] | None = None
     unified: bool = False
+    usage_profile: dict | None = field(default=None, repr=False, compare=False)
 
 
 class CallBusy(Exception):
@@ -166,11 +167,15 @@ class MemoryStore:
                 prompt += "\n\n" + safety
         return prompt
 
-    async def principal(self, email_hash):
-        row = await self.one("""SELECT c.id AS caller_id,c.friend_id,f.name,c.context_revision
+    async def principal(self, email_hash, *, include_limits=False):
+        columns = ",p.usage_unlimited,p.daily_units,p.call_monthly_usd" if include_limits else ""
+        profile_join = "LEFT JOIN marong.friend_profiles p ON p.friend_id=f.id" if include_limits else ""
+        row = await self.one(f"""SELECT c.id AS caller_id,c.friend_id,f.name,c.context_revision{columns}
             FROM call.caller_logins l JOIN call.callers c ON c.id=l.caller_id
-            JOIN marong.friends f ON f.id=c.friend_id WHERE l.email_sha256=%s AND c.enabled""", (email_hash,))
-        return Principal(row['caller_id'], row['friend_id'], row['name'], row['context_revision']) if row else None
+            JOIN marong.friends f ON f.id=c.friend_id {profile_join}
+            WHERE l.email_sha256=%s AND c.enabled""", (email_hash,))
+        return Principal(row['caller_id'], row['friend_id'], row['name'], row['context_revision'],
+                         usage_profile=row if include_limits else None) if row else None
 
     def context_version(self):
         version = "context_revision"
@@ -403,7 +408,7 @@ class MemoryStore:
         return await self.one("""SELECT t.* FROM call.live_tunings t WHERE name=COALESCE((
             SELECT value #>> '{}' FROM call.settings WHERE key='live_tuning'),%s)""", (BASE,))
 
-    async def start_segment(self,p,call_id,client_id,model,*,tuning=None,handoff_from=None):
+    async def start_segment(self,p,call_id,client_id,model,*,tuning=None,handoff_from=None,await_provider=False):
         segment=str(uuid.uuid4())
         async with self.pool.connection() as c,c.transaction():
             await self._owned(c,p,call_id)
@@ -413,11 +418,40 @@ class MemoryStore:
                 if changed.rowcount!=1:raise ValueError('handoff_segment_changed')
             else:
                 await c.execute("UPDATE call.segments SET state='closed',closed_at=now(),close_reason='connection_lost' WHERE call_id=%s AND state<>'closed'",(call_id,))
-            await c.execute("""INSERT INTO call.segments(id,call_id,mode,client_id,state,provider,provider_model,provider_ready_at)
-                VALUES(%s,%s,%s,%s,'open','vertex',%s,now())""",(segment,call_id,'handoff' if handoff_from else 'reconnect',client_id,model))
+            await c.execute("""
+                INSERT INTO call.segments(id,call_id,mode,client_id,state,provider,provider_model,provider_ready_at)
+                VALUES(%s,%s,
+                    CASE WHEN %s THEN 'handoff'
+                         WHEN %s AND NOT EXISTS(SELECT 1 FROM call.segments WHERE call_id=%s) THEN 'start'
+                         ELSE 'reconnect' END,
+                    %s,%s,'vertex',%s,CASE WHEN %s THEN NULL ELSE clock_timestamp() END)
+            """, (segment,call_id,handoff_from is not None,await_provider,call_id,client_id,
+                  'opening' if await_provider else 'open',model,await_provider))
             if tuning:
                 await c.execute("UPDATE call.segments SET tuning=%s WHERE id=%s", (tuning,segment))
         return segment
+
+    async def segment_ready(self, segment):
+        async with self.pool.connection() as c:
+            await c.execute("""
+                UPDATE call.segments SET state='open',provider_ready_at=clock_timestamp()
+                WHERE id=%s AND state='opening'
+            """, (segment,))
+
+    async def segment_start_failed(self, segment):
+        async with self.pool.connection() as c:
+            await c.execute("""
+                UPDATE call.segments SET state='closed',closed_at=clock_timestamp(),close_reason='start_failed'
+                WHERE id=%s AND state='opening'
+            """, (segment,))
+
+    async def record_connection(self, segment, *, timing=None, playback=None):
+        async with self.pool.connection() as c:
+            await c.execute("""
+                UPDATE call.segments SET connect_timing=coalesce(%s,connect_timing),playback=coalesce(%s,playback)
+                WHERE id=%s
+            """, (Jsonb(timing) if timing is not None else None,
+                  Jsonb(playback) if playback is not None else None, segment))
 
     async def record_mic(self, segment, sent, held):
         async with self.pool.connection() as c:

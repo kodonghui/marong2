@@ -6,7 +6,7 @@ async function setup(){
   class Room{on(event,fn){handlers[event]=fn;}async connect(){}async startAudio(){}async disconnect(){}}
   const box={LivekitClient:{Room,RoomEvent:{Disconnected:'disconnected',Reconnecting:'reconnecting',TrackSubscribed:'track',TrackUnsubscribed:'untrack'},Track:{Kind:{Audio:'audio'}}},
     document:{createElement:()=>({setAttribute(){},pause(){},remove(){}}),body:{append(){}}},
-    performance:{now:()=>now},setInterval(){},clearInterval(){},setTimeout,clearTimeout,
+    performance:{now:()=>now},setInterval(){},clearInterval(){},setTimeout,clearTimeout,AbortController,
     fetch:async()=>({ok:true,json:async()=>({url:'synthetic',token:'synthetic'})})};
   vm.createContext(box);vm.runInContext(source,box);
   box.fault=reason=>faults.push(reason);

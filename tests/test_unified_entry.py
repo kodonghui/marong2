@@ -44,6 +44,7 @@ class WorkLoopsTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(db.close)
         db.apply_unified_prerequisites()
         db.apply_unified()
+        db.apply_usage_limit()
         with patch.dict(os.environ, {"MARONG_FRIEND_MEMORY": "shadow"}):
             store = UnifiedStore(db.app_url)
         await store.open(wait=True)
@@ -93,6 +94,7 @@ class WorkLoopsTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(db.close)
         db.apply_unified_prerequisites()
         db.apply_unified()
+        db.apply_usage_limit()
         return db
 
     async def test_standalone_entry_runs_chat_with_no_discord_configuration(self):

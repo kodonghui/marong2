@@ -145,6 +145,8 @@ describe('chat page', { skip }, () => {
     await page.locator('#text').fill('남겨 둘 합성 글');
     await page.locator('#send').click();
     await page.getByText('오늘 쓸 수 있는 양을 다 썼어.', {exact: false}).waitFor();
+    const usage = page.getByRole('link', {name: '내 사용량 보기'});
+    assert.equal(await usage.getAttribute('href'), '/chat/me');
     assert.equal(await page.locator('#text').inputValue(), '남겨 둘 합성 글');
     assert.equal(await page.locator('#send').isDisabled(), true);
     tickets = 1;
