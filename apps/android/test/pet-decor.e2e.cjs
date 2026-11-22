@@ -193,3 +193,49 @@ test('TC-551: preview a new background, then restore and explicitly save default
     await browser.close();
   }
 });
+
+test('TC-543: show item validation, change listing, and recover after a forbidden read', {skip: !chromium}, async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage({viewport: {width: 360, height: 780}, isMobile: true});
+    const items = [
+      {id: 'green-cap', name: '초록 모자', state: 'listed', owners: 2, missing: []},
+      {id: 'blue-cap', name: '파란 모자', state: 'unlisted', owners: 1, missing: []},
+      {id: 'broken-cap', name: '검사 중 모자', state: 'new', owners: 0, missing: ['layer:dog_long']},
+    ];
+    let permitted = true;
+    await page.route('**/*', async route => {
+      const address = new URL(route.request().url()).pathname;
+      if (address === '/chat/admin/api/items') {
+        return permitted ? route.fulfill({json: {items, set: 'v1'}})
+          : route.fulfill({status: 403, json: {code: 'not_allowed'}});
+      }
+      if (address === '/chat/admin/api/items/blue-cap/list') {
+        items[1].state = 'listed';
+        return route.fulfill({json: items[1]});
+      }
+      const file = address === '/chat/admin/items' ? 'admin-items.html' : path.basename(address);
+      if (!['admin-items.html', 'admin-items.js', 'chat.css', 'unified.css', 'unified.js'].includes(file)) {
+        return route.fulfill({status: 404});
+      }
+      const type = file.endsWith('.css') ? 'text/css' : file.endsWith('.js') ? 'application/javascript' : 'text/html';
+      return route.fulfill({contentType: type + '; charset=utf-8', body: await readFile(path.join(STATIC, file))});
+    });
+    await page.goto(BASE + '/chat/admin/items');
+    const blue = page.locator('li').filter({hasText: '파란 모자'});
+    const broken = page.locator('li').filter({hasText: '검사 중 모자'});
+    await broken.getByText('확인할 항목 layer:dog_long').waitFor();
+    assert.equal(await broken.getByRole('button', {name: '올리기'}).isDisabled(), true);
+    await blue.getByRole('button', {name: '올리기'}).click();
+    await blue.getByRole('button', {name: '내리기'}).waitFor();
+
+    permitted = false;
+    await page.reload();
+    await page.getByText('아이템을 불러오지 못했어요').waitFor();
+    permitted = true;
+    await page.getByRole('button', {name: '다시 보기'}).click();
+    await blue.getByRole('button', {name: '내리기'}).waitFor();
+  } finally {
+    await browser.close();
+  }
+});
