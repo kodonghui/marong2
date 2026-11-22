@@ -54,6 +54,13 @@ class TestDB:
             ROOT / "marong" / "call" / "migrations" / "009_usage_limit.sql",
         )
 
+    def apply_pet_app_prerequisites(self) -> None:
+        self.apply_usage_limit()
+        self.apply_sql(ROOT / "marong" / "call" / "migrations" / "010_call_connect.sql")
+
+    def apply_pet_app(self) -> None:
+        self.apply_sql(ROOT / "marong" / "migrations" / "022_pet_app.sql")
+
     def admin(self, sql: str, params=()) -> list[tuple]:
         """슈퍼유저로 읽기(시험 확인용)."""
         with psycopg.connect(self.admin_url, autocommit=True) as c:

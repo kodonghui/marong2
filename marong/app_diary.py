@@ -1,6 +1,5 @@
 """Authenticated routes for one friend's diary."""
 
-import os
 import re
 from calendar import monthrange
 from datetime import date, datetime
@@ -9,7 +8,7 @@ from pathlib import Path
 from aiohttp import web
 
 from .app_chat import UUID, Problem, bad
-from .diary import KST, diary_day, drawing_allowed, image_budget
+from .diary import KST, diary_day, drawing_allowed
 from .diary_models import GLASSES, HAIR, WEATHER
 
 _PREFIX = "/chat/diary/api"
@@ -45,7 +44,7 @@ class AppDiary:
     def __init__(self, chat):
         self.chat = chat
         self.store = chat.store
-        self.draw_budget = image_budget(os.getenv("MARONG_DIARY_IMAGE_BUDGET_USD"))
+        self.draw_budget = chat.pet_app_settings.diary_image_budget
 
     async def page(self, req):
         return web.FileResponse(_STATIC / "index.html", headers={"Content-Type": "text/html; charset=utf-8"})

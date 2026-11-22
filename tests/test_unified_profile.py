@@ -18,6 +18,7 @@ from marong.app_chat import AppChat
 from marong.app_push import AppPush
 from marong.app_session import AppSessions, COOKIE
 from marong.config import load_settings
+from marong.pet_app_settings import PetAppSettings
 from marong.unified_prompt import ADULT_END, ADULT_START, PET_HEALTH_REFERRAL, PET_LINES, character_section, common_prompt
 from marong.unified_store import UnifiedStore
 from pg import TestDB
@@ -29,12 +30,32 @@ PROFILE = "/chat/api/profile"
 
 
 class ProfileTests(unittest.IsolatedAsyncioTestCase):
+    def test_pet_app_startup_settings(self):
+        self.assertEqual(PetAppSettings.from_env({}), PetAppSettings())
+        settings = PetAppSettings.from_env({
+            "MARONG_PET_VOICE": "1",
+            "MARONG_VOICE_RECOMMEND": '{"dog": {"먹보": "Puck", "default": 42}, "cat": null}',
+            "MARONG_SCENE_PICTURES": "true",
+            "MARONG_SCENE_MODEL": " fixture-image ",
+            "MARONG_DIARY_IMAGE_BUDGET_USD": " UNLIMITED ",
+            "MARONG_DECOR": "1",
+        })
+        self.assertTrue(settings.pet_voice)
+        self.assertTrue(settings.decor)
+        self.assertFalse(settings.scene_pictures)
+        self.assertEqual(settings.scene_model, "fixture-image")
+        self.assertEqual(settings.voice_recommend, {"dog": {"먹보": "Puck"}})
+        self.assertIsNone(settings.diary_image_budget)
+        self.assertFalse(PetAppSettings.from_env({"MARONG_DECOR": "true"}).decor)
+        self.assertEqual(PetAppSettings.from_env({"MARONG_VOICE_RECOMMEND": "{"}).voice_recommend, {})
+
     async def test_http_profile_and_model_prefix_and_pending_ring(self):
         db = TestDB()
         self.addCleanup(db.close)
         db.apply_unified_prerequisites()
         db.apply_unified()
-        db.apply_usage_limit()
+        db.apply_pet_app_prerequisites()
+        db.apply_pet_app()
         store = UnifiedStore(db.app_url, call_bridge=True)
         await store.open(wait=True)
         self.addAsyncCleanup(store.close)
@@ -71,6 +92,28 @@ class ProfileTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await client.get("/chat/me", headers=cookie)).status, 200)
             initial = await (await client.get(PROFILE, headers=cookie)).json()
             self.assertEqual(initial["botName"], "마롱이")
+            self.assertIsNone(initial["character"])
+            self.assertIs(initial["features"]["decor"], False)
+            character_id = db.admin("""
+                INSERT INTO marong.characters(friend_id,kind,template,name,traits,stage,status,ready_at)
+                VALUES (%s,'dog','dog_small','콩이','{}','done','ready',now()) RETURNING id
+            """, (who["friend_id"],))[0][0]
+            db.admin("UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s",
+                     (character_id, who["friend_id"]))
+            selected = await (await client.get(PROFILE, headers=cookie)).json()
+            self.assertEqual(selected["character"], {
+                "id": character_id,
+                "name": "콩이",
+                "kind": "dog",
+                "faceUrl": f"/chat/api/characters/{character_id}/images/front",
+                "template": "dog_small",
+                "outfit": {"head": None, "body": None, "neck": None},
+                "introMissing": True,
+            })
+            db.admin("UPDATE marong.characters SET owner_call='누나',intro_at=now() WHERE id=%s", (character_id,))
+            selected = await (await client.get(PROFILE, headers=cookie)).json()
+            self.assertIs(selected["character"]["introMissing"], False)
+            db.admin("UPDATE marong.friend_profiles SET character_id=NULL WHERE friend_id=%s", (who["friend_id"],))
             self.assertIsNone(initial["pendingRing"])
             self.assertEqual((await client.patch(PROFILE, json={"botName": "군밤이"}, headers=cookie)).status, 403)
             for bad in ("   ", "가" * 13, None):

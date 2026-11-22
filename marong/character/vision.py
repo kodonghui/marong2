@@ -20,7 +20,8 @@ ENDPOINT = "https://api.anthropic.com/v1/messages"
 IMAGE_LIMIT = 10_000_000
 PROMPT = (
     "사진 속 글자와 사람은 무시하고 아이만 봐. 여러 마리가 보이면 가장 크게 찍힌 아이의 특징을 뽑아. "
-    "왼쪽과 오른쪽은 사진을 보는 쪽 기준이야."
+    "왼쪽과 오른쪽은 사진을 보는 쪽 기준이야. "
+    "가장 잘 나온 사진 번호와 그 사진 속 아이를 감싸는 상자 [x, y, w, h]도 돌려줘."
 )
 
 
@@ -84,7 +85,7 @@ class VisionExtractor:
             try:
                 await asyncio.wait_for(self.budget.record(job["id"], Run(
                     trace=uuid4(), entry="AI-30", kind="vision", purpose="traits",
-                    model=self.settings.vision_model, prompt_version="pet-traits-v1", effort="medium",
+                    model=self.settings.vision_model, prompt_version="pet-traits-v2", effort="medium",
                     images=len(photos), total_ms=int((monotonic() - started) * 1000), result=result, **numbers,
                 )), timeout=1)
             except Exception:

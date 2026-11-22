@@ -100,3 +100,19 @@ def sanitize(raw, number, detect):
     output = BytesIO()
     image.save(output, format="PNG")
     return Photo(output.getvalue(), image.width, image.height, count)
+
+
+def crop_pick(raw, box):
+    x, y, w, h = box
+    with Image.open(BytesIO(raw)) as source:
+        width, height = source.size
+        left = max(0, floor((x - w * .1) * width))
+        top = max(0, floor((y - h * .1) * height))
+        right = min(width, ceil((x + w * 1.1) * width))
+        bottom = min(height, ceil((y + h * 1.1) * height))
+        cropped = source.crop((left, top, right, bottom)).convert("RGB")
+    cropped.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+    cropped.info.clear()
+    output = BytesIO()
+    cropped.save(output, format="PNG")
+    return output.getvalue()

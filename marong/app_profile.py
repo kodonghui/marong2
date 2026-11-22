@@ -18,7 +18,7 @@ class AppProfile:
     def __init__(self, chat, *, character=None, friends=None, google=False, voices=None,
                  voice_samples=None):
         self.chat = chat
-        self.features = {"character": bool(character), "friends": bool(friends)}
+        self.features = {"character": bool(character), "friends": bool(friends), "decor": chat.pet_app_settings.decor}
         self.google = google
         self.voices = voices or configured_voices()
         self.voice_samples = Path(voice_samples) if voice_samples else None
@@ -35,7 +35,7 @@ class AppProfile:
         record = await self.chat.store._one("""
             SELECT f.name,f.share,p.bot_name,p.voice,p.friend_code,p.tickets,c.id AS character_id,
                    p.usage_unlimited,p.daily_units,p.call_monthly_usd,
-                   c.name AS character_name,c.kind,coalesce(u.chat_turns,0) AS chat_turns,
+                                      c.name AS character_name,c.kind,c.template,c.intro_at,coalesce(u.chat_turns,0) AS chat_turns,
                    coalesce(u.call_seconds,0) AS call_seconds,coalesce(u.images,0) AS images,
                    coalesce(u.units,0) AS units,r.id AS ring_id,r.answer_until
             FROM marong.friends f JOIN marong.friend_profiles p ON p.friend_id=f.id
@@ -56,7 +56,9 @@ class AppProfile:
         character = None
         if record["character_id"] is not None:
             character = {"id": record["character_id"], "name": record["character_name"], "kind": record["kind"],
-                         "faceUrl": f"/chat/api/characters/{record['character_id']}/images/front"}
+                         "faceUrl": f"/chat/api/characters/{record['character_id']}/images/front",
+                         "template": record["template"], "outfit": {"head": None, "body": None, "neck": None},
+                         "introMissing": record["intro_at"] is None}
         ringing = None
         if record["ring_id"] is not None:
             ringing = {"ringId": str(record["ring_id"]), "until": record["answer_until"].isoformat()}

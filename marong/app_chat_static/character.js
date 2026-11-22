@@ -375,11 +375,12 @@
     }
     workStarted = 0;
     if (card.job?.state === 'failed') {
-      const hint = card.job.error === 'model_refused' ? '사진을 다시 골라 줘' :
+      const hint = ['model_refused', 'photo_missing'].includes(card.job.error) ? '사진을 다시 골라 줘' :
         card.job.error === 'budget' ? '지금은 그림을 만들 수 없어' : '잠깐 문제가 생겼어. 다시 해 볼래?';
       signal(error, hint);
     }
-    const stage = card.stage === 'done' ? 'try' : card.stage === 'sheet' ? 'candidates' : card.stage;
+    const needsPhotos = card.job?.state === 'failed' && card.job?.error === 'photo_missing';
+    const stage = needsPhotos ? 'photos' : card.stage === 'done' ? 'try' : card.stage === 'sheet' ? 'candidates' : card.stage;
     const canEditEarlier = editingEarlier && ((wanted === 'photos' && stage === 'traits')
       || (wanted === 'traits' && stage === 'preview'));
     if ((stage !== wanted && !canEditEarlier) || stage === 'try') {

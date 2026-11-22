@@ -28,7 +28,6 @@ from marong.character.vision import VisionExtractor
 from marong.character.worker import CharacterWorker, WorkerBudget
 from marong.config import load_dotenv, load_settings
 from marong.deepseek import from_env as deepseek_route
-from marong.diary import image_budget
 from marong.diary_models import DiaryModels
 from marong.diary_worker import DiaryWorker
 from marong.discord_dm import PrivateChatAgent
@@ -39,6 +38,7 @@ from marong.internal_shop import InternalShop
 from marong.llm import LLM
 from marong.memory import MemoryWorker
 from marong.pet.settings import PriceBook
+from marong.pet_app_settings import PetAppSettings
 from marong.store import Store
 from marong.topics import Topics
 from marong.unified_delivery import AppProactive, AppReminders, UnifiedDelivery
@@ -125,6 +125,7 @@ def character_settings(settings):
 
 
 async def serve(settings, credentials, options, secret, authentication, home, stop):
+    pet_settings = PetAppSettings.from_env(os.environ)
     server_config = google_settings(credentials)
     web, shop, warm = model_tools(settings)
     try:
@@ -173,7 +174,8 @@ async def serve(settings, credentials, options, secret, authentication, home, st
         chat = AppChat(store, agent, locks, AccessVerifier(options["access"]), push,
                        origin=options["origin"], port=options["port"], timezone=settings.timezone,
                        sessions=sessions, authentication=authentication,
-                       admin_email_hash=os.getenv("MARONG_ADMIN_EMAIL_SHA256"), diary_models=diary_models)
+                       admin_email_hash=os.getenv("MARONG_ADMIN_EMAIL_SHA256"), diary_models=diary_models,
+                       pet_app_settings=pet_settings)
         chat.profile = AppProfile(chat, character=os.getenv("MARONG_CHARACTER") == "1",
                                   friends=os.getenv("MARONG_FRIENDS") == "1", google=google is not None,
                                   voice_samples=os.getenv("MARONG_VOICE_SAMPLES_DIR"))
@@ -231,7 +233,7 @@ async def serve(settings, credentials, options, secret, authentication, home, st
             reminders = AppReminders(settings, store, agent, delivery, origin=options["origin"])
             jobs.update(proactive=proactive.run, reminders=reminders.run)
             if diary_enabled:
-                diary = DiaryWorker(store, diary_models, delivery, image_budget(os.getenv("MARONG_DIARY_IMAGE_BUDGET_USD")),
+                diary = DiaryWorker(store, diary_models, delivery, pet_settings.diary_image_budget,
                                     unified=True)
                 jobs["diary"] = diary.run
             call_texts = await store._one("SELECT to_regclass('marong.call_texts') IS NOT NULL AS ready")
