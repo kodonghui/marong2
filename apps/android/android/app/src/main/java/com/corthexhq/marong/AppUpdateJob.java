@@ -349,10 +349,31 @@ public final class AppUpdateJob extends JobService {
         return bytes;
     }
 
-    private static boolean quiet(Context context) {
+    private static boolean windowVisible(Context context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S_V2) {
+            ActivityManager manager = context.getSystemService(ActivityManager.class);
+            if (manager != null) {
+                try {
+                    boolean sawTask = false;
+                    for (ActivityManager.AppTask task : manager.getAppTasks()) {
+                        ActivityManager.RecentTaskInfo info = task.getTaskInfo();
+                        if (info == null) continue;
+                        if (info.isVisible()) return true;
+                        sawTask = true;
+                    }
+                    // A paused Activity can keep its process in TOP even after its task is hidden.
+                    if (sawTask) return false;
+                } catch (IllegalArgumentException | SecurityException ignored) {
+                    // A task can disappear between listing and inspecting it.
+                }
+            }
+        }
         ActivityManager.RunningAppProcessInfo process = new ActivityManager.RunningAppProcessInfo();
         ActivityManager.getMyMemoryState(process);
-        boolean visible = process.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE;
+        return process.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE;
+    }
+
+    private static boolean quiet(Context context) {
         NotificationManager manager = context.getSystemService(NotificationManager.class);
         if (manager == null) return false;
         boolean calling = false;
@@ -361,7 +382,7 @@ public final class AppUpdateJob extends JobService {
             calling |= notification.getId() == CallService.NOTIFICATION_ID;
             ringing |= notification.getId() == Ring.NOTIFICATION_ID;
         }
-        return AppUpdate.quiet(calling, ringing, visible);
+        return AppUpdate.quiet(calling, ringing, windowVisible(context));
     }
 
     private boolean install(Candidate candidate, File apk, CancellationSignal cancel) {
