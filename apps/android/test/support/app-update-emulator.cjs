@@ -137,7 +137,8 @@ async function main() {
     }
     await waitFor(() => site.updateRequests.some((request) => request.path === APK_PATH),
       60_000, 'Release APK was not downloaded');
-    await waitFor(() => jobState(INSTALL_JOB) !== 'absent', 45_000,
+    // A slow fixture transfer must not use up the post-deferral installation budget.
+    await waitFor(() => jobState(INSTALL_JOB) !== 'absent', 180_000,
       'A verified APK did not produce the deferred installation job');
     const requests = site.updateRequests.filter((request) => request.path === APK_PATH);
     assert.equal(requests.length, 1);
