@@ -85,6 +85,10 @@ public final class AppUpdateTest {
         }
     }
 
+    @Test public void tc597DeferredJobLeavesOneMinuteForInstallation() {
+        assertEquals(14 * 60_000L, AppUpdateJob.DEFER_MS);
+    }
+
     @Test public void tc219ResultAndConfirmOncePerVersion() {
         assertEquals(AppUpdate.Result.SUCCESS, AppUpdate.result(0));
         assertEquals(AppUpdate.Result.CONFIRM, AppUpdate.result(-1));

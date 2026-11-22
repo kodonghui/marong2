@@ -57,7 +57,7 @@ public final class AppUpdateJob extends JobService {
     private static final int QUIET_INSTALL_JOB = 2213;
     private static final int RING_EXPIRY_JOB = 2214;
     private static final long DAY_MS = 24L * 60 * 60 * 1000;
-    private static final long DEFER_MS = 15L * 60 * 1000;
+    static final long DEFER_MS = 15L * 60 * 1000;
     private static final int BUFFER_SIZE = 65536;
     static final Object STATE_LOCK = new Object();
 
