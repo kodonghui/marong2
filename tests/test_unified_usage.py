@@ -18,6 +18,7 @@ from marong.app_push import AppPush
 from marong.app_session import AppSessions, COOKIE
 from marong.config import load_settings
 from marong.unified_store import UnifiedStore
+from marong.usage import configured_limit
 from pg import TestDB
 from run_app import AppAgent, RoomLocks
 
@@ -26,6 +27,14 @@ ORIGIN = "https://fixture.invalid"
 
 
 class UsageTests(IsolatedAsyncioTestCase):
+    def test_daily_default_limit_matches_admin_range(self):
+        for text, expected in (("", None), ("1", 1), ("100000", 100_000)):
+            with self.subTest(text=text):
+                self.assertEqual(configured_limit({"MARONG_DAILY_UNITS": text}), expected)
+        for text in ("0", "-1", "100001", "1.5", "１００"):
+            with self.subTest(text=text), self.assertRaisesRegex(ValueError, "MARONG_DAILY_UNITS"):
+                configured_limit({"MARONG_DAILY_UNITS": text})
+
     async def test_chat_and_call_meter_day_boundary_and_overflow(self):
         db = TestDB()
         self.addCleanup(db.close)
