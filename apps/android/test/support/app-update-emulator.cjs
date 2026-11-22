@@ -101,11 +101,12 @@ async function main() {
     const deadline = installJob().match(/Max execution delay: .*/)?.[0];
     console.log(`mode=${mode} downloads=${requests.length} before_home=9 deadline=${deadline ?? 'absent'}`);
     const bucket = mode.split('-')[0];
+    const expectedBucket = { rare: '40', restricted: '45' }[bucket];
     if (mode.endsWith('idle')) {
       adb('shell', 'dumpsys', 'battery', 'unplug');
       assert.match(adb('shell', 'dumpsys', 'deviceidle', 'force-idle'), /deep idle mode/);
     }
-    if (bucket === 'rare' || bucket === 'restricted') {
+    if (expectedBucket) {
       adb('shell', 'am', 'set-standby-bucket', PACKAGE, bucket);
     }
     const pid = mode === 'fallback' ? adb('shell', 'pidof', PACKAGE) : null;
@@ -121,14 +122,19 @@ async function main() {
     } else {
       adb('shell', 'input', 'keyevent', 'KEYCODE_HOME');
     }
-    if (bucket === 'rare' || bucket === 'restricted') {
-      adb('shell', 'am', 'set-standby-bucket', PACKAGE, bucket);
+    let appliedBucket;
+    if (expectedBucket) {
+      // A usage event from the foreground activity can reset a forced bucket during Home.
+      await waitFor(() => {
+        adb('shell', 'am', 'set-standby-bucket', PACKAGE, bucket);
+        appliedBucket = adb('shell', 'am', 'get-standby-bucket', PACKAGE);
+        return appliedBucket === expectedBucket;
+      }, 5_000, `Android did not apply the ${bucket} bucket`, 100);
+    } else {
+      appliedBucket = adb('shell', 'am', 'get-standby-bucket', PACKAGE);
     }
-    const appliedBucket = adb('shell', 'am', 'get-standby-bucket', PACKAGE);
     const idle = adb('shell', 'cmd', 'deviceidle', 'get', 'deep');
     console.log(`bucket=${appliedBucket} idle=${idle}`);
-    if (bucket === 'rare') assert.equal(appliedBucket, '40');
-    if (bucket === 'restricted') assert.equal(appliedBucket, '45');
     if (mode.endsWith('idle')) assert.equal(idle, 'IDLE');
     try {
       if (mode === 'normal' || mode.endsWith('idle')) {
@@ -137,6 +143,7 @@ async function main() {
       }
       await waitFor(() => version() === 10, LIMIT_MS - (performance.now() - backgrounded),
         'TC-222: no natural 9 → 10 install within 15 minutes of leaving the app', 2_000);
+      assert.ok(performance.now() - backgrounded <= LIMIT_MS, 'TC-222: installation observed after 15 minutes');
     } finally {
       console.log(`elapsed_seconds=${((performance.now() - backgrounded) / 1000).toFixed(3)} installed=${version()}`);
       console.log(`install_job=${jobState(INSTALL_JOB)}`);
