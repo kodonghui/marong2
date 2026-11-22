@@ -52,7 +52,7 @@ cd apps/android/android && ./gradlew testDebugUnitTest lintDebug assembleDebug  
 
 ## 확인
 
-- Must 명세(SPEC-284\~299, 301, 302)마다 작업이 있어요. SPEC-300(proposed)은 TASK-183이에요.
+- Must 명세(SPEC-284\~299, 301, 302)마다 작업이 있어요. SPEC-300은 TASK-183이에요.
 - API-141·142를 만지는 작업(TASK-180)은 계약의 모든 응답에 시험이 있어야 끝나요.
 - 의존에 고리가 없어요. 모든 작업이 번호가 더 작은 작업에만 기대요(서버 179→180·181→182, 183 따로, 179\~183→191, 앱 184→185·186·188→187→189→190, 190·191→192→193).
 
@@ -89,3 +89,53 @@ GPT가 TASK마다 상태·커밋·확인한 것을 적어요(AGENTS.md '구현�
 | TASK-192 | 다음 버전 미서명 후보와 기기 시험 | 93ad07c | 2026-11-18 운영 최신 0.2.3(코드 6)을 확인. 설치 순서를 맞추도록 노트북 빌드 사본에만 0.2.4(코드 7)를 적용. APK와 Gradle 메타데이터, Firebase 리소스, 미서명, 5,041,532바이트 SHA-256 d9380a295df5d347d3d6102e6a5832c622a8c07bcc435394bb232450faac8ca5 검증. 노트북 Java 21 JVM 28개와 lintDebug 통과. Android 16 시험 서버·동일 디버그 키에서 6→7, 내려받기 한 번, 창이 보일 때 보류, 시험에서 예약 작업 실행 후 글 대화, 캐시 정리와 24시간 작업 등록 확인. |
 | TASK-193 | 실제 폰 설치 대기 | 대기 | 사용자 결정에 따라 최종 APK를 한 번 설치. 그다음 릴리스에서 실제 폰 업데이트 및 이틀 조회를 관찰(TC-228·229). |
 | TASK-185·190·192 | 빠른 재시도 반영과 APK 검증 | `5ac18a8` | Java 21 단위 시험 28개, Node 웹·앱 68개, 서버 시험 54개, lintDebug 통과. Android 16 TC-222 재시험에서 마지막 보류 조건이 끝나고 3.038초에 코드 7로 설치. 노트북에서 0.2.4(코드 7)를 기존 인증서로 서명, 5,097,674바이트와 SHA-256 `4cc22a40da9b686091d7dd3637e7960c5e13e11be1de4fbb28eafdf9b61641e0` 확인. |
+
+## 2026-11-22 기능 변경: 게시 즉시 업데이트와 업데이트 상태
+
+2026-11-22 밤 KST 작성(Claude 마롱이 봇, 기능 변경 설계 PR). 입력: 기능 명세 [8절](../04-functional-spec/app-update.md#8-2026-11-22-기능-변경-게시-즉시-업데이트와-업데이트-상태)(SPEC-430\~443과 바뀐 행), DB [05-erd/app-update.md](../05-erd/app-update.md)(TBL-182), 계약 API-105 `update`([app-chat.openapi.yaml](../../api/app-chat.openapi.yaml))와 API-267([app-update.openapi.yaml](../../api/app-update.openapi.yaml)), 화면 상태 [SCR-001 업데이트 배너](../08-screens/app-update.md#scr-001-통화-홈의-업데이트-배너2026-11-22)와 [SCR-107 업데이트 배너](../08-screens/app-update.md#scr-107-글-대화의-업데이트-배너2026-11-22), 시험 계획 [12-qa/app-update.md](../12-qa/app-update.md)의 TC-599\~619. 결정은 [도메인 9절](../01-domain/app-update.md#9-기능-변경2026-11-22-게시-즉시-업데이트와-업데이트-상태)의 D122\~D131이에요.
+
+### Codex 인계
+
+- 목표: 새 버전을 올리면 서버가 1분 안에 뒤처진 폰을 조용한 데이터 메시지로 깨우고, 앱은 6시간 규칙 없이 받아 조용할 때 깔고, 그 사이 상태를 앱 화면을 열지 않고 서버에 보고해요. 친구는 통화 홈과 글 대화의 배너로 '지금 설치'를 누를 수 있고, 자동 업데이트가 꺼져 있으면 같은 배너에서 켜요. 관리자는 버전 기록(릴리스 노트 포함)과 폰별 업데이트 기록을 읽기 API로 봐요. 동희님 2026-11-22 "우리가 서버에 배포하면 앱 업데이트를 하면 마롱이가 선톡을 하던 해서 폰에서도 업데이트 되게 하자"(오랑이 msg_397f90d091b4), 답 D122\~D130(Orca 마롱이 항목 2, e17·e32)과 D131(Orca 마롱이 Home 채팅 "둔다 ㄱㄱ").
+- 시작: 이 설계 PR과 버그 수정 PR #100(BUG-112, TC-222)이 모두 `main`에 합쳐진 뒤 `main`에서 새 브랜치 `codex/app-update-push`. 앱 작업(TASK-481\~483)은 PR #100이 고친 `AppUpdateJob.java` 위에서 해요. 서버 작업(TASK-475\~480)은 PR #100과 겹치지 않아 먼저 해도 돼요.
+- 읽을 것: 기능 명세 8절 전부와 3.1·3.2·3.4절, 05 문서 2절(종류마다 채우는 칸), 계약의 API-105 `UpdateState`와 API-267, 화면 상태의 SCR-001#update-*와 SCR-107#update-* 여섯 상태, 시험 계획 TC-599\~619. 바탕 코드: `marong/fcm.py`(`notice`, `ring`, `send`), `marong/app_chat.py`(`device`, `app_apk`, `_require_app_origin`), `marong/app_release.py`, `marong/app_admin.py`(`require_admin`), `tools/app_release.py`, `deploy/ovh.sh`(`app-release`), 앱의 `MarongMessagingService`·`AppUpdateJob`·`AppUpdateReceiver`·`MarongPushPlugin`·`PushState`와 `assets/marong_page.js`, 통화 홈 `tools/vertex_live/static/app.js`·`index.html`·`style.css`, 글 대화 `marong/app_chat_static/chat.js`·`index.html`·`chat.css`와 그 브라우저 시험 `apps/android/test/chat-page.e2e.cjs`.
+- 순서: TASK-475 → TASK-476 → TASK-477 → TASK-478 → TASK-479 → TASK-480 → (TASK-484 대지) → TASK-485 → TASK-489 → TASK-486 서버 반영. 앱은 PR #100 뒤 TASK-481 → TASK-482 → TASK-483. 마지막 TASK-487(빌드·시험·게시)은 TASK-486과 앱 작업이 모두 끝난 뒤. TASK-488은 Claude가 PR #100과 이 PR이 합쳐진 뒤 해요.
+- 반영 순서(SPEC-442): ① 마이그레이션 023 ② 봇(글 대화 페이지 포함)·도구·통화 홈 페이지 반영과 `backfill` ③ 새 앱. 서버가 먼저예요. 옛 서버는 `update`가 든 기기 보고를 400으로 거절해요.
+- 게시 조건: 0.3.3(버전 코드 11)은 에뮬레이터 시험(TC-599\~613, TC-617\~619)과 실제 삼성 폰 시험(TC-614\~616)이 모두 통과한 뒤에만 올려요. 에뮬레이터 '미충족'이나 실제 폰 '대기'가 하나라도 남아 있으면 게시하지 말고 동희님께 먼저 말씀드려요(오랑이 msg_93f811d54b84의 규칙). 실제 폰 시험은 현경님 폰에 손대기 전에 동희님 삼성 폰이나 동희님이 고른 폰으로 해요.
+- 시험 환경: Python 3.12와 `pgserver`(AGENTS.md, 마이그레이션 시험), Node(`npm test`, Playwright), Java 21과 Gradle, 안드로이드 16 에뮬레이터(대기 버킷 `adb shell am set-standby-bucket com.corthexhq.marong rare|restricted`). FCM은 진짜가 필요 없어요(가짜 보내기와 시험 사이트). 업데이트 데이터 메시지가 앱에 닿는지는 에뮬레이터에서 `adb shell am broadcast`가 아니라 시험 사이트의 FCM 목(mock)이나 실제 FCM 시험 프로젝트로 봐요(TC-601).
+- 하면 안 되는 것: 새 라이브러리(WorkManager, OkHttp 등) 더하기. 업데이트 데이터 메시지에 `notification` 칸 넣기(넣으면 백그라운드 앱이 받지 못함). 릴리스 노트를 API-141 응답이나 앱에 보내기(REQ-554). FID·설치 ID·이메일을 로그나 API-267 응답에 넣기(REQ-312, REQ-559). 기기 보고에서 `ring`을 빼기(빼면 서버가 벨 칸을 비움). 업데이트 기록을 고치거나 지우기. 시험용 APK를 실제 서버 릴리스로 올리기. Access 설정 바꾸기.
+- 겹치는 파일: `docs/04-functional-spec/app-update.md`의 SPEC-289·294 행과 4·6절, `docs/10-wbs/app-update.md`의 TASK-185 행과 11단계 진행 표, `docs/12-qa/app-update.md`의 TC-222 줄과 BUG-112 절은 PR #100이 고쳐요. 이 PR은 그 줄을 고치지 않고 아래에 절을 더했어요. 앱의 `AppUpdateJob.java`·`MainActivity.java`·`ChatActivity.java`·`RingActivity.java`도 PR #100이 고쳐요.
+- 사람 확인: TC-614\~616(실제 삼성 폰), 그리고 게시. 게시는 동희님께 결과를 보여 드린 뒤예요.
+- 끝 조건: TASK-475\~487과 TASK-489의 끝 조건 시험 통과, TC-599\~619 결과를 시험 계획의 '결과' 칸에 어디서·어느 커밋으로 적음, 아래 명령 통과.
+
+```bash
+.venv/bin/python tests/test_app_update.py tests/test_app_update_push.py   # 서버: TC-599~601, TC-607~613, TC-617
+cd apps/android && npm test && npm run test:browser                        # 연결·배너 TC-609·618, TC-610의 페이지 쪽
+cd apps/android/android && ./gradlew testDebugUnitTest lintDebug assembleDebug   # 앱 논리 TC-603·604·606
+```
+
+### 작업
+
+| ID | Task | From | Touches | Depends on | Owner | Estimate | Done when |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TASK-475 | 마이그레이션 `023_app_update_events.sql` 시험: 빈 DB에 014·023 적용, 두 번 적용, 종류마다 맞지 않는 줄 거절(빈 `status`·`attempt` 포함), 같은 폰·버전·시도의 `pushed` 두 번과 같은 폰·앱 버전의 `installed` 두 번 거절, `marong` 역할의 고치기·지우기 거절 | SPEC-435, TBL-182 | `marong/migrations/023_app_update_events.sql`, 새 `tests/test_app_update_events.py` | 없음 | Codex | 0.25 | TC-608의 DB 쪽 통과 |
+| TASK-476 | 릴리스 노트와 버전 기록: 서버 도구 `publish --notes-file`(1\~300자 한 줄), `history.json`(8.3) 쓰기와 실패 때 되돌리기, `pause`·`resume` 줄, `history`·`backfill` 명령. 노트북 `deploy/ovh.sh app-release publish <APK> --notes "<노트>"`는 노트를 `notes.txt`로 보냄 | SPEC-287, SPEC-436, SPEC-437 | `tools/app_release.py`, `marong/app_release.py`(기록 읽기), `deploy/ovh.sh` | 없음 | Codex | 0.5 | TC-611·612 통과, `bash -n deploy/ovh.sh` 통과 |
+| TASK-477 | 업데이트 데이터 메시지 만들기 `fcm.app_update(fid, version_code)` | SPEC-431 | `marong/fcm.py` | 없음 | Codex | 0.1 | TC-601의 서버 쪽 통과 |
+| TASK-478 | 릴리스 감시 `AppUpdatePush`: 30초 읽기, 바뀜·시작·10분 차례, 보낼 폰 고르기(친구마다 최근 20대), 한 차례 100개·동시 4개 상한과 다음 30초 차례에 이어 보내기, 보내기 전에 `pushed`(시도 번호)를 잡고 잡힌 때만 보내기, 실패면 같은 시도의 `push_failed`, `MARONG_APP_UPDATE_PUSH` 스위치, 로그 한 줄 | SPEC-430 | 새 `marong/app_update_push.py`, 봇 시작 코드, `marong/store`(쿼리) | TASK-475, TASK-477 | Codex | 0.75 | TC-599·600 통과(가짜 FCM·가짜 시계) |
+| TASK-479 | 기기 보고 `update` 칸 받기(정수는 `type(x) is int`)와 `state` 기록(`installed` 밖, 버전 기록에 있는 버전 코드만, 마지막 상태와 같으면 건너뜀, 친구마다 1시간 30줄), 앱 버전이 올라갈 때 `installed` 한 줄(버전 기록에 있는 버전 이름만, `ON CONFLICT DO NOTHING`), API-142의 `fetched` 기록(친구·버전마다 1시간에 한 줄). API-105 새 폰 상한(D134로 SPEC-115 바뀜, 기능 명세 8.9) | SPEC-434, SPEC-435, SPEC-115(D134로 바뀜) | `marong/app_chat.py`(`device`, `app_apk`), `marong/app_store.py`(`app_device_put`) | TASK-475 | Codex | 0.5 | TC-607·608 통과, 계약 API-105 응답 시험 그대로 통과 |
+| TASK-480 | 관리자 읽기 `GET /chat/admin/api/app-versions`(API-267): 버전 기록(`file` 뺌), 폰은 친구마다 최근 20대·모두 200대, `friendId`, 폰별 기록 20줄(지금 친구의 줄만), 친구마다 받아 감 20줄·100명까지, 90일 | SPEC-438 | `marong/app_admin.py` | TASK-476, TASK-479 | Codex | 0.5 | TC-613 통과(응답에 설치 ID·FID·이메일 없음) |
+| TASK-481 | 앱: 업데이트 데이터 메시지 처리(`kind=app_update`, 버전 비교, `forcedAt` 10분, 빠른 작업, 거절되면 보통 작업, 알림 없음) | SPEC-432, SPEC-289 | `MarongMessagingService.java`, `AppUpdateJob.java`, `AppUpdate.java` | PR #100 합침 | Codex | 0.5 | TC-603·604 통과 |
+| TASK-482 | 앱: 업데이트 상태 보고 `AppUpdateReport`(네트워크 조건 작업, 네 칸 + `update`, `Origin`·쿠키, `reported`·`pendingReport`, 15분 다시·24시간까지, 400이면 그만), 상태가 바뀌는 다섯 곳에서 부르기 | SPEC-433, SPEC-298 | 새 `AppUpdateReport.java`, `AppUpdateJob.java`, `AppUpdateReceiver.java`, `PushState.java`, 매니페스트 | TASK-481 | Codex | 0.75 | TC-606 통과(앱 화면을 열지 않고 기록이 남고 벨 칸 그대로) |
+| TASK-483 | 앱 연결과 지금 설치: `MarongPush.updateState()`·`installUpdate()`(통화·벨이면 `busy`, 앱 창이 보여도 설치, 확인이 필요하면 확인 창을 바로), `marong_page.js`의 `__marongApp` `version: 3`과 `marongupdate` 이벤트(통화 창과 글 대화 창 모두) | SPEC-440, SPEC-441 | `MarongPushPlugin.java`, `AppUpdateJob.java`, `assets/marong_page.js` | TASK-482 | Codex | 0.5 | TC-610 통과 |
+| TASK-484 | 배너 대지: 공통 캔버스에 통화 홈 `C021-001-update-ready`·`-off`·`-installing`과 글 대화 `C021-107-update-ready`·`-off`(낮·밤, 360px)를 지금 홈·글 대화 토큰으로 그림 | SCR-001#update-ready, #update-off, #update-installing, SCR-107#update-ready, #update-off | 공통 목업 캔버스(claude.ai) | 없음 | Claude | 0.25 | 동희님이 방향을 봄(토큰은 그대로) |
+| TASK-485 | 통화 홈 업데이트 배너: 여섯 상태, 앱 연결 `version` 3 이상일 때만, 500ms 안에 정함, 통화 중엔 숨김, `visibilitychange`·`marongupdate`에 다시 읽기 | SPEC-439, SCR-001#update-* | `tools/vertex_live/static/app.js`, `index.html`, `style.css` | TASK-484 | Codex | 0.5 | TC-609 통과(Playwright 360·430px, 낮·밤, 가짜 연결) |
+| TASK-486 | 서버 반영: 마이그레이션 023 적용, 봇(글 대화 배너 포함)·도구·통화 홈 반영, `backfill` 한 번(0.2.2\~0.3.2, 서버 폴더와 WBS 기록으로 확인), 감시 시작 로그, 업데이트 기록 정리 명령과 매달 한 번 도는 타이머(소유 역할로, ERD 2절). 재시작은 조용할 때(최근 5분 친구 말 없음, 진행 중 통화 0). 되돌리기 스크립트 | SPEC-442 ①② | 서버(`marong-discord`, 통화 서버) | TASK-475\~480, TASK-485, TASK-489 | Codex | 0.5 | TC-617 통과, `update` 없는 API-105가 그대로 200, 버전 기록에 채운 줄 |
+| TASK-487 | 0.3.3(버전 코드 11) 빌드·서명, 에뮬레이터 시험 전부, 실제 삼성 폰 시험 TC-614\~616, 결과를 동희님께 보여 드린 뒤 `app-release publish --notes`로 게시. 0.3.2 폰에서 업데이트 데이터 메시지가 알림 없이 닿는지(TC-602) | SPEC-442 ③ | 앱 버전, 노트북, 서버 릴리스 폴더 | TASK-481\~483, TASK-486 | Codex | 0.75 | TC-602, TC-605, TC-614\~616 통과와 게시 기록(버전 기록에 노트) |
+| TASK-488 | PR #100과 이 PR이 합쳐진 뒤 문서 정리: SPEC-289 행에 ④, SPEC-294 행에 SPEC-441 예외, 4·6절에 8.8 합치기, TC 번호 겹침 확인 | 기능 명세 8.1, 8.8 | `docs/04-functional-spec/app-update.md`, `docs/12-qa/app-update.md` | PR #100 합침 | Claude | 0.1 | 4·6절과 8.8이 한 곳에 있음 |
+| TASK-489 | 글 대화 업데이트 배너: SCR-001 배너와 같은 여섯 상태와 글, 앱 연결 `version` 3 이상일 때만, 머리 아래·메시지 목록 위, 첫 목록을 그리기 전에 정함(500ms), 통화 중에도 보임(누르면 `busy`), `visibilitychange`·`marongupdate`에 다시 읽기, 띠가 생겨도 마지막 말이 보이던 자리 유지 | SPEC-443, SCR-107#update-* | `marong/app_chat_static/chat.js`, `index.html`, `chat.css`, `apps/android/test/chat-page.e2e.cjs` | TASK-484 | Codex | 0.5 | TC-618 통과(Playwright 360·430px, 낮·밤, 가짜 연결). TC-619는 TASK-487의 에뮬레이터 시험에서 |
+
+### 확인
+
+- 새 명세(SPEC-430\~443)마다 작업이 있어요: 430 TASK-478, 431 TASK-477, 432 TASK-481, 433 TASK-482, 434·435 TASK-479(DB는 TASK-475), 436·437 TASK-476, 438 TASK-480, 439 TASK-485, 440·441 TASK-483, 442 TASK-486·487, 443 TASK-489. 바뀐 행 SPEC-287은 TASK-476, 298은 TASK-482, 301은 TASK-483, 296은 TASK-485·489(배너), 302는 TASK-486이에요.
+- API-105의 `update`(TASK-479)와 API-267(TASK-480)은 계약의 모든 응답에 시험이 있어야 끝나요.
+- 의존에 고리가 없어요(서버 475·477→478, 475→479, 476·479→480, 484→485·489, 475\~480·485·489→486, 앱 PR #100→481→482→483, 481\~483·486→487).
