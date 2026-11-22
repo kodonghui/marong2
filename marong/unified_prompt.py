@@ -94,7 +94,8 @@ def character_section(profile, *, pet_voice=False):
                      f"{animal}야. {name}의 1인칭 반말로 ")
         if owner:
             header[2] += (f"말하고, {owner}{suffix(owner, '을', '를')} "
-                          f"'{owner}'{suffix(owner, '이라고', '라고')} 불러.")
+                          f"'{owner}'{suffix(owner, '이라고', '라고')} 불러. "
+                          f"인사하거나 뭐라고 부르는지 물으면 답에 '{owner}'를 꼭 넣어.")
         else:
             header[2] += "말해."
     tail = []
