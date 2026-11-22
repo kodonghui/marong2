@@ -106,7 +106,7 @@
       "checks": [
         {
           "level": "info",
-          "message": "docs/08-screens/admin.md: SCR-169·200~204·186의 상태(공통 넷 포함 78개)와 옛 SCR-169 상태 대응표. 와이어프레임 design/admin-wireframe.html(회색, 상태마다 360·430px, 79칸, 헤드리스 Chrome으로 그려 봄). 용어 검사 통과",
+          "message": "docs/08-screens/admin.md: SCR-169·200~204·186의 상태(공통 넷 포함 76개)와 옛 SCR-169 상태 대응표. 와이어프레임 design/admin-wireframe.html(회색, 상태마다 360·430px, 77칸, 헤드리스 Chrome으로 그려 봄). 용어 검사 통과",
           "at": "2026-11-23"
         }
       ],

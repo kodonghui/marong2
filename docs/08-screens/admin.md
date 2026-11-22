@@ -56,7 +56,7 @@ Purpose: 동희님이 관리 페이지를 열면 손볼 일을 먼저 보고, �
 | `kind` | `warn` | `danger` |
 | --- | --- | --- |
 | `call_budget` | '통화 월 예산 {value}% 썼어요' | '통화 월 예산을 넘었어요({value}%) · 새 통화가 막혀요' |
-| `image_budget` | '그림 예산 {value}% 썼어요' | '그림 예산을 다 썼어요 · 새 캐릭터 만들기가 막혀요' |
+| `image_budget` | '그림 예산 {value}% 썼어요' | '다 쓴 그림 예산이 있어요({value}%) · 비용에서 종류를 봐요' |
 | `app_paused` | '앱 업데이트를 멈춰 둔 상태예요' | |
 | `app_behind` | '새 버전을 아직 받지 못한 폰 {value}대' | '설치가 멈춘 폰 {value}대 · 확인 창 기다림이나 실패' |
 | `invite_expiring` | '24시간 안에 끝나는 초대 링크 {value}개' | |
@@ -71,7 +71,6 @@ Purpose: 동희님이 관리 페이지를 열면 손볼 일을 먼저 보고, �
 | SCR-169#calm | '손볼 일' 그룹에 '지금 손볼 일 없어요' 한 줄, 그 아래 카드 다섯 | API-280#200(`attention` 빈 목록) |
 | SCR-169#cards | 카드 다섯: '회원 3명 · 잇지 않은 친구 1명', '오늘 단위 420 · 글 41 · 통화 21분 · 그림 2', '통화 11월(UTC) $121.40 / $150.00 · 80%'와 막대, '그림 11월 $21.10 · 예산 85%', '앱 최신 0.3.3 · 폰 2대 중 1대 뒤처짐'(멈춤이면 '업데이트 멈춤 중') | API-280#200 |
 | SCR-169#card-unknown | `null`인 칸의 카드만 '지금 못 불러왔어요'. 나머지 카드와 주의 항목은 그대로 | API-280#200(`callMonth`·`images`·`app`·`usageToday` 가운데 `null`) |
-| SCR-169#budget-off | 통화 카드 '통화 11월(UTC) $30.00 · 예산 꺼짐', 막대 없음 | API-280#200(`callMonth.state=off`) |
 | SCR-169#no-release | 앱 카드 '아직 올린 버전이 없어요' | API-280#200(`app.latest=null`) |
 | SCR-169#error | 공통#error(화면 전체) | API-280#503(`db_unavailable`), API-280#500 |
 | SCR-169#forbidden | 공통#forbidden | API-280#403(`not_allowed`) |
@@ -137,7 +136,7 @@ Purpose: 한 사람의 한도·사용량·로그인·폰을 한 화면에서 보
 | SCR-201#revoked | '로그인 0개'와 띠 '로그인을 끊었어요' | API-241#204 |
 | SCR-201#phones | 폰마다 한 줄 '폰 1 · 0.3.2 · 뒤처짐 · 마지막 보고 11월 24일 오후 2:03'과 '앱 버전에서 보기' | API-267#200(그 `friendId`의 폰 있음) |
 | SCR-201#phones-none | '90일 안에 보고한 폰이 없어요' | API-267#200(그 `friendId`의 폰 없음) |
-| SCR-201#phones-cap | 폰 줄 20개 아래 회색 글 '최근 보고한 20대만 보여요' | API-267#200(그 `friendId`의 폰이 20줄, PR #101 SPEC-438의 상한) |
+| SCR-201#phones-cap | 폰 줄 20개 아래 회색 글 '최근 보고한 20대만 보여요'. `devices`가 200줄이면 폰이 0대여도 '폰이 많아 일부만 보여요'와 '앱 버전에서 보기' | API-267#200(그 `friendId`의 폰이 20줄, 또는 `devices` 200줄, PR #101 SPEC-438의 상한) |
 | SCR-201#phones-unknown | 폰 그룹만 '지금 못 불러왔어요' | API-267#403·500·503, 네트워크 실패 |
 | SCR-201#error | 공통#error | API-236#500·503, API-243#403(`cross_site`)·503, API-237#403(`cross_site`)·503, API-241#403(`cross_site`)·500 |
 
@@ -256,7 +255,6 @@ Purpose: 이번 달 통화 비용이 월 예산의 어디쯤인지, 누가 얼�
 | SCR-204#normal | 그룹 '통화 · 11월(UTC)': '$121.40 / $150.00 · 80%'와 막대, 상태 '정상'·'80% 넘음'·'다 씀'·'120% 넘음'. 그룹 '사람마다 통화': 큰 차례로 '이름 · $1.23'. 그룹 '그림 · 11월': 넷 줄 '일기 $2.00', '화두 $0.50', '반응 $0.10', '캐릭터 $3.00 / $20.00 · 15%' | API-280#200, API-236#200, API-266#200 |
 | SCR-204#call-warn | 막대와 비율이 노랑(`warn`) | API-280#200(`state=warn`) |
 | SCR-204#call-danger | 막대와 비율이 빨강(`danger`), 아래 '새 통화가 막혀요' | API-280#200(`state=exhausted`·`hard_stop`) |
-| SCR-204#budget-off | '$30.00 · 예산 꺼짐', 막대 없음 | API-280#200(`state=off`) |
 | SCR-204#call-unknown | 통화 그룹만 '지금 못 불러왔어요' | API-280#200(`callMonth=null`) |
 | SCR-204#person-unknown | 그 사람 줄 '이름 · —' | API-236#200(`callMonthUsd=null`) |
 | SCR-204#images-unknown | 그림 그룹만 공통#error | API-266#500·503 |

@@ -9,12 +9,12 @@ info:
     - 관리자 경로(`/chat/admin/api/`)는 Cloudflare Access 뒤에 있고, 서버가 `Cf-Access-Jwt-Assertion`을 다시 확인한 뒤 그 이메일의 해시가 관리자 해시(`MARONG_ADMIN_EMAIL_SHA256`)와 같은지 봐요(통합 앱 SPEC-395, 지금 `marong/app_admin.py`의 `require_admin`). 아니면 403 `not_allowed`예요. 증명이 없어도 401을 쓰지 않아요(API-267과 같음).
     - 쓰기 요청(POST)은 `Origin`이 `https://marong.corthex-hq.com`이어야 해요. 아니면 403 `cross_site`예요. 본문은 없어요.
     - 오류는 RFC 9457 Problem Details에 `code`와 `traceId`를 더한 모양이에요. 코드 목록은 `components.x-corthex.errors`예요. JSON 응답은 모두 `Cache-Control: no-store`예요.
-    - 응답에는 대화 글, 기억, 사진, 설치 ID, FCM 설치 ID, 로그인 토큰, 초대 링크 토큰과 주소, 이메일, 친구 이름이 없어요(REQ-580). 주의 항목은 개수만 줘요.
+    - 응답에는 대화 글, 기억, 사진, 설치 ID, FCM 설치 ID, 로그인 토큰, 초대 링크 토큰과 주소, 이메일이 없어요(REQ-580). API-280의 주의 항목은 친구 이름 없이 개수만 줘요. API-281은 API-240 목록과 같은 초대 링크 줄(`Invite`, 메모 `note`와 쓴 사람 `usedBy.name` 포함)을 돌려줘요. 관리자가 이미 목록에서 보는 값이에요.
     - 페이지(`/chat/admin/`, `/chat/admin/members`, `/chat/admin/members/{friendId}`, `/chat/admin/invites`, `/chat/admin/app`, `/chat/admin/costs`)는 HTML이라 이 계약에 넣지 않았어요. 화면은 07 사이트맵과 08 화면 정의(docs/08-screens/admin.md)예요.
     - API 282~299번은 이 part를 위해 비워 둬요.
 
     계약에서 정한 것(Claude 제안, 2026-11-23, 검토 대상).
-    1. 개요(API-280)는 네 부분(사용량, 통화, 그림, 앱)을 따로 읽어요. 한 부분이 실패하거나 1초를 넘기면 그 칸만 `null`이고 응답은 200이에요. 회원 수조차 읽지 못하면(DB에 닿지 않음) 503이에요.
+    1. 개요(API-280)는 다섯 부분(사용량, 통화, 그림, 앱, 초대 링크 만료 수)을 따로 읽어요. 한 부분이 실패하거나 1초를 넘기면 그 칸만 `null`이고(초대 링크 만료 수는 칸이 없어 주의 항목 `invite_expiring`만 빠짐) 응답은 200이에요. 회원 수조차 읽지 못하면(DB에 닿지 않음) 503이에요.
     2. 돈 값은 소수 둘째 자리 문자열, 비율은 내림한 정수 퍼센트예요(usage-limit 계약과 같음).
     3. 거두기(API-281)는 같은 요청을 두 번 받아도 같은 결과예요(이미 거둔 링크 → 200, `revokedAt` 그대로). 쓴 링크와 기간 지난 링크는 409 `invite_closed`예요. API-281은 동희님이 '초대 링크 거두기'를 더하기로 답한 뒤에만 구현해요(질문 2).
 
@@ -162,7 +162,7 @@ paths:
     post:
       operationId: revokeInvite
       summary: 초대 링크 거두기(제안)
-      description: 초대 링크 화면(SCR-202)이 확인 줄 뒤에 불러요. 열린 초대 링크의 `revoked_at`을 지금으로 정하는 UPDATE 하나예요. 가입·잇기·다시 로그인은 이미 `revoked_at`을 보고 거절해요(SPEC-455). 동희님 답(질문 2) 전에는 구현하지 않아요.
+      description: 초대 링크 화면(SCR-202)이 확인 줄 뒤에 불러요. 열린 초대 링크의 `revoked_at`을 지금(앱 시계, API-240과 같음)으로 정하는 UPDATE 하나예요. 바뀌지 않으면 없음 → 404, 이미 거둠 → 200 그대로(그 뒤 기간이 지났어도), 쓴·기간 지난 링크 → 409 차례로 정해요. 가입·잇기·다시 로그인은 이미 `revoked_at`을 보고 거절해요(SPEC-455). 동희님 답(질문 2) 전에는 구현하지 않아요.
       security:
       - cfAccess: []
       x-corthex:
@@ -457,15 +457,11 @@ components:
               spentUsd:
                 $ref: '#/components/schemas/Usd'
               budgetUsd:
-                description: 월 예산. 0 이하(예산 꺼짐)면 null
-                oneOf:
-                - type: 'null'
-                - $ref: '#/components/schemas/Usd'
+                description: 월 예산(call.settings의 monthly_budget_usd, DB 제약으로 0보다 큼, 없으면 150)
+                $ref: '#/components/schemas/Usd'
               percent:
-                description: 내림(합 ÷ 예산 × 100). 예산 꺼짐이면 null
-                type:
-                - integer
-                - 'null'
+                description: 내림(합 ÷ 예산 × 100)
+                type: integer
                 minimum: 0
               state:
                 type: string
@@ -474,8 +470,7 @@ components:
                 - warn
                 - exhausted
                 - hard_stop
-                - 'off'
-                description: 80·100·120% 문턱(call_cost.STATE와 같음), off는 예산 꺼짐
+                description: 80·100·120% 문턱(call_cost.STATE와 같음)
         images:
           description: 이번 한국 시각 달의 그림 비용(API-266과 같은 서버 함수). 읽지 못하면 null
           oneOf:
