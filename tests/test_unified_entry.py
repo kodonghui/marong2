@@ -89,6 +89,13 @@ class WorkLoopsTest(unittest.IsolatedAsyncioTestCase):
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
 
+    async def test_scene_worker_enters_the_application_lock(self):
+        db = TestDB()
+        self.addCleanup(db.close)
+        job = AsyncMock()
+        await asyncio.wait_for(run_locked(db.app_url, "scenes", job), 2)
+        job.assert_awaited_once()
+
     def database(self):
         db = TestDB()
         self.addCleanup(db.close)

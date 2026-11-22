@@ -46,7 +46,7 @@ from marong.topics import Topics
 from marong.unified_delivery import AppProactive, AppReminders, UnifiedDelivery
 from marong.unified_prompt import PET_HEALTH_REFERRAL, character_section, explicit_pet_health, marker_positions
 from marong.unified_store import UnifiedStore
-from marong.work_loops import loops_home, run_locked
+from marong.work_loops import LOCKS, loops_home, run_locked
 
 
 log = logging.getLogger("marong.runtime")
@@ -268,6 +268,8 @@ async def serve(settings, credentials, options, secret, authentication, home, st
                 google_web = await serve_google(google, sessions=sessions, authentication=authentication,
                                                 origin=options["origin"])
                 jobs["google"] = google.sync_loop
+        if missing_locks := jobs.keys() - LOCKS.keys():
+            raise RuntimeError(f"Unregistered application work loops: {', '.join(sorted(missing_locks))}")
         tasks = [asyncio.create_task(run_locked(settings.database_url, name, job)) for name, job in jobs.items()]
         log.info("app_runtime_on loops_home=%s authentication=%s", home, authentication)
         await stop.wait()
