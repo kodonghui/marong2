@@ -20,8 +20,8 @@ def configured_limit(env=os.environ):
     value = env.get("MARONG_DAILY_UNITS", "").strip()
     if not value:
         return None
-    if not value.isascii() or not value.isdecimal() or not 0 < int(value) <= 2_147_483_647:
-        raise ValueError("MARONG_DAILY_UNITS must be a positive integer or empty")
+    if not value.isascii() or not value.isdecimal() or not 1 <= int(value) <= 100_000:
+        raise ValueError("MARONG_DAILY_UNITS must be an integer from 1 to 100000 or empty")
     return int(value)
 
 

@@ -94,9 +94,9 @@
 | TASK-464 | 로컬 시험 통과 | `c6466f2` | 브리지 버전, 벨 수락, 기준 시각 및 이전 주소 방식 시험. |
 | TASK-465 | 로컬 시험 통과 | `c6466f2` | Node의 재생 증거·무음 전환·정상 재생 시험과 로컬 LiveKit 음성 왕복 확인. |
 | TASK-466 | 운영 배포 및 확인 통화 | `fef8bcf` | 2026-11-22 16:07:05 KST. 통화 010 적용. 재시작 후 5분 오류 0건. 가짜 마이크 웹 통화 1회에서 start, setupComplete 시각, connect_timing, playback 확인. 올바른 파일 해시에서만 1년 private 캐시(TC-573). |
-| TASK-467 | 시작 전 | | |
-| TASK-468 | 시작 전 | | |
-| TASK-469 | 시작 전 | | |
+| TASK-467 | 최신 main 시험 통과 | `c3a9b17` | Node 33개, 브라우저 49개, JVM·lint, API 36 에뮬레이터 계측 4개 통과. |
+| TASK-468 | 게시 완료 | `8c1decc` | 2026-11-22 16:21:02 KST. Android 0.3.2 코드 10, 5,114,156바이트. 서명 인증서와 0.3.1 덮어쓰기 확인. 운영 API 200과 코드 10 다운로드 로그 1건. |
+| TASK-469 | 기기 확인 전 | | 0.3.2 게시 뒤 약속 벨 10회와 출력 장치를 확인해요. P95는 측정 전이에요. |
 | TASK-470 | 시작 전 | | |
 | TASK-471 | 시작 전 | | |
 | TASK-472 | 자동 시험 통과 | `c39fdc7` | JVM 39개, Node 33개, 벨 브라우저 시험 10개, API 36 에뮬레이터 계측 1개, lint 통과. 목(mock) 서버 통화 중 통신 모드와 내장 스피커를 확인했고, 끊은 뒤 정상 모드로 돌아왔어요. |
@@ -104,5 +104,8 @@
 | TASK-474 | 기기 확인 전 | | TC-594 대기, 재생 진단 없음. |
 
 - 0.3.1 APK SHA-256 `dc0d05a315fb0e1ae8ea203699e94a22046a8a546ae56a35a780a0d580c5f91e`.
+- 0.3.2 APK SHA-256 `205876d61f4fb1de284733ad4d5e621063e65d5d067579b33db7ae2a35e16356`.
 - 서명 인증서 SHA-256 `b42ce1870fe2c90e88d850dbbd5718969b0d1e1c07f1a6d213247cc8657c45f9`. 0.3.0과 일치.
 - 운영 백업 `~/marong-deploy/20261121-android-031/release.before.json`, 복구 `~/marong-deploy/20261121-android-031/rollback.sh --rollback`. 게시 전에 `--dry-run`으로 0.3.0 APK 해시를 확인했어요.
+
+- 0.3.2 이전 배포 목록과 복구는 `~/marong-deploy/20261122-android-032/`의 `release.before.json`과 `rollback.sh`에 있어요.
