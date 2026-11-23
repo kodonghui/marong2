@@ -174,6 +174,18 @@ class AdminTest(unittest.IsolatedAsyncioTestCase):
             # resolved its types against this session's temporary domain.
             conn.execute("CREATE DOMAIN pg_temp.timestamptz AS pg_catalog.timestamptz CHECK (VALUE IS NULL)")
             self.assertEqual(read(), original)
+            # Same name again, now checked by a temporary function that only raises.
+            conn.execute("DROP DOMAIN pg_temp.timestamptz")
+            conn.execute("""
+                CREATE FUNCTION pg_temp.intercept(pg_catalog.timestamptz) RETURNS boolean
+                LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'intercepted'; END $$
+            """)
+            conn.execute("CREATE DOMAIN pg_temp.timestamptz AS pg_catalog.timestamptz "
+                         "CHECK (pg_temp.intercept(VALUE))")
+            # The trap is live: in this session the bare type name resolves to the temporary domain.
+            with self.assertRaisesRegex(psycopg.errors.RaiseException, "intercepted"):
+                conn.execute("SELECT %s::timestamptz", (args[0],))
+            self.assertEqual(read(), original)
 
         dsn = self.db.admin_url.replace("postgres:@", "marong_call@", 1)
         with psycopg.connect(dsn) as conn, self.assertRaises(psycopg.errors.InsufficientPrivilege):
