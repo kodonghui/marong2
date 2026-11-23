@@ -18,6 +18,7 @@ from memory_tools import CALL_GREETING_TEXT,TranscriptRecorder,execute_tool
 from hangup import Consent
 from call_search import queries as search_queries
 from call_shop import FAILED as SHOP_FAILED, LIMIT as SHOP_LIMIT, READS as SHOP_READS
+from call_tuning import BASE, DEFAULTS
 from quiet_mic import QuietMic, level
 from tool_trace import step as trace_step
 from connect_reports import playback_report,timing_report
@@ -524,24 +525,34 @@ class LiveSession:
             else:await self.queue_greeting(greeting)
 
     async def run_provider(self,upstream,ledger,usage_mode,tuning,lead_in):
-        if not usage_mode or not self.segment:
-            await self.provider(upstream)
-            return
+        segment = self.segment
         entrypoint='discord' if self.entry_transport=='discord' else 'web'
         async def check_budget():
-            if not self.stop.is_set() and self.hanging_up is None and self.segment==meter.segment:
+            if not self.stop.is_set() and self.hanging_up is None and self.segment==segment:
                 state=await self.store.monthly_cost.status(entrypoint)
                 if (state=='hard_stop' and not self.stop.is_set() and self.hanging_up is None
-                        and self.segment==meter.segment):
+                        and self.segment==segment):
                     self.begin_budget_goodbye()
-        meter=ledger.meter(self.call_id,self.segment,entrypoint,self.model,usage_mode,self.searches,
-                           tuning=tuning['name'] if tuning else None,after_flush=check_budget)
+        meter = None
+        if usage_mode and segment:
+            meter=ledger.meter(self.call_id,segment,entrypoint,self.model,usage_mode,self.searches,
+                               tuning=tuning['name'] if tuning else None,after_flush=check_budget)
         try:await self.provider(upstream,meter,lead_in=lead_in)
         finally:
-            meter.close()
-            if self.quiet_mic:
-                try:await asyncio.wait_for(self.store.record_mic(meter.segment,*self.quiet_mic.counts()),.4)
+            if meter:meter.close()
+            if segment and self.quiet_mic:
+                try:await asyncio.wait_for(self.store.record_mic(segment,*self.quiet_mic.counts()),.4)
                 except Exception:self.d['micCountsFailed']=True
+
+    async def load_tuning(self):
+        try:
+            tuning = await asyncio.wait_for(self.store.tuning(), .4)
+            if tuning is not None:
+                return tuning
+        except Exception:
+            pass
+        print('call_tuning_fallback', flush=True)
+        return {'name': BASE, **DEFAULTS}
 
     async def google_loop(self):
         delay=1
@@ -574,18 +585,16 @@ class LiveSession:
                     else:
                         self.audio.clear()
                         seed='';self.segment=None;tuning=None
-                        if usage_mode and self.p:
-                            try:tuning=await asyncio.wait_for(self.store.tuning(),.4)
-                            except Exception:print('call_tuning_fallback',flush=True)
                         if self.store and self.p:
+                            tuning = await self.load_tuning()
                             try:
-                                segment_options={'tuning':tuning['name']} if tuning else {}
+                                segment_options={'tuning':tuning['name']}
                                 if self.entry_transport!='discord':
                                     segment_options['await_provider']=True
-                                memory_options={'memory_limit':tuning['seed_call_memories']} if tuning else {}
                                 self.segment=await asyncio.wait_for(self.store.start_segment(
                                     self.p,self.call_id,self.client_id,self.model,**segment_options),3)
-                                seed=await asyncio.wait_for(self.store.seed(self.p,self.call_id,**memory_options),1)
+                                seed=await asyncio.wait_for(self.store.seed(
+                                    self.p,self.call_id,memory_limit=tuning['seed_call_memories']),1)
                                 self.d['memoryConnected']=True
                             except Exception:self.d['memoryConnected']=False
                         mode=self.search_mode()

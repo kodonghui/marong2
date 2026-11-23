@@ -1,6 +1,7 @@
 """Offline regressions for call instructions, metering, and organization."""
 
 import asyncio
+from contextlib import nullcontext
 from datetime import datetime, timezone
 import os
 import sys
@@ -13,7 +14,8 @@ from test_connect_server import TestDB
 
 import live_session
 from call_memory import MemoryStore, Principal
-from call_tuning import BASE, parse_tuning
+from call_tuning import BASE
+from cost_admin import cli, run as run_admin
 from organizer import Organizer
 
 
@@ -73,12 +75,16 @@ class CallMemoryRegressions(unittest.TestCase):
         await store.open()
         try:
             self.assertIsNone(await store.live_usage.mode())
-            tuning = parse_tuning("fixture-independent", ["max_output_tokens=768"])
-            for loaded, name, tokens in ((tuning, tuning["name"], 768), (None, BASE, 1024),
-                                         (TimeoutError(), BASE, 1024)):
-                with self.subTest(name=name, lookup=type(loaded).__name__):
-                    outcome = {"side_effect": loaded} if isinstance(loaded, Exception) else {"return_value": loaded}
-                    with patch.object(store, "tuning", AsyncMock(**outcome)):
+            name = "fixture-independent"
+            for args in (["add", name, "max_output_tokens=768"], ["use", name]):
+                await run_admin(store, cli().parse_args(["call-tuning", *args]), datetime.now(timezone.utc))
+            for lookup, expected, tokens in (
+                (None, name, 768),
+                (AsyncMock(return_value=None), BASE, 1024),
+                (AsyncMock(side_effect=TimeoutError), BASE, 1024),
+            ):
+                with self.subTest(tuning=expected):
+                    with patch.object(store, "tuning", lookup) if lookup else nullcontext():
                         session, browser, upstream, task = await self.connect(store, person, str(uuid4()))
                         await self.stop(browser, task)
                     config = upstream.sent[0][1]["setup"]
@@ -86,7 +92,7 @@ class CallMemoryRegressions(unittest.TestCase):
                     self.assertEqual(self.db.admin("""
                         SELECT s.tuning, c.estimated, (SELECT count(*) FROM call.live_usage u WHERE u.segment_ref=s.id)
                         FROM call.segments s JOIN call.segment_costs c ON c.segment_id=s.id WHERE s.id=%s
-                        """, (session.segment,)), [(name, True, 0)])
+                        """, (session.segment,)), [(expected, True, 0)])
         finally:
             await store.close()
 
@@ -157,7 +163,7 @@ class CallMemoryRegressions(unittest.TestCase):
             with patch.dict(os.environ, {"MARONG_FRIEND_MEMORY": "off"}):
                 extractor = AsyncMock(return_value=({"memories": []}, {}))
                 worker = Organizer(store, extractor)
-            for number, greeting in ((0, False), (0, True), (19, True), (20, False)):
+            for number, greeting in ((0, False), (0, True), (19, True), (20, True)):
                 with self.subTest(user_chars=number, legacy_greeting=greeting):
                     extractor.reset_mock()
                     client = str(uuid4())
@@ -174,6 +180,9 @@ class CallMemoryRegressions(unittest.TestCase):
                     await worker.graph().ainvoke(state)
                     organized = number >= 20
                     self.assertEqual(extractor.await_count, int(organized))
+                    if organized:
+                        self.assertNotIn(live_session.CALL_GREETING_TEXT,
+                                         [turn["content"] for turn in extractor.await_args.args[0]])
                     self.assertEqual(self.db.admin("""
                         SELECT organize_status, (SELECT count(*) FROM call.cards WHERE call_id=c.id),
                         (SELECT count(*) FROM call.ai_runs WHERE call_id=c.id AND kind='organize')
