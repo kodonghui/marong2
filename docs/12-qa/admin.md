@@ -1,6 +1,6 @@
 # 마롱이 관리 페이지 다시 만들기: 시험 계획(12단계)
 
-상태: 2026-11-23 새벽 KST 작성(Claude 마롱이 봇). 아직 돌리지 않았어요. TC-640·641과 TC-639의 노트북 폭은 2026-11-23 노트북 폭 기능 변경(D140)으로 더한 제안이고 체크포인트 전이에요([요구사항의 기능 변경 목록 2](../02-prd/admin.md#노트북-폭-기능-변경-목록-2)). 시험을 쓰고 돌리는 쪽은 GPT예요([AGENTS.md](../../AGENTS.md)). 작업은 [작업 목록](../10-wbs/admin.md)의 TASK-490\~501이에요.
+상태: 2026-11-23 새벽 KST 작성(Claude 마롱이 봇). 아직 돌리지 않았어요. TC-640·641과 TC-639의 노트북 폭은 2026-11-23 노트북 폭 기능 변경(D140)으로 더했고 같은 날 체크포인트를 통과했어요(D141, [요구사항의 기능 변경 목록 2](../02-prd/admin.md#노트북-폭-기능-변경-목록-2)). 시험을 쓰고 돌리는 쪽은 GPT예요([AGENTS.md](../../AGENTS.md)). 작업은 [작업 목록](../10-wbs/admin.md)의 TASK-490\~501이에요.
 입력: [기능 명세](../04-functional-spec/admin.md) SPEC-450\~458의 받아들임 조건과 1절 공통 규칙, 요구사항 REQ-570\~585, 흐름 [FL-200](../03-user-flow/FL-200-admin-overview.md)·[FL-201](../03-user-flow/FL-201-admin-app-version.md), 계약 `api/admin.openapi.yaml` 0.1.0-draft(API-280·281), 바뀌지 않는 API-235\~243·263\~266(`api/unified.openapi.yaml` 등), PR #101의 API-267(읽기만), 화면 정의 [08-screens/admin.md](../08-screens/admin.md)(넓은 폭은 1.1절), 표 문서 [05-erd/admin.md](../05-erd/admin.md)(함수 `call.month_budget`).
 
 돌리는 법(`Runs as`)은 [사람별 사용 한도 시험 계획](usage-limit.md)과 같아요: `unit`(함수 하나), `api`(`pgserver`의 빈 DB에 020·008·021·009·022·010과 통화 011을 적용하고 HTTP 경로를 부름, 시험 시계, 관리자 확인은 시험용 Access JWT와 시험 이메일 해시), `e2e`(Playwright Chromium 360·430px와 노트북 1280·1440px, 나뉘는 폭 시험은 768·1023·1024px도, 낮·밤 테마, 가짜 백엔드. 노트북 폭은 D140 2-12), `server`(반영한 서버에서 읽기 확인), `device`(사람이 실제 화면에서 봄). 진짜 모델, 결제, FCM은 부르지 않아요.
