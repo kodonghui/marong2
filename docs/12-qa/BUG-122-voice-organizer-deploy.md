@@ -9,6 +9,8 @@ TC-649, 운영 읽기와 수동 배포 검증. `systemctl --user show marong-voi
 
 웹 통화 서버가 읽는 배포본의 `organizer.py` 해시는 조사 당시 `main`과 일치했다. [운영 절차](../../tools/vertex_live/OPERATIONS.md#통화-기억-배포-검증)에 따라 다음 반영에서 정리기와 웹 통화 서버의 소스가 같은 릴리스를 가리키는지 확인한다.
 
+운영에서 실행 중인 파일과 웹 통화 릴리스 사본의 해시가 다름을 확인했다. 로컬 `test_organizer_reconnect.py` 검사 8개와 짧은 통화 정리 회귀가 통과했다. 유닛 전환과 실행 해시 일치 검증은 반영 때 수행한다.
+
 ## 친구 기억 작업 조사
 
 SPEC-233·235는 `proposed`다. 운영 DB에서 기한이 지난 글 작업 2건은 시도 0회·잠금 토큰 0개였고, 통화 작업과 기억 항목은 각각 0건이었다. 운영 앱의 `run_app.py`는 `MARONG_LOOPS_HOME=app`과 `MARONG_FRIEND_MEMORY=on`에서 `friend_memory` 작업을 등록한다. 운영의 `work_loops.py`에서 `LOCKS['friend_memory']` 키가 빠져 작업 본문에 이르기 전에 `KeyError`가 발생한다. 해당 경로는 다른 작업 예외와 함께 종료 시 회수되어 운영 로그에 이 오류가 남지 않았다. 통화 정리기는 예전 소스를 사용하고 `MARONG_FRIEND_MEMORY`도 설정되지 않아 새 통화 작업을 예약하거나 처리할 경로가 없다. 조사만 했으며 작업 설정과 기능 변경은 별도 결정 대상이다.
