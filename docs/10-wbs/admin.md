@@ -60,4 +60,7 @@ for f in tools/vertex_live/test_*.py; do .venv/bin/python "$f" || exit 1; done  
 
 ## 11단계 진행
 
-아직 없어요.
+| TASK | 상태 | 커밋 | 확인한 것 |
+| --- | --- | --- | --- |
+| TASK-490 | 구현·검토 대기 | `95a68be`·`5c6bd05`·`03d083b` 다음 커밋 | TC-631·632 통과. TC-632는 011 두 번 적용, 함수·표 권한, `search_path`, `BEGIN ATOMIC`, 같은 이름의 임시 표와 값 제약 임시 도메인, `RAISE EXCEPTION` 함수를 CHECK에 쓰는 임시 도메인 `pg_temp.timestamptz`를 둔 세션에서 두 함수 결과 동일·오류 없음 확인(같은 세션의 맨 이름 캐스트는 'intercepted'로 막힘) |
+| TASK-491 | 구현·검토 대기 | `95a68be` | TC-622~625 통과. API-280 응답 200·403·500·503과 한 연결에서 순차 읽기 확인 |

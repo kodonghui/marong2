@@ -61,6 +61,9 @@ class TestDB:
     def apply_pet_app(self) -> None:
         self.apply_sql(ROOT / "marong" / "migrations" / "022_pet_app.sql")
 
+    def apply_admin(self) -> None:
+        self.apply_sql(ROOT / "marong" / "call" / "migrations" / "011_admin_month.sql")
+
     def admin(self, sql: str, params=()) -> list[tuple]:
         """슈퍼유저로 읽기(시험 확인용)."""
         with psycopg.connect(self.admin_url, autocommit=True) as c:

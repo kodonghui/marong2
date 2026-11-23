@@ -5,9 +5,11 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import hmac
 import logging
+import math
 import re
 
 from aiohttp import web
+from psycopg.errors import QueryCanceled
 
 from .app_chat import Problem
 from .app_release import utc_timestamp, version_parts
@@ -33,6 +35,41 @@ def limit_amounts(daily, monthly):
     return {"dailyUnits": daily, "callMonthlyUsd": usd(monthly)}
 
 
+def overview_attention(now, members, call, images, app, expiring):
+    items = []
+
+    def add(kind, destination, level="warn", value=None):
+        item = {"kind": kind, "level": level, "target": f"{ADMIN_PATH}/{destination}"}
+        if value is not None:
+            item["value"] = value
+        items.append(item)
+
+    if call and call["state"] != "ok":
+        add("call_budget", "costs", "warn" if call["state"] == "warn" else "danger", call["percent"])
+    if images and images["budgetPercent"] is not None and images["budgetPercent"] >= 80:
+        percent = images["budgetPercent"]
+        add("image_budget", "costs", "danger" if percent >= 100 else "warn", percent)
+    if app and app["paused"]:
+        add("app_paused", "app")
+    elif app and app["latest"]:
+        past_grace_period = now - utc_timestamp(app["latest"]["publishedAt"]) >= timedelta(hours=24)
+        needing_attention = 0
+        danger = False
+        for phone in app["devices"]:
+            if phone["behind"]:
+                state = next((event["state"] for event in phone["events"] if event["kind"] == "state"), None)
+                urgent = state in ("needs_confirm", "failed")
+                needing_attention += urgent or past_grace_period
+                danger |= urgent
+        if needing_attention:
+            add("app_behind", "app", "danger" if danger else "warn", needing_attention)
+    if expiring:
+        add("invite_expiring", "invites", value=expiring)
+    if members["unlinked"]:
+        add("unlinked_friend", "members", value=members["unlinked"])
+    return items
+
+
 class AppAdmin:
     def __init__(self, chat, email_hash):
         self.chat = chat
@@ -51,13 +88,20 @@ class AppAdmin:
     async def app_versions(self, req):
         """API-267: read the release history and the current owners' device records."""
         await self.require_admin(req)
+        return self.chat._json(200, await self.read_app_versions())
+
+    async def read_app_versions(self, conn=None):
         releases = self.chat.releases
-        latest, paused, history = await asyncio.gather(
-            asyncio.to_thread(releases.manifest), asyncio.to_thread(releases.paused), asyncio.to_thread(releases.history))
-        devices, fetches = await asyncio.gather(self.chat.store.admin_app_devices(), self.chat.store.admin_app_fetches())
+
+        def read_releases():
+            return releases.manifest(), releases.paused(), releases.history()
+
+        latest, paused, history = await asyncio.to_thread(read_releases)
+        devices = await self.chat.store.admin_app_devices(conn=conn)
+        fetches = await self.chat.store.admin_app_fetches(conn=conn)
         current = version_parts(latest.name) if latest else None
         ordered = sorted(reversed(history), key=lambda entry: utc_timestamp(entry["at"]), reverse=True)
-        return self.chat._json(200, {
+        return {
             "latest": {"versionCode": latest.code, "versionName": latest.name,
                        "publishedAt": latest.published_at} if latest else None,
             "paused": paused,
@@ -69,7 +113,89 @@ class AppAdmin:
                         for row in devices],
             "fetches": [{"friend": row["friend"], "friendId": row["friend_id"], "items": row["items"]}
                         for row in fetches],
+        }
+
+    @staticmethod
+    async def _overview_read(conn, read, *args):
+        async with asyncio.timeout(1), conn.transaction():
+            await conn.execute("SET LOCAL statement_timeout = '1s'")
+            return await read(conn, *args)
+
+    async def _overview_part(self, conn, part, read, *args):
+        try:
+            return await self._overview_read(conn, read, *args)
+        except Exception:
+            log.warning("admin_overview part=%s result=failed", part)
+            return None
+
+    async def overview(self, req):
+        await self.require_admin(req)
+        now = self.chat.sessions.now()
+        async with self.chat.store.pool.connection(timeout=2) as conn:
+            try:
+                members = await self._overview_read(conn, self._overview_members)
+            except QueryCanceled:
+                raise Problem("db_unavailable") from None
+            call = await self._overview_part(conn, "call", self._overview_call, now)
+            images = await self._overview_part(conn, "images", self._overview_images, now)
+            app = await self._overview_part(conn, "app", self._overview_app)
+            usage = await self._overview_part(conn, "usage", self._overview_usage, now)
+            expiring = await self._overview_part(conn, "invites", self._overview_invites, now)
+
+        return self.chat._json(200, {
+            "members": members, "callMonth": call, "images": images, "usageToday": usage,
+            "attention": overview_attention(now, members, call, images, app, expiring),
+            "app": {"latest": app["latest"], "paused": app["paused"], "devices": len(app["devices"]),
+                    "behind": sum(phone["behind"] for phone in app["devices"])} if app is not None else None,
         })
+
+    async def _overview_members(self, conn):
+        return await one(conn, """
+            SELECT count(p.friend_id) AS count, count(*) FILTER (WHERE p.friend_id IS NULL) AS unlinked
+            FROM marong.friends f LEFT JOIN marong.friend_profiles p ON p.friend_id=f.id
+        """)
+
+    async def _overview_call(self, conn, now):
+        start, end = month_bounds(now.astimezone(timezone.utc))
+        row = await one(conn, "SELECT * FROM call.month_budget(%s,%s)", (start, end))
+        spent, budget = row["spent_usd"], row["budget_usd"]
+        if budget <= 0:
+            raise ValueError("nonpositive call budget")
+        percent = math.floor(spent * 100 / budget)
+        state = "ok"
+        for threshold, name in ((80, "warn"), (100, "exhausted"), (120, "hard_stop")):
+            if spent * 100 >= budget * threshold:
+                state = name
+        return {"month": start.strftime("%Y-%m"), "spentUsd": usd(spent), "budgetUsd": usd(budget),
+                "percent": percent, "state": state}
+
+    async def _overview_images(self, conn, now):
+        images = await self.read_image_costs(conn, now)
+        ratios = [Decimal(str(budget["ratio"])) for budget in images["budgets"].values() if budget is not None]
+        total = sum(Decimal(str(cost)) for cost in images["byKind"].values())
+        return {"month": images["month"], "totalUsd": usd(total),
+                "budgetPercent": math.floor(max(ratios) * 100) if ratios else None}
+
+    async def _overview_app(self, conn):
+        reader = getattr(self, "read_app_versions", None)
+        return await reader(conn) if reader else None
+
+    async def _overview_usage(self, conn, now):
+        day = usage_day(now)
+        totals = await one(conn, """
+            SELECT coalesce(sum(u.chat_turns),0) AS "chatTurns",
+                   coalesce(sum(u.call_seconds),0) AS "callSeconds",
+                   coalesce(sum(u.images),0) AS images, coalesce(sum(u.units),0) AS units
+            FROM marong.friend_profiles p JOIN marong.usage_daily u ON u.friend_id=p.friend_id AND u.day=%s
+        """, (day,))
+        return {"day": day.isoformat(), **totals}
+
+    async def _overview_invites(self, conn, now):
+        row = await one(conn, """
+            SELECT count(*) FROM marong.invites
+            WHERE used_at IS NULL AND revoked_at IS NULL AND expires_at>%s AND expires_at<=%s
+        """, (now, now + timedelta(hours=24)))
+        return row["count"]
 
     async def page(self, req):
         await self.require_admin(req)
@@ -88,8 +214,13 @@ class AppAdmin:
 
     async def image_costs(self, req):
         await self.require_admin(req)
-        start, end = picture_month_bounds(datetime.now(KST))
-        costs = await self.chat.store._one("""
+        async with self.chat.store.pool.connection() as conn:
+            costs = await self.read_image_costs(conn, datetime.now(KST))
+        return self.chat._json(200, costs)
+
+    async def read_image_costs(self, conn, now):
+        start, end = picture_month_bounds(now.astimezone(KST))
+        costs = await one(conn, """
             WITH diary AS (
                 SELECT coalesce(sum(cost_usd),0) AS total,
                        coalesce(sum(cost_usd) FILTER (WHERE prompt_version<>'scene-v1'),0) AS metered
@@ -112,14 +243,14 @@ class AppAdmin:
             return {"limitUsd": round(float(limit), 2), "usedUsd": round(float(spent), 2),
                     "ratio": float(spent / limit) if limit else 0}
 
-        return self.chat._json(200, {
+        return {
             "month": start.strftime("%Y-%m"),
             "byKind": {name: round(float(costs[name]), 2) for name in ("diary", "topic", "reaction", "character")},
             "budgets": {
                 "diary": budget(self.chat.pet_app_settings.diary_image_budget, costs["diary_metered"]),
                 "character": budget(self.chat.characters.budget, costs["character"]),
             },
-        })
+        }
 
     async def _decor_item_states(self, ident=None):
         rows = await self.chat.store._all("""
@@ -341,6 +472,7 @@ class AppAdmin:
 
     def register(self, router):
         router.add_get(ADMIN_PATH + "/", self.page)
+        router.add_get(ADMIN_PATH + "/api/overview", self.overview)
         router.add_get(ADMIN_PATH + "/api/image-costs", self.image_costs)
         router.add_get(ADMIN_PATH + "/items", self.decor_page)
         router.add_get(ADMIN_PATH + "/api/items", self.decor_items)

@@ -182,8 +182,8 @@ class AppStore:
             ON CONFLICT DO NOTHING RETURNING id
         """, {**target, "code": code, "status": status})
 
-    async def admin_app_devices(self) -> list[dict]:
-        return await self._all("""
+    async def admin_app_devices(self, *, conn=None) -> list[dict]:
+        query = """
             WITH recent AS (
                 SELECT install_id, friend_id, app_version, notifications, seen_at, created_at,
                        row_number() OVER (PARTITION BY friend_id ORDER BY seen_at DESC, install_id) AS rank
@@ -209,10 +209,13 @@ class AppStore:
                 ) e
             ) events ON true
             ORDER BY d.friend, d.friend_id, d.phone
-        """)
+        """
+        if conn is None:
+            return await self._all(query)
+        return await (await conn.execute(query)).fetchall()
 
-    async def admin_app_fetches(self) -> list[dict]:
-        return await self._all("""
+    async def admin_app_fetches(self, *, conn=None) -> list[dict]:
+        query = """
             WITH visible AS (
                 SELECT f.id AS friend_id, f.name AS friend FROM marong.friends f
                 WHERE EXISTS (SELECT FROM marong.app_update_events e WHERE e.friend_id = f.id
@@ -231,7 +234,10 @@ class AppStore:
                 ) e
             ) events
             ORDER BY f.friend, f.friend_id
-        """)
+        """
+        if conn is None:
+            return await self._all(query)
+        return await (await conn.execute(query)).fetchall()
 
     # ── in-app chat history (API-102, API-104) ─────────────────
 
