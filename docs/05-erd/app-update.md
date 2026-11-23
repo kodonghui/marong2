@@ -83,6 +83,7 @@ DELETE FROM marong.app_update_events
 | 기기 보고: 설치됨 한 줄(SPEC-435) | `app_update_events_installed_once`(유일, `installed`만) |
 | 관리자 읽기: 폰마다 최근 20줄, 지금 친구의 줄만(SPEC-438) | `app_update_events_device_idx`(설치 ID, 때 내림차순) |
 | 관리자 읽기: 친구마다 90일 안의 APK 받아 감 20줄(SPEC-438) | `app_update_events_fetched_idx`(친구, 때 내림차순. `fetched` 줄만 읽어서 `WHERE kind = 'fetched'` 부분 인덱스) |
+| 기기 보고: 친구가 지난 1시간에 남긴 `state`·`installed` 수(SPEC-434) | `app_update_events_reports_idx`(친구, 때 내림차순. `WHERE kind IN ('state', 'installed')` 부분 인덱스) |
 
 폰이 둘이고 릴리스마다 열 줄 안팎이라 표가 작아요. 지우기와 보관 규칙은 두지 않았어요(새 제안. 한 해에 몇천 줄이 넘으면 다시 봐요).
 

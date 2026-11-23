@@ -111,10 +111,12 @@ async def run_api(db, base, logs):
 
     source = apk(base / "signed.apk")
     unsigned = apk(base / "unsigned.apk", signer=False)
+    notes = base / "notes.txt"
+    notes.write_text("시험 릴리스", encoding="utf-8")
 
     def upload(code, package=PACKAGE, file=source):
         return ["publish", "--apk", file, "--package", package, "--version-code", code,
-                "--version-name", f"0.2.{code - 3}"]
+                "--version-name", f"0.2.{code - 3}", "--notes-file", notes]
 
     try:
         async with TestClient(TestServer(chat.web_app())) as http:
@@ -203,6 +205,7 @@ async def run_api(db, base, logs):
                    "TC-209 atomic manifest and digest")
                 old = await (await http.get(GET, headers=headers)).json()
                 ok(old["versionCode"] == code and not (folder / "paused").exists(), "TC-209 new metadata served")
+                ok("notes" not in old, "TC-611 API-141 does not expose release notes")
             ok(sorted(p.name for p in folder.glob("*.apk")) ==
                ["marong-0.2.3-6.apk", "marong-0.2.4-7.apk", "marong-0.2.5-8.apk"], "TC-211 keep three")
             ok(old["sha256"][:16] in cli("status").stdout, "TC-212 status hash prefix")

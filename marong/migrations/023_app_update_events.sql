@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS marong.app_update_events (
   at           timestamptz NOT NULL DEFAULT now(),
   -- Which columns each kind fills (SPEC-435). A row that does not fit its kind is refused. Every branch is built from
   -- IS [NOT] NULL tests or guards a comparison with IS NOT NULL, so no branch can be NULL (a NULL CHECK passes).
-  CONSTRAINT app_update_events_kind_check CHECK (CASE kind
+  CONSTRAINT app_update_events_fields_by_kind CHECK (CASE kind
     WHEN 'pushed' THEN install_id IS NOT NULL AND version_code IS NOT NULL AND app_version IS NULL
                        AND state IS NULL AND status IS NULL AND attempt IS NOT NULL
     WHEN 'push_failed' THEN install_id IS NOT NULL AND version_code IS NOT NULL AND app_version IS NULL
@@ -73,6 +73,9 @@ CREATE INDEX IF NOT EXISTS app_update_events_device_idx ON marong.app_update_eve
 -- The admin read of APK fetches per friend, newest first (SPEC-438). Only fetched rows are read by friend.
 CREATE INDEX IF NOT EXISTS app_update_events_fetched_idx
   ON marong.app_update_events (friend_id, at DESC) WHERE kind = 'fetched';
+-- The hourly API-105 report cap counts only state and installed events (SPEC-434).
+CREATE INDEX IF NOT EXISTS app_update_events_reports_idx
+  ON marong.app_update_events (friend_id, at DESC) WHERE kind IN ('state', 'installed');
 
 GRANT SELECT, INSERT ON marong.app_update_events TO marong;
 -- without a table: TERM-221 (release note) and TERM-222 (version history) live in the release folder's history.json

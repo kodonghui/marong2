@@ -78,6 +78,12 @@ def ring(fid: str, ring_id: str, reason: str = "promise", line: str | None = Non
     return {"fid": fid, "data": data, "android": {"priority": "HIGH", "ttl": f"{RING_TTL_S}s"}}
 
 
+def app_update(fid: str, version_code: int) -> dict:
+    """Wake the app to check its release, without a visible notification (SPEC-431)."""
+    return {"fid": fid, "data": {"kind": "app_update", "v": str(version_code)},
+            "android": {"priority": "HIGH", "ttl": "86400s", "collapse_key": "app_update"}}
+
+
 def _error(r: httpx.Response) -> tuple[str, set]:
     try:
         err = r.json().get("error") or {}
@@ -139,7 +145,9 @@ class FCM:
         """ok | gone (FCM no longer knows this device: drop its FID) | auth (key or permission) | failed."""
         end = self.monotonic() + SEND_BUDGET_S
         url = SEND_URL.format(project=self.project)
-        for attempt in range(len(RETRY_GAPS_S) + 1):
+        # App updates persist and schedule their own numbered attempts (SPEC-430).
+        retries = () if message.get("data", {}).get("kind") == "app_update" else RETRY_GAPS_S
+        for attempt in range(len(retries) + 1):
             left = end - self.monotonic()
             if left <= 0:
                 return "failed"
@@ -153,10 +161,9 @@ class FCM:
                 return "auth"
             except (httpx.HTTPError, OSError, asyncio.TimeoutError, ValueError, KeyError) as e:
                 log.info("fcm_send_error %s", type(e).__name__)
-                wait = RETRY_GAPS_S[min(attempt, len(RETRY_GAPS_S) - 1)]
-                if attempt == len(RETRY_GAPS_S) or self.monotonic() + wait >= end:
+                if attempt == len(retries) or self.monotonic() + retries[attempt] >= end:
                     return "failed"
-                await self.sleep(wait)
+                await self.sleep(retries[attempt])
                 continue
             if r.status_code == 200:
                 return "ok"
@@ -169,13 +176,13 @@ class FCM:
                     self.token = None  # refresh before the next send
                 self._warn(f"status={r.status_code}")
                 return "auth"
-            if r.status_code not in (429, 500, 502, 503, 504) or attempt == len(RETRY_GAPS_S):
+            if r.status_code not in (429, 500, 502, 503, 504) or attempt == len(retries):
                 log.info("fcm_send_status %s", r.status_code)
                 return "failed"
             try:
                 wait = min(RETRY_AFTER_MAX_S, max(0, int(r.headers.get("Retry-After", ""))))
             except ValueError:
-                wait = RETRY_GAPS_S[attempt]
+                wait = retries[attempt]
             if self.monotonic() + wait >= end:
                 return "failed"
             await self.sleep(wait)

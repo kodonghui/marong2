@@ -190,25 +190,33 @@ case "${1:-}" in
   app-release)
     command="sudo -n -u marong /usr/bin/python3 /opt/marong-discord/tools/app_release.py"
     case "${2:-}" in
-      status|pause|resume) on_server "$command $2" ;;
+      status|pause|resume|history|backfill) on_server "$command $2" ;;
       publish)
         apk=${3:-}
-        if [[ -z "$apk" ]]; then echo "사용법: bash deploy/ovh.sh app-release publish <APK>"; exit 2; fi
+        if [[ -z "$apk" || ${4:-} != --notes || $# != 5 ]]; then
+          echo '사용법: bash deploy/ovh.sh app-release publish <APK> --notes "<릴리스 노트>"'
+          exit 2
+        fi
         metadata=$(app_release_metadata "$apk") || exit 2
         read -r package version name <<< "$metadata"
+        local_staging=$(mktemp -d)
+        trap 'rm -f -- "$local_staging/notes.txt"; rmdir -- "$local_staging"' EXIT
+        printf '%s' "$5" > "$local_staging/notes.txt"
         staging=$(on_server 'umask 077; mktemp -d /var/tmp/marong-app-release.XXXXXXXX')
         if [[ ! "$staging" =~ ^/var/tmp/marong-app-release\.[a-zA-Z0-9]{8}$ ]]; then
           echo "서버에서 APK 임시 폴더를 만들지 못했습니다."
           exit 2
         fi
-        trap 'on_server "sudo -n rm -f -- $staging/app.apk $staging/output-metadata.json && sudo -n rmdir -- $staging" || true' EXIT
+        trap 'rm -f -- "$local_staging/notes.txt"; rmdir -- "$local_staging";
+              on_server "sudo -n rm -f -- $staging/app.apk $staging/output-metadata.json $staging/notes.txt && sudo -n rmdir -- $staging" || true' EXIT
         scp -- "$apk" "$HOST:$staging/app.apk"
         scp -- "$(dirname -- "$apk")/output-metadata.json" "$HOST:$staging/output-metadata.json"
-        on_server "sudo -n chown marong:marong -- $staging $staging/app.apk $staging/output-metadata.json &&
-                   sudo -n chmod 600 -- $staging/app.apk $staging/output-metadata.json &&
-                   $command publish --apk $staging/app.apk --package $package --version-code $version --version-name $name"
+        scp -- "$local_staging/notes.txt" "$HOST:$staging/notes.txt"
+        on_server "sudo -n chown marong:marong -- $staging $staging/app.apk $staging/output-metadata.json $staging/notes.txt &&
+                   sudo -n chmod 600 -- $staging/app.apk $staging/output-metadata.json $staging/notes.txt &&
+                   $command publish --apk $staging/app.apk --package $package --version-code $version --version-name $name --notes-file $staging/notes.txt"
         ;;
-      *) echo "사용법: bash deploy/ovh.sh app-release publish <APK>|status|pause|resume"; exit 2 ;;
+      *) echo '사용법: bash deploy/ovh.sh app-release publish <APK> --notes "<릴리스 노트>" | status | pause | resume | history | backfill'; exit 2 ;;
     esac
     ;;
   backup)
