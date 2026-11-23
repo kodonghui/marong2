@@ -1,6 +1,6 @@
 # BUG-114 웹 통화 재연결을 다른 기기의 통화로 표시
 
-- 상태 `open` · 심각도 S2 · 우선순위 P1 · 유형 구현 · 원인 11단계
+- 상태 `fixed` · 심각도 S2 · 우선순위 P1 · 유형 구현 · 원인 11단계 · 실기기 검증 대기
 - 발견 운영, 2026-11-24 02:00~02:04 KST, iPhone Safari 웹 통화 두 번. 통화가 끊긴 뒤 통화 중 표시와 함께 ‘다른 기기에서 마롱이랑 통화 중이야’가 보였어요.
 - 기준 [SPEC-386 §3.9](../04-functional-spec/unified.md#39-목소리와-동시-통화spec-385-spec-386), [SCR-001#call-busy](../08-screens/unified.md), [TC-468](unified.md). 승인된 명세는 같은 계정과 클라이언트 ID의 재연결을 허용해요. 문서 변경 없음(기존 명세 유지).
 
@@ -27,3 +27,12 @@ Anthropic 인증은 음성 스트리밍과 별도 통화 기억 정리기에 쓰
 수정 후 API 시험 통과. Windows의 WebKit·Chromium 프로필 3개에서 각각 통화 ID 유지 1건, 자동 종료 POST 0건, 종료 버튼을 누른 뒤 POST 1건을 확인했어요. Windows WebKit 시험의 오디오는 가짜이고 WebSocket과 화면은 실제 브라우저를 사용했어요. 실제 iPhone·Android의 화면 잠금, 망 전환, 소리 확인은 운영 반영 뒤 검증할 항목이에요.
 
 기존 중계 시험은 다른 클라이언트 ID로 거절을 확인하도록 고쳤어요. 검색 시험은 Windows에서 두 합성 이벤트가 같은 시각을 갖는 문제 때문에 `256c5cf`에서 3/3 실패했어요. 앞 이벤트가 완료된 뒤 시계가 진행되고 나서 다음 이벤트를 보냈으며, 같은 검사를 3/3 통과했어요. 로컬 WebRTC 음성 시험은 400ms 지연을 주입해 음성 프레임 606개, 중간 무음 프레임 0개, 송신 버퍼 고갈 0건을 확인했어요. 통화 시험 파일은 Python 20/20, Node 7/7 통과했어요. Windows의 PostgreSQL 시험은 Selector 이벤트 루프에서, 통화 비용 시험은 로컬 WSL에서 실행했어요.
+
+## 운영 반영
+
+- [PR #115](https://github.com/kodonghui/marong2/pull/115)를 2026-11-24 02:49:33 KST에 `f3bca34cda83958be88e2c6c7dc0935938e2469e`로 병합했어요. 리뷰는 사용 한도로 실패해 [Claude 리뷰](https://github.com/kodonghui/marong2/pull/115#issuecomment-7109125062)로 판단했어요.
+- 02:52:56 KST에 `ko-family`의 `marong-vertex-live.service`를 재시작했어요. 바로 전 `SELECT`에서 `status <> 'ended'` 0건, `ss -Htnp`에서 통화 서버 PID의 TCP 연결 0개를 확인했어요. PID는 `337224`에서 `440904`로 바뀌었어요.
+- 배포 파일 `server.py`, `live_session.py`, `static/app.js`의 SHA256이 병합 커밋과 일치했어요. 서비스 상태는 `active`, `/healthz`는 HTTP 200이었어요. 노트북에서 받은 공개 `app.js`도 SHA256 `30dd45e1b30e0d984221a9403d9428cd98ab75ca585ccf86a311102e927f86dc`로 일치했어요.
+- 02:57:58 KST에 300초 관찰을 마쳤어요. 매분 `/healthz`는 HTTP 200이었고, 통화 서버 로그 4줄에서 오류 0건을 확인했어요.
+- 현재 자산 주소는 `app.js?v=30dd45e1b30e`예요. 서버와 공개 주소 모두 새 버전에는 `private, max-age=31536000, immutable`, 이전 버전과 버전 없는 주소에는 `no-store`를 반환했어요. 실제 iPhone Safari에서 새로고침 후 통화하는 검증은 대기 상태예요.
+- 배포 전 DB 백업 27,254,116바이트의 목차를 확인했고, 파일 3개의 백업 SHA256도 확인했어요. 되돌리기 명령은 서버에서 `bash /home/opc/marong-deploy/20261124-bug114.0LXtpBtp/deploy.sh rollback`이에요.
