@@ -235,8 +235,12 @@ async function current(site, fcm, update, apk, updateBanner) {
     await evaluateChat("document.querySelector('#update-banner button').click(); true");
     await waitFor(() => version() === 13, 'The manual install did not replace the APK', 90_000);
     const elapsed = ((performance.now()-started)/1000).toFixed(3);
-    launch();
-    await waitFor(() => foreground().includes(pkg), 'The installed app would not open');
+    // Android can still stop an activity after the replacement version becomes visible.
+    await waitFor(async () => {
+      launch();
+      await sleep(500);
+      return foreground().includes(pkg + '/.MainActivity');
+    }, 'The installed app would not open');
     console.log('TC-619 notifications_tapped=2 late_banner=ready busy_block=1 before=12 after=13 reopened=1 install_seconds=' + elapsed);
   } finally {
     try { if (adb('forward', '--list').includes('tcp:19225')) adb('forward', '--remove', 'tcp:19225'); } finally { adb('uninstall',pkg); }
