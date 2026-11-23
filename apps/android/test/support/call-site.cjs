@@ -26,6 +26,7 @@ function fileFor(pathname) {
     return full.startsWith(base + path.sep) ? full : null;
   };
   if (pathname === '/') return path.join(STATIC, 'index.html');
+  if (pathname === '/chat/update-banner.js') return path.join(REPO, 'marong', 'app_chat_static', 'update-banner.js');
   if (pathname.startsWith('/face/v1/')) return pick(FACES, pathname.slice('/face/v1/'.length));
   if (pathname.startsWith('/__app/')) return pick(APP_WWW, pathname.slice('/__app/'.length));
   return pick(STATIC, pathname.slice(1));

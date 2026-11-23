@@ -27,6 +27,20 @@
 })();
 
 const $ = (id) => document.getElementById(id);
+const updateBannerReady = (() => {
+  if (!(window.__marongApp?.version >= 3) || !$('update-banner')) return Promise.resolve();
+  const deadline = performance.now() + 500;
+  let timer;
+  return Promise.race([
+    import('/chat/update-banner.js?v=20261123').then(({ mountUpdateBanner }) =>
+      mountUpdateBanner($('update-banner'), deadline, render => {
+        const stick = app.ready && nearBottom();
+        render();
+        if (stick) toBottom();
+      })),
+    new Promise(resolve => { timer = setTimeout(resolve, 500); }),
+  ]).catch(() => {}).finally(() => clearTimeout(timer));
+})();
 const API = '/chat/api';
 const PAGE = 30;
 const FACE = '/face/v1/01-neutral.webp';
@@ -949,6 +963,7 @@ async function start() {
   const page = await api(`/messages?limit=${PAGE}`);
   if (!handle(page)) return;
   if (page.status !== 200) { block('broken', page.body && page.body.traceId); return; }
+  await updateBannerReady;
   try {
     sessionStorage.removeItem('marong.chat.relogin');
     const draft = sessionStorage.getItem('marong.session.draft');

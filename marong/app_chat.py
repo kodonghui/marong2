@@ -46,7 +46,7 @@ REPLY_TTL_S = 3600
 READ_ROOMS_MAX = 256     # rooms whose '읽음' this process keeps (one per call friend)
 STATIC = Path(__file__).with_name("app_chat_static")
 FILES = {"": ("index.html", "text/html"), "chat.js": ("chat.js", "text/javascript"),
-         "chat.css": ("chat.css", "text/css")}
+         "chat.css": ("chat.css", "text/css"), "update-banner.js": ("update-banner.js", "text/javascript")}
 UNIFIED_FILES = {"account.html": "text/html", "admin.html": "text/html", "unified.css": "text/css",
                  "unified.js": "text/javascript", "account.js": "text/javascript", "admin.js": "text/javascript",
                  "profile.html": "text/html", "profile.js": "text/javascript",
@@ -794,7 +794,7 @@ class AppChat:
             self.decor.register(app.router)
         app.router.add_get("/chat", self.home)
         app.router.add_get("/chat/", self.page)
-        app.router.add_get("/chat/{name:chat\\.(?:js|css)}", self.page)
+        app.router.add_get("/chat/{name:chat\\.(?:js|css)|update-banner\\.js}", self.page)
         app.router.add_get("/chat/{asset:manifest\\.webmanifest|icon-(?:180|192|512)\\.png}", self.web_asset)
         app.router.add_get("/chat/api/me", self.me)
         app.router.add_get("/chat/api/messages", self.messages)
