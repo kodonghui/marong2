@@ -121,7 +121,7 @@ WHERE deleted_at IS NULL AND status='ended' AND organize_status='failed' AND id 
 
 BUG-118~122 후속 반영은 리뷰와 병합 뒤에 진행한다. 동작 수정은 `85567b1`, BUG-117의 구간 설정 변경은 별도 커밋 `7fe94a4`다. 통화가 없는 시간에 승인 범위의 파일로 아래 순서를 적용한다.
 
-PR #119는 `5f89fd5`로 병합됐다. 2026-11-24 03:37:54 KST 사전 대조에서 승인 범위 밖 파일 차이를 발견해 운영 반영을 중단했다. 운영과 `main`의 `live_session.py` 해시가 다르다. BUG-117은 합침, 운영 반영 보류(사용자님 결정 대기) 상태다. 다음 반영의 통화 서버 파일은 승인 범위인 `85567b1`에서 선택한다. [파일별 대조와 QA 결과](../../docs/12-qa/runs/2026-11-24-call-memory-deployment-gate.md)
+PR #119는 `5f89fd5`로 병합됐다. 2026-11-24 03:37:54 KST 사전 대조에서 승인 범위 밖 파일 차이를 발견해 운영 반영을 중단했다. 운영과 `main`의 `live_session.py` 해시가 다르다. BUG-117은 병합했고, 마롱이 항목 77(2026-11-24 03시대 KST)에 따라 대화 이어 주기 설계에서 컨텍스트 창 압축 값을 정한 뒤 반영한다. 다음 반영의 통화 서버 파일은 승인 범위인 `85567b1`에서 선택한다. [파일별 대조와 QA 결과](../../docs/12-qa/runs/2026-11-24-call-memory-deployment-gate.md)
 
 1. `systemctl --user show marong-vertex-live -p WorkingDirectory --value`로 실제 릴리스의 `tools/vertex_live` 경로를 얻는다. DB와 현재 파일 및 사용자 유닛 설정을 백업하고 해시를 대조한다. 릴리스 루트에 정리기 import에 필요한 동일 버전의 `marong` 패키지가 있는지 확인한다. 되돌리기 스크립트 경로는 반영 전에 기록한다.
 2. 병합본의 `call_instruction.md`를 같은 디렉터리의 임시 파일을 거쳐 원자적으로 교체하고 SHA256을 확인한다. 웹 통화 서버는 다음 공급자 연결 때 이 파일을 읽는다. 비활성 디스코드 중계는 계속 정지하고, 중계를 되살릴 때 지시문과 코드 해시를 별도로 확인한다.
