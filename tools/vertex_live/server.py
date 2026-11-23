@@ -1,7 +1,7 @@
 """Private Gemini Live relay; no application-imposed call duration/count limit."""
 from __future__ import annotations
 import asyncio, hashlib, hmac, json, os, re, secrets, time, uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from mimetypes import guess_type
 from functools import partial
@@ -48,6 +48,7 @@ LOCATION='us-central1'
 MODEL='gemini-3.8-live'
 VOICE=chosen_voice()
 CALL_MAX=call_capacity()
+RECONNECT_CLEANUP_TIMEOUT=15
 AUTH_MODE=os.environ.get('VERTEX_AUTH_MODE','api_key')
 AUTHENTICATION=auth_mode(os.environ.get("MARONG_AUTH","access"))
 SESSION_AGE=timedelta(days=int(os.environ.get("MARONG_SESSION_DAYS","90")))
@@ -102,6 +103,8 @@ memory_store=None
 class CallSlot:
     client_id: str
     session: LiveSession | None = None
+    released: asyncio.Event = field(default_factory=asyncio.Event)
+    reconnecting: bool = False
 
 
 active_calls: dict[int | str, CallSlot] = {}
@@ -372,10 +375,12 @@ async def end_call(req):
     slot=active_calls.get(person.friend_id)
     session=slot.session if slot else None
     if session and session.call_id==call_id and session.p and session.p.caller_id==person.caller_id:
+        session.d.setdefault('browserEnd','end_http')
         session.explicit=True;session.stop.set()
     else:
         try:await memory_store.finish(person,call_id,True,entrypoint='web')
         except PermissionError:raise web.HTTPNotFound()
+        print('call_end_http detached',flush=True)
     return json_response({'ok':True})
 
 async def live(req):
@@ -384,17 +389,20 @@ async def live(req):
     if not same_origin(req):raise web.HTTPForbidden()
     person=await get_principal(authn)
     owner=call_owner(authn,person)
+    try:client_id=str(uuid.UUID(req.query.get('client','')))
+    except ValueError:client_id=str(uuid.uuid4())
     slot=None
     ws=web.WebSocketResponse(heartbeat=20,max_msg_size=70000)
+    ws_opened=None
+    close_reason='socket_closed'
     try:
-        try:client_id=str(uuid.UUID(req.query.get('client','')))
-        except ValueError:client_id=str(uuid.uuid4())
         # API-107: the ring a page opened from Marong's call carries (/?ring=). Anything else is no ring.
         try:ring=str(uuid.UUID(req.query.get('ring','')))
         except ValueError:ring=None
         refresh_session_cookie(req,ws)
         await ws.prepare(req)
         ws_opened=time.monotonic()
+        print(f'call_ws_open client={client_id[:8]}',flush=True)
         resume=recent_resume(owner,client_id)
         if await budget_status(memory_store, 'web') in BLOCKED:
             if person:
@@ -402,20 +410,47 @@ async def live(req):
             else:
                 resumable = resume.get('owner') == authn['owner']
             if not resumable:
+                close_reason='budget_exhausted'
                 await ws.send_json({'type':'budget_exhausted'})
                 return ws
         browser_resume=resume.get('owner')==authn['owner']
         if person and not browser_resume and await person_budget_blocked(person):
+            close_reason='budget_exhausted'
             await ws.send_json({'type':'budget_exhausted'})
             return ws
         if person and person.unified and not browser_resume and await memory_store.daily_usage.blocked(person.friend_id):
             if not await memory_store.resume_voice(person, client_id):
+                close_reason='daily_limit'
                 await ws.send_json({'type':'daily_limit'})
                 return ws
-        if owner in active_calls:
-            await ws.send_json({'type':'call_busy'})
-            return ws
-        if len(active_calls)>=CALL_MAX:
+        previous=active_calls.get(owner)
+        if previous:
+            if previous.client_id!=client_id:
+                close_reason='call_busy'
+                await ws.send_json({'type':'call_busy'})
+                return ws
+            if previous.reconnecting:
+                close_reason='reconnect_pending'
+                return ws
+            # Keep the slot reserved while the old session saves its resume state and finishes its DB work.
+            previous.reconnecting=True
+            if previous.session:
+                previous.session.d.setdefault('browserEnd','client_replaced')
+                previous.session.stop.set()
+            try:
+                await asyncio.wait_for(previous.released.wait(),RECONNECT_CLEANUP_TIMEOUT)
+            except TimeoutError:
+                close_reason='reconnect_timeout'
+                return ws
+            finally:
+                previous.reconnecting=False
+                if previous.released.is_set() and active_calls.get(owner) is previous:
+                    del active_calls[owner]
+            if ws.closed or req.transport is None or req.transport.is_closing():
+                return ws
+            resume=recent_resume(owner,client_id)
+        elif len(active_calls)>=CALL_MAX:
+            close_reason='calls_full'
             await ws.send_json({'type':'calls_full'})
             return ws
         slot=CallSlot(client_id)
@@ -430,6 +465,9 @@ async def live(req):
             columns = PET_INTRO_COLUMNS if PET_VOICE else ""
             query = CHARACTER_PROFILE.format(intro_columns=columns, has_friends=ACCEPTED_FRIENDSHIPS)
             character = await memory_store.one(query, (os.getenv("MARONG_FRIENDS") == "1", person.friend_id))
+        if slot.reconnecting:
+            close_reason='client_replaced'
+            return ws
         configure=partial(setup,voice=voice,bot_name=bot_name,character=character)
         session=LiveSession(ws,authn['owner'],memory_store,person,configure,google_headers,resume,{},LOCATION,MODEL,voice,client_id,search=SEARCH,ring=ring)
         session.shop=SHOP
@@ -448,9 +486,12 @@ async def live(req):
         elif bridge and bridge.owner==authn['owner']:await bridge.close()
         await session.run()
     except CallBusy:
+        close_reason='call_busy'
         await ws.send_json({'type':'call_busy'})
         if slot and slot.session and slot.session.rtc:await slot.session.rtc.close()
-    except Exception as error:print('session_error',type(error).__name__,flush=True)
+    except Exception as error:
+        close_reason='session_error'
+        print(f'call_ws_error client={client_id[:8]} error={type(error).__name__}',flush=True)
     finally:
         try:
             if slot is not None and active_calls.get(owner) is slot:
@@ -461,7 +502,20 @@ async def live(req):
                     resume_state.pop((owner,client_id),None)
         finally:
             if slot is not None and active_calls.get(owner) is slot:
-                del active_calls[owner]
+                if not slot.reconnecting:
+                    del active_calls[owner]
+                slot.released.set()
+            if ws_opened is not None:
+                if close_reason=='socket_closed':
+                    finished=slot.session if slot else None
+                    if finished and finished.explicit:
+                        close_reason=getattr(finished,'close_reason',None) or finished.d.get('browserEnd','client_stop')
+                    elif finished and finished.d.get('browserEnd'):
+                        close_reason=finished.d['browserEnd']
+                    elif ws.exception():
+                        close_reason='socket_error'
+                print(f'call_ws_close client={client_id[:8]} reason={close_reason} '
+                      f'code={ws.close_code} age_ms={round((time.monotonic()-ws_opened)*1000)}',flush=True)
             await ws.close()
     return ws
 

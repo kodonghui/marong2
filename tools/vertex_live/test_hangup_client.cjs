@@ -10,7 +10,7 @@ const source=fs.readFileSync(__dirname+'/static/app.js','utf8');
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function page(rtcConnects){
   const nodes=new Map(),urls=[],sockets=[],sent=[],rtc=[],clock={offset:0};
-  const element=()=>({textContent:'',hidden:false,disabled:false,value:'',children:[],classList:{toggle(){},remove(){},add(){}},
+  const element=()=>({textContent:'',hidden:false,disabled:false,value:'',children:[],classList:{toggle(){},remove(){},add(){},contains(){return false;}},
     setAttribute(){},replaceChildren(){},append(){}});
   class Context{
     constructor(){this.state='running';this.sampleRate=48000;this.audioWorklet={addModule:async()=>{}};}
@@ -34,7 +34,7 @@ async function page(rtcConnects){
       body:element(),documentElement:{dataset:{}},querySelector(){return null;},visibilityState:'visible',addEventListener(){}},
     window:{AudioContext:Context,addEventListener(){}},navigator:{},AudioWorkletNode:Worklet,
     localStorage:{getItem(){return null;},setItem(){}},location:{protocol:'https:',host:'example.test',hash:'',pathname:'/'},history:{replaceState(){}},
-    WebSocket:{OPEN:1},WorkerSocket:Socket,MarongRTC:RTC,
+    WebSocket:{CONNECTING:0,OPEN:1},WorkerSocket:Socket,MarongRTC:RTC,
     fetch:async()=>({ok:true,status:200,json:async()=>({ready:true,active:false,webRTC:true,memoryConnected:false})}),
     setInterval(){return 1;},clearInterval(){},
     setTimeout(fn,delay){const timer=setTimeout(fn,delay);if(fn.name==='syncTheme')timer.unref();return timer;},clearTimeout};
