@@ -200,6 +200,31 @@ describe('app update banners', { skip }, () => {
       const banner = await state(page, 'ready');
       assert.equal(await banner.evaluate(b => getComputedStyle(b).animationDuration), '0.2s');
     });
+
+    it(`BUG-113 ${tc}: a late module reads the staged update after the first content`, async () => {
+      const module = Promise.withResolvers();
+      try {
+        const page = await open(surface, { routes: context => context.route('**/chat/update-banner.js*', async route => {
+          await module.promise;
+          await route.continue();
+        }) });
+        await page.waitForFunction(() => window.firstUpdateState !== undefined);
+        assert.equal(await page.evaluate(() => window.firstUpdateState), 'none');
+        assert.equal(await page.evaluate(() => window.updateFixture.reads), 0);
+        const bottom = () => page.locator('#log').evaluate(log => log.scrollHeight - log.scrollTop - log.clientHeight);
+        if (surface === 'chat') assert.ok(await bottom() < 2);
+
+        module.resolve();
+        const banner = page.locator('#update-banner[data-update-state="ready"]');
+        await banner.waitFor({ timeout: 2500 });
+        assert.equal(await banner.locator('p').textContent(), '새 버전 준비됨 (0.3.4)');
+        assert.equal(await page.evaluate(() => window.updateFixture.reads), 1);
+        assert.equal(await banner.evaluate(b => getComputedStyle(b).animationDuration), '0.2s');
+        if (surface === 'chat') assert.ok(await bottom() < 2);
+      } finally {
+        module.resolve();
+      }
+    });
   }
 
   it('TC-609: the banner stays under budget, daily limit and error, and hides during calls', async () => {

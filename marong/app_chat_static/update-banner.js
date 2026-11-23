@@ -100,6 +100,8 @@ export async function mountUpdateBanner(banner, deadline, renderLayout = render 
 
   const remaining = deadline - performance.now();
   if (remaining > 0) await refresh(remaining, false);
+  // The first screen is already unblocked, but the bridge hasn't been read yet.
+  else void refresh();
   window.addEventListener('marongupdate', reread);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') reread();

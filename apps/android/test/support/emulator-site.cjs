@@ -40,7 +40,7 @@ function route(report) {
 }
 
 async function startEmulatorSite({ port = 8787, fidFile = null, log = () => {},
-  update = { release: null, apk: null, mode: 'normal' }, deviceUpdate = {} } = {}) {
+  update = { release: null, apk: null, mode: 'normal' }, deviceUpdate = {}, updateBanner = {} } = {}) {
   const chat = await startChatSite({ waitMs: 25_000 });
   const call = await startCallSite({ log, ready: (url) => ({ ring: RING_IN_URL.test(url) }) });
   chat.state.me.body = { ...chat.state.me.body, delivery: { to: 'discord', reason: 'no_device' },
@@ -73,7 +73,11 @@ async function startEmulatorSite({ port = 8787, fidFile = null, log = () => {},
     if (req.method === 'GET' && (pathname === '/' || pathname === '/chat/')) log(`page ${pathname}${search}`);
     const chunks = [];
     req.on('data', (chunk) => chunks.push(chunk));
-    req.on('end', () => {
+    req.on('end', async () => {
+      if (pathname === '/chat/update-banner.js' && updateBanner.delayMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, updateBanner.delayMs));
+        if (res.destroyed) return;
+      }
       const body = Buffer.concat(chunks);
       let deviceUpdateStatus;
       if (pathname === '/chat/api/app/release' || pathname.startsWith('/chat/app/')) {
