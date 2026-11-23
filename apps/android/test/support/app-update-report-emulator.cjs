@@ -10,9 +10,10 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { startEmulatorSite } = require('./emulator-site.cjs');
 
 const PACKAGE = 'com.corthexhq.marong';
+const PORT = Number(process.env.MARONG_UPDATE_PORT || 18787);
 const [serial, oldApk, newApk, mode = 'states'] = process.argv.slice(2);
 assert.match(serial ?? '', /^emulator-\d+$/);
-assert.match(mode, /^(states|retry)$/);
+assert.match(mode, /^(states|background|retry)$/);
 
 function adb(...args) {
   return execFileSync(process.env.ADB || 'adb', ['-s', serial, ...args], {
@@ -41,9 +42,9 @@ async function main() {
   const path = '/chat/app/marong-0.3.2-10.apk';
   const update = { release: null, apk, mode: 'normal', apkDelayMs: 5000 };
   const deviceUpdate = {};
-  const site = await startEmulatorSite({ port: 18787, update, deviceUpdate });
+  const site = await startEmulatorSite({ port: PORT, update, deviceUpdate });
   const requests = site.deviceUpdateRequests;
-  const open = () => adb('shell', 'am', 'start', '-n', `${PACKAGE}/.MainActivity`);
+  const open = () => adb('shell', 'am', 'start', '-W', '-n', `${PACKAGE}/.MainActivity`);
   const home = () => adb('shell', 'input', 'keyevent', 'KEYCODE_HOME');
   const failure = (status) => fixture('report-failure', '--ei', 'status', String(status));
   const count = (number, timeout = 30_000) => waitFor(() => requests.length >= number, timeout, `Expected ${number} device updates`);
@@ -52,7 +53,7 @@ async function main() {
     adb('shell', 'pm', 'grant', PACKAGE, 'android.permission.POST_NOTIFICATIONS');
     adb('shell', 'appops', 'set', PACKAGE, 'REQUEST_INSTALL_PACKAGES', 'allow');
     open();
-    await waitFor(() => site.reports.length && site.updateRequests.length, 45_000, 'App did not register');
+    await waitFor(() => site.reports.length, 120_000, 'App did not register');
     home();
     await delay(1500);
     if (mode === 'retry') {
@@ -60,8 +61,11 @@ async function main() {
       failure(101);
       await count(1);
       const start = performance.now();
-      await waitFor(() => /Minimum latency: \+14m\d+s/.test(adb('shell', `dumpsys jobscheduler ${PACKAGE} | grep -A 35 '  JOB #.*/2217:'`)),
-        10_000, 'Android did not schedule a 15-minute network retry');
+      await waitFor(() => {
+        const job = adb('shell', `dumpsys jobscheduler ${PACKAGE} | grep -A 35 '  JOB #.*/2217:'`);
+        return /Minimum latency: \+(?:14m59s|15m0s)/.test(job)
+          && /Max execution delay: \+(?:14m59s|15m0s)/.test(job);
+      }, 10_000, 'Android did not schedule the 15-minute network retry and deadline');
       deviceUpdate.status = 200;
       await count(2, 18 * 60_000);
       const seconds = (performance.now() - start) / 1000;
@@ -77,6 +81,16 @@ async function main() {
       sha256: createHash('sha256').update(apk).digest('hex'), url: path };
     fixture('update-push', '--es', 'version', '10');
     await waitFor(() => site.updateRequests.some(request => request.path === path), 30_000, 'Background download did not start');
+    if (mode === 'background') {
+      await count(2, 120_000);
+      assert.deepEqual(requests.map(r => r.update.state), ['downloaded', 'installed']);
+      assert.match(adb('shell', 'dumpsys', 'activity', 'activities'), /topResumedActivity=.*Launcher/);
+      assert.match(adb('shell', 'dumpsys', 'package', PACKAGE), /versionCode=10\b/);
+      assert.ok(requests.every(r => r.hasFixtureCookie));
+      assert.ok(requests.every(r => JSON.stringify(r.ring) === JSON.stringify(ring)));
+      console.log('PASS background_reports=2 states=downloaded,installed version=10');
+      return;
+    }
     open();
     await count(2);
     assert.deepEqual(requests.map(request => request.update.state), ['downloaded', 'waiting_quiet']);
@@ -89,7 +103,7 @@ async function main() {
       assert.deepEqual(request.ring, ring);
       assert.equal(request.method, 'PUT');
       assert.deepEqual(request.keys, ['appVersion', 'fid', 'notifications', 'ring', 'update']);
-      assert.equal(request.origin, 'http://10.0.2.2:18787');
+      assert.equal(request.origin, `http://10.0.2.2:${PORT}`);
       assert.match(request.agent, /^MarongApp\/0\.3\.[12]$/);
       assert.ok(request.hasFixtureCookie);
       const transportHeaders = new Set(['host', 'connection', 'content-length', 'accept-encoding']);

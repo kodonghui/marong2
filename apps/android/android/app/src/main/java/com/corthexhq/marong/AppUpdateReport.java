@@ -7,6 +7,10 @@ import android.app.job.JobService;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.os.Build;
 import android.os.CancellationSignal;
 import android.os.Handler;
 import android.os.Looper;
@@ -156,7 +160,11 @@ public final class AppUpdateReport extends JobService {
         JobInfo.Builder job = new JobInfo.Builder(JOB_ID, new ComponentName(context, AppUpdateReport.class))
             .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
             .setBackoffCriteria(RETRY_MS, JobInfo.BACKOFF_POLICY_LINEAR);
-        if (wait > 0) job.setMinimumLatency(wait);
+        if (wait > 0) {
+            // A deadline lets Android reevaluate an isolated retry even if it has nothing to batch it with.
+            // Android can ignore the network constraint at a deadline, so deliver() checks it again.
+            job.setMinimumLatency(wait).setOverrideDeadline(wait);
+        }
         if (!AppUpdateJob.submit(scheduler, job.build())) Log.i(AppUpdateJob.TAG, "update_report unavailable");
     }
 
@@ -170,7 +178,7 @@ public final class AppUpdateReport extends JobService {
         }
         worker.execute(() -> {
             try {
-                deliver(cancel);
+                deliver(cancel, networkAvailable(params));
             } finally {
                 main.post(() -> {
                     if (active != cancel) return;
@@ -210,7 +218,16 @@ public final class AppUpdateReport extends JobService {
         super.onDestroy();
     }
 
-    private void deliver(CancellationSignal cancel) {
+    private boolean networkAvailable(JobParameters params) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && params.getNetwork() != null) return true;
+        ConnectivityManager manager = getSystemService(ConnectivityManager.class);
+        if (manager == null) return false;
+        Network active = manager.getActiveNetwork();
+        NetworkCapabilities network = active == null ? null : manager.getNetworkCapabilities(active);
+        return network != null && network.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+    }
+
+    private void deliver(CancellationSignal cancel, boolean online) {
         SharedPreferences prefs = AppUpdateJob.preferences(this);
         while (!cancel.isCanceled()) {
             JSONObject entry;
@@ -231,7 +248,7 @@ public final class AppUpdateReport extends JobService {
                 reportsBefore = pageReports;
             }
 
-            Response result = send(entry, cancel);
+            Response result = online ? send(entry, cancel) : Response.RETRY;
             synchronized (LOCK) {
                 if (cancel.isCanceled()) return;
                 JSONArray queue = queue(prefs);
