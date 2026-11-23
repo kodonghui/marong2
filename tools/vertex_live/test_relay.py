@@ -75,7 +75,7 @@ async def main():
                 assert 'thinkingConfig' not in setup['generationConfig']
                 # No function tools for a page without memory or hang-up; Google Search is on by default (call_search.py).
                 assert setup.get('tools')==[{'googleSearch':{}}],setup.get('tools')
-                second=await c.ws_connect('/live?client=00000000-0000-4000-8000-000000000001',headers=headers)
+                second=await c.ws_connect('/live?client=00000000-0000-4000-8000-000000000002',headers=headers)
                 assert (await event(second,'call_busy'))['type']=='call_busy'
                 await second.close()
                 for i in range(100):

@@ -291,7 +291,10 @@ class LiveSession:
                     try:item=json.loads(msg.data)
                     except (ValueError,TypeError):continue
                     if not isinstance(item,dict):continue
-                    if item.get('type')=='stop':self.explicit=True;return
+                    if item.get('type')=='stop':
+                        self.d.setdefault('browserEnd','client_stop')
+                        self.explicit=True
+                        return
                     if self.entry_transport=='discord':continue
                     if item.get('type')=='timing':
                         if len(msg.data.encode('utf-8'))>4096:print('timing_rejected reason=size',flush=True)
@@ -372,6 +375,7 @@ class LiveSession:
         self.hold_greeting=self.hold_requested and not self.logical_resumed and not self.handle
         self.recorder=TranscriptRecorder(self.save,self.caption)
         running=[asyncio.create_task(self.browser_writer()),asyncio.create_task(self.browser_input()),asyncio.create_task(self.google_loop()),asyncio.create_task(self.watch_revision())]
+        running.append(asyncio.create_task(self.stop.wait()))
         if self.call_safety:running.append(asyncio.create_task(self.safety_loop()))
         try:
             done,_=await asyncio.wait(running,return_when=asyncio.FIRST_COMPLETED)
@@ -601,7 +605,7 @@ class LiveSession:
                     await self.run_provider(upstream,ledger,usage_mode,tuning,lead_in)
             except asyncio.CancelledError:raise
             except Exception as error:
-                print('connection_retry',type(error).__name__,flush=True)
+                print(f'connection_retry client={self.client_id[:8]} error={type(error).__name__}',flush=True)
             if not self.prepared:self.ready=False
             if self.close_reason=='budget_hard_stop':
                 self.stop.set();return
@@ -852,6 +856,7 @@ class LiveSession:
                 for identifier in data.get('toolCallCancellation',{}).get('ids',[]):
                     if identifier in tool_tasks:tool_tasks[identifier].cancel()
                 if data.get('goAway'):
+                    if not go_away:print(f'call_provider_go_away client={self.client_id[:8]}',flush=True)
                     go_away=True
                     if not speaking and self.handle:return
                 if data.get('error'):raise ConnectionError('provider_error')

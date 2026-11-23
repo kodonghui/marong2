@@ -6,8 +6,8 @@ const vm=require('node:vm');
 const crypto=require('node:crypto');
 const source=fs.readFileSync(__dirname+'/static/app.js','utf8');
 async function scenario(rtcConnects,midCall=false,busy=false){
-  const nodes=new Map(),urls=[],rtcInstances=[],sockets=[],sent=[],listeners={};
-  const element=()=>({textContent:'',hidden:false,disabled:false,value:'',children:[],classList:{toggle(){},remove(){},add(){}},
+  const nodes=new Map(),urls=[],rtcInstances=[],sockets=[],sent=[],requests=[],listeners={};
+  const element=()=>({textContent:'',hidden:false,disabled:false,value:'',children:[],classList:{toggle(){},remove(){},add(){},contains(){return false;}},
     setAttribute(){},replaceChildren(){},append(){}});
   class Context{
     constructor(){this.state='running';this.sampleRate=48000;this.audioWorklet={addModule:async()=>{}};}
@@ -15,7 +15,8 @@ async function scenario(rtcConnects,midCall=false,busy=false){
   }
   class Worklet{constructor(){this.port={postMessage(){}};}connect(){}disconnect(){}}
   class Socket{
-    constructor(url){urls.push(url);sockets.push(this);this.readyState=1;queueMicrotask(()=>this.onmessage?.({data:JSON.stringify(busy?{type:'call_busy'}:{type:'ready',memoryConnected:false,callId:'synthetic'})}));}
+    constructor(url){urls.push(url);sockets.push(this);this.readyState=1;queueMicrotask(()=>this.onmessage?.({data:JSON.stringify(
+      busy===true||(busy==='reconnect'&&sockets.length>1)?{type:'call_busy'}:{type:'ready',memoryConnected:true,callId:'synthetic'})}));}
     send(data){sent.push(JSON.parse(data));}close(){this.readyState=3;}
     bind(){}
   }
@@ -30,14 +31,21 @@ async function scenario(rtcConnects,midCall=false,busy=false){
       body:element(),documentElement:{dataset:{}},querySelector(){return null;},visibilityState:'visible',addEventListener(){}},
     window:{AudioContext:Context,addEventListener(name,fn){listeners[name]=fn;}},navigator:{},AudioWorkletNode:Worklet,
     localStorage:{getItem(){return null;},setItem(){}},location:{origin:'https://example.test',protocol:'https:',host:'example.test',hash:'',pathname:'/'},history:{replaceState(){}},
-    WebSocket:{OPEN:1},WorkerSocket:Socket,MarongRTC:RTC,
-    fetch:async()=>({ok:true,status:200,json:async()=>({ready:true,active:false,webRTC:true,memoryConnected:false})}),
+    WebSocket:{CONNECTING:0,OPEN:1},WorkerSocket:Socket,MarongRTC:RTC,
+    fetch:async(url,options)=>{requests.push([url,options?.method]);return {ok:true,status:200,json:async()=>({ready:true,active:false,webRTC:true,memoryConnected:true})};},
     setInterval(){return 1;},clearInterval(){},
     setTimeout(fn, delay){const timer=setTimeout(fn, delay);if(fn.name==='syncTheme')timer.unref();return timer;},clearTimeout};
   vm.createContext(sandbox);vm.runInContext(source,sandbox);
   await new Promise(setImmediate);
-  assert.equal(await vm.runInContext('begin(false)',sandbox),!busy);
-  if(busy){
+  assert.equal(await vm.runInContext('begin(false)',sandbox),busy!==true);
+  if(busy==='reconnect'){
+    sockets[0].readyState=3;sockets[0].onclose();listeners.online();
+    await new Promise(setImmediate);
+    assert.deepEqual(requests.filter(([,method])=>method==='POST'),[],'rejection ended the previous call over HTTP');
+    assert(!sent.some(x=>x.type==='stop'),'rejection sent stop');
+    return;
+  }
+  if(busy===true){
     await new Promise(setImmediate);
     assert.equal(vm.runInContext('!intended && socket===null && retryTimer===null',sandbox),true);
     assert.equal(urls.length,1,'busy response started a reconnect loop');
@@ -75,5 +83,6 @@ async function scenario(rtcConnects,midCall=false,busy=false){
 }
 (async()=>{
   await scenario(false);await scenario(true);await scenario(true,true);await scenario(true,false,true);
-  console.log('PASS initial RTC failure, same-call PCM fallback, duplicate faults, ACK retry, control WS recovery, sticky PCM and busy cleanup');
+  await scenario(true,false,'reconnect');
+  console.log('PASS 5 scenarios: RTC fallback, control recovery and rejection cleanup without hangup');
 })().catch(error=>{console.error(error);process.exitCode=1;});

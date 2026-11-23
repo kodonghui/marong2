@@ -349,15 +349,15 @@ function hangUpAfterPlayback(pendingMs=0){
     const now=performance.now();
     const playing=rtcClient?speaking:(speaking||(playbackStats.queuedMs||0)>0);
     if(playing)quietSince=null;else if(quietSince===null)quietSince=now;
-    if(now-started>=15000||(now-started>=minimum&&quietSince!==null&&now-quietSince>=600)){void end(HANGUP_MESSAGE);return;}
+    if(now-started>=15000||(now-started>=minimum&&quietSince!==null&&now-quietSince>=600)){void end(HANGUP_MESSAGE,{hangup:true});return;}
     hangupTimer=setTimeout(check,100);
   };
   check();
 }
-async function end(message='또 이야기하자. 여기 있을게.'){
+async function end(message='또 이야기하자. 여기 있을게.',{hangup=false}={}){
   stopWaiting();waitBuffer=null;
   sendPlaybackStats();flushTiming();clearTimeout(timingTimer);ringId=null;if(ringShown)ringOffer(false);closeTopic();
-  if(memoryConnected&&callId)fetch(`/api/calls/${encodeURIComponent(callId)}/end`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',keepalive:true}).catch(()=>{});
+  if(hangup&&memoryConnected&&callId)fetch(`/api/calls/${encodeURIComponent(callId)}/end`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',keepalive:true}).catch(()=>{});
   generation++;
   intended=false;ready=false;starting=false;clearTimeout(retryTimer);retryTimer=null;
   hangingUp=false;clearTimeout(hangupTimer);hangupTimer=null;
@@ -365,7 +365,7 @@ async function end(message='또 이야기하자. 여기 있을게.'){
   clearTimeout(fallbackNoticeTimer);fallbackNoticeTimer=null;
   const resolve=firstReady;firstReady=null;if(resolve)resolve(false);
   const old=socket;socket=null;
-  if(old){old.onclose=null;try{if(old.readyState===WebSocket.OPEN)old.send(JSON.stringify({type:'stop'}));old.close();}catch{}}
+  if(old){old.onclose=null;try{if(hangup&&old.readyState===WebSocket.OPEN)old.send(JSON.stringify({type:'stop'}));old.close();}catch{}}
   if(worklet){worklet.port.onmessage=null;worklet.disconnect();worklet=null;}
   if(micSource){micSource.disconnect();micSource=null;}
   if(stream){stream.getTracks().forEach(track=>track.stop());stream=null;}
@@ -380,7 +380,7 @@ async function end(message='또 이야기하자. 여기 있을게.'){
   await refresh();status(message);
 }
 function connect(){
-  if(!intended)return;
+  if(!intended||socket?.readyState===WebSocket.CONNECTING||socket?.readyState===WebSocket.OPEN)return;
   ready=false;
   const previous=socket;
   const current=new WorkerSocket(`${location.protocol==='https:'?'wss:':'ws:'}//${location.host}/live?client=${encodeURIComponent(clientId)}&hangup=1&hold=1${(rtcPreparing||rtcClient)&&!pcmFallback?'&rtc=1':''}${ringId?'&ring='+ringId:''}`,player,worklet,assetUrl('transport.js'));
@@ -428,7 +428,7 @@ function connect(){
     if(!intended||current!==socket)return;
     flushTiming();
     stopWaiting();
-    if(hangingUp){void end(HANGUP_MESSAGE);return;}
+    if(hangingUp){void end(HANGUP_MESSAGE,{hangup:true});return;}
     if(rtcClient)fallbackToPCM('control_reconnect');
     ready=false;$('send').disabled=true;document.body.classList.add('reconnecting');connection('다시 잇는 중');status('연결을 다시 잇고 있어. 통화는 계속 유지할게.');
     clearTimeout(retryTimer);retryTimer=setTimeout(connect,retryDelay);retryDelay=Math.min(10000,retryDelay*2);
@@ -607,7 +607,7 @@ if(!window.__marongCall){
   });
 }
 $('start').onclick=()=>begin(true);
-$('stop').onclick=()=>end();
+$('stop').onclick=()=>end(undefined,{hangup:true});
 for(const id of ['topic-close','topic-picture','topic-title'])$(id).onclick=closeTopic;
 $('login').onclick=()=>location.assign('/');
 $('mute').onclick=()=>{

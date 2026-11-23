@@ -9,7 +9,7 @@
    the friend speaks or without a handle; a later call starts without search once today's are spent, and
    the next Korean day has them again; off at 0 a day.
 """
-import asyncio,base64,os,tempfile
+import asyncio,base64,os,tempfile,time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock,patch
@@ -148,7 +148,11 @@ async def check_flows(server):
             c.all.clear();budget=SearchBudget(per_call=1,daily=100)
             session,browser,d,task=await call(server,budget,c)
             u=c.last
-            for m in [handle('h3'),audio('응'),grounding('대구 날씨',complete=True),speech()]:u.queue.put_nowait(m)
+            for m in [handle('h3'),audio('응'),grounding('대구 날씨',complete=True)]:u.queue.put_nowait(m)
+            # A coarse clock can give consecutive scripted frames the same timestamp.
+            await until(lambda:session.turn_done_at is not None and time.monotonic()>session.turn_done_at,
+                        what='new speech after the completed turn')
+            u.queue.put_nowait(speech())
             await until(lambda:session.searches==1,what='search counted')
             await asyncio.sleep(.8);assert len(c.all)==1,'cut while the friend was speaking'
             u.queue.put_nowait(audio('그랬구나'));u.queue.put_nowait(complete())
