@@ -62,6 +62,7 @@ public final class AppUpdateJob extends JobService {
     private static final int QUIET_INSTALL_JOB = 2213;
     private static final int RING_EXPIRY_JOB = 2214;
     private static final int ALARM_INSTALL_JOB = 2215;
+    private static final int FORCED_CHECK_JOB = 2216;
     private static final long DAY_MS = 24L * 60 * 60 * 1000;
     private static final long DEFER_MS = 14 * 60_000L;
     private static final long BACKOFF_MS = 15 * 60_000L;
@@ -83,6 +84,43 @@ public final class AppUpdateJob extends JobService {
     static void check(Context context) {
         schedule(context, DAILY_JOB, false);
         schedule(context, CHECK_JOB, false);
+    }
+
+    static void checkFromPush(Context context, String value) {
+        int offered = AppUpdate.pushVersion(value);
+        if (offered == 0) {
+            Log.i(TAG, "update_push bad");
+            return;
+        }
+        long installed = installed(context);
+        synchronized (STATE_LOCK) {
+            SharedPreferences prefs = preferences(context);
+            long now = System.currentTimeMillis();
+            if (AppUpdate.shouldForce(offered, installed, prefs.getLong("forcedAt", 0), now)) {
+                prefs.edit().putLong("forcedAt", now).apply();
+                schedule(context, DAILY_JOB, false);
+                scheduleForcedCheck(context);
+                return;
+            }
+        }
+        Log.i(TAG, "update_push ordinary");
+        check(context);
+    }
+
+    private static void scheduleForcedCheck(Context context) {
+        JobScheduler scheduler = context.getSystemService(JobScheduler.class);
+        if (scheduler == null) return;
+        if (scheduler.getPendingJob(FORCED_CHECK_JOB) != null) return;
+        JobInfo.Builder builder = new JobInfo.Builder(FORCED_CHECK_JOB, new ComponentName(context, AppUpdateJob.class))
+            .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (submit(scheduler, builder.setExpedited(true).build())) {
+                Log.i(TAG, "update_push expedited");
+                return;
+            }
+            builder.setExpedited(false);
+        }
+        Log.i(TAG, submit(scheduler, builder.build()) ? "update_push fallback" : "update_push unavailable");
     }
 
     static void rearm(Context context) {
@@ -311,7 +349,7 @@ public final class AppUpdateJob extends JobService {
         long now = System.currentTimeMillis();
 
         boolean installOnly = installOnly(job);
-        if (!installOnly && AppUpdate.shouldCheck(prefs.getLong("checkedAt", 0), now)) {
+        if (!installOnly && (job == FORCED_CHECK_JOB || AppUpdate.shouldCheck(prefs.getLong("checkedAt", 0), now))) {
             CheckResponse response = ask(own.versionName, cancel);
             if (response.kind == AppUpdate.Check.SIGNED_OUT || response.kind == AppUpdate.Check.RETRY) return false;
             prefs.edit().putLong("checkedAt", System.currentTimeMillis()).apply();

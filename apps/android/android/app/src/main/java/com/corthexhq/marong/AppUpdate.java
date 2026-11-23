@@ -6,6 +6,8 @@ import java.util.regex.Pattern;
 /** Self-update rules shared by the job, result receiver and JVM tests (SPEC-289~297). */
 final class AppUpdate {
     static final long CHECK_INTERVAL_MS = 6L * 60 * 60 * 1000;
+    private static final long FORCED_INTERVAL_MS = 10 * 60_000L;
+    static final int MAX_VERSION = 2_100_000_000;
     static final long APK_MAX_BYTES = 200L * 1024 * 1024;
     static final int FAILURE_LIMIT = 3;
     static final String RELEASE_PATH = "/chat/api/app/release";
@@ -43,7 +45,7 @@ final class AppUpdate {
         long version = ((Number) code).longValue();
         long bytes = ((Number) size).longValue();
         String versionName = (String) name;
-        if (version < 1 || version > 2_100_000_000 || bytes < 1 || bytes > APK_MAX_BYTES
+        if (version < 1 || version > MAX_VERSION || bytes < 1 || bytes > APK_MAX_BYTES
                 || !VERSION_NAME.matcher(versionName).matches() || !SHA256.matcher((String) sha256).matches()) return null;
         String expected = "/chat/app/marong-" + versionName + "-" + version + ".apk";
         if (!expected.equals(url)) return null;
@@ -52,6 +54,16 @@ final class AppUpdate {
 
     static boolean shouldCheck(long checkedAt, long now) {
         return checkedAt <= 0 || now < checkedAt || now - checkedAt >= CHECK_INTERVAL_MS;
+    }
+
+    static int pushVersion(String value) {
+        if (value == null || !value.matches("[0-9]{1,10}")) return 0;
+        long code = Long.parseLong(value);
+        return code > MAX_VERSION ? 0 : (int) code;
+    }
+
+    static boolean shouldForce(int offered, long installed, long forcedAt, long now) {
+        return offered > installed && (forcedAt <= 0 || now < forcedAt || now - forcedAt >= FORCED_INTERVAL_MS);
     }
 
     static Check check(int status) {
