@@ -15,7 +15,8 @@
     "usage-limit",
     "call-connect",
     "pet-app",
-    "admin"
+    "admin",
+    "continuity"
   ],
   "records": {
     "kind": "notion",

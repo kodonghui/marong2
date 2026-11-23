@@ -1,0 +1,205 @@
+{
+  "format": 1,
+  "project": "marong",
+  "part": "continuity",
+  "stages": {
+    "01-domain": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 대기: 질문 1~8과 바뀌는 승인 항목 C-1~C-8을 항목마다 여쭘(docs/01-domain/continuity.md 7·8절). 답 전에는 승인 문서를 고치지 않음",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(대화 이어 주기). 근거: 동희님 2026-11-24 03시대 KST 마롱이 봇 채팅 원문1~3(docs/02-prd/continuity.md 출처 표기), 마롱이 봇 인계. 기준 main a39fef4",
+          "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "바뀜: CTX-004·002·001 규칙·정책, 새 TERM-260~263(직전 대화, 대화 이어 주기, 초기 대화 기록, 상대 시각 표기). 새 맥락 없음. docs/01-domain/continuity.md",
+          "at": "2026-11-24"
+        }
+      ],
+      "updated": "2026-11-23T18:29:30+00:00"
+    },
+    "02-prd": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 대기: 질문 1~8과 바뀌는 승인 항목 C-1~C-8을 항목마다 여쭘(docs/01-domain/continuity.md 7·8절). 답 전에는 승인 문서를 고치지 않음",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(대화 이어 주기). 근거: 동희님 2026-11-24 03시대 KST 마롱이 봇 채팅 원문1~3(docs/02-prd/continuity.md 출처 표기), 마롱이 봇 인계. 기준 main a39fef4",
+          "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "바뀜: 새 REQ-600~611(모두 proposed). 승인 REQ-022는 질문 4에 따라 뜻이 좁아짐(C-4). docs/02-prd/continuity.md",
+          "at": "2026-11-24"
+        }
+      ],
+      "updated": "2026-11-23T18:29:30+00:00"
+    },
+    "03-user-flow": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 대기: 질문 1~8과 바뀌는 승인 항목 C-1~C-8을 항목마다 여쭘(docs/01-domain/continuity.md 7·8절). 답 전에는 승인 문서를 고치지 않음",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(대화 이어 주기). 근거: 동희님 2026-11-24 03시대 KST 마롱이 봇 채팅 원문1~3(docs/02-prd/continuity.md 출처 표기), 마롱이 봇 인계. 기준 main a39fef4",
+          "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "바뀜: 새 FL-210(통화를 열 때 직전 대화 잇기), FL-211(통화 뒤 글 대화로 잇기). FL-002·007·010은 고치지 않음",
+          "at": "2026-11-24"
+        }
+      ],
+      "updated": "2026-11-23T18:29:30+00:00"
+    },
+    "04-functional-spec": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 대기: 질문 1~8과 바뀌는 승인 항목 C-1~C-8을 항목마다 여쭘(docs/01-domain/continuity.md 7·8절). 답 전에는 승인 문서를 고치지 않음",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(대화 이어 주기). 근거: 동희님 2026-11-24 03시대 KST 마롱이 봇 채팅 원문1~3(docs/02-prd/continuity.md 출처 표기), 마롱이 봇 인계. 기준 main a39fef4",
+          "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "바뀜: 새 SPEC-480~488(모두 proposed), AI 호출 셋의 입력 바뀜. 승인 SPEC-004·017·024·182와 SPEC-382의 바뀔 곳은 C-1~C-8로 따로 여쭘. docs/04-functional-spec/continuity.md",
+          "at": "2026-11-24"
+        }
+      ],
+      "updated": "2026-11-23T18:29:30+00:00"
+    },
+    "05-erd": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 대기: 질문 1~8과 바뀌는 승인 항목 C-1~C-8을 항목마다 여쭘(docs/01-domain/continuity.md 7·8절). 답 전에는 승인 문서를 고치지 않음",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(대화 이어 주기). 근거: 동희님 2026-11-24 03시대 KST 마롱이 봇 채팅 원문1~3(docs/02-prd/continuity.md 출처 표기), 마롱이 봇 인계. 기준 main a39fef4",
+          "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "바뀜 없음: 새 표·칸·마이그레이션 없음. 지금 marong.messages, call.turns, call.calls, call.cards, call.memories, call.transcript_report만 읽음. 카드 네 칸은 schema.sql:129-132에 이미 있음",
+          "at": "2026-11-24"
+        }
+      ],
+      "updated": "2026-11-23T18:29:30+00:00"
+    },
+    "06-api": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 대기: 질문 1~8과 바뀌는 승인 항목 C-1~C-8을 항목마다 여쭘(docs/01-domain/continuity.md 7·8절). 답 전에는 승인 문서를 고치지 않음",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(대화 이어 주기). 근거: 동희님 2026-11-24 03시대 KST 마롱이 봇 채팅 원문1~3(docs/02-prd/continuity.md 출처 표기), 마롱이 봇 인계. 기준 main a39fef4",
+          "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "바뀜 없음: 브라우저·앱 메시지(API-107)와 글 대화 API 그대로. 초기 대화 기록은 통화 서버와 Google 사이 메시지라 우리 계약 밖",
+          "at": "2026-11-24"
+        }
+      ],
+      "updated": "2026-11-23T18:29:30+00:00"
+    },
+    "07-sitemap": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 대기: 질문 1~8과 바뀌는 승인 항목 C-1~C-8을 항목마다 여쭘(docs/01-domain/continuity.md 7·8절). 답 전에는 승인 문서를 고치지 않음",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(대화 이어 주기). 근거: 동희님 2026-11-24 03시대 KST 마롱이 봇 채팅 원문1~3(docs/02-prd/continuity.md 출처 표기), 마롱이 봇 인계. 기준 main a39fef4",
+          "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "바뀜 없음: 새 화면·경로 없음",
+          "at": "2026-11-24"
+        }
+      ],
+      "updated": "2026-11-23T18:29:30+00:00"
+    },
+    "08-screen-states": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 대기: 질문 1~8과 바뀌는 승인 항목 C-1~C-8을 항목마다 여쭘(docs/01-domain/continuity.md 7·8절). 답 전에는 승인 문서를 고치지 않음",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(대화 이어 주기). 근거: 동희님 2026-11-24 03시대 KST 마롱이 봇 채팅 원문1~3(docs/02-prd/continuity.md 출처 표기), 마롱이 봇 인계. 기준 main a39fef4",
+          "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "바뀜 없음: 친구가 보는 화면 상태 그대로. SCR-004#normal은 이미 카드 다섯 칸을 정의함",
+          "at": "2026-11-24"
+        }
+      ],
+      "updated": "2026-11-23T18:29:30+00:00"
+    },
+    "09-mockup": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 대기: 질문 1~8과 바뀌는 승인 항목 C-1~C-8을 항목마다 여쭘(docs/01-domain/continuity.md 7·8절). 답 전에는 승인 문서를 고치지 않음",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(대화 이어 주기). 근거: 동희님 2026-11-24 03시대 KST 마롱이 봇 채팅 원문1~3(docs/02-prd/continuity.md 출처 표기), 마롱이 봇 인계. 기준 main a39fef4",
+          "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "바뀜 없음: 화면이 없어 토큰도 그대로",
+          "at": "2026-11-24"
+        }
+      ],
+      "updated": "2026-11-23T18:29:30+00:00"
+    },
+    "10-wbs": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 대기: 질문 1~8과 바뀌는 승인 항목 C-1~C-8을 항목마다 여쭘(docs/01-domain/continuity.md 7·8절). 답 전에는 승인 문서를 고치지 않음",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(대화 이어 주기). 근거: 동희님 2026-11-24 03시대 KST 마롱이 봇 채팅 원문1~3(docs/02-prd/continuity.md 출처 표기), 마롱이 봇 인계. 기준 main a39fef4",
+          "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "바뀜: 새 패키지 docs/10-wbs/continuity.md, TASK-520~533(Owner GPT, TASK-533만 Claude). 체크포인트 전이라 시작 불가",
+          "at": "2026-11-24"
+        }
+      ],
+      "updated": "2026-11-23T18:29:30+00:00"
+    },
+    "12-qa": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 대기: 질문 1~8과 바뀌는 승인 항목 C-1~C-8을 항목마다 여쭘(docs/01-domain/continuity.md 7·8절). 답 전에는 승인 문서를 고치지 않음",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(대화 이어 주기). 근거: 동희님 2026-11-24 03시대 KST 마롱이 봇 채팅 원문1~3(docs/02-prd/continuity.md 출처 표기), 마롱이 봇 인계. 기준 main a39fef4",
+          "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "바뀜: 새 TC-670~686(docs/12-qa/continuity.md). 기억 시험에 previous·date 대본(SPEC-488). real 시험은 질문 7의 한도 안",
+          "at": "2026-11-24"
+        }
+      ],
+      "updated": "2026-11-23T18:29:30+00:00"
+    }
+  }
+}
