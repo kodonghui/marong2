@@ -339,12 +339,13 @@ class MemoryStore:
             await self._record_operation(conn, call_id, segment, request_key, "forget", stored, [], 0)
             return result
 
-    async def start_call(self, p, client_id, voice, prompt_version, *, entrypoint='web'):
+    async def start_call(self, p, client_id, voice, prompt_version, *, entrypoint='web') -> tuple[str, bool, datetime]:
+        """Open or resume a logical call and return its original start time."""
         async with self.pool.connection() as c, c.transaction():
             caller = await c.execute('SELECT id FROM call.callers WHERE id=%s AND enabled FOR UPDATE', (p.caller_id,))
             if not await caller.fetchone():
                 raise PermissionError('caller_disabled')
-            cur = await c.execute("""SELECT id,entrypoint,status,client_id FROM call.calls
+            cur = await c.execute("""SELECT id,entrypoint,status,client_id,started_at FROM call.calls
                 WHERE caller_id=%s AND status<>'ended' AND deleted_at IS NULL FOR UPDATE""", (p.caller_id,))
             row = await cur.fetchone()
             if row:
@@ -353,7 +354,7 @@ class MemoryStore:
                 if same_call:
                     await c.execute("""UPDATE call.calls SET status='live',client_id=%s,last_beat_at=now()
                         WHERE id=%s""", (client_id, row['id']))
-                    return str(row['id']), True
+                    return str(row['id']), True, row['started_at']
                 if row['status'] == 'live':
                     raise CallBusy()
                 # A disconnected call from another entry point keeps its own history and memory scope.
@@ -363,8 +364,9 @@ class MemoryStore:
                     end_reason='beat_lost',organize_status='pending',organize_next_at=now() WHERE id=%s""",
                     (row['id'],))
             cur = await c.execute("""INSERT INTO call.calls(caller_id,client_id,prompt_version,voice,entrypoint)
-                VALUES(%s,%s,%s,%s,%s) RETURNING id""", (p.caller_id, client_id, prompt_version, voice, entrypoint))
-            return str((await cur.fetchone())['id']), False
+                VALUES(%s,%s,%s,%s,%s) RETURNING id,started_at""", (p.caller_id, client_id, prompt_version, voice, entrypoint))
+            row = await cur.fetchone()
+            return str(row['id']), False, row['started_at']
 
     async def can_resume_call(self, p, entrypoint, client_id):
         row = await self.one("""SELECT 1 FROM call.calls WHERE caller_id=%s AND entrypoint=%s

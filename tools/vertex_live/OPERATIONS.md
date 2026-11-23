@@ -116,3 +116,23 @@ WHERE deleted_at IS NULL AND status='ended' AND organize_status='failed' AND id 
 운영 PostgreSQL의 추가 로컬 인증 규칙은 `pg_hba.conf`의 `local marong marong_call peer map=marong_voice`, `pg_ident.conf`의 `marong_voice opc marong_call`이다. 원격 DB 포트나 DB 비밀번호 파일을 추가하지 않았다. 테스트 DB의 별도 규칙과 운영 규칙을 혼동하지 않는다.
 
 서버에만 남기는 항목: Google 키, LiveKit 비밀키, Cloudflare 인증 정보·허용 계정 목록, SSH 인증 파일, 카톡 데이터·DB 덤프. DB·코드 백업은 `/home/opc/marong-voice-backups/`에 유지한다. 비공개 통화 파생 자료가 생긴 뒤에는 카톡 보호 코드를 이전 버전으로 되돌리지 않는다.
+
+## 통화 기억 배포 검증
+
+BUG-118~122 후속 반영은 리뷰와 병합 뒤에 진행한다. 동작 수정은 `85567b1`, BUG-117의 구간 설정 변경은 별도 커밋 `7fe94a4`다. 통화가 없는 시간에 승인 범위의 파일로 아래 순서를 적용한다.
+
+1. `systemctl --user show marong-vertex-live -p WorkingDirectory --value`로 실제 릴리스의 `tools/vertex_live` 경로를 얻는다. DB와 현재 파일 및 사용자 유닛 설정을 백업하고 해시를 대조한다. 릴리스 루트에 정리기 import에 필요한 동일 버전의 `marong` 패키지가 있는지 확인한다. 되돌리기 스크립트 경로는 반영 전에 기록한다.
+2. 병합본의 `call_instruction.md`를 같은 디렉터리의 임시 파일을 거쳐 원자적으로 교체하고 SHA256을 확인한다. 웹 통화 서버는 다음 공급자 연결 때 이 파일을 읽는다. 비활성 디스코드 중계는 계속 정지하고, 중계를 되살릴 때 지시문과 코드 해시를 별도로 확인한다.
+3. 웹 통화 릴리스의 코드와 회귀 시험을 확인한 뒤 정리기의 사용자 유닛 drop-in에 `WorkingDirectory`를 1번 경로로, `PYTHONPATH`를 그 릴리스 루트로 둔다. 기존 `ExecStart`를 빈 값으로 초기화한 뒤 기존 로컬 Python으로 그 경로의 `organizer.py`를 실행하도록 설정한다. 기존 인증·DB 설정을 보존한다. 정리기에서 현재 꺼진 친구 기억 작업은 이 반영에서 활성화하지 않는다.
+4. `systemd-analyze --user verify marong-voice-memory.service`와 시작 전 import 확인을 거친다. 서버 반영 승인 후 사용자 유닛을 다시 읽고 재시작한다. PID의 작업 폴더와 실행 파일 SHA256, 서비스 상태, 5분 로그의 오류 수를 확인한다. 자연 발생 통화나 승인된 합성 통화에서 정리 상태를 확인한다. BUG-117을 별도로 반영하면 구간 설정도 확인한다.
+5. 되돌리려면 백업한 지시문·코드·유닛 설정을 복원하고, 그 반영에서 추가한 drop-in만 제거한 뒤 사용자 유닛을 다시 읽어 영향받은 서비스를 재시작한다. 카드 숨김과 검침 활성화는 이 절차에 포함하지 않는다.
+
+정리기 drop-in 예시다. `<release>`에 1번에서 확인한 실제 경로를 사용한다.
+
+```ini
+[Service]
+WorkingDirectory=%h/marong-deploy/<release>/voice-runtime/tools/vertex_live
+Environment=PYTHONPATH=%h/marong-deploy/<release>/voice-runtime
+ExecStart=
+ExecStart=%h/marong-vertex-test/venv-memory2/bin/python organizer.py
+```

@@ -44,13 +44,14 @@ async def main():
         seed=await mem.seed(p)
         ok('파란 우산' in seed and '노란 꽃' in seed and '자주색' not in seed and '주황색' not in seed,'Kakao to voice room scope')
         ok((await mem.recall(p,'우산'))['result']=='found','Kakao recall')
-        call,resumed=await mem.start_call(p,str(uuid.uuid4()),'Sulafat','test')
+        call,resumed,started=await mem.start_call(p,str(uuid.uuid4()),'Sulafat','test')
         seg=await mem.start_segment(p,call,str(uuid.uuid4()),'gemini-3.8-live')
-        same,again=await mem.start_call(p,str(uuid.uuid4()),'Sulafat','test')
+        same,again,original_start=await mem.start_call(p,str(uuid.uuid4()),'Sulafat','test')
+        assert original_start==started
         ok(same==call and again and not resumed,'one logical call survives reconnect')
         await mem.save_turn(p,call,seg,'old-preference','user','예전에는 홍차를 마실 계획이었어')
         old=await mem.remember(p,call,seg,'remember-old','예전에는 홍차를 마실 계획이었어')
-        quote='다음 주에는 라벤더 차를 마실 거야'
+        quote='다음 주에는 향긋한 라벤더 차를 마실 거야'
         tid=await mem.save_turn(p,call,seg,'user-1','user',quote)
         await mem.save_turn(p,call,seg,'ai-1','assistant','사용자는 달나라 여행을 예약했다')
         ok((await mem.remember(p,call,seg,'bad','달나라 여행'))['result']=='not_saved','assistant hallucination cannot be remembered')

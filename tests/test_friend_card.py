@@ -214,7 +214,7 @@ async def scenario(db, store):
             prefix = await voice.friend_instruction(Principal(caller, 1, "fixture"))
         assert "아주 짧게 답할게." in prefix and "시험 지침" not in prefix and "친구 규칙" in prefix
         assert await voice.friend_instruction(Principal(caller, 1, "fixture")) == ""
-        call, _ = await voice.start_call(Principal(caller, 1, "fixture"), "00000000-0000-4000-8000-000000000001", "fixture", "fixture")
+        call, *_ = await voice.start_call(Principal(caller, 1, "fixture"), "00000000-0000-4000-8000-000000000001", "fixture", "fixture")
         bridge = CallSafety(voice, Principal(caller, 1, "fixture"), call, AsyncMock(), "fixture")
         assert await bridge.caption("fixture-partial", "user", "약 모아 놨어", False) is None
         prompt = await bridge.caption("fixture-signal", "user", "약 모아 놨어", True)

@@ -15,6 +15,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from call_memory import MemoryStore,Principal,normalized,quoted
+from memory_tools import CALL_GREETING_TEXT
 from vertex_transport import PROJECT,google_headers
 
 TEXT_MODEL='gemini-3.8-flash'
@@ -120,12 +121,15 @@ class Organizer:
         call_id=state['call_id'];started=time.monotonic()
         turns=await self.store.all("""SELECT t.id,t.role,t.content FROM call.turns t JOIN call.calls c ON c.id=t.call_id
           WHERE t.call_id=%s AND c.caller_id=%s AND c.deleted_at IS NULL AND t.finalized
-          AND NOT t.interrupted AND t.forgotten_at IS NULL""" + self.store.keep_source("call_turn", "t.id") +
-          " ORDER BY t.seq DESC LIMIT 1000",(call_id,state['caller_id']))
+          AND NOT t.interrupted AND t.forgotten_at IS NULL
+          AND NOT (t.role='user' AND COALESCE(t.turn_key, '') LIKE 'text:%%' AND t.content=%s)"""
+          + self.store.keep_source("call_turn", "t.id") +
+          " ORDER BY t.seq DESC LIMIT 1000",(call_id,state['caller_id'],CALL_GREETING_TEXT))
         turns.reverse();trimmed=False
         while sum(len(t['content']) for t in turns)>150000:turns.pop(0);trimmed=True
         users=[t for t in turns if t['role']=='user']
-        result,usage=await self.extractor(turns) if users else ({'summary':'','memories':[]},{})
+        has_enough_user_text = sum(len(normalized(t['content'])) for t in users) >= 20
+        result,usage=await self.extractor(turns) if has_enough_user_text else ({'memories':[]},{})
         verified=[]
         for item in result['memories'][:8]:
             if not isinstance(item,dict):continue
@@ -144,7 +148,7 @@ class Organizer:
             cur=await c.execute('SELECT organize_status FROM call.calls WHERE id=%s AND caller_id=%s AND deleted_at IS NULL FOR UPDATE',(call_id,state['caller_id']))
             row=await cur.fetchone()
             if not row:return {'saved':0}
-            if row['organize_status']=='done':return {'saved':0}
+            if row['organize_status'] in ('done','skipped'):return {'saved':0}
             # Recheck source eligibility after generation, under the caller lock.
             for quote,turn_id in verified:
                 cur=await c.execute('SELECT 1 FROM call.turns WHERE id=%s AND forgotten_at IS NULL AND finalized',(turn_id,))
@@ -155,16 +159,17 @@ class Organizer:
             # Cards remain extractive too: an invented model summary must never
             # become evidence for the next Kakao conversation.
             summary=' · '.join(q for q,_ in verified)[:400]
-            if not summary:summary=' · '.join(normalized(t['content']) for t in users[-3:])[:400]
-            if summary and users:
+            if has_enough_user_text and not summary:summary=' · '.join(normalized(t['content']) for t in users[-3:])[:400]
+            if summary:
                 await c.execute("""INSERT INTO call.cards(call_id,summary,truncated,model,prompt_version)
                   VALUES(%s,%s,%s,%s,%s) ON CONFLICT(call_id) DO UPDATE SET summary=EXCLUDED.summary,
                   truncated=EXCLUDED.truncated,updated_at=now() WHERE call.cards.forgotten_at IS NULL""",(call_id,summary,trimmed,TEXT_MODEL,PROMPT))
-            await c.execute("UPDATE call.calls SET organize_status=%s,organized_at=now(),organize_lease_until=NULL WHERE id=%s",('done' if users else 'skipped',call_id))
+            await c.execute("UPDATE call.calls SET organize_status=%s,organized_at=now(),organize_lease_until=NULL WHERE id=%s",('done' if has_enough_user_text else 'skipped',call_id))
             if self.friend_memory_enabled and users:
                 await self.reserve_friend_memory(c, call_id, state["caller_id"])
-            await c.execute("""INSERT INTO call.ai_runs(kind,call_id,trace_id,model,prompt_version,thinking,sent_at,total_ms,input_tokens,output_tokens,thoughts_tokens,outcome)
-              VALUES('organize',%s,%s,%s,%s,'LOW',now(),%s,%s,%s,%s,'ok')""",(call_id,'organize:'+call_id,TEXT_MODEL,PROMPT,round((time.monotonic()-started)*1000),usage.get('promptTokenCount'),usage.get('candidatesTokenCount'),usage.get('thoughtsTokenCount')))
+            if has_enough_user_text:
+                await c.execute("""INSERT INTO call.ai_runs(kind,call_id,trace_id,model,prompt_version,thinking,sent_at,total_ms,input_tokens,output_tokens,thoughts_tokens,outcome)
+                  VALUES('organize',%s,%s,%s,%s,'LOW',now(),%s,%s,%s,%s,'ok')""",(call_id,'organize:'+call_id,TEXT_MODEL,PROMPT,round((time.monotonic()-started)*1000),usage.get('promptTokenCount'),usage.get('candidatesTokenCount'),usage.get('thoughtsTokenCount')))
         return {'saved':len(verified)}
 
     @staticmethod
