@@ -62,5 +62,5 @@ for f in tools/vertex_live/test_*.py; do .venv/bin/python "$f" || exit 1; done  
 
 | TASK | 상태 | 커밋 | 확인한 것 |
 | --- | --- | --- | --- |
-| TASK-490 | 구현·검토 대기 | `95a68be` | TC-631 통과. TC-632는 011 두 번 적용, 함수·표 권한, `search_path`, `BEGIN ATOMIC`, 임시 표를 둔 세션에서 결과가 같음을 확인 |
+| TASK-490 | 구현·검토 대기 | `95a68be`·`5c6bd05` | TC-631 통과. TC-632는 011 두 번 적용, 함수·표 권한, `search_path`, `BEGIN ATOMIC`, 임시 표와 값 제약이 있는 같은 이름의 임시 도메인을 둔 세션에서 결과 동일 확인 |
 | TASK-491 | 구현·검토 대기 | `95a68be` | TC-622~625 통과. API-280 응답 200·403·500·503과 한 연결에서 순차 읽기 확인 |
