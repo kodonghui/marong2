@@ -180,17 +180,22 @@ async function main() {
     await waitFor(() => site.updateRequests.some((request) => request.path.endsWith('/release')),
       120_000, 'Warm-up release request did not arrive');
     await waitFor(() => jobState(2210) === 'absent', 30_000, 'Warm-up check still pending');
-    adb('shell', 'input', 'keyevent', 'KEYCODE_HOME');
-    await waitFor(() => /topResumedActivity=.*Launcher/.test(adb('shell', 'dumpsys', 'activity', 'activities')),
-      10_000, 'The launcher did not take over from the warm-up activity');
     let foreignTask;
     if (mode === 'foreign-task') {
+      adb('shell', 'input', 'keyevent', 'KEYCODE_HOME');
+      await waitFor(() => /topResumedActivity=.*Launcher/.test(adb('shell', 'dumpsys', 'activity', 'activities')),
+        10_000, 'The launcher did not take over from the warm-up activity');
       adb('shell', 'am', 'start', '-a', 'android.settings.SETTINGS');
       await waitFor(() => {
         foreignTask = adb('shell', 'dumpsys', 'activity', 'activities')
           .match(/topResumedActivity=.* com\.android\.settings\/\S+ t(\d+)}/)?.[1];
         return foreignTask !== undefined;
       }, 10_000, 'No foreground Settings task to host the app window');
+    } else {
+      // Launcher extras alone do not give a background Activity the privileges of a notification tap.
+      await waitFor(() => /topResumedActivity=.*com\.corthexhq\.marong\/\.MainActivity\b/.test(
+        adb('shell', 'dumpsys', 'activity', 'activities')),
+      30_000, 'The call window is not in the foreground before opening the chat');
     }
     site.updateRequests.length = 0;
     update.release = {
@@ -205,6 +210,11 @@ async function main() {
       await waitFor(() => top.test(adb('shell', 'dumpsys', 'activity', 'activities')),
         10_000, 'The app window is not visible in the foreign task');
       console.log('visible_in_settings_task=true');
+    } else {
+      await waitFor(() => /topResumedActivity=.*com\.corthexhq\.marong\/\.ChatActivity\b/.test(
+        adb('shell', 'dumpsys', 'activity', 'activities')),
+      30_000, 'The chat window is not in the foreground before waiting for the deferred install');
+      console.log('chat_visible_before_install=true');
     }
     await waitFor(() => site.updateRequests.some((request) => request.path === APK_PATH),
       60_000, 'Release APK was not downloaded');
