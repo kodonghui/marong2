@@ -25,6 +25,17 @@ public class CallService extends Service {
     static final String ACTION_HANG_UP = "com.corthexhq.marong.action.HANG_UP";
     static final String CHANNEL_ID = "call";
     static final int NOTIFICATION_ID = 101;
+    private static volatile boolean running;
+
+    static boolean isRunning() {
+        return running;
+    }
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        running = true;
+    }
 
     /**
      * Starts the service while the app is in the foreground. Uses startService, not
@@ -79,6 +90,7 @@ public class CallService extends Service {
 
     @Override
     public void onDestroy() {
+        running = false;
         super.onDestroy();
         AppUpdateJob.retryWhenQuiet(this);
     }

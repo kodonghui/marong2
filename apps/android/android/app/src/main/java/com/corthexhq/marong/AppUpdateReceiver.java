@@ -16,15 +16,22 @@ import androidx.core.app.NotificationCompat;
 /** Install results and cleanup after Android replaces the package (SPEC-296~298). */
 public final class AppUpdateReceiver extends BroadcastReceiver {
     static final String RESULT = "com.corthexhq.marong.APP_UPDATE_RESULT";
+    static final String RETRY = "com.corthexhq.marong.APP_UPDATE_RETRY";
     static final String VERSION = "versionCode";
     static final String SESSION = "sessionId";
     static final int NOTIFICATION_ID = 301;
 
     @Override
     public void onReceive(Context context, Intent intent) {
+        if (RETRY.equals(intent.getAction())) {
+            PendingResult pending = goAsync();
+            AppUpdateJob.backupAlarmFired(context.getApplicationContext(), pending::finish);
+            return;
+        }
         SharedPreferences prefs = AppUpdateJob.preferences(context);
         synchronized (AppUpdateJob.STATE_LOCK) {
             if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(intent.getAction())) {
+                AppUpdateJob.cancelBackupAlarm(context);
                 Channels.ensure(context);
                 AppUpdateJob.rearm(context);
                 AppUpdateJob.clean(context, -1);

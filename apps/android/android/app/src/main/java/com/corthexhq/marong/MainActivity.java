@@ -39,6 +39,7 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        AppUpdateWindows.track(this);
         // Plugins load before the WebView opens the call page (SPEC-102); the window's own handling first.
         registerPlugin(MarongWindowPlugin.class);
         registerPlugin(MarongCallPlugin.class);

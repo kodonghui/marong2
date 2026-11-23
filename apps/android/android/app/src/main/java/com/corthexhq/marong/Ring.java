@@ -1,6 +1,7 @@
 package com.corthexhq.marong;
 
 import android.app.Notification;
+import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
@@ -9,6 +10,7 @@ import android.media.AudioManager;
 import android.media.RingtoneManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.service.notification.StatusBarNotification;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
@@ -38,6 +40,11 @@ final class Ring {
 
     private static final String TAG = "MarongRing";
     static final int NOTIFICATION_ID = 201;
+    private static volatile long alertEndsAt;
+
+    static boolean alertInProgress() {
+        return SystemClock.elapsedRealtime() < alertEndsAt;
+    }
 
     private Ring() {}
 
@@ -134,7 +141,19 @@ final class Ring {
         notification.flags |= Notification.FLAG_INSISTENT; // the ringtone repeats until answered or stopped
 
         try {
-            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification);
+            synchronized (AppUpdateJob.STATE_LOCK) {
+                NotificationManagerCompat manager = NotificationManagerCompat.from(context);
+                manager.notify(NOTIFICATION_ID, notification);
+                boolean enabled = manager.areNotificationsEnabled();
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    NotificationChannel channel = manager.getNotificationChannel(Channels.RING);
+                    enabled = enabled && channel != null && channel.getImportance() != NotificationManager.IMPORTANCE_NONE;
+                }
+                if (enabled) {
+                    // The notification can become observable after notify() returns.
+                    alertEndsAt = SystemClock.elapsedRealtime() + RING_MS;
+                }
+            }
             AppUpdateJob.observeRingExpiry(context);
             Logger.info(TAG, "ring_shown reason=" + reason);
         } catch (SecurityException | IllegalArgumentException e) {
@@ -168,7 +187,10 @@ final class Ring {
 
     /** Stops the ring: answered, declined, or a call started (SPEC-132, SPEC-133). */
     static void cancel(Context context) {
-        NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID);
+        synchronized (AppUpdateJob.STATE_LOCK) {
+            NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID);
+            alertEndsAt = 0;
+        }
         AppUpdateJob.retryWhenQuiet(context);
         RingActivity.closeShown();
     }

@@ -25,6 +25,7 @@ public class ChatActivity extends BridgeActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        AppUpdateWindows.track(this);
         registerPlugin(MarongWindowPlugin.class);
         registerPlugin(MarongPushPlugin.class);
         config = chatConfig();

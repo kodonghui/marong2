@@ -1,6 +1,6 @@
 package com.corthexhq.marong;
 
-import android.app.ActivityManager;
+import android.app.AlarmManager;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.job.JobInfo;
@@ -20,6 +20,7 @@ import android.os.CancellationSignal;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.OperationCanceledException;
+import android.os.SystemClock;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
 import android.webkit.CookieManager;
@@ -45,8 +46,12 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /** Fetches, verifies and installs a release outside the UI thread (SPEC-289~295). */
 public final class AppUpdateJob extends JobService {
@@ -56,10 +61,16 @@ public final class AppUpdateJob extends JobService {
     static final int INSTALL_JOB = 2212;
     private static final int QUIET_INSTALL_JOB = 2213;
     private static final int RING_EXPIRY_JOB = 2214;
+    private static final int ALARM_INSTALL_JOB = 2215;
     private static final long DAY_MS = 24L * 60 * 60 * 1000;
-    private static final long DEFER_MS = 15L * 60 * 1000;
+    private static final long DEFER_MS = 14 * 60_000L;
+    private static final long BACKOFF_MS = 15 * 60_000L;
+    private static final long FIRST_ALARM_MS = 2 * 60_000L;
+    private static final long NEXT_ALARM_MS = 5 * 60_000L;
+    private static final int ALARM_FLAGS = PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_ONE_SHOT;
     private static final int BUFFER_SIZE = 65536;
     static final Object STATE_LOCK = new Object();
+    private static final ScheduledExecutorService RETRIES = Executors.newSingleThreadScheduledExecutor();
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -81,22 +92,108 @@ public final class AppUpdateJob extends JobService {
     static void retryWhenQuiet(Context source) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return;
         Context context = source.getApplicationContext();
-        // Android's process importance and service notification can lag a lifecycle callback.
-        new Handler(Looper.getMainLooper()).postDelayed(() -> scheduleQuietInstall(context), 900);
+        RETRIES.execute(() -> {
+            if (!hasStagedInstall(context) || scheduleQuietInstall(context)) return;
+            // The window and notification state can change after the lifecycle callback returns.
+            RETRIES.schedule(() -> {
+                if (hasStagedInstall(context)) scheduleQuietInstall(context);
+            }, 900, TimeUnit.MILLISECONDS);
+        });
     }
 
-    private static void scheduleQuietInstall(Context context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return;
+    private static boolean scheduleQuietInstall(Context context) {
+        if (!quiet(context)) return false;
         JobScheduler scheduler = context.getSystemService(JobScheduler.class);
-        if (scheduler == null || scheduler.getPendingJob(INSTALL_JOB) == null
-                || scheduler.getPendingJob(QUIET_INSTALL_JOB) != null || !quiet(context)) return;
-        Candidate cached = candidate(preferences(context));
-        if (cached == null || !apk(context, cached.release.code).isFile()) return;
-        JobInfo job = new JobInfo.Builder(QUIET_INSTALL_JOB, new ComponentName(context, AppUpdateJob.class))
-            .setExpedited(true).build();
-        if (scheduler.schedule(job) != JobScheduler.RESULT_SUCCESS) {
-            Log.i(TAG, "update_install expedited_unavailable");
+        if (scheduler == null) return false;
+        if (scheduler.getPendingJob(QUIET_INSTALL_JOB) != null) return true;
+        boolean scheduled = scheduleInstallTrigger(context, scheduler, QUIET_INSTALL_JOB, false);
+        Log.i(TAG, scheduled ? "update_install expedited_scheduled" : "update_install expedited_unavailable");
+        return scheduled;
+    }
+
+    private static boolean hasStagedInstall(Context context) {
+        SharedPreferences prefs = preferences(context);
+        Candidate cached = candidate(prefs);
+        if (cached == null || !apk(context, cached.release.code).isFile()) return false;
+        boolean permissionGranted = cached.permissionBlocked && !installPermissionMissing(context);
+        if (cached.permissionBlocked && !permissionGranted
+                && prefs.getInt("notified", -1) == cached.release.code) return false;
+        return cached.session < 0 || permissionGranted
+            || context.getPackageManager().getPackageInstaller().getSessionInfo(cached.session) == null;
+    }
+
+    private static boolean scheduleInstallTrigger(Context context, JobScheduler scheduler, int id, boolean allowOrdinary) {
+        ComponentName service = new ComponentName(context, AppUpdateJob.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                && submit(scheduler, new JobInfo.Builder(id, service).setExpedited(true).build())) return true;
+        return allowOrdinary && submit(scheduler, new JobInfo.Builder(id, service).build());
+    }
+
+    private static boolean submit(JobScheduler scheduler, JobInfo job) {
+        try {
+            return scheduler.schedule(job) == JobScheduler.RESULT_SUCCESS;
+        } catch (IllegalStateException | SecurityException error) {
+            return false;
         }
+    }
+
+    static void backupAlarmFired(Context context, Runnable completion) {
+        RETRIES.execute(() -> {
+            try {
+                // A window check may need the main thread, so take it before locking candidate state.
+                boolean ready = quiet(context);
+                synchronized (STATE_LOCK) {
+                    if (!hasStagedInstall(context)) return;
+                    Log.i(TAG, "update_install alarm_fired");
+                    // The process can be reclaimed as soon as the app stops being busy.
+                    armBackupAlarmLocked(context, ready ? NEXT_ALARM_MS : FIRST_ALARM_MS);
+                    if (!ready) {
+                        Log.i(TAG, "update_install alarm_busy");
+                        return;
+                    }
+                    JobScheduler scheduler = context.getSystemService(JobScheduler.class);
+                    if (scheduler == null || scheduler.getPendingJob(ALARM_INSTALL_JOB) != null) return;
+                    if (!scheduleInstallTrigger(context, scheduler, ALARM_INSTALL_JOB, true)) {
+                        Log.i(TAG, "update_install alarm_job_unavailable");
+                    }
+                }
+            } finally {
+                completion.run();
+            }
+        });
+    }
+
+    private static PendingIntent backupIntent(Context context, int flags) {
+        Intent intent = new Intent(context, AppUpdateReceiver.class).setAction(AppUpdateReceiver.RETRY);
+        return PendingIntent.getBroadcast(context, 0, intent, ALARM_FLAGS | flags);
+    }
+
+    private static void armBackupAlarm(Context context, long delay) {
+        synchronized (STATE_LOCK) {
+            if (hasStagedInstall(context)) armBackupAlarmLocked(context, delay);
+        }
+    }
+
+    private static void armBackupAlarmLocked(Context context, long delay) {
+        AlarmManager alarms = context.getSystemService(AlarmManager.class);
+        if (alarms == null || backupIntent(context, PendingIntent.FLAG_NO_CREATE) != null) return;
+        PendingIntent pending = backupIntent(context, 0);
+        try {
+            alarms.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                SystemClock.elapsedRealtime() + delay, pending);
+            Log.i(TAG, "update_install alarm_armed delay_ms=" + delay);
+        } catch (SecurityException error) {
+            pending.cancel();
+            Log.i(TAG, "update_install alarm_unavailable");
+        }
+    }
+
+    static void cancelBackupAlarm(Context context) {
+        PendingIntent pending = backupIntent(context, PendingIntent.FLAG_NO_CREATE);
+        if (pending == null) return;
+        AlarmManager alarms = context.getSystemService(AlarmManager.class);
+        if (alarms != null) alarms.cancel(pending);
+        pending.cancel();
     }
 
     static void observeRingExpiry(Context context) {
@@ -122,11 +219,14 @@ public final class AppUpdateJob extends JobService {
         JobInfo.Builder builder = new JobInfo.Builder(job, new ComponentName(context, AppUpdateJob.class));
         if (job == INSTALL_JOB) {
             builder.setMinimumLatency(DEFER_MS);
-            builder.setBackoffCriteria(DEFER_MS, JobInfo.BACKOFF_POLICY_LINEAR);
+            builder.setOverrideDeadline(DEFER_MS);
+            builder.setBackoffCriteria(BACKOFF_MS, JobInfo.BACKOFF_POLICY_LINEAR);
         } else builder.setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY);
         if (job == DAILY_JOB) builder.setPeriodic(DAY_MS);
-        if (scheduler.schedule(builder.build()) != JobScheduler.RESULT_SUCCESS) {
-            Log.i(TAG, "update_check scheduling_failed");
+        if (!submit(scheduler, builder.build())) {
+            Log.i(TAG, job == INSTALL_JOB ? "update_install backup_unavailable" : "update_check scheduling_failed");
+        } else if (job == INSTALL_JOB) {
+            Log.i(TAG, "update_install backup_scheduled");
         }
     }
 
@@ -134,7 +234,7 @@ public final class AppUpdateJob extends JobService {
     public boolean onStartJob(JobParameters params) {
         int job = params.getJobId();
         if (job == RING_EXPIRY_JOB) {
-            scheduleQuietInstall(this);
+            retryWhenQuiet(this);
             return false;
         }
         CancellationSignal cancel = new CancellationSignal();
@@ -143,7 +243,12 @@ public final class AppUpdateJob extends JobService {
         executor.execute(() -> {
             boolean defer = false;
             try {
+                if (installOnly(job)) Log.i(TAG, "update_install started job=" + job);
                 defer = update(job, cancel);
+                if (defer) {
+                    cancel.throwIfCanceled();
+                    armBackupAlarm(this, FIRST_ALARM_MS);
+                }
             } catch (OperationCanceledException ignored) {
                 // onStopJob decides whether JobScheduler should retry.
             } catch (Exception error) {
@@ -154,7 +259,12 @@ public final class AppUpdateJob extends JobService {
                     if (active.get(job) != cancel) return;
                     active.remove(job);
                     jobFinished(params, false);
-                    if (retryInstall) schedule(this, INSTALL_JOB, job == INSTALL_JOB);
+                    if (retryInstall) RETRIES.execute(() -> {
+                        if (!hasStagedInstall(this)) return;
+                        schedule(this, INSTALL_JOB, job == INSTALL_JOB);
+                        // The last activity may have stopped before the backup triggers were armed.
+                        if (job != QUIET_INSTALL_JOB && job != ALARM_INSTALL_JOB) retryWhenQuiet(this);
+                    });
                 });
             }
         });
@@ -186,6 +296,10 @@ public final class AppUpdateJob extends JobService {
         super.onDestroy();
     }
 
+    private static boolean installOnly(int job) {
+        return job == INSTALL_JOB || job == QUIET_INSTALL_JOB || job == ALARM_INSTALL_JOB;
+    }
+
     private boolean update(int job, CancellationSignal cancel) throws IOException, PackageManager.NameNotFoundException {
         cancel.throwIfCanceled();
         PackageManager manager = getPackageManager();
@@ -196,7 +310,7 @@ public final class AppUpdateJob extends JobService {
         AppUpdate.Release release = cached == null ? null : cached.release;
         long now = System.currentTimeMillis();
 
-        boolean installOnly = job == INSTALL_JOB || job == QUIET_INSTALL_JOB;
+        boolean installOnly = installOnly(job);
         if (!installOnly && AppUpdate.shouldCheck(prefs.getLong("checkedAt", 0), now)) {
             CheckResponse response = ask(own.versionName, cancel);
             if (response.kind == AppUpdate.Check.SIGNED_OUT || response.kind == AppUpdate.Check.RETRY) return false;
@@ -210,6 +324,10 @@ public final class AppUpdateJob extends JobService {
         }
 
         if (release == null || !AppUpdate.eligible(release.code, installed, failures(prefs, release.code))) return false;
+        if (installOnly && !quiet(this)) {
+            Log.i(TAG, "update_install deferred_before_verify job=" + job);
+            return true;
+        }
         File apk = apk(this, release.code);
         if (cached == null || !cached.release.sameAs(release)) {
             discard(this, prefs, cached, release.code);
@@ -247,12 +365,19 @@ public final class AppUpdateJob extends JobService {
                 // The receiver finished while the file was being checked.
                 return false;
             }
-            if (latest != null && latest.release.sameAs(release)) cached = latest;
-            save(prefs, cached);
+            if (latest != null && latest.release.sameAs(release)) {
+                cached = latest;
+            } else if (!candidateEdit(prefs, cached).commit()) {
+                Log.i(TAG, "update_install candidate_unavailable");
+                return false;
+            }
         }
         if (cached.permissionBlocked && installPermissionMissing(this)
                 && prefs.getInt("notified", -1) == release.code) return false;
-        if (!quiet(this)) return true;
+        if (!installOnly && !quiet(this)) {
+            Log.i(TAG, "update_install deferred code=" + release.code);
+            return true;
+        }
         return install(cached, apk, cancel);
     }
 
@@ -337,9 +462,7 @@ public final class AppUpdateJob extends JobService {
     }
 
     private static boolean quiet(Context context) {
-        ActivityManager.RunningAppProcessInfo process = new ActivityManager.RunningAppProcessInfo();
-        ActivityManager.getMyMemoryState(process);
-        boolean visible = process.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE;
+        if (CallControl.isActive() || CallService.isRunning() || Ring.alertInProgress()) return false;
         NotificationManager manager = context.getSystemService(NotificationManager.class);
         if (manager == null) return false;
         boolean calling = false;
@@ -348,7 +471,41 @@ public final class AppUpdateJob extends JobService {
             calling |= notification.getId() == CallService.NOTIFICATION_ID;
             ringing |= notification.getId() == Ring.NOTIFICATION_ID;
         }
-        return AppUpdate.quiet(calling, ringing, visible);
+        return AppUpdate.quiet(calling, ringing, AppUpdateWindows.visible(context));
+    }
+
+    private enum Commit { SUBMITTED, DEFERRED, STALE }
+
+    private Commit commitOnMain(SharedPreferences prefs, AppUpdate.Release release, PackageInstaller.Session session,
+                                int sessionId, PendingIntent callback, CancellationSignal cancel) {
+        CompletableFuture<Commit> result = new CompletableFuture<>();
+        if (!main.post(() -> {
+            try {
+                synchronized (STATE_LOCK) {
+                    cancel.throwIfCanceled();
+                    Candidate latest = candidate(prefs);
+                    if (latest == null || !latest.release.sameAs(release)) {
+                        result.complete(Commit.STALE);
+                    } else if (!quiet(this)) {
+                        result.complete(Commit.DEFERRED);
+                    } else {
+                        // Activity and call-service callbacks cannot interleave on the main thread.
+                        // The worker retains the open session until this decision is complete.
+                        save(prefs, new Candidate(release, sessionId, false, false));
+                        session.commit(callback.getIntentSender());
+                        result.complete(Commit.SUBMITTED);
+                    }
+                }
+            } catch (RuntimeException error) {
+                result.completeExceptionally(error);
+            }
+        })) return Commit.DEFERRED;
+        try {
+            return result.join();
+        } catch (CompletionException error) {
+            if (error.getCause() instanceof RuntimeException) throw (RuntimeException) error.getCause();
+            throw error;
+        }
     }
 
     private boolean install(Candidate candidate, File apk, CancellationSignal cancel) {
@@ -395,17 +552,15 @@ public final class AppUpdateJob extends JobService {
                 int flags = PendingIntent.FLAG_UPDATE_CURRENT;
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) flags |= PendingIntent.FLAG_MUTABLE;
                 PendingIntent callback = PendingIntent.getBroadcast(this, sessionId, result, flags);
-                synchronized (STATE_LOCK) {
-                    cancel.throwIfCanceled();
-                    // The app may have become visible while the installer session was staged.
-                    if (!quiet(this)) {
-                        callback.cancel();
-                        return true;
-                    }
-                    save(prefs, new Candidate(release, sessionId, false, false));
-                    session.commit(callback.getIntentSender());
-                    committed = true;
+                Commit outcome = commitOnMain(prefs, release, session, sessionId, callback, cancel);
+                if (outcome != Commit.SUBMITTED) {
+                    callback.cancel();
+                    if (outcome == Commit.DEFERRED) Log.i(TAG, "update_install deferred_before_commit");
+                    return outcome == Commit.DEFERRED;
                 }
+                committed = true;
+                cancelBackupAlarm(this);
+                Log.i(TAG, "update_install committed code=" + release.code);
             }
         } catch (IOException | RuntimeException error) {
             if (error instanceof OperationCanceledException) throw (OperationCanceledException) error;
@@ -522,13 +677,17 @@ public final class AppUpdateJob extends JobService {
     }
 
     static void save(SharedPreferences prefs, Candidate candidate) {
+        candidateEdit(prefs, candidate).apply();
+    }
+
+    private static SharedPreferences.Editor candidateEdit(SharedPreferences prefs, Candidate candidate) {
         AppUpdate.Release release = candidate.release;
         try {
             JSONObject data = new JSONObject()
                 .put("versionCode", release.code).put("versionName", release.name).put("size", release.size)
                 .put("sha256", release.sha256).put("url", release.url).put("session", candidate.session)
                 .put("waitingForUser", candidate.waitingForUser).put("permissionBlocked", candidate.permissionBlocked);
-            prefs.edit().putString("release", data.toString()).apply();
+            return prefs.edit().putString("release", data.toString());
         } catch (JSONException error) {
             throw new IllegalStateException(error);
         }
@@ -548,6 +707,7 @@ public final class AppUpdateJob extends JobService {
 
     static void fail(Context context, SharedPreferences prefs, int version) {
         synchronized (STATE_LOCK) {
+            cancelBackupAlarm(context);
             clean(context, -1);
             prefs.edit().remove("release").putInt("fail." + version, AppUpdate.afterFailure(failures(prefs, version))).apply();
         }
@@ -555,6 +715,7 @@ public final class AppUpdateJob extends JobService {
 
     private static void discard(Context context, SharedPreferences prefs, Candidate candidate, int keep) {
         synchronized (STATE_LOCK) {
+            cancelBackupAlarm(context);
             prefs.edit().remove("release").apply();
             clean(context, keep);
             if (candidate == null || candidate.session < 0) return;
