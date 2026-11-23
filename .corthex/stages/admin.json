@@ -357,6 +357,24 @@
       ],
       "updated": "2026-11-23T06:43:58+00:00"
     },
+    "11-development": {
+      "state": "done",
+      "checkpoints": [],
+      "next": "TC-639의 관리자 인증 화면과 아이폰·노트북 확인을 동희님이 해요.",
+      "checks": [
+        {
+          "level": "info",
+          "message": "PR #116 병합 46b4835501330f291362bf9ddbc1a1b366cc4944, PR #117 병합 ad7226b2c0d91a9e2561b77e97c1df6f66b46a5d.",
+          "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "TASK-500 ko-family 반영 2026-11-24 03:32:36 KST. 통화 DB 011, 앱 파일 8개. 백업 ~/marong-deploy/20261124-admin.bQpgBC6N/backup/, 복구 ~/marong-deploy/20261124-admin.bQpgBC6N/rollback.sh.",
+          "at": "2026-11-24"
+        }
+      ],
+      "updated": "2026-11-23T18:37:36+00:00"
+    },
     "12-qa": {
       "state": "done",
       "checkpoints": [
@@ -373,7 +391,7 @@
           "date": "2026-11-23"
         }
       ],
-      "next": "구현은 0.3.4 뒤 TASK-490부터(docs/10-wbs/admin.md의 GPT 인계대로, 노트북 폭 넓은 배치 포함). 언제 시작할지는 동희님이 정해요. 앱 버전 화면(TASK-496)은 앱 업데이트 TASK-480 반영 뒤예요",
+      "next": "동희님이 운영 관리자 로그인으로 TC-639를 아이폰과 노트북에서 확인해요.",
       "checks": [
         {
           "level": "info",
@@ -394,9 +412,14 @@
           "level": "info",
           "message": "노트북 폭 기능 변경(D140) 체크포인트 통과(D141~D144, 2026-11-23): 제안 표시를 지우고 답을 적음(PR #109)",
           "at": "2026-11-23"
+        },
+        {
+          "level": "info",
+          "message": "TC-639 운영 비인증 확인. ad7226b2c0d91a9e2561b77e97c1df6f66b46a5d, 2026-11-24 03:32:36 KST. health 200, 화면 일곱과 개요 API 403, 외부 Access 302, 300초 ERROR 0건. 달 비용 함수 1행·non-null, 파일 SHA256 8/8. 관리자 인증 화면과 아이폰·노트북은 대기.",
+          "at": "2026-11-24"
         }
       ],
-      "updated": "2026-11-23T06:43:58+00:00"
+      "updated": "2026-11-23T18:37:36+00:00"
     }
   }
 }
