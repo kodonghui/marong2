@@ -71,6 +71,8 @@ test('TC-133, TC-146: only FCM and the ring notification reach the new parts of 
   assert.match(block('RingDeclineReceiver'), /android:exported="false"/);
   assert.match(block('AppUpdateJob'), /android:permission="android.permission.BIND_JOB_SERVICE"/);
   assert.match(block('AppUpdateJob'), /android:exported="false"/);
+  assert.match(block('AppUpdateReport'), /android:permission="android.permission.BIND_JOB_SERVICE"/);
+  assert.match(block('AppUpdateReport'), /android:exported="false"/);
   assert.match(block('AppUpdateReceiver'), /android:exported="false"/);
   assert.match(manifest, /<action android:name="android\.intent\.action\.MY_PACKAGE_REPLACED" \/>/);
 });

@@ -34,6 +34,9 @@ public final class UpdateFixtureReceiver extends BroadcastReceiver {
             // Substitute a RemoteMessage at the Firebase callback boundary.
             new MockMessagingService(context).onMessageReceived(new RemoteMessage.Builder("fixture")
                 .addData("kind", "app_update").addData("v", intent.getStringExtra("version")).build());
+        } else if ("report-failure".equals(mode)) {
+            AppUpdateReport.record(context, intent.getIntExtra("version", 10), AppUpdateReport.FAILED,
+                intent.getIntExtra("status", 101));
         }
     }
 

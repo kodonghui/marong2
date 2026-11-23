@@ -35,9 +35,13 @@ public final class AppUpdateReceiver extends BroadcastReceiver {
                 Channels.ensure(context);
                 AppUpdateJob.rearm(context);
                 AppUpdateJob.clean(context, -1);
-                AppUpdateJob.clearOlderFailures(prefs, AppUpdateJob.installed(context));
+                long installed = AppUpdateJob.installed(context);
+                AppUpdateJob.clearOlderFailures(prefs, installed);
                 prefs.edit().remove("release").remove("notified").apply();
                 cancelNotification(context);
+                if (installed <= AppUpdate.MAX_VERSION) {
+                    AppUpdateReport.record(context, (int) installed, AppUpdateReport.INSTALLED, 0);
+                }
                 return;
             }
             if (!RESULT.equals(intent.getAction())) return;
@@ -57,6 +61,7 @@ public final class AppUpdateReceiver extends BroadcastReceiver {
                 case CONFIRM:
                     AppUpdateJob.save(prefs, new AppUpdateJob.Candidate(candidate.release, candidate.session, true,
                         AppUpdateJob.installPermissionMissing(context)));
+                    AppUpdateReport.record(context, code, AppUpdateReport.NEEDS_CONFIRM, 0);
                     if (AppUpdate.notifyVersion(code, prefs.getInt("notified", -1))
                             && notify(context, confirmation(intent), candidate.release)) {
                         prefs.edit().putInt("notified", code).apply();
@@ -72,7 +77,9 @@ public final class AppUpdateReceiver extends BroadcastReceiver {
                         Log.i(AppUpdateJob.TAG, "update_install permission_session_ended code=" + code);
                         break;
                     }
-                    AppUpdateJob.fail(context, prefs, code);
+                    // Use the contracted generic failure for a platform-specific status outside 1–7.
+                    int reportStatus = status >= 1 && status <= 7 ? status : PackageInstaller.STATUS_FAILURE;
+                    AppUpdateJob.fail(context, prefs, code, reportStatus);
                     Log.i(AppUpdateJob.TAG, "update_install fail=" + status + " code=" + code);
                     break;
             }

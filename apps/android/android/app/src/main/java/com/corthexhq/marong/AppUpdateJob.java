@@ -84,6 +84,7 @@ public final class AppUpdateJob extends JobService {
     static void check(Context context) {
         schedule(context, DAILY_JOB, false);
         schedule(context, CHECK_JOB, false);
+        AppUpdateReport.wake(context);
     }
 
     static void checkFromPush(Context context, String value) {
@@ -100,6 +101,7 @@ public final class AppUpdateJob extends JobService {
                 prefs.edit().putLong("forcedAt", now).apply();
                 schedule(context, DAILY_JOB, false);
                 scheduleForcedCheck(context);
+                AppUpdateReport.wake(context);
                 return;
             }
         }
@@ -167,7 +169,7 @@ public final class AppUpdateJob extends JobService {
         return allowOrdinary && submit(scheduler, new JobInfo.Builder(id, service).build());
     }
 
-    private static boolean submit(JobScheduler scheduler, JobInfo job) {
+    static boolean submit(JobScheduler scheduler, JobInfo job) {
         try {
             return scheduler.schedule(job) == JobScheduler.RESULT_SUCCESS;
         } catch (IllegalStateException | SecurityException error) {
@@ -364,6 +366,7 @@ public final class AppUpdateJob extends JobService {
         if (release == null || !AppUpdate.eligible(release.code, installed, failures(prefs, release.code))) return false;
         if (installOnly && !quiet(this)) {
             Log.i(TAG, "update_install deferred_before_verify job=" + job);
+            AppUpdateReport.record(this, release.code, AppUpdateReport.WAITING_QUIET, 0);
             return true;
         }
         File apk = apk(this, release.code);
@@ -376,7 +379,7 @@ public final class AppUpdateJob extends JobService {
                 } catch (IOException error) {
                     cancel.throwIfCanceled();
                     Log.i(TAG, "update_download fail code=" + release.code);
-                    fail(this, prefs, release.code);
+                    fail(this, prefs, release.code, error instanceof SizeLimit ? 102 : 101);
                     return false;
                 }
             }
@@ -392,7 +395,7 @@ public final class AppUpdateJob extends JobService {
         if (check != 0) {
             cancel.throwIfCanceled();
             Log.i(TAG, "update_verify fail=" + check + " code=" + release.code);
-            fail(this, prefs, release.code);
+            fail(this, prefs, release.code, 110 + check);
             return false;
         }
 
@@ -408,12 +411,15 @@ public final class AppUpdateJob extends JobService {
             } else if (!candidateEdit(prefs, cached).commit()) {
                 Log.i(TAG, "update_install candidate_unavailable");
                 return false;
+            } else {
+                AppUpdateReport.record(this, release.code, AppUpdateReport.DOWNLOADED, 0);
             }
         }
         if (cached.permissionBlocked && installPermissionMissing(this)
                 && prefs.getInt("notified", -1) == release.code) return false;
         if (!installOnly && !quiet(this)) {
             Log.i(TAG, "update_install deferred code=" + release.code);
+            AppUpdateReport.record(this, release.code, AppUpdateReport.WAITING_QUIET, 0);
             return true;
         }
         return install(cached, apk, cancel);
@@ -429,7 +435,7 @@ public final class AppUpdateJob extends JobService {
     }
 
     private CheckResponse ask(String versionName, CancellationSignal cancel) throws IOException {
-        HttpURLConnection connection = connection(AppUpdate.RELEASE_PATH, versionName, "application/json");
+        HttpURLConnection connection = connection(this, AppUpdate.RELEASE_PATH, versionName, "application/json");
         try {
             AppUpdate.Check kind = AppUpdate.check(connection.getResponseCode());
             cancel.throwIfCanceled();
@@ -447,8 +453,8 @@ public final class AppUpdateJob extends JobService {
         }
     }
 
-    private HttpURLConnection connection(String path, String versionName, String accept) throws IOException {
-        String serverUrl = CapConfig.loadDefault(this).getServerUrl();
+    static HttpURLConnection connection(Context context, String path, String versionName, String accept) throws IOException {
+        String serverUrl = CapConfig.loadDefault(context).getServerUrl();
         if (serverUrl == null) throw new IOException("Missing app URL");
         URL url = new URL(AppUrls.origin(serverUrl) + path);
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
@@ -469,7 +475,7 @@ public final class AppUpdateJob extends JobService {
         if (!folder.isDirectory() && !folder.mkdirs()) throw new IOException("Update cache");
         clean(this, release.code);
         File part = new File(target.getPath() + ".part");
-        HttpURLConnection connection = connection(release.url, versionName, "application/vnd.android.package-archive");
+        HttpURLConnection connection = connection(this, release.url, versionName, "application/vnd.android.package-archive");
         try {
             if (connection.getResponseCode() != 200) throw new IOException("APK unavailable");
             long size;
@@ -593,7 +599,10 @@ public final class AppUpdateJob extends JobService {
                 Commit outcome = commitOnMain(prefs, release, session, sessionId, callback, cancel);
                 if (outcome != Commit.SUBMITTED) {
                     callback.cancel();
-                    if (outcome == Commit.DEFERRED) Log.i(TAG, "update_install deferred_before_commit");
+                    if (outcome == Commit.DEFERRED) {
+                        Log.i(TAG, "update_install deferred_before_commit");
+                        AppUpdateReport.record(this, release.code, AppUpdateReport.WAITING_QUIET, 0);
+                    }
                     return outcome == Commit.DEFERRED;
                 }
                 committed = true;
@@ -603,7 +612,7 @@ public final class AppUpdateJob extends JobService {
         } catch (IOException | RuntimeException error) {
             if (error instanceof OperationCanceledException) throw (OperationCanceledException) error;
             Log.i(TAG, "update_install fail=session code=" + release.code);
-            fail(this, prefs, release.code);
+            fail(this, prefs, release.code, 121);
         } finally {
             if (sessionId >= 0 && !committed) {
                 try {
@@ -743,11 +752,12 @@ public final class AppUpdateJob extends JobService {
         edit.apply();
     }
 
-    static void fail(Context context, SharedPreferences prefs, int version) {
+    static void fail(Context context, SharedPreferences prefs, int version, int status) {
         synchronized (STATE_LOCK) {
             cancelBackupAlarm(context);
             clean(context, -1);
             prefs.edit().remove("release").putInt("fail." + version, AppUpdate.afterFailure(failures(prefs, version))).apply();
+            AppUpdateReport.record(context, version, AppUpdateReport.FAILED, status);
         }
     }
 

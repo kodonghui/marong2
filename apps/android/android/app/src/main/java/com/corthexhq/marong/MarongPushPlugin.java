@@ -53,6 +53,18 @@ public class MarongPushPlugin extends Plugin {
         call.resolve(result);
     }
 
+    /** A successful page report can release a native report parked while signed out. */
+    @PluginMethod
+    public void updateReport(PluginCall call) {
+        Context context = getContext();
+        if (Boolean.TRUE.equals(call.getBoolean("deviceReported", false))) {
+            AppUpdateReport.deviceReported(context);
+        }
+        JSObject result = new JSObject();
+        result.put("waitingForDeviceReport", AppUpdateReport.waitingForDeviceReport(context));
+        call.resolve(result);
+    }
+
     /** The chat page is on screen in this window (true) or not (false). On screen, its notifications go away. */
     @PluginMethod
     public void chatVisible(PluginCall call) {

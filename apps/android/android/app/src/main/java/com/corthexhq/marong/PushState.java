@@ -35,12 +35,17 @@ final class PushState {
     /** This installation's id, made once (a random lowercase UUID). */
     static synchronized String installId(Context context) {
         SharedPreferences prefs = prefs(context);
-        String id = prefs.getString(INSTALL_ID, null);
-        if (id == null || !PushLinks.isRingId(id)) {
+        String id = existingInstallId(context);
+        if (id == null) {
             id = UUID.randomUUID().toString();
             prefs.edit().putString(INSTALL_ID, id).apply();
         }
         return id;
+    }
+
+    static String existingInstallId(Context context) {
+        String id = prefs(context).getString(INSTALL_ID, null);
+        return id != null && PushLinks.isRingId(id) ? id : null;
     }
 
     /** The Firebase installation id FCM registered (onRegistered), or null before that. */

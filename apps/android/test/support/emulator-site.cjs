@@ -40,7 +40,7 @@ function route(report) {
 }
 
 async function startEmulatorSite({ port = 8787, fidFile = null, log = () => {},
-  update = { release: null, apk: null, mode: 'normal' } } = {}) {
+  update = { release: null, apk: null, mode: 'normal' }, deviceUpdate = {} } = {}) {
   const chat = await startChatSite({ waitMs: 25_000 });
   const call = await startCallSite({ log, ready: (url) => ({ ring: RING_IN_URL.test(url) }) });
   chat.state.me.body = { ...chat.state.me.body, delivery: { to: 'discord', reason: 'no_device' },
@@ -49,6 +49,7 @@ async function startEmulatorSite({ port = 8787, fidFile = null, log = () => {},
   const callPort = Number(new URL(call.url).port);
   const reports = [];
   const updateRequests = [];
+  const deviceUpdateRequests = [];
   const agent = new http.Agent({ keepAlive: true });
   const tunnels = new Set();
 
@@ -99,6 +100,8 @@ async function startEmulatorSite({ port = 8787, fidFile = null, log = () => {},
         res.writeHead(200);
         if (update.mode === 'truncate') {
           res.write(apk.subarray(0, 8192), () => res.destroy());
+        } else if (update.apkDelayMs) {
+          setTimeout(() => res.end(apk), update.apkDelayMs);
         } else {
           res.end(update.mode === 'oversize' ? Buffer.concat([apk, Buffer.alloc(1)]) : apk);
         }
@@ -107,7 +110,23 @@ async function startEmulatorSite({ port = 8787, fidFile = null, log = () => {},
       if (req.method === 'GET' && pathname === '/') {
         res.setHeader('Set-Cookie', 'marong_fixture=logged_in; Path=/; HttpOnly; SameSite=Lax');
       }
-      if (toChat && req.method === 'PUT' && DEVICE_PATH.test(pathname)) report(body.toString('utf8'));
+      if (toChat && req.method === 'PUT' && DEVICE_PATH.test(pathname)) {
+        const raw = body.toString('utf8');
+        let device;
+        try { device = JSON.parse(raw); } catch {}
+        if (device?.update) {
+          const status = deviceUpdate.status || 200;
+          deviceUpdateRequests.push({ status, method: req.method, appVersion: device.appVersion, ring: device.ring,
+            update: device.update, keys: Object.keys(device).sort(), headers: Object.keys(req.headers).sort(),
+            origin: req.headers.origin, agent: req.headers['user-agent'],
+            hasFixtureCookie: (req.headers.cookie || '').includes('marong_fixture=logged_in') });
+          if (status >= 300) {
+            res.writeHead(status, status === 302 ? { Location: '/fixture-login' } : {}).end();
+            return;
+          }
+        }
+        report(raw);
+      }
       const upstream = http.request({ host: '127.0.0.1', port: toChat ? chatPort : callPort, method: req.method,
         path: req.url, headers: req.headers, agent }, (answer) => {
         res.writeHead(answer.statusCode, answer.headers);
@@ -148,6 +167,7 @@ async function startEmulatorSite({ port = 8787, fidFile = null, log = () => {},
     call,
     reports,
     updateRequests,
+    deviceUpdateRequests,
     async close() {
       for (const side of tunnels) side.destroy();
       front.closeAllConnections?.();
