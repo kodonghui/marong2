@@ -67,6 +67,8 @@ public final class AppUpdateReceiver extends BroadcastReceiver {
                     PushEvents.updateChanged();
                     Intent confirmation = confirmation(intent);
                     if (AppUpdateJob.openManualConfirmation(context, candidate.session, confirmation)) {
+                        // A shown prompt owns this version just like a posted confirmation notification.
+                        prefs.edit().putInt("notified", code).apply();
                         cancelNotification(context);
                         Log.i(AppUpdateJob.TAG, "update_install confirmation_opened code=" + code);
                         break;

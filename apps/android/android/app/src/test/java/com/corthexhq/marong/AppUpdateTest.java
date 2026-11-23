@@ -41,6 +41,15 @@ public final class AppUpdateTest {
         assertTrue(AppUpdate.shouldCheck(now - AppUpdate.CHECK_INTERVAL_MS, now));
     }
 
+    @Test public void tc610ManualReleaseCheckAfterTenMinutes() {
+        long now = 3_600_000L;
+        assertFalse(AppUpdate.shouldRecheckForManualInstall(now - 599_999, now));
+        assertFalse(AppUpdate.shouldRecheckForManualInstall(now - 600_000, now));
+        assertTrue(AppUpdate.shouldRecheckForManualInstall(now - 600_001, now));
+        assertTrue(AppUpdate.shouldRecheckForManualInstall(0, now));
+        assertTrue(AppUpdate.shouldRecheckForManualInstall(now + 1, now));
+    }
+
     @Test public void tc214ReleaseAndSameOriginPath() {
         assertEquals(6, RELEASE.code);
         assertEquals(5120, RELEASE.size);

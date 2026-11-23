@@ -357,7 +357,7 @@ public final class AppUpdateJob extends JobService {
 
         boolean installOnly = installOnly(job);
         if (!installOnly && (job == FORCED_CHECK_JOB || AppUpdate.shouldCheck(prefs.getLong("checkedAt", 0), now))) {
-            CheckResponse response = ask(own.versionName, cancel);
+            CheckResponse response = ask(this, own.versionName, cancel);
             if (response.kind == AppUpdate.Check.SIGNED_OUT || response.kind == AppUpdate.Check.RETRY) return false;
             prefs.edit().putLong("checkedAt", System.currentTimeMillis()).apply();
             release = response.release;
@@ -440,8 +440,8 @@ public final class AppUpdateJob extends JobService {
         }
     }
 
-    private CheckResponse ask(String versionName, CancellationSignal cancel) throws IOException {
-        HttpURLConnection connection = connection(this, AppUpdate.RELEASE_PATH, versionName, "application/json");
+    private static CheckResponse ask(Context context, String versionName, CancellationSignal cancel) throws IOException {
+        HttpURLConnection connection = connection(context, AppUpdate.RELEASE_PATH, versionName, "application/json");
         try {
             AppUpdate.Check kind = AppUpdate.check(connection.getResponseCode());
             cancel.throwIfCanceled();
@@ -599,17 +599,19 @@ public final class AppUpdateJob extends JobService {
         if (!current.waitingForUser && hasSession(context, current)) return "installing";
         AppUpdate.Release release = current.release;
         File file = apk(context, release.code);
+        SharedPreferences prefs = preferences(context);
         CancellationSignal cancel = new CancellationSignal();
         int check;
         try {
             PackageManager manager = context.getPackageManager();
             PackageInfo own = manager.getPackageInfo(context.getPackageName(), signatureFlags());
+            if (!recheckManualRelease(context, prefs, release, own.versionName, cancel)) return "none";
             check = verify(manager, own, release, file, cancel);
         } catch (IOException | PackageManager.NameNotFoundException error) {
             check = 1;
         }
         if (check != 0) {
-            fail(context, preferences(context), release.code, 110 + check);
+            fail(context, prefs, release.code, 110 + check);
             return "failed";
         }
         switch (install(context, current, file, cancel, owner)) {
@@ -618,6 +620,33 @@ public final class AppUpdateJob extends JobService {
             case FAILED: return "failed";
             default: return "none";
         }
+    }
+
+    private static boolean recheckManualRelease(Context context, SharedPreferences prefs, AppUpdate.Release release,
+                                                String versionName, CancellationSignal cancel) {
+        if (!AppUpdate.shouldRecheckForManualInstall(prefs.getLong("checkedAt", 0), System.currentTimeMillis())) {
+            return true;
+        }
+        CheckResponse response;
+        try {
+            response = ask(context, versionName, cancel);
+        } catch (IOException error) {
+            return true;
+        }
+        if (response.kind == AppUpdate.Check.RETRY || response.kind == AppUpdate.Check.SIGNED_OUT) return true;
+        if (response.release != null && release.sameAs(response.release)) {
+            prefs.edit().putLong("checkedAt", System.currentTimeMillis()).apply();
+            return true;
+        }
+
+        synchronized (STATE_LOCK) {
+            Candidate latest = candidate(prefs);
+            if (latest != null && latest.release.sameAs(release)) {
+                discard(context, prefs, latest, -1);
+                AppUpdateReceiver.cancelNotification(context);
+            }
+        }
+        return false;
     }
 
     static boolean openManualConfirmation(Context context, int sessionId, Intent confirmation) {

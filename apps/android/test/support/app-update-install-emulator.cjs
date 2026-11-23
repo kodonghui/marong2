@@ -15,7 +15,7 @@ const PORT = Number(process.env.MARONG_UPDATE_PORT || 18787);
 const ORIGIN = process.env.MARONG_UPDATE_ORIGIN || 'http://10.0.2.2:' + PORT;
 const [serial, oldApk, newApk, mode = 'install'] = process.argv.slice(2);
 assert.match(serial ?? '', /^emulator-\d+$/);
-assert.match(mode, /^(install|confirm)$/);
+assert.match(mode, /^(install|confirm|confirm-retained|paused|superseded|current|offline)$/);
 
 function adb(...args) {
   return execFileSync(process.env.ADB || 'adb', ['-s', serial, ...args], {
@@ -41,7 +41,7 @@ async function evaluate(page, expression) {
   const ws = new WebSocket(page.webSocketDebuggerUrl);
   try {
     const result = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('WebView did not answer')), 12_000);
+      const timer = setTimeout(() => reject(new Error('WebView did not answer: ' + expression)), 20_000);
       ws.addEventListener('open', () => ws.send(JSON.stringify({
         id: 1, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true },
       })), { once: true });
@@ -71,6 +71,12 @@ async function main() {
   const open = () => shell('am', 'start', '-W', '-n', PACKAGE + '/.MainActivity');
   const active = (id) => shell('cmd', 'notification', 'list').includes('|' + PACKAGE + '|' + id + '|');
   const version = () => Number(shell('dumpsys', 'package', PACKAGE).match(/versionCode=(\d+)/)?.[1]);
+  const candidate = () => {
+    const prefs = shell('run-as', PACKAGE, 'cat', 'shared_prefs/marong_update.xml');
+    const release = prefs.match(/<string name="release">(.*?)<\/string>/)?.[1];
+    return release ? JSON.parse(release.replaceAll('&quot;', '"')) : null;
+  };
+  const power = () => shell('dumpsys', 'power');
   try {
     adb('install', oldApk);
     shell('pm', 'grant', PACKAGE, 'android.permission.POST_NOTIFICATIONS');
@@ -92,11 +98,16 @@ async function main() {
     const bridgeVersion = (page) => evaluate(page, 'window.__marongApp?.version');
     await waitFor(async () => (await bridgeVersion(call)) === 3, 10_000, 'Call page bridge did not start');
     assert.deepEqual(await evaluate(call, 'window.__marongApp.installUpdate()'), { state: 'none' });
-    await evaluate(call, "document.getElementById('chat-link').click(); true");
-    const chat = await pageAt('/chat/');
-    await waitFor(async () => (await bridgeVersion(chat)) === 3, 10_000, 'Chat page bridge did not start');
+    let installPage = call;
+    const pages = [call];
+    if (mode === 'install') {
+      await evaluate(call, "document.getElementById('chat-link').click(); true");
+      installPage = await pageAt('/chat/');
+      await waitFor(async () => (await bridgeVersion(installPage)) === 3, 10_000, 'Chat page bridge did not start');
+      pages.push(installPage);
+    }
     await waitFor(() => site.reports.length, 20_000, 'WebView device report did not start');
-    for (const page of [call, chat]) {
+    for (const page of pages) {
       await evaluate(page, "window.fixtureUpdates=0; addEventListener('marongupdate', () => window.fixtureUpdates++); true");
       assert.deepEqual(await evaluate(page, 'window.__marongApp.updateState()'), { state: 'none' });
     }
@@ -106,9 +117,14 @@ async function main() {
     update.release = { versionCode: 10, versionName: '0.3.2', size: apk.length,
       sha256: createHash('sha256').update(apk).digest('hex'), url: path };
     fixture('update-push', '--es', 'version', '10');
-    for (const page of [call, chat]) {
-      await waitFor(() => evaluate(page, 'window.fixtureUpdates'), 30_000, 'No marongupdate in a WebView');
-      assert.deepEqual(await evaluate(page, 'window.__marongApp.updateState()'), { state: 'ready', versionName: '0.3.2' });
+    const ready = { state: 'ready', versionName: '0.3.2' };
+    await waitFor(async () => (await evaluate(installPage, 'window.__marongApp.updateState()')).state === ready.state,
+      45_000, 'Candidate was not ready in the WebView');
+    if (mode === 'install') {
+      for (const page of pages) {
+        await waitFor(() => evaluate(page, 'window.fixtureUpdates'), 30_000, 'No marongupdate in a WebView');
+        assert.deepEqual(await evaluate(page, 'window.__marongApp.updateState()'), ready);
+      }
     }
     assert.equal(version(), 9);
 
@@ -116,7 +132,7 @@ async function main() {
       for (const [start, stop, id] of [['call-on', 'call-off', 101], ['ring', 'ring-off', 201]]) {
         fixture(start);
         await waitFor(() => active(id), 15_000, 'Busy notification missing: ' + id);
-        assert.deepEqual(await evaluate(chat, 'window.__marongApp.installUpdate()'), { state: 'busy' });
+        assert.deepEqual(await evaluate(installPage, 'window.__marongApp.installUpdate()'), { state: 'busy' });
         assert.equal(version(), 9);
         fixture(stop);
         await waitFor(() => !active(id), 8_000, 'Busy notification remained: ' + id);
@@ -132,7 +148,30 @@ async function main() {
     };
     const request = 'Promise.all([window.__marongApp.installUpdate(), window.__marongApp.installUpdate()])';
     const start = performance.now();
-    assert.deepEqual(await evaluate(chat, request), [{ state: 'installing' }, { state: 'installing' }]);
+    if (['paused', 'superseded', 'current', 'offline'].includes(mode)) {
+      fixture('prepare-push');
+      if (mode === 'paused') update.release = null;
+      if (mode === 'superseded') update.release = { ...update.release, sha256: 'a'.repeat(64) };
+      if (mode === 'offline') update.mode = 'disconnect';
+      const before = site.updateRequests.length;
+      const expected = mode === 'paused' || mode === 'superseded' ? 'none' : 'installing';
+      assert.deepEqual(await evaluate(installPage, 'window.__marongApp.installUpdate()'), { state: expected });
+      const checks = site.updateRequests.slice(before);
+      assert.ok(checks.length > 0);
+      assert.ok(checks.every(check => check.path === '/chat/api/app/release'));
+      if (mode !== 'offline') assert.equal(checks.length, 1);
+      if (expected === 'none') {
+        assert.deepEqual(await evaluate(installPage, 'window.__marongApp.updateState()'), { state: 'none' });
+        await waitFor(() => candidate() === null, 10_000, 'The discarded candidate remained on disk');
+        assert.equal(version(), 9);
+        assert.doesNotMatch(logs(), /committed code=10/);
+        console.log(`PASS mode=${mode} release_checks=1 commits=0 version=9`);
+        return;
+      }
+      console.log(`PASS mode=${mode} release_checks=${checks.length} proceeded=true`);
+    } else {
+      assert.deepEqual(await evaluate(installPage, request), [{ state: 'installing' }, { state: 'installing' }]);
+    }
     if (mode === 'install') {
       await waitFor(() => version() === 10, 45_000, 'Visible-window install did not update the app');
       open();
@@ -143,11 +182,43 @@ async function main() {
       assert.match(foreground, /(?:mResumedActivity|topResumedActivity)[=:].*(?:packageinstaller|AppInstaller|unknownapps)/i);
       assert.equal(active(301), false, 'No update notification should be posted for the direct confirmation');
       assert.equal(version(), 9);
+      if (mode === 'confirm-retained') {
+        const session = candidate()?.session;
+        assert.ok(session >= 0, 'Manual confirmation must have an installer session');
+        const runBackup = async () => {
+          await waitFor(() => /mWakefulness=(?:Asleep|Dozing)/.test(power()),
+            15_000, 'Screen did not turn off');
+          const starts = (logs().match(/started job=2212\b/g) || []).length;
+          assert.match(shell('cmd', 'jobscheduler', 'run', '-f', PACKAGE, '2212'), /Running job/);
+          await waitFor(() => (logs().match(/started job=2212\b/g) || []).length > starts,
+            15_000, 'Backup job did not run');
+          await waitFor(() => !/\bactive\b/.test(shell(`cmd jobscheduler get-job-state ${PACKAGE} 2212 || true`)),
+            15_000, 'Backup job did not finish');
+        };
+        shell('input', 'keyevent', 'KEYCODE_SLEEP');
+        await runBackup();
+        assert.equal(candidate()?.session, session, 'The backup job replaced the open manual session');
+        assert.equal(active(301), false);
+
+        shell('input', 'keyevent', 'KEYCODE_WAKEUP');
+        shell('wm', 'dismiss-keyguard');
+        shell('input', 'keyevent', 'KEYCODE_BACK');
+        await waitFor(() => /permission_session_ended code=10/.test(logs()),
+          15_000, 'Installer did not report cancellation after Back');
+        assert.equal(candidate()?.session, -1);
+        fixture('schedule-install-job');
+        shell('input', 'keyevent', 'KEYCODE_SLEEP');
+        await runBackup();
+        assert.equal(candidate()?.session, -1, 'The backup job restarted the cancelled manual installation');
+        assert.equal(active(301), false);
+        console.log('PASS manual_session_retained=true permission_cancel_retained=true install_notifications=0');
+      }
     }
     assert.equal((logs().match(/committed code=10/g) || []).length, 1);
-    console.log('PASS mode=' + mode + ' windows=2 commits=1 elapsed_seconds=' + ((performance.now() - start) / 1000).toFixed(3)
+    console.log('PASS mode=' + mode + ' windows=' + pages.length + ' commits=1 elapsed_seconds=' + ((performance.now() - start) / 1000).toFixed(3)
       + ' version=' + version() + ' call_and_ring=' + (mode === 'install' ? 'busy' : 'not_run'));
   } finally {
+    shell('input', 'keyevent', 'KEYCODE_WAKEUP');
     if (debugPort) adb('forward', '--remove', 'tcp:' + debugPort);
     adb('uninstall', PACKAGE);
     await site.close();

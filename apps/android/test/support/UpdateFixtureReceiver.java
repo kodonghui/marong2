@@ -1,10 +1,12 @@
 package com.corthexhq.marong;
 
+import android.app.job.JobInfo;
+import android.app.job.JobScheduler;
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.os.SystemClock;
-import android.app.job.JobScheduler;
 import android.util.Log;
 
 import com.google.firebase.messaging.RemoteMessage;
@@ -39,6 +41,9 @@ public final class UpdateFixtureReceiver extends BroadcastReceiver {
         } else if ("report-failure".equals(mode)) {
             AppUpdateReport.record(context, intent.getIntExtra("version", 10), AppUpdateReport.FAILED,
                 intent.getIntExtra("status", 101));
+        } else if ("schedule-install-job".equals(mode)) {
+            context.getSystemService(JobScheduler.class).schedule(new JobInfo.Builder(AppUpdateJob.INSTALL_JOB,
+                new ComponentName(context, AppUpdateJob.class)).setMinimumLatency(60_000L).build());
         }
     }
 

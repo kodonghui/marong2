@@ -7,6 +7,7 @@ import java.util.regex.Pattern;
 final class AppUpdate {
     static final long CHECK_INTERVAL_MS = 6L * 60 * 60 * 1000;
     private static final long FORCED_INTERVAL_MS = 10 * 60_000L;
+    private static final long MANUAL_RECHECK_INTERVAL_MS = 10 * 60_000L;
     static final int MAX_VERSION = 2_100_000_000;
     static final long APK_MAX_BYTES = 200L * 1024 * 1024;
     static final int FAILURE_LIMIT = 3;
@@ -54,6 +55,10 @@ final class AppUpdate {
 
     static boolean shouldCheck(long checkedAt, long now) {
         return checkedAt <= 0 || now < checkedAt || now - checkedAt >= CHECK_INTERVAL_MS;
+    }
+
+    static boolean shouldRecheckForManualInstall(long checkedAt, long now) {
+        return checkedAt <= 0 || now < checkedAt || now - checkedAt > MANUAL_RECHECK_INTERVAL_MS;
     }
 
     static int pushVersion(String value) {

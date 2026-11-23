@@ -82,7 +82,9 @@ async function startEmulatorSite({ port = 8787, fidFile = null, log = () => {},
           hasFixtureCookie: (req.headers.cookie || '').includes('marong_fixture=logged_in') });
         res.setHeader('Cache-Control', 'no-store');
         if (pathname === '/chat/api/app/release') {
-          if (update.mode === 'redirect') {
+          if (update.mode === 'disconnect') {
+            res.destroy();
+          } else if (update.mode === 'redirect') {
             res.writeHead(302, { Location: '/fixture-login' }).end();
           } else if (update.release) {
             res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(update.release));
