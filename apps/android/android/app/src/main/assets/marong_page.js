@@ -273,6 +273,7 @@
     if (started || !window.Capacitor) return;
     started = true;
     listen('MarongPush', 'registered', () => report());
+    listen('MarongPush', 'updateChanged', () => window.dispatchEvent(new Event('marongupdate')));
     // Back from Android's settings or another app: notifications may have been turned on or off.
     listen('MarongPush', 'resumed', () => {
       syncChat(false, true);
@@ -296,7 +297,7 @@
 
   Object.defineProperty(window, '__marongApp', {
     value: Object.freeze({
-      version: 2,
+      version: 3,
       // A ring answered in the app starts the call without a second tap (docs/app-ring.md SPEC-135).
       autoAnswer: true,
       endCall,
@@ -306,6 +307,8 @@
       openFullScreenSettings: () => send('MarongPush', 'openFullScreenSettings'),
       openInstallSettings: () => send('MarongPush', 'openInstallSettings'),
       deviceState: () => Promise.resolve(ask('MarongPush', 'state')).catch(() => null),
+      updateState: () => Promise.resolve(ask('MarongPush', 'updateState')).catch(() => null),
+      installUpdate: () => Promise.resolve(ask('MarongPush', 'installUpdate')).catch(() => ({ state: 'failed' })),
     }),
   });
 })();

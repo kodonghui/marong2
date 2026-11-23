@@ -25,6 +25,8 @@ public final class UpdateFixtureReceiver extends BroadcastReceiver {
         } else if ("ring".equals(mode)) {
             Ring.receive(context, "00000000-0000-4000-8000-000000000112",
                 System.currentTimeMillis(), "promise", null, "Fixture");
+        } else if ("ring-off".equals(mode)) {
+            Ring.cancel(context);
         } else if ("prepare-push".equals(mode)) {
             AppUpdateJob.preferences(context).edit()
                 .putLong("checkedAt", System.currentTimeMillis() - 3_600_000L)

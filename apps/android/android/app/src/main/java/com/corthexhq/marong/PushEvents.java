@@ -7,6 +7,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.WeakHashMap;
+import java.util.function.Consumer;
 
 /**
  * Lets the FCM service reach the pages that are open in the app (docs/app-chat.md SPEC-121,
@@ -32,14 +33,20 @@ final class PushEvents {
 
     /** FCM registered or dropped this installation: the page in every open window reports again. */
     static void registered() {
+        forEachWindow(MarongPushPlugin::notifyRegistered);
+    }
+
+    static void updateChanged() {
+        forEachWindow(MarongPushPlugin::notifyUpdateChanged);
+    }
+
+    private static void forEachWindow(Consumer<MarongPushPlugin> event) {
         MAIN.post(() -> {
             List<MarongPushPlugin> plugins;
             synchronized (PushEvents.class) {
                 plugins = new ArrayList<>(ATTACHED);
             }
-            for (MarongPushPlugin plugin : plugins) {
-                plugin.notifyRegistered();
-            }
+            plugins.forEach(event);
         });
     }
 

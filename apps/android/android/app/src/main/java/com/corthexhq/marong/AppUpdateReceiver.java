@@ -31,6 +31,7 @@ public final class AppUpdateReceiver extends BroadcastReceiver {
         SharedPreferences prefs = AppUpdateJob.preferences(context);
         synchronized (AppUpdateJob.STATE_LOCK) {
             if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(intent.getAction())) {
+                AppUpdateJob.clearManualConfirmation(-1);
                 AppUpdateJob.cancelBackupAlarm(context);
                 Channels.ensure(context);
                 AppUpdateJob.rearm(context);
@@ -52,6 +53,7 @@ public final class AppUpdateReceiver extends BroadcastReceiver {
             int status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE);
             switch (AppUpdate.result(status)) {
                 case SUCCESS:
+                    AppUpdateJob.clearManualConfirmation(candidate.session);
                     AppUpdateJob.clean(context, -1);
                     AppUpdateJob.clearOlderFailures(prefs, code);
                     prefs.edit().remove("release").remove("notified").apply();
@@ -62,12 +64,20 @@ public final class AppUpdateReceiver extends BroadcastReceiver {
                     AppUpdateJob.save(prefs, new AppUpdateJob.Candidate(candidate.release, candidate.session, true,
                         AppUpdateJob.installPermissionMissing(context)));
                     AppUpdateReport.record(context, code, AppUpdateReport.NEEDS_CONFIRM, 0);
+                    PushEvents.updateChanged();
+                    Intent confirmation = confirmation(intent);
+                    if (AppUpdateJob.openManualConfirmation(context, candidate.session, confirmation)) {
+                        cancelNotification(context);
+                        Log.i(AppUpdateJob.TAG, "update_install confirmation_opened code=" + code);
+                        break;
+                    }
                     if (AppUpdate.notifyVersion(code, prefs.getInt("notified", -1))
-                            && notify(context, confirmation(intent), candidate.release)) {
+                            && notify(context, confirmation, candidate.release)) {
                         prefs.edit().putInt("notified", code).apply();
                     }
                     break;
                 case FAILED:
+                    AppUpdateJob.clearManualConfirmation(candidate.session);
                     cancelNotification(context);
                     if (candidate.permissionBlocked && status == PackageInstaller.STATUS_FAILURE_ABORTED) {
                         // Settings can abort this session even when the user allows the source.
@@ -75,6 +85,7 @@ public final class AppUpdateReceiver extends BroadcastReceiver {
                         AppUpdateJob.save(prefs, new AppUpdateJob.Candidate(candidate.release, -1, true, true));
                         if (!AppUpdateJob.installPermissionMissing(context)) AppUpdateJob.check(context);
                         Log.i(AppUpdateJob.TAG, "update_install permission_session_ended code=" + code);
+                        PushEvents.updateChanged();
                         break;
                     }
                     // Use the contracted generic failure for a platform-specific status outside 1–7.

@@ -190,7 +190,7 @@ describe('call page: Marong\'s own call and the chat link', { skip }, () => {
     assert.ok((await socketURL(site)).includes(`&ring=${RING}`));
     assert.equal(site.upgrades.length, 1);
     assert.equal(await page.evaluate(() => location.search), '');
-    assert.equal(await page.evaluate(() => window.__marongApp.version), 2);
+    assert.equal(await page.evaluate(() => window.__marongApp.version), 3);
     // The page took the microphone: the app keeps the call alive and stops the ring (SPEC-132).
     await page.waitForFunction(() => window.__native.includes('MarongCall.callStarted'));
   });

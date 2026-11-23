@@ -65,6 +65,24 @@ public class MarongPushPlugin extends Plugin {
         call.resolve(result);
     }
 
+    @PluginMethod
+    public void updateState(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("state", AppUpdateJob.updateState(getContext(), name -> result.put("versionName", name)));
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void installUpdate(PluginCall call) {
+        Activity activity = getActivity();
+        if (activity == null) {
+            call.resolve(new JSObject().put("state", "failed"));
+            return;
+        }
+        getBridge().executeOnMainThread(() -> AppUpdateJob.installNow(activity,
+            state -> call.resolve(new JSObject().put("state", state))));
+    }
+
     /** The chat page is on screen in this window (true) or not (false). On screen, its notifications go away. */
     @PluginMethod
     public void chatVisible(PluginCall call) {
@@ -129,6 +147,10 @@ public class MarongPushPlugin extends Plugin {
     void notifyRegistered() {
         // Kept until a page listens, so a page that is still loading reports it too.
         notifyListeners("registered", new JSObject(), true);
+    }
+
+    void notifyUpdateChanged() {
+        notifyListeners("updateChanged", new JSObject());
     }
 
     @Override

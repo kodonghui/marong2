@@ -46,6 +46,7 @@ async function main() {
   const site = await startEmulatorSite({ port: 18787, update });
   try {
     adb('install', oldApk);
+    adb('shell', 'pm', 'grant', PACKAGE, 'android.permission.POST_NOTIFICATIONS');
     adb('shell', 'am', 'start', '-n', `${PACKAGE}/.MainActivity`);
     await waitFor(() => site.updateRequests.length > 0, 30_000, 'Initial release check did not run');
     adb('shell', 'input', 'keyevent', 'KEYCODE_HOME');

@@ -40,7 +40,7 @@ const PHONE = () => ({ installId: INSTALL, fid: 'fid_AAAAAAAAAAAAAAAAAAAA', noti
 
 function setup({ capacitorAtStart = true, deny = false, theme = 'night', rootAtStart = true, path: pathname = '/',
   phone = PHONE(), fetchStatus = 201, storage = new Map(), now = Date.parse('2026-11-15T12:00:00Z'),
-  adoptedSheets = false, styleElements = false } = {}) {
+  adoptedSheets = false, styleElements = false, waitingForDeviceReport = false } = {}) {
   const calls = [];
   const docListeners = {};
   const winListeners = {};
@@ -50,7 +50,7 @@ function setup({ capacitorAtStart = true, deny = false, theme = 'night', rootAtS
   const observers = [];
   const inline = {};
   const clock = { now };
-  const net = { status: fetchStatus, pending: null };
+  const net = { status: fetchStatus, pending: null, waitingForDeviceReport };
   const root = { dataset: { theme }, style: { getPropertyValue: (name) => inline[name] || '', setProperty: (name, value) => { inline[name] = value; } } };
   let currentRoot = rootAtStart ? root : null;
   const stopButton = { clicks: 0, click() { this.clicks++; } };
@@ -65,6 +65,12 @@ function setup({ capacitorAtStart = true, deny = false, theme = 'night', rootAtS
     nativePromise: (plugin, method, options) => {
       calls.push([plugin, method, { ...options }]);
       if (plugin === 'MarongPush' && method === 'state') return Promise.resolve(phone ? JSON.parse(JSON.stringify(phone)) : null);
+      if (plugin === 'MarongPush' && method === 'updateReport') {
+        if (options.deviceReported) net.waitingForDeviceReport = false;
+        return Promise.resolve({ waitingForDeviceReport: net.waitingForDeviceReport });
+      }
+      if (plugin === 'MarongPush' && method === 'updateState') return Promise.resolve({ state: 'ready', versionName: '0.3.4' });
+      if (plugin === 'MarongPush' && method === 'installUpdate') return Promise.resolve({ state: 'busy' });
       return Promise.resolve();
     },
     addListener: (plugin, event, callback) => { (listeners[`${plugin}.${event}`] ||= []).push(callback); return { remove() {} }; },
@@ -376,10 +382,10 @@ test('TC-123: the chat page tells the app while it is on screen', async () => {
   await settle();
 });
 
-test('TC-145, TC-146: version 2 answers rings by itself and opens the settings the chat menu names', async () => {
+test('TC-145, TC-146: the app answers rings by itself and opens the settings the chat menu names', async () => {
   const t = setup();
   const app = t.window.__marongApp;
-  assert.equal(app.version, 2);
+  assert.equal(app.version, 3);
   assert.equal(app.autoAnswer, true);
   assert.equal(Object.isFrozen(app), true);
   assert.equal(app.openNotificationSettings('ring'), true);
@@ -399,6 +405,38 @@ test('TC-145, TC-146: version 2 answers rings by itself and opens the settings t
   const outside = setup({ capacitorAtStart: false });
   assert.equal(outside.window.__marongApp.openFullScreenSettings(), false, 'no bridge, nothing opens');
   assert.equal(await outside.window.__marongApp.deviceState(), null);
+});
+
+test('TC-606: a parked native report refreshes an otherwise cached web report', async () => {
+  const t = setup();
+  t.fire('DOMContentLoaded');
+  await settle();
+  assert.equal(t.requests.length, 1);
+  t.net.waitingForDeviceReport = true;
+  t.net.status = 403;
+  t.emit('resumed');
+  await settle();
+  assert.equal(t.requests.length, 2);
+  assert.equal(t.net.waitingForDeviceReport, true);
+  t.net.status = 200;
+  t.emit('resumed');
+  await settle();
+  assert.equal(t.requests.length, 3);
+  assert.equal(t.net.waitingForDeviceReport, false);
+});
+
+test('TC-609, TC-610: the version 3 update API and event are available in both windows', async () => {
+  for (const path of ['/', '/chat/']) {
+    const t = setup({ path });
+    const app = t.window.__marongApp;
+    assert.equal(app.version, 3);
+    assert.deepEqual(await app.updateState(), { state: 'ready', versionName: '0.3.4' });
+    assert.deepEqual(await app.installUpdate(), { state: 'busy' });
+    t.fire('DOMContentLoaded');
+    await settle();
+    t.emit('updateChanged');
+    assert.equal(t.events.at(-1), 'marongupdate');
+  }
 });
 
 test('TC-151: at document start the call screen\'s text panel is hidden with an adopted style sheet, once', () => {
