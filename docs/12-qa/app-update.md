@@ -209,6 +209,19 @@ Windows 시험 준비본은 `C:/tmp/marong-bug112/`의 `rtl-fixture.cjs`, `rtl-9
 | TC-619 | 선톡 알림으로 연 글 대화에서 지금 설치 | SPEC-443, SPEC-440, SPEC-441, REQ-560, FL-148 | 상태 변경 | emulator | 받아 둔 새 버전이 있을 때 선톡 알림(SCR-108)을 누르면 글 대화 창에 #update-ready가 보이고, '지금 설치'로 설치되어 새 버전으로 열림. 통화 창에서 통화 중이면 #update-busy. 글 대화 창을 연 채 받기가 끝나면 `marongupdate`가 그 창에도 닿아 띠가 생김 | 대기 |
 
 - 흐름 FL-193·194와 바뀐 FL-146\~148, 새 계약 응답(API-105의 `update` 200·201·400, API-267의 200·403·503), 새 화면 상태 여섯(SCR-001#update-*)과 글 대화의 같은 여섯(SCR-107#update-*, TC-618·619)에 시험을 마련했어요.
+
+## BUG-113 모듈을 늦게 받은 화면에서 업데이트 배너가 비어 있음
+
+- 상태 · 열림. 심각도 · 중간. 받아 둔 버전이 있어도 배너에서 바로 설치할 수 없어요.
+- 재현 · 앱 연결 3과 준비된 시험 APK를 두고 배너 모듈 응답을 500ms 넘게 지연해요. 통화 단추나 첫 메시지 목록은 나타나지만 모듈 응답 뒤에도 배너가 숨은 채로 남아요. Android 16에서는 첫 선톡 알림으로 글 대화를 열고 APK를 받아 둔 다음 두 번째 알림으로 새 글 대화 화면을 열어요(TC-619).
+- 근거 · 수정 전 Playwright의 통화 홈과 글 대화에서 각각 `locator.waitFor: Timeout 2500ms exceeded`가 나왔어요. 첫 화면이 그려진 뒤 모듈 응답을 풀었고, 다음 상태 변화 이벤트를 보내지 않았어요. Android 16에서 두 번째 알림으로 열린 활성 WebView에서도 `second_chat_module_ms=2104 banner_on_load=none`과 `second_chat_banner=none native=ready`를 확인했어요.
+- 시험 환경 · `qa034-current-final.log`의 알림함 탐색 실패와 `qa034-current-after-shade.log`의 시험 주소 `//chat/` 오류는 별도의 시험 도구 문제예요. `qa034-current-origin.log`에서는 글 대화가 다시 열리고 네이티브가 `ready`를 돌려줬지만, 시험이 활성 WebView를 구분하지 않아 당시 화면의 정확한 원인은 그 로그만으로 알 수 없어요.
+
+### TC-619 재현용 Android 16 시험
+
+1. BUG-112의 영문 경로 사본을 사용해요. 이 시험의 `server.url`은 끝 슬래시 없이 `http://127.0.0.1:18787`로 두고, 로컬 에뮬레이터에서만 평문 연결을 허용해요. `test/support/FixtureFcmApp.java`와 `UpdateFixtureReceiver.java`를 사본의 앱 Java 폴더에 복사해요.
+2. 사본의 매니페스트에서 `<application android:name=".FixtureFcmApp"`을 지정하고, BUG-112와 같은 `android.permission.DUMP` 제한으로 `.UpdateFixtureReceiver`를 등록해요. 같은 디버그 키로 코드 12(0.3.4)와 코드 13(0.3.5)을 빌드해요.
+3. 로컬 Android 16 시험 AVD에서 `node apps/android/test/support/app-update-chat-emulator.cjs <emulator-serial> <code-12.apk> <code-13.apk> 1200`을 실행해요. 가짜 FCM 서버가 선톡 두 건과 업데이트 신호를 보내요. 기본 320×640 AVD의 알림 배치와 다르면 `MARONG_TC619_SHADE_PNG`에 시험 화면을 저장할 경로를 넣고, 실행 중 표시되는 각 선톡을 눌러요. 시험은 두 번째 알림으로 열린 새 화면의 배너 모듈을 1,200ms 지연해요. 지연 없이 확인하려면 마지막 인자를 `0`으로 하고, 설치 시험을 연달아 돌릴 때는 35초 이상 기다려요.
 - API-267의 500·default는 다른 경로와 같은 오류 처리라 TC-613에서 따로 일으키지 않아요(TC-200\~208의 방식과 같음).
 
 ### PR #107 리뷰 재시험
