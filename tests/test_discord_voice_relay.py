@@ -203,7 +203,7 @@ if __name__ == '__main__':
     try:
         prepare(db)
         for name in ('003_transport_reporting.sql', '004_transcript_reporting.sql', '005_discord_voice.sql',
-                     '006_discord_shared_callers.sql'):
+                     '006_discord_shared_callers.sql', '007_call_cost.sql'):
             db.admin((ROOT / 'marong/call/migrations' / name).read_text(encoding='utf-8'), None)
         db.admin("""UPDATE marong.discord_dm_links SET channel_id=%s,last_incoming_at=now() WHERE friend_id IN (1,2)""",
                  (CHANNEL,))
