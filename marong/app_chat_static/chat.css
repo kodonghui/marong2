@@ -77,6 +77,22 @@ button:disabled {cursor: default; opacity: .45}
 .menu-update p {flex: 1 1 180px; min-width: 0; margin: 0}
 .text-button {border: 1px solid var(--accent); background: transparent; color: var(--accent); border-radius: 12px; min-height: 44px; padding: 8px 14px; margin-top: 4px}
 
+.update-banner {
+  flex: none; margin: 10px 16px 0; padding: 10px 14px; border-radius: 16px;
+  border: 1px solid var(--line); background: var(--surface); font-size: 14px; line-height: 1.6;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; word-break: keep-all;
+}
+.update-banner p {flex: 1 1 165px; min-width: 0; margin: 0; overflow-wrap: anywhere}
+.update-version {color: var(--muted)}
+.update-banner .text-button {margin-top: 0}
+.update-progress {width: 16px; height: 16px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%}
+@media (prefers-reduced-motion: no-preference) {
+  .update-reveal {animation: update-reveal 200ms ease-out}
+  .update-progress {animation: update-spin .8s linear infinite}
+}
+@keyframes update-reveal {from {clip-path: inset(0 0 100% 0)} to {clip-path: inset(0)}}
+@keyframes update-spin {to {transform: rotate(1turn)}}
+
 .log {flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 8px 16px 12px}
 .more {text-align: center; font-size: 12px; color: var(--muted); margin: 8px 0}
 .messages {list-style: none; margin: 0; padding: 0}

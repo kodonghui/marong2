@@ -955,11 +955,14 @@ async def put_device(db, install, fid):
 async def page_checks(http):
     r = await http.get("/chat", allow_redirects=False)
     ok(r.status == 302 and r.headers["Location"] == "/chat/", "/chat → /chat/")
-    for path, kind in (("/chat/", "text/html"), ("/chat/chat.js", "text/javascript"), ("/chat/chat.css", "text/css")):
+    for path, kind in (
+        ("/chat/", "text/html"), ("/chat/chat.js", "text/javascript"), ("/chat/chat.css", "text/css"),
+        ("/chat/update-banner.js?v=20261123", "text/javascript"),
+    ):
         r = await http.get(path)
         ok(r.status == 200 and r.headers["Content-Type"].startswith(kind) and r.headers["Cache-Control"] == "no-store"
            and "frame-ancestors 'none'" in r.headers["Content-Security-Policy"], f"{path} {r.headers}")
-    ok((await http.get("/chat/other.js")).status == 404, "only the three files")
+    ok((await http.get("/chat/other.js")).status == 404, "only the listed files")
     html = await (await http.get("/chat/")).text()
     ok("<script" in html and "script src=\"/chat/chat.js" in html and "style=" not in html
        and "onclick" not in html, "no inline script or style (the CSP allows only files)")

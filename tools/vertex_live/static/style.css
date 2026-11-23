@@ -90,6 +90,25 @@ header {display: flex; align-items: center; justify-content: space-between}
 .sky span:nth-child(4) {left: 5%; top: 271px; font-size: 9px; opacity: .6}
 .sky span:nth-child(5) {left: 26%; top: 29px; font-size: 24px; opacity: .5}
 .eyebrow {font-size: 11px; letter-spacing: 2.2px; color: var(--muted); margin: 0 0 27px}
+.update-banner {
+  width: 100%; margin: 0 0 16px; padding: 10px 14px; border-radius: 16px;
+  border: 1px solid var(--line); background: var(--surface); font-size: 14px; line-height: 1.6;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; text-align: left; word-break: keep-all;
+}
+:is(.checking-call, .in-call, .active-elsewhere) .update-banner {display: none}
+.update-banner p {flex: 1 1 165px; min-width: 0; margin: 0; overflow-wrap: anywhere}
+.update-version {color: var(--muted)}
+.update-banner button {
+  border: 1px solid var(--accent); background: transparent; color: var(--accent);
+  border-radius: 12px; min-height: 44px; padding: 8px 14px;
+}
+.update-progress {width: 16px; height: 16px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%}
+@media (prefers-reduced-motion: no-preference) {
+  .update-reveal {animation: update-reveal 200ms ease-out}
+  .update-progress {animation: update-spin .8s linear infinite}
+}
+@keyframes update-reveal {from {clip-path: inset(0 0 100% 0)} to {clip-path: inset(0)}}
+@keyframes update-spin {to {transform: rotate(1turn)}}
 .hero {display: flex; align-items: center; flex-direction: column; max-width: 100%}
 .portrait {position: relative; width: 200px; height: 200px; margin: 0 0 27px; transition: width .45s, height .45s}
 .face-disc {

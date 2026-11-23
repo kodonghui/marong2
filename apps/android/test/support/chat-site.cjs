@@ -13,6 +13,7 @@ const STATIC = path.join(REPO, 'marong', 'app_chat_static');
 const FACES = path.join(REPO, 'marong', 'call', 'static', 'face', 'v1');
 const FILES = { '/chat/': ['index.html', 'text/html'], '/chat/chat.js': ['chat.js', 'text/javascript'],
   '/chat/chat.css': ['chat.css', 'text/css'],
+  '/chat/update-banner.js': ['update-banner.js', 'text/javascript'],
   '/chat/me': ['profile.html', 'text/html'],
   '/chat/profile.js': ['profile.js', 'text/javascript'],
   '/chat/admin/': ['admin.html', 'text/html'],

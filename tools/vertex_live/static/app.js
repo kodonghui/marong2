@@ -33,6 +33,15 @@ const appStartedAt=performance.timeOrigin+performance.now();
 })();
 
 const $=id=>document.getElementById(id);
+const updateBannerReady=(()=>{
+  if(!(window.__marongApp?.version>=3)||!$('update-banner'))return Promise.resolve();
+  const deadline=performance.now()+500;
+  let timer;
+  return Promise.race([
+    import('/chat/update-banner.js?v=20261123').then(({mountUpdateBanner})=>mountUpdateBanner($('update-banner'),deadline)),
+    new Promise(resolve=>{timer=setTimeout(resolve,500);}),
+  ]).catch(()=>{}).finally(()=>clearTimeout(timer));
+})();
 const CLIENT_VERSION='20261119-call-wait1';
 let assetVersions={};
 try{assetVersions=JSON.parse(document.documentElement.dataset.assets||'{}');}catch{}
@@ -263,6 +272,7 @@ async function refresh(){
     const profile=intended?Promise.resolve():refreshProfile();
     const response=await fetch('/status',{headers:{'X-Requested-With':'XMLHttpRequest'}});
     if(response.status===401||response.status===403||response.redirected){
+      document.body.classList.remove('active-elsewhere');
       budgetBlocked=false;dailyBlocked=false;
       $('start').disabled=true;$('send').disabled=true;$('login').hidden=false;
       connection('로그인 필요');status('로그인하면 바로 이야기할 수 있어.');return null;
@@ -274,7 +284,9 @@ async function refresh(){
     dailyBlocked=state.canCall===false&&state.blockedReason==='daily_limit';
     rtcEnabled=Boolean(state.webRTC);
     memoryConnected=Boolean(state.memoryConnected);
-    await profile;
+    document.body.classList.toggle('active-elsewhere',Boolean(state.active&&!intended));
+    await Promise.all([profile,updateBannerReady]);
+    document.body.classList.remove('checking-call');
     markTiming('statusReady');
     if(!intended)ringOffer(Boolean(ringId&&!state.active));
     $('login').hidden=true;$('start').disabled=!state.ready||intended||state.active||budgetBlocked||dailyBlocked;
@@ -286,6 +298,11 @@ async function refresh(){
   }catch{
     $('start').disabled=true;$('send').disabled=true;connection('연결 확인 중');
     if(!intended)status('연결을 확인하고 있어. 잠시 후 다시 준비할게.');return null;
+  }finally{
+    if(document.body.classList.contains('checking-call')){
+      await updateBannerReady;
+      document.body.classList.remove('checking-call');
+    }
   }
 }
 function audioOut(buffer){

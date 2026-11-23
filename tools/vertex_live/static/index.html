@@ -10,12 +10,17 @@
   <script src="/rtc-client.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
-<body>
+<body class="checking-call">
   <main class="phone">
     <header><a class="brand" href="/" aria-label="마롱이 홈">마롱이<span class="brand-star" aria-hidden="true">✦</span></a><span class="header-end"><span class="connection"><i></i><span id="connection">준비 중</span></span><a class="chat-link" id="chat-link" href="/chat/" hidden>글 대화</a></span></header>
     <section class="scene" aria-label="마롱이와 통화">
       <div class="sky" aria-hidden="true"><span>✦</span><span>✧</span><span>·</span><span>✦</span><span>·</span></div>
       <p class="eyebrow" id="eyebrow">너의 이야기 곁에</p>
+      <section class="update-banner" id="update-banner" hidden>
+        <p role="status"><span class="update-message"></span><small class="update-version"></small></p>
+        <span class="update-progress" aria-hidden="true" hidden></span>
+        <button type="button" hidden></button>
+      </section>
       <div class="hero">
         <div class="portrait" id="portrait"><div class="ring ring-one"></div><div class="ring ring-two"></div><div class="face-disc"><img id="face" src="/face/v1/01-neutral.webp" width="248" height="248" alt="곁에서 기다리는 마롱이"><img id="topic-picture" class="topic-picture" width="248" height="248" alt="" hidden></div><p class="topic-title" id="topic-title" hidden></p><button class="topic-close" id="topic-close" type="button" aria-label="그림 닫기" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
         <div class="greeting">
