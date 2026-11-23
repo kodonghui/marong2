@@ -24,7 +24,7 @@ async def main():
     kakao=int(admin(f"INSERT INTO marong.messages(room_key,role,content,created_at) VALUES('{prefix}','user','KAKAO_FIXTURE','2001-01-02 10:00:10+09') RETURNING id;"))
     p=Principal(caller,friend,prefix);store=MemoryStore(CALL_DSN);await store.open()
     try:
-        call,_=await store.start_call(p,str(uuid.uuid4()),'Sulafat','report-only-test')
+        call,*_=await store.start_call(p,str(uuid.uuid4()),'Sulafat','report-only-test')
         seg=await store.start_segment(p,call,str(uuid.uuid4()),'gemini-3.8-live')
         ids={}
         for key,role,content,finalized,interrupted,at in [

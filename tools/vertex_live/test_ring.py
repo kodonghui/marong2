@@ -102,7 +102,7 @@ class Store:
         self.claims, self.saved = [], []
 
     async def start_call(self, p, client_id, voice, build, entrypoint):
-        return 'call-1', False
+        return 'call-1', False, RANG
 
     async def claim_ring(self, p, call_id, ring_id=None):
         self.claims.append((call_id, ring_id))
@@ -121,7 +121,7 @@ class Store:
     async def start_segment(self, p, call_id, client_id, model, **options):
         return 'segment-1'
 
-    async def seed(self, p, call_id):
+    async def seed(self, p, call_id, *, memory_limit=30):
         return ''
 
     async def save_turn(self, p, call_id, segment, key, role, content, *a):

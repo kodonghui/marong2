@@ -83,7 +83,7 @@ class UsageTests(IsolatedAsyncioTestCase):
             await send(202)
             await send(202)
             client = str(uuid4())
-            call, _ = await calls.start_call(voice, client, "fixture", "fixture")
+            call, *_ = await calls.start_call(voice, client, "fixture", "fixture")
             segment = await calls.start_segment(voice, call, client, "fixture")
             db.admin("UPDATE call.segments SET opened_at=now()-interval '90 seconds' WHERE id=%s", (segment,))
             await calls.finish(voice, call, True, client_id=client)

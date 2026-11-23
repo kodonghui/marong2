@@ -745,7 +745,7 @@ async def check_voice_forget(db):
                    (%s,'fact','다른 초록 우산','app',%s,'다른 초록 우산',now(),'text') RETURNING id
         """, (friend, original, other, original))
         client = str(uuid4())
-        call, _ = await store.start_call(principal, client, "fixture", "fixture")
+        call, *_ = await store.start_call(principal, client, "fixture", "fixture")
         segment = await store.start_segment(principal, call, client, "fixture")
 
         async def save(*args):

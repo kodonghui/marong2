@@ -17,7 +17,7 @@ async def main():
     caller=int(admin(f"INSERT INTO call.callers(friend_id) VALUES({friend}) RETURNING id"))
     p=Principal(caller,friend,name);store=MemoryStore(CALL_DSN);await store.open()
     try:
-        call,_=await store.start_call(p,str(uuid.uuid4()),'Sulafat','test-report')
+        call,*_=await store.start_call(p,str(uuid.uuid4()),'Sulafat','test-report')
         first=await store.start_segment(p,call,str(uuid.uuid4()),'gemini-3.8-live')
         await store.save_turn(p,call,first,'private-test','user','PRIVATE_VOICE_CONTENT_MUST_NOT_REACH_SHEET')
         conn=str(uuid.uuid4());await store.record_transport(p,call,conn,'webrtc','start')

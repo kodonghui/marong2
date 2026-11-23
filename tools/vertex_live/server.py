@@ -288,7 +288,7 @@ def ring_part(ring):
     return (HELLO_GUIDE if hello else RING_GUIDE)+json.dumps(data,ensure_ascii=False)
 
 def setup(handle=None,seed='',memory=False,hangup=False,search=None,ring=None,tuning=None,handoff=False,
-          friend_instruction='',*,voice=None,bot_name=None,friend_memory=None,character=None):
+          friend_instruction='',*,voice=None,bot_name=None,friend_memory=None,character=None,call_started_at=None):
     # search: 'on' adds Google Search and its guide, 'spent'/'off' only a guide that she cannot search now,
     # None (callers without a search budget) neither. ring: the promise of a call Marong placed, or None.
     resume={'transparent':True}
@@ -296,6 +296,9 @@ def setup(handle=None,seed='',memory=False,hangup=False,search=None,ring=None,tu
     base_instruction = instruction()
     if character is not None and marker_positions(base_instruction.splitlines()) is not None:
         base_instruction = common_prompt(base_instruction, pet=bool(character["kind"]))
+    start = call_started_at.astimezone(KST) if call_started_at is not None else datetime.now(KST)
+    weekday = '월화수목금토일'[start.weekday()]
+    base_instruction += f'\n\n통화 시작 시각(한국 시각) {start:%Y-%m-%d} {weekday}요일 {start:%H:%M}'
     result={'setup':{'model':f'projects/{PROJECT}/locations/{LOCATION}/publishers/google/models/{MODEL}',
       'generationConfig':{'responseModalities':['AUDIO'],'maxOutputTokens':1024,'speechConfig':{'languageCode':'ko-KR','voiceConfig':{'prebuiltVoiceConfig':{'voiceName':voice or VOICE}}}},
       'systemInstruction':{'parts':[{'text':base_instruction}]},

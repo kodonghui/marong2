@@ -92,7 +92,7 @@ async def check(db, temp, module):
             web_person = await store.principal('a' * 64)
             assert web_person.caller_id == other.caller_id
             web_client = str(uuid.uuid4())
-            web_id, _ = await store.start_call(web_person, web_client, 'Sulafat', 'web-test')
+            web_id, *_ = await store.start_call(web_person, web_client, 'Sulafat', 'web-test')
             async with http.get('http://localhost/available', headers=other_headers) as r:
                 assert r.status == 409
             try:
@@ -126,7 +126,7 @@ async def check(db, temp, module):
                 async with http.post('http://localhost/end', headers=other_headers) as r:
                     assert r.status == 204
                 assert (await store.detail(other, other_id))['status'] == 'ended'
-            resumed_web_id, resumed = await store.start_call(web_person, web_client, 'Sulafat', 'web-test')
+            resumed_web_id, resumed, _ = await store.start_call(web_person, web_client, 'Sulafat', 'web-test')
             assert resumed_web_id not in (web_id, other_id) and not resumed
             await store.finish(web_person, resumed_web_id, True, entrypoint='web', client_id=web_client)
             with patch.object(module, 'google_headers', AsyncMock(return_value={})), \
