@@ -1,10 +1,15 @@
 package com.corthexhq.marong;
 
+import android.app.job.JobInfo;
+import android.app.job.JobScheduler;
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.os.SystemClock;
 import android.util.Log;
+
+import com.google.firebase.messaging.RemoteMessage;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -22,6 +27,29 @@ public final class UpdateFixtureReceiver extends BroadcastReceiver {
         } else if ("ring".equals(mode)) {
             Ring.receive(context, "00000000-0000-4000-8000-000000000112",
                 System.currentTimeMillis(), "promise", null, "Fixture");
+        } else if ("ring-off".equals(mode)) {
+            Ring.cancel(context);
+        } else if ("prepare-push".equals(mode)) {
+            AppUpdateJob.preferences(context).edit()
+                .putLong("checkedAt", System.currentTimeMillis() - 3_600_000L)
+                .remove("forcedAt").commit();
+            context.getSystemService(JobScheduler.class).cancel(AppUpdateJob.CHECK_JOB);
+        } else if ("update-push".equals(mode)) {
+            // Substitute a RemoteMessage at the Firebase callback boundary.
+            new MockMessagingService(context).onMessageReceived(new RemoteMessage.Builder("fixture")
+                .addData("kind", "app_update").addData("v", intent.getStringExtra("version")).build());
+        } else if ("report-failure".equals(mode)) {
+            AppUpdateReport.record(context, intent.getIntExtra("version", 10), AppUpdateReport.FAILED,
+                intent.getIntExtra("status", 101));
+        } else if ("schedule-install-job".equals(mode)) {
+            context.getSystemService(JobScheduler.class).schedule(new JobInfo.Builder(AppUpdateJob.INSTALL_JOB,
+                new ComponentName(context, AppUpdateJob.class)).setMinimumLatency(60_000L).build());
+        }
+    }
+
+    private static final class MockMessagingService extends MarongMessagingService {
+        MockMessagingService(Context context) {
+            attachBaseContext(context);
         }
     }
 

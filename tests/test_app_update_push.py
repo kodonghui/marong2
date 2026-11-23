@@ -284,6 +284,27 @@ class UpdateAPITests(unittest.IsolatedAsyncioTestCase):
     def events(self):
         return self.db.admin("SELECT kind, version_code, app_version, state, status FROM marong.app_update_events ORDER BY id")
 
+    async def test_tc607_native_update_report_payloads(self):
+        # Match AppUpdateReport.body and the failure numbers from download, verification and install.
+        ring = {"channel": "enabled", "fullScreen": "denied"}
+        body = {"fid": fid(1), "notifications": "granted", "appVersion": "0.3.1", "ring": ring}
+        updates = [{"versionCode": 10, "state": state} for state in ("downloaded", "waiting_quiet", "needs_confirm")]
+        for status in (*range(1, 8), 101, 102, *range(111, 116), 121):
+            updates.append({"versionCode": 10, "state": "failed", "status": status})
+
+        expected = []
+        for i, update in enumerate(updates):
+            with self.subTest(update=update):
+                response = await self.report(**body, update=update)
+                self.assertEqual(response.status, 201 if i == 0 else 200)
+                self.assertEqual((await response.json())["ring"], {"to": "app", "reason": "app_on", "fullScreen": False})
+                expected.append(("state", 10, None, update["state"], update.get("status")))
+
+        response = await self.report(**{**body, "appVersion": "0.3.2"}, update={"versionCode": 10, "state": "installed"})
+        self.assertEqual(response.status, 200)
+        self.assertEqual((await response.json())["ring"], {"to": "app", "reason": "app_on", "fullScreen": False})
+        self.assertEqual(self.events(), [*expected, ("installed", 10, "0.3.2", None, None)])
+
     async def test_tc607_validation_and_legacy_api105_responses(self):
         r = await self.report()
         self.assertEqual(r.status, 201)

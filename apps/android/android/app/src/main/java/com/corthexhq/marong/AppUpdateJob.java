@@ -1,5 +1,6 @@
 package com.corthexhq.marong;
 
+import android.app.Activity;
 import android.app.AlarmManager;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -37,6 +38,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.ref.WeakReference;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -52,6 +54,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /** Fetches, verifies and installs a release outside the UI thread (SPEC-289~295). */
 public final class AppUpdateJob extends JobService {
@@ -62,6 +65,7 @@ public final class AppUpdateJob extends JobService {
     private static final int QUIET_INSTALL_JOB = 2213;
     private static final int RING_EXPIRY_JOB = 2214;
     private static final int ALARM_INSTALL_JOB = 2215;
+    private static final int FORCED_CHECK_JOB = 2216;
     private static final long DAY_MS = 24L * 60 * 60 * 1000;
     private static final long DEFER_MS = 14 * 60_000L;
     private static final long BACKOFF_MS = 15 * 60_000L;
@@ -71,9 +75,12 @@ public final class AppUpdateJob extends JobService {
     private static final int BUFFER_SIZE = 65536;
     static final Object STATE_LOCK = new Object();
     private static final ScheduledExecutorService RETRIES = Executors.newSingleThreadScheduledExecutor();
-
-    private final Handler main = new Handler(Looper.getMainLooper());
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+    // Automatic jobs and button requests share the same APK and install session.
+    private static final ExecutorService UPDATES = Executors.newSingleThreadExecutor();
+    private static boolean manualInFlight; // Protected by STATE_LOCK.
+    private static int manualSession = -1; // Accessed on the main thread.
+    private static WeakReference<Activity> manualActivity;
     private final Map<Integer, CancellationSignal> active = new HashMap<>();
 
     static SharedPreferences preferences(Context context) {
@@ -83,6 +90,45 @@ public final class AppUpdateJob extends JobService {
     static void check(Context context) {
         schedule(context, DAILY_JOB, false);
         schedule(context, CHECK_JOB, false);
+        AppUpdateReport.wake(context);
+    }
+
+    static void checkFromPush(Context context, String value) {
+        int offered = AppUpdate.pushVersion(value);
+        if (offered == 0) {
+            Log.i(TAG, "update_push bad");
+            return;
+        }
+        long installed = installed(context);
+        synchronized (STATE_LOCK) {
+            SharedPreferences prefs = preferences(context);
+            long now = System.currentTimeMillis();
+            if (AppUpdate.shouldForce(offered, installed, prefs.getLong("forcedAt", 0), now)) {
+                prefs.edit().putLong("forcedAt", now).apply();
+                schedule(context, DAILY_JOB, false);
+                scheduleForcedCheck(context);
+                AppUpdateReport.wake(context);
+                return;
+            }
+        }
+        Log.i(TAG, "update_push ordinary");
+        check(context);
+    }
+
+    private static void scheduleForcedCheck(Context context) {
+        JobScheduler scheduler = context.getSystemService(JobScheduler.class);
+        if (scheduler == null) return;
+        if (scheduler.getPendingJob(FORCED_CHECK_JOB) != null) return;
+        JobInfo.Builder builder = new JobInfo.Builder(FORCED_CHECK_JOB, new ComponentName(context, AppUpdateJob.class))
+            .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (submit(scheduler, builder.setExpedited(true).build())) {
+                Log.i(TAG, "update_push expedited");
+                return;
+            }
+            builder.setExpedited(false);
+        }
+        Log.i(TAG, submit(scheduler, builder.build()) ? "update_push fallback" : "update_push unavailable");
     }
 
     static void rearm(Context context) {
@@ -129,7 +175,7 @@ public final class AppUpdateJob extends JobService {
         return allowOrdinary && submit(scheduler, new JobInfo.Builder(id, service).build());
     }
 
-    private static boolean submit(JobScheduler scheduler, JobInfo job) {
+    static boolean submit(JobScheduler scheduler, JobInfo job) {
         try {
             return scheduler.schedule(job) == JobScheduler.RESULT_SUCCESS;
         } catch (IllegalStateException | SecurityException error) {
@@ -240,7 +286,7 @@ public final class AppUpdateJob extends JobService {
         CancellationSignal cancel = new CancellationSignal();
         CancellationSignal previous = active.put(job, cancel);
         if (previous != null) previous.cancel();
-        executor.execute(() -> {
+        UPDATES.execute(() -> {
             boolean defer = false;
             try {
                 if (installOnly(job)) Log.i(TAG, "update_install started job=" + job);
@@ -255,7 +301,7 @@ public final class AppUpdateJob extends JobService {
                 Log.i(TAG, "update_check unavailable");
             } finally {
                 boolean retryInstall = defer;
-                main.post(() -> {
+                MAIN.post(() -> {
                     if (active.get(job) != cancel) return;
                     active.remove(job);
                     jobFinished(params, false);
@@ -292,7 +338,6 @@ public final class AppUpdateJob extends JobService {
     public void onDestroy() {
         for (CancellationSignal cancel : active.values()) cancel.cancel();
         active.clear();
-        executor.shutdownNow();
         super.onDestroy();
     }
 
@@ -311,8 +356,8 @@ public final class AppUpdateJob extends JobService {
         long now = System.currentTimeMillis();
 
         boolean installOnly = installOnly(job);
-        if (!installOnly && AppUpdate.shouldCheck(prefs.getLong("checkedAt", 0), now)) {
-            CheckResponse response = ask(own.versionName, cancel);
+        if (!installOnly && (job == FORCED_CHECK_JOB || AppUpdate.shouldCheck(prefs.getLong("checkedAt", 0), now))) {
+            CheckResponse response = ask(this, own.versionName, cancel);
             if (response.kind == AppUpdate.Check.SIGNED_OUT || response.kind == AppUpdate.Check.RETRY) return false;
             prefs.edit().putLong("checkedAt", System.currentTimeMillis()).apply();
             release = response.release;
@@ -326,6 +371,7 @@ public final class AppUpdateJob extends JobService {
         if (release == null || !AppUpdate.eligible(release.code, installed, failures(prefs, release.code))) return false;
         if (installOnly && !quiet(this)) {
             Log.i(TAG, "update_install deferred_before_verify job=" + job);
+            AppUpdateReport.record(this, release.code, AppUpdateReport.WAITING_QUIET, 0);
             return true;
         }
         File apk = apk(this, release.code);
@@ -338,7 +384,7 @@ public final class AppUpdateJob extends JobService {
                 } catch (IOException error) {
                     cancel.throwIfCanceled();
                     Log.i(TAG, "update_download fail code=" + release.code);
-                    fail(this, prefs, release.code);
+                    fail(this, prefs, release.code, error instanceof SizeLimit ? 102 : 101);
                     return false;
                 }
             }
@@ -354,7 +400,7 @@ public final class AppUpdateJob extends JobService {
         if (check != 0) {
             cancel.throwIfCanceled();
             Log.i(TAG, "update_verify fail=" + check + " code=" + release.code);
-            fail(this, prefs, release.code);
+            fail(this, prefs, release.code, 110 + check);
             return false;
         }
 
@@ -370,15 +416,19 @@ public final class AppUpdateJob extends JobService {
             } else if (!candidateEdit(prefs, cached).commit()) {
                 Log.i(TAG, "update_install candidate_unavailable");
                 return false;
+            } else {
+                AppUpdateReport.record(this, release.code, AppUpdateReport.DOWNLOADED, 0);
+                PushEvents.updateChanged();
             }
         }
         if (cached.permissionBlocked && installPermissionMissing(this)
                 && prefs.getInt("notified", -1) == release.code) return false;
         if (!installOnly && !quiet(this)) {
             Log.i(TAG, "update_install deferred code=" + release.code);
+            AppUpdateReport.record(this, release.code, AppUpdateReport.WAITING_QUIET, 0);
             return true;
         }
-        return install(cached, apk, cancel);
+        return install(this, cached, apk, cancel, null) == InstallOutcome.DEFERRED;
     }
 
     private static final class CheckResponse {
@@ -390,8 +440,8 @@ public final class AppUpdateJob extends JobService {
         }
     }
 
-    private CheckResponse ask(String versionName, CancellationSignal cancel) throws IOException {
-        HttpURLConnection connection = connection(AppUpdate.RELEASE_PATH, versionName, "application/json");
+    private static CheckResponse ask(Context context, String versionName, CancellationSignal cancel) throws IOException {
+        HttpURLConnection connection = connection(context, AppUpdate.RELEASE_PATH, versionName, "application/json");
         try {
             AppUpdate.Check kind = AppUpdate.check(connection.getResponseCode());
             cancel.throwIfCanceled();
@@ -409,8 +459,8 @@ public final class AppUpdateJob extends JobService {
         }
     }
 
-    private HttpURLConnection connection(String path, String versionName, String accept) throws IOException {
-        String serverUrl = CapConfig.loadDefault(this).getServerUrl();
+    static HttpURLConnection connection(Context context, String path, String versionName, String accept) throws IOException {
+        String serverUrl = CapConfig.loadDefault(context).getServerUrl();
         if (serverUrl == null) throw new IOException("Missing app URL");
         URL url = new URL(AppUrls.origin(serverUrl) + path);
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
@@ -431,7 +481,7 @@ public final class AppUpdateJob extends JobService {
         if (!folder.isDirectory() && !folder.mkdirs()) throw new IOException("Update cache");
         clean(this, release.code);
         File part = new File(target.getPath() + ".part");
-        HttpURLConnection connection = connection(release.url, versionName, "application/vnd.android.package-archive");
+        HttpURLConnection connection = connection(this, release.url, versionName, "application/vnd.android.package-archive");
         try {
             if (connection.getResponseCode() != 200) throw new IOException("APK unavailable");
             long size;
@@ -462,6 +512,10 @@ public final class AppUpdateJob extends JobService {
     }
 
     private static boolean quiet(Context context) {
+        return quiet(context, false);
+    }
+
+    private static boolean quiet(Context context, boolean allowVisible) {
         if (CallControl.isActive() || CallService.isRunning() || Ring.alertInProgress()) return false;
         NotificationManager manager = context.getSystemService(NotificationManager.class);
         if (manager == null) return false;
@@ -471,32 +525,178 @@ public final class AppUpdateJob extends JobService {
             calling |= notification.getId() == CallService.NOTIFICATION_ID;
             ringing |= notification.getId() == Ring.NOTIFICATION_ID;
         }
-        return AppUpdate.quiet(calling, ringing, AppUpdateWindows.visible(context));
+        return AppUpdate.quiet(calling, ringing, !allowVisible && AppUpdateWindows.visible(context));
     }
 
     private enum Commit { SUBMITTED, DEFERRED, STALE }
+    private enum InstallOutcome { INSTALLING, DEFERRED, STALE, FAILED }
 
-    private Commit commitOnMain(SharedPreferences prefs, AppUpdate.Release release, PackageInstaller.Session session,
-                                int sessionId, PendingIntent callback, CancellationSignal cancel) {
+    static String updateState(Context context, Consumer<String> readyVersion) {
+        synchronized (STATE_LOCK) {
+            Candidate candidate = staged(context);
+            if (candidate == null) return "none";
+            if (manualInFlight || (!candidate.waitingForUser && hasSession(context, candidate))) return "installing";
+            readyVersion.accept(candidate.release.name);
+            return "ready";
+        }
+    }
+
+    private static Candidate staged(Context context) {
+        SharedPreferences prefs = preferences(context);
+        Candidate candidate = candidate(prefs);
+        return candidate != null && apk(context, candidate.release.code).isFile()
+            && AppUpdate.eligible(candidate.release.code, installed(context), failures(prefs, candidate.release.code))
+            ? candidate : null;
+    }
+
+    private static boolean hasSession(Context context, Candidate candidate) {
+        return candidate.session >= 0
+            && context.getPackageManager().getPackageInstaller().getSessionInfo(candidate.session) != null;
+    }
+
+    static void installNow(Activity activity, Consumer<String> reply) {
+        Context context = activity.getApplicationContext();
+        Candidate candidate;
+        synchronized (STATE_LOCK) {
+            candidate = staged(context);
+            if (candidate == null) {
+                reply.accept("none");
+                return;
+            }
+            if (!quiet(context, true)) {
+                reply.accept("busy");
+                return;
+            }
+            if (manualInFlight || (!candidate.waitingForUser && hasSession(context, candidate))) {
+                reply.accept("installing");
+                return;
+            }
+            manualInFlight = true;
+        }
+        WeakReference<Activity> owner = new WeakReference<>(activity);
+        PushEvents.updateChanged();
+        UPDATES.execute(() -> {
+            String state = "failed";
+            try {
+                state = installFromPage(context, candidate, owner);
+            } finally {
+                String outcome = state;
+                MAIN.post(() -> {
+                    synchronized (STATE_LOCK) {
+                        manualInFlight = false;
+                    }
+                    PushEvents.updateChanged();
+                    reply.accept(outcome);
+                });
+            }
+        });
+    }
+
+    private static String installFromPage(Context context, Candidate requested, WeakReference<Activity> owner) {
+        Candidate current = staged(context);
+        if (current == null || !current.release.sameAs(requested.release)) return "none";
+        if (!quiet(context, true)) return "busy";
+        if (!current.waitingForUser && hasSession(context, current)) return "installing";
+        AppUpdate.Release release = current.release;
+        File file = apk(context, release.code);
+        SharedPreferences prefs = preferences(context);
+        CancellationSignal cancel = new CancellationSignal();
+        int check;
+        try {
+            PackageManager manager = context.getPackageManager();
+            PackageInfo own = manager.getPackageInfo(context.getPackageName(), signatureFlags());
+            if (!recheckManualRelease(context, prefs, release, own.versionName, cancel)) return "none";
+            check = verify(manager, own, release, file, cancel);
+        } catch (IOException | PackageManager.NameNotFoundException error) {
+            check = 1;
+        }
+        if (check != 0) {
+            fail(context, prefs, release.code, 110 + check);
+            return "failed";
+        }
+        switch (install(context, current, file, cancel, owner)) {
+            case INSTALLING: return "installing";
+            case DEFERRED: return "busy";
+            case FAILED: return "failed";
+            default: return "none";
+        }
+    }
+
+    private static boolean recheckManualRelease(Context context, SharedPreferences prefs, AppUpdate.Release release,
+                                                String versionName, CancellationSignal cancel) {
+        if (!AppUpdate.shouldRecheckForManualInstall(prefs.getLong("checkedAt", 0), System.currentTimeMillis())) {
+            return true;
+        }
+        CheckResponse response;
+        try {
+            response = ask(context, versionName, cancel);
+        } catch (IOException error) {
+            return true;
+        }
+        if (response.kind == AppUpdate.Check.RETRY || response.kind == AppUpdate.Check.SIGNED_OUT) return true;
+        if (response.release != null && release.sameAs(response.release)) {
+            prefs.edit().putLong("checkedAt", System.currentTimeMillis()).apply();
+            return true;
+        }
+
+        synchronized (STATE_LOCK) {
+            Candidate latest = candidate(prefs);
+            if (latest != null && latest.release.sameAs(release)) {
+                discard(context, prefs, latest, -1);
+                AppUpdateReceiver.cancelNotification(context);
+            }
+        }
+        return false;
+    }
+
+    static boolean openManualConfirmation(Context context, int sessionId, Intent confirmation) {
+        if (sessionId != manualSession || manualActivity == null) return false;
+        Activity activity = manualActivity.get();
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()
+                || confirmation == null || !AppUpdateWindows.visible(context)) return false;
+        try {
+            activity.startActivity(confirmation);
+            return true;
+        } catch (RuntimeException error) {
+            Log.i(TAG, "update_install confirmation_unavailable");
+            return false;
+        }
+    }
+
+    static void clearManualConfirmation(int sessionId) {
+        if (sessionId != manualSession && sessionId >= 0) return;
+        manualSession = -1;
+        manualActivity = null;
+    }
+
+    private static Commit commitOnMain(Context context, SharedPreferences prefs, AppUpdate.Release release,
+                                       PackageInstaller.Session session, int sessionId, PendingIntent callback,
+                                       CancellationSignal cancel, WeakReference<Activity> owner) {
         CompletableFuture<Commit> result = new CompletableFuture<>();
-        if (!main.post(() -> {
+        if (!MAIN.post(() -> {
             try {
                 synchronized (STATE_LOCK) {
                     cancel.throwIfCanceled();
                     Candidate latest = candidate(prefs);
                     if (latest == null || !latest.release.sameAs(release)) {
                         result.complete(Commit.STALE);
-                    } else if (!quiet(this)) {
+                    } else if (!quiet(context, owner != null)) {
                         result.complete(Commit.DEFERRED);
                     } else {
                         // Activity and call-service callbacks cannot interleave on the main thread.
                         // The worker retains the open session until this decision is complete.
                         save(prefs, new Candidate(release, sessionId, false, false));
+                        if (owner != null) {
+                            manualSession = sessionId;
+                            manualActivity = owner;
+                        }
                         session.commit(callback.getIntentSender());
+                        PushEvents.updateChanged();
                         result.complete(Commit.SUBMITTED);
                     }
                 }
             } catch (RuntimeException error) {
+                clearManualConfirmation(sessionId);
                 result.completeExceptionally(error);
             }
         })) return Commit.DEFERRED;
@@ -508,21 +708,22 @@ public final class AppUpdateJob extends JobService {
         }
     }
 
-    private boolean install(Candidate candidate, File apk, CancellationSignal cancel) {
+    private static InstallOutcome install(Context context, Candidate candidate, File apk, CancellationSignal cancel,
+                                          WeakReference<Activity> owner) {
         AppUpdate.Release release = candidate.release;
-        SharedPreferences prefs = preferences(this);
-        PackageInstaller installer = getPackageManager().getPackageInstaller();
+        SharedPreferences prefs = preferences(context);
+        PackageInstaller installer = context.getPackageManager().getPackageInstaller();
         int sessionId = -1;
         boolean committed = false;
         try {
             synchronized (STATE_LOCK) {
                 Candidate latest = candidate(prefs);
-                if (latest == null || !latest.release.sameAs(release)) return false;
-                boolean permissionGranted = latest.permissionBlocked && !installPermissionMissing(this);
+                if (latest == null || !latest.release.sameAs(release)) return InstallOutcome.STALE;
+                boolean permissionGranted = latest.permissionBlocked && !installPermissionMissing(context);
                 if (latest.session >= 0 && installer.getSessionInfo(latest.session) != null) {
                     // An ordinary pending confirmation still owns its install session.
-                    if (!permissionGranted && (!latest.waitingForUser
-                            || prefs.getInt("notified", -1) == release.code)) return false;
+                    if (!latest.waitingForUser || (owner == null && !permissionGranted
+                            && prefs.getInt("notified", -1) == release.code)) return InstallOutcome.INSTALLING;
                     save(prefs, new Candidate(release, -1, false, false));
                     try {
                         installer.abandonSession(latest.session);
@@ -530,11 +731,11 @@ public final class AppUpdateJob extends JobService {
                         // Android can close the old permission-gated session from Settings.
                     }
                 }
-                if (permissionGranted) AppUpdateReceiver.cancelNotification(this);
+                if (permissionGranted || owner != null) AppUpdateReceiver.cancelNotification(context);
             }
             cancel.throwIfCanceled();
             PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
-            params.setAppPackageName(getPackageName());
+            params.setAppPackageName(context.getPackageName());
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED);
             }
@@ -545,27 +746,31 @@ public final class AppUpdateJob extends JobService {
                     if (transfer(input, output, release.size, cancel) != release.size) throw new IOException("APK changed");
                     session.fsync(output);
                 }
-                Intent result = new Intent(this, AppUpdateReceiver.class)
+                Intent result = new Intent(context, AppUpdateReceiver.class)
                     .setAction(AppUpdateReceiver.RESULT)
                     .putExtra(AppUpdateReceiver.VERSION, release.code)
                     .putExtra(AppUpdateReceiver.SESSION, sessionId);
                 int flags = PendingIntent.FLAG_UPDATE_CURRENT;
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) flags |= PendingIntent.FLAG_MUTABLE;
-                PendingIntent callback = PendingIntent.getBroadcast(this, sessionId, result, flags);
-                Commit outcome = commitOnMain(prefs, release, session, sessionId, callback, cancel);
+                PendingIntent callback = PendingIntent.getBroadcast(context, sessionId, result, flags);
+                Commit outcome = commitOnMain(context, prefs, release, session, sessionId, callback, cancel, owner);
                 if (outcome != Commit.SUBMITTED) {
                     callback.cancel();
-                    if (outcome == Commit.DEFERRED) Log.i(TAG, "update_install deferred_before_commit");
-                    return outcome == Commit.DEFERRED;
+                    if (outcome == Commit.DEFERRED) {
+                        Log.i(TAG, "update_install deferred_before_commit");
+                        AppUpdateReport.record(context, release.code, AppUpdateReport.WAITING_QUIET, 0);
+                    }
+                    return outcome == Commit.DEFERRED ? InstallOutcome.DEFERRED : InstallOutcome.STALE;
                 }
                 committed = true;
-                cancelBackupAlarm(this);
+                cancelBackupAlarm(context);
                 Log.i(TAG, "update_install committed code=" + release.code);
             }
         } catch (IOException | RuntimeException error) {
             if (error instanceof OperationCanceledException) throw (OperationCanceledException) error;
             Log.i(TAG, "update_install fail=session code=" + release.code);
-            fail(this, prefs, release.code);
+            fail(context, prefs, release.code, 121);
+            return InstallOutcome.FAILED;
         } finally {
             if (sessionId >= 0 && !committed) {
                 try {
@@ -575,7 +780,7 @@ public final class AppUpdateJob extends JobService {
                 }
             }
         }
-        return false;
+        return InstallOutcome.INSTALLING;
     }
 
     private static int verify(PackageManager manager, PackageInfo own, AppUpdate.Release release, File apk,
@@ -705,11 +910,13 @@ public final class AppUpdateJob extends JobService {
         edit.apply();
     }
 
-    static void fail(Context context, SharedPreferences prefs, int version) {
+    static void fail(Context context, SharedPreferences prefs, int version, int status) {
         synchronized (STATE_LOCK) {
             cancelBackupAlarm(context);
             clean(context, -1);
             prefs.edit().remove("release").putInt("fail." + version, AppUpdate.afterFailure(failures(prefs, version))).apply();
+            AppUpdateReport.record(context, version, AppUpdateReport.FAILED, status);
+            PushEvents.updateChanged();
         }
     }
 

@@ -18,7 +18,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { startEmulatorSite } = require('./emulator-site.cjs');
 
 const PACKAGE = 'com.corthexhq.marong';
-const PORT = 18787;
+const PORT = Number(process.env.MARONG_UPDATE_PORT || 18787);
 const APK_PATH = '/chat/app/marong-0.3.2-10.apk';
 const INSTALL_JOB = 2212;
 const LIMIT_MS = 15 * 60 * 1000;

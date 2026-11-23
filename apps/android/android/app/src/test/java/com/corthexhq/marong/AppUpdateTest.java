@@ -15,12 +15,39 @@ public final class AppUpdateTest {
     private static final String PACKAGE = "com.corthexhq.marong";
     private static final AppUpdate.Release RELEASE = AppUpdate.release(6, "0.2.3", 5120, HASH, PATH);
 
+    @Test public void tc603PushVersionRequiresPositiveAndroidVersionCode() {
+        for (String value : new String[] { null, "", "0", "-1", "1.5", " 10", "2100000001", "99999999999999999999" }) {
+            assertEquals(0, AppUpdate.pushVersion(value));
+        }
+        assertEquals(11, AppUpdate.pushVersion("11"));
+        assertEquals(2_100_000_000, AppUpdate.pushVersion("2100000000"));
+    }
+
+    @Test public void tc603ForcedCheckRequiresNewerVersionAndTenMinutesUnlessClockRolledBack() {
+        long forced = 1_000_000;
+        assertFalse(AppUpdate.shouldForce(11, 10, forced, forced + 599_000));
+        assertTrue(AppUpdate.shouldForce(11, 10, forced, forced + 600_000));
+        assertTrue(AppUpdate.shouldForce(11, 10, forced, forced - 1));
+        assertTrue(AppUpdate.shouldForce(11, 10, 0, forced));
+        assertFalse(AppUpdate.shouldForce(10, 10, 0, forced));
+        assertFalse(AppUpdate.shouldForce(9, 10, 0, forced));
+    }
+
     @Test public void tc213SixHourBoundaryAndClockRollback() {
         long now = 10 * AppUpdate.CHECK_INTERVAL_MS;
         assertTrue(AppUpdate.shouldCheck(0, now));
         assertTrue(AppUpdate.shouldCheck(now + 1, now));
         assertFalse(AppUpdate.shouldCheck(now - AppUpdate.CHECK_INTERVAL_MS + 60_000, now));
         assertTrue(AppUpdate.shouldCheck(now - AppUpdate.CHECK_INTERVAL_MS, now));
+    }
+
+    @Test public void tc610ManualReleaseCheckAfterTenMinutes() {
+        long now = 3_600_000L;
+        assertFalse(AppUpdate.shouldRecheckForManualInstall(now - 599_999, now));
+        assertFalse(AppUpdate.shouldRecheckForManualInstall(now - 600_000, now));
+        assertTrue(AppUpdate.shouldRecheckForManualInstall(now - 600_001, now));
+        assertTrue(AppUpdate.shouldRecheckForManualInstall(0, now));
+        assertTrue(AppUpdate.shouldRecheckForManualInstall(now + 1, now));
     }
 
     @Test public void tc214ReleaseAndSameOriginPath() {

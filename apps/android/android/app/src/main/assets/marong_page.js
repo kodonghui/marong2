@@ -218,7 +218,10 @@
     });
     const last = lastReport();
     const age = last ? Date.now() - last.at : NaN;
-    if (last && last.installId === state.installId && last.body === body && age >= 0 && age < REPORT_EVERY_MS) return;
+    if (last && last.installId === state.installId && last.body === body && age >= 0 && age < REPORT_EVERY_MS) {
+      const native = await ask('MarongPush', 'updateReport');
+      if (!native?.waitingForDeviceReport) return;
+    }
     const res = await fetch(`/chat/api/devices/${state.installId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -229,6 +232,7 @@
     });
     // Anything else (signed out, server down) is tried again when a page opens or comes back.
     if (res.status !== 200 && res.status !== 201) return;
+    send('MarongPush', 'updateReport', { deviceReported: true });
     try {
       localStorage.setItem(REPORT_KEY, JSON.stringify({ installId: state.installId, body, at: Date.now() }));
     } catch {
@@ -269,6 +273,7 @@
     if (started || !window.Capacitor) return;
     started = true;
     listen('MarongPush', 'registered', () => report());
+    listen('MarongPush', 'updateChanged', () => window.dispatchEvent(new Event('marongupdate')));
     // Back from Android's settings or another app: notifications may have been turned on or off.
     listen('MarongPush', 'resumed', () => {
       syncChat(false, true);
@@ -292,7 +297,7 @@
 
   Object.defineProperty(window, '__marongApp', {
     value: Object.freeze({
-      version: 2,
+      version: 3,
       // A ring answered in the app starts the call without a second tap (docs/app-ring.md SPEC-135).
       autoAnswer: true,
       endCall,
@@ -302,6 +307,8 @@
       openFullScreenSettings: () => send('MarongPush', 'openFullScreenSettings'),
       openInstallSettings: () => send('MarongPush', 'openInstallSettings'),
       deviceState: () => Promise.resolve(ask('MarongPush', 'state')).catch(() => null),
+      updateState: () => Promise.resolve(ask('MarongPush', 'updateState')).catch(() => null),
+      installUpdate: () => Promise.resolve(ask('MarongPush', 'installUpdate')).catch(() => ({ state: 'failed' })),
     }),
   });
 })();
