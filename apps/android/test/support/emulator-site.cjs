@@ -75,6 +75,7 @@ async function startEmulatorSite({ port = 8787, fidFile = null, log = () => {},
     req.on('data', (chunk) => chunks.push(chunk));
     req.on('end', () => {
       const body = Buffer.concat(chunks);
+      let deviceUpdateStatus;
       if (pathname === '/chat/api/app/release' || pathname.startsWith('/chat/app/')) {
         updateRequests.push({ path: pathname, method: req.method, query: Boolean(search), body: body.length,
           headers: Object.keys(req.headers).sort(), agent: req.headers['user-agent'],
@@ -115,7 +116,7 @@ async function startEmulatorSite({ port = 8787, fidFile = null, log = () => {},
         let device;
         try { device = JSON.parse(raw); } catch {}
         if (device?.update) {
-          const status = deviceUpdate.status || 200;
+          const status = deviceUpdate.status ?? chat.state.deviceStatus;
           deviceUpdateRequests.push({ status, method: req.method, appVersion: device.appVersion, ring: device.ring,
             update: device.update, keys: Object.keys(device).sort(), headers: Object.keys(req.headers).sort(),
             origin: req.headers.origin, agent: req.headers['user-agent'],
@@ -124,12 +125,13 @@ async function startEmulatorSite({ port = 8787, fidFile = null, log = () => {},
             res.writeHead(status, status === 302 ? { Location: '/fixture-login' } : {}).end();
             return;
           }
+          deviceUpdateStatus = status;
         }
         report(raw);
       }
       const upstream = http.request({ host: '127.0.0.1', port: toChat ? chatPort : callPort, method: req.method,
         path: req.url, headers: req.headers, agent }, (answer) => {
-        res.writeHead(answer.statusCode, answer.headers);
+        res.writeHead(deviceUpdateStatus ?? answer.statusCode, answer.headers);
         answer.pipe(res);
       });
       upstream.on('error', () => {

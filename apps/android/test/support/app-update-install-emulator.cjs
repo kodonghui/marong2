@@ -12,6 +12,7 @@ const { startEmulatorSite } = require('./emulator-site.cjs');
 
 const PACKAGE = 'com.corthexhq.marong';
 const PORT = Number(process.env.MARONG_UPDATE_PORT || 18787);
+const ORIGIN = process.env.MARONG_UPDATE_ORIGIN || 'http://10.0.2.2:' + PORT;
 const [serial, oldApk, newApk, mode = 'install'] = process.argv.slice(2);
 assert.match(serial ?? '', /^emulator-\d+$/);
 assert.match(mode, /^(install|confirm)$/);
@@ -82,7 +83,7 @@ async function main() {
       const find = async () => {
         try {
           const pages = await fetch('http://127.0.0.1:' + debugPort + '/json/list', { signal: AbortSignal.timeout(1000) }).then(r => r.json());
-          return pages.find(page => page.url === 'http://10.0.2.2:' + PORT + path);
+          return pages.find(page => page.url === ORIGIN + path);
         } catch { return null; }
       };
       return waitFor(find, 60_000, 'Missing WebView ' + path);

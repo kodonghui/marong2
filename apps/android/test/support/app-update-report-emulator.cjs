@@ -11,6 +11,7 @@ const { startEmulatorSite } = require('./emulator-site.cjs');
 
 const PACKAGE = 'com.corthexhq.marong';
 const PORT = Number(process.env.MARONG_UPDATE_PORT || 18787);
+const ORIGIN = process.env.MARONG_UPDATE_ORIGIN || `http://10.0.2.2:${PORT}`;
 const [serial, oldApk, newApk, mode = 'states'] = process.argv.slice(2);
 assert.match(serial ?? '', /^emulator-\d+$/);
 assert.match(mode, /^(states|background|retry)$/);
@@ -103,7 +104,7 @@ async function main() {
       assert.deepEqual(request.ring, ring);
       assert.equal(request.method, 'PUT');
       assert.deepEqual(request.keys, ['appVersion', 'fid', 'notifications', 'ring', 'update']);
-      assert.equal(request.origin, `http://10.0.2.2:${PORT}`);
+      assert.equal(request.origin, ORIGIN);
       assert.match(request.agent, /^MarongApp\/0\.3\.[12]$/);
       assert.ok(request.hasFixtureCookie);
       const transportHeaders = new Set(['host', 'connection', 'content-length', 'accept-encoding']);

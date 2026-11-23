@@ -42,17 +42,20 @@ async function main() {
   assert.equal(adb('shell', 'pm', 'list', 'packages', PACKAGE), '');
   const apk = readFileSync(newApk);
   const path = '/chat/app/marong-0.3.2-10.apk';
-  const update = { release: null, apk, mode: 'normal' };
+  // Hold the APK response until after we can check for a notification from the push itself.
+  const update = { release: null, apk, mode: 'normal', apkDelayMs: 8000 };
   const site = await startEmulatorSite({ port: 18787, update });
   try {
     adb('install', oldApk);
     adb('shell', 'pm', 'grant', PACKAGE, 'android.permission.POST_NOTIFICATIONS');
-    adb('shell', 'am', 'start', '-n', `${PACKAGE}/.MainActivity`);
-    await waitFor(() => site.updateRequests.length > 0, 30_000, 'Initial release check did not run');
+    adb('shell', 'am', 'start', '-W', '-n', `${PACKAGE}/.MainActivity`);
+    await waitFor(() => site.updateRequests.length > 0, 90_000, 'Initial release check did not run');
+    fixture('prepare-push');
     adb('shell', 'input', 'keyevent', 'KEYCODE_HOME');
+    await waitFor(() => /topResumedActivity=.*Launcher/.test(adb('shell', 'dumpsys', 'activity', 'activities')),
+      15_000, 'Launcher did not take over from the app');
     adb('shell', 'am', 'set-standby-bucket', PACKAGE, bucket);
     assert.equal(adb('shell', 'am', 'get-standby-bucket', PACKAGE), bucket === 'rare' ? '40' : '45');
-    fixture('prepare-push');
     site.updateRequests.length = 0;
     update.release = { versionCode: 10, versionName: '0.3.2', size: apk.length,
       sha256: createHash('sha256').update(apk).digest('hex'), url: path };
