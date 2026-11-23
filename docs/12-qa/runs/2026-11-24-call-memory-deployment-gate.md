@@ -1,8 +1,8 @@
-# PR #119 통화 기억 운영 반영 사전 대조
+# PR #119 통화 기억 운영 반영과 복구
 
 - 병합 2026-11-24 03:37:17 KST. PR #119의 검토 대상 `701d6d5764b92a34fd6aaa1198d299d4a0ab2c89`를 병합 커밋 `5f89fd542f1ddd5d832e89635d6a6fae65997f01`으로 합쳤다. 리뷰 요청 한 건은 사용 한도로 실패해 기존 리뷰로 병합을 판단했다. [PR #119](https://github.com/kodonghui/marong2/pull/119), [기존 리뷰](https://github.com/kodonghui/marong2/pull/119#issuecomment-7110352271), [병합 판단 기록](https://github.com/kodonghui/marong2/pull/119#issuecomment-7110417544)
 - 운영 사전 대조 2026-11-24 03:37:54 KST. `ko-family`의 통화 서버 작업 폴더 `/home/opc/marong-deploy/20261119-unified-cutover.qAcbv7Wm/voice-runtime/tools/vertex_live/`와 승인 기준 `85567b18274170cdcc563ef57155cc1bd720273a`의 같은 폴더를 파일별 SHA256으로 대조했다. 병합 전 `main`인 `ad7226b`와도 대조해 기존 차이를 확인했다.
-- **운영 반영 중단.** 승인 범위 밖 파일의 차이로 배포 전 단계에서 중단했다. 운영 반영 시각은 없다. 파일 교체, 유닛 변경, 재시작, 데이터 변경은 0건이었다.
+- **1차 사전 대조 중단.** 승인 범위 밖 파일의 차이로 배포 전 단계에서 중단했다. 당시 파일 교체, 유닛 변경, 재시작, 데이터 변경은 0건이었다. 이후 런타임 파일 6개에 한해 반영하기로 했다.
 
 ## 파일 대조
 
@@ -46,9 +46,9 @@ static/face/v1/23-mouth-wide-open-eyes-closed.webp
 | 항목 | 결과 |
 | --- | --- |
 | TC-644 · BUG-117 | 합침, 운영 반영 보류. 마롱이 항목 77(2026-11-24 03시대 KST)에 따라 대화 이어 주기 설계(항목 78)에서 컨텍스트 창 압축 값을 정한 뒤 반영한다. 원래 PR의 격리 회귀 통과. |
-| TC-645 · BUG-118 | 사전 대조에서 운영 지시문 해시 불일치 확인. 파일 교체와 반영 후 일치 확인 대기. |
-| TC-646~648 · BUG-119~121 | 병합된 코드의 격리 회귀 통과. 승인 범위 밖 차이로 운영 반영 중단. |
-| TC-649 · BUG-122 | 사전 조회에서 통화 서버와 정리기 모두 `active`였다. 정리기의 작업 폴더는 `/home/opc/marong-vertex-test/app`였다. 유닛 전환과 실행 해시 확인 대기. |
+| TC-645 · BUG-118 | 임시 교체한 지시문 해시가 `main`과 일치했다. 정리기 유닛 검증 실패 뒤 이전 파일의 해시를 확인했다. |
+| TC-646~648 · BUG-119~121 | 병합된 코드의 격리 회귀 통과. 운영에서 승인본 해시와 import를 확인했으며, 유닛 검증 실패 뒤 이전 파일을 복구했다. |
+| TC-649 · BUG-122 | 기존 통화 서버와 정리기는 복구 뒤에도 `active`였다. 정리기 작업 폴더는 `/home/opc/marong-vertex-test/app`다. 유닛 전환과 새 프로세스 검증 대기. |
 
 5분 로그 검증은 운영 반영 뒤에 수행한다. 다음 통화 서버 반영에서도 승인된 `85567b1`의 `live_session.py`를 기준으로 삼는다. `main`의 파일에는 압축 값 확정 뒤 반영할 BUG-117 변경이 포함돼 있다.
 
@@ -58,3 +58,31 @@ static/face/v1/23-mouth-wide-open-eyes-closed.webp
 | --- | --- | --- | --- |
 | `live_session.py` | `8bab5a2465d036e40b9b26b82c4fa16f386e6709e48467788b2fd88406a592d6` | `223b81253363c353a60ee34055cd90785255c09c13716eb44619dce2f031567b` | `961fc4cc8fd4c14d119d516b6e316a5d032fa773ea2892650bb1409bddc89060` |
 | `call_instruction.md` | `a8ea9de577861edde03dd2e00bb70f23544dbf24d459e6969dfbc9ec3d8d4e73` | `119bd8baf8e682054162cac29007875ecb65aa29d994268e33a139a88bab1800` | `119bd8baf8e682054162cac29007875ecb65aa29d994268e33a139a88bab1800` |
+
+## 런타임 6개 승인 후 반영 시도와 복구
+
+2026-11-24 03:44:06 KST `ko-family`에서 승인된 런타임 파일을 다시 대조했다. 배포 폴더의 파일을 병합 전 `main`인 `ad7226b`의 같은 파일과 비교한 결과다.
+
+| 파일 | SHA256 대조 결과 |
+| --- | --- |
+| `call_instruction.md` | 다름. 운영 해시가 구버전 `a2dc9a0`과 일치했다(BUG-118). |
+| `call_memory.py` | 일치 |
+| `live_session.py` | 일치 |
+| `memory_tools.py` | 일치 |
+| `organizer.py` | 일치. 실행 중인 정리기는 이 사본 대신 `/home/opc/marong-vertex-test/app/organizer.py`를 사용했다(BUG-122). |
+| `server.py` | 일치 |
+
+- 반영 직전 DB 열린 통화 0건, 최근 3분 `last_beat_at` 0건, 미완료 정리 작업 0건, 통화 서버 연결과 관련 로그 이벤트 각각 0건이었다. 서버 안에 6개 파일과 두 유닛 설정, DB를 백업했다. DB 백업은 27,276,457바이트이며 `pg_restore -l`에서 788줄을 확인했다. [백업 및 복구 명령](#서버-백업과-복구-명령)
+- 임시 반영한 운영 파일 6개 모두 `85567b1`과 SHA256이 일치했고, 새 정리기와 통화 서버 모듈 import를 통과했다. 정리기의 반영 설정에는 릴리스 경로와 기존 통화 서버의 의존성 경로를 지정했다.
+- 03:47:39 KST에 `systemd-analyze --user verify marong-voice-memory.service`가 `Failed to initialize manager: No such device or address`와 종료 코드 1을 반환했다. 재시작 전에 파일 6개를 복원하고 적용하려던 drop-in을 백업 폴더로 옮긴 뒤 사용자 유닛 설정을 다시 읽었다. 복구 명령의 출력은 `ROLLBACK_COMPLETE`였다. 시험 파일과 표정 이미지는 기존 파일을 유지했다.
+- 03:48:17 KST 재조회에서 6개 파일 모두 반영 전 해시와 일치했다. 통화 서버 PID `440904`와 정리기 PID `3187623` 모두 이전과 같고 `active`였으며, 각 서비스의 자동 재시작은 0회였다. 통화 서버의 로컬 `/healthz`는 HTTP 200을 반환했다. 정리기의 실행 경로는 복구 전부터 사용한 `/home/opc/marong-vertex-test/app/organizer.py`다.
+- SSH 실행 환경에 `XDG_RUNTIME_DIR` 값이 없었다. 복구된 유닛을 읽기 검증한 결과 기본 환경은 종료 코드 1, 사용자 런타임 경로와 버스 주소를 명시한 환경은 종료 코드 0을 반환했다. 새 drop-in의 검증, 서비스 재시작과 반영 뒤 5분 로그 확인은 다음 반영 때 수행한다.
+- BUG-118~122 운영 반영은 복구로 종료됐다. 카드 숨김은 선행 조건 미충족으로 실행 대기 중이며 `marker`와 SQL 실행 결과는 없다. BUG-117은 항목 77 결정에 따라 압축 값 확정 뒤 반영한다.
+
+### 서버 백업과 복구 명령
+
+서버 백업 경로는 `/home/opc/marong-deploy/20261124-bug118-122.Ioj1ff/backup/`이다.
+
+```bash
+bash /home/opc/marong-deploy/20261124-bug118-122.Ioj1ff/deploy.sh rollback
+```
