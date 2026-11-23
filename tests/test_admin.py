@@ -170,6 +170,9 @@ class AdminTest(unittest.IsolatedAsyncioTestCase):
             conn.execute("INSERT INTO live_usage VALUES (99)")
             conn.execute("CREATE TEMP TABLE settings (key text, value jsonb)")
             conn.execute("INSERT INTO settings VALUES ('monthly_budget_usd', '99')")
+            # A non-null timestamp would fail this constraint if either function
+            # resolved its types against this session's temporary domain.
+            conn.execute("CREATE DOMAIN pg_temp.timestamptz AS pg_catalog.timestamptz CHECK (VALUE IS NULL)")
             self.assertEqual(read(), original)
 
         dsn = self.db.admin_url.replace("postgres:@", "marong_call@", 1)
