@@ -7,6 +7,14 @@
   const list = document.getElementById('item-list');
   const error = document.getElementById('item-error');
   const state = {listed: '올림', unlisted: '내림', new: '새 아이템'};
+  const tabs = document.querySelector('.admin-tabs');
+  if (tabs) {
+    const markOverflow = () => {
+      tabs.parentElement.dataset.overflow = String(tabs.scrollLeft + tabs.clientWidth < tabs.scrollWidth - 1);
+    };
+    new ResizeObserver(markOverflow).observe(tabs);
+    tabs.addEventListener('scroll', markOverflow, {passive: true});
+  }
 
   function render(item) {
     const card = node('li', '', 'card');

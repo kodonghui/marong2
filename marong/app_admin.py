@@ -23,6 +23,14 @@ from .usage import effective_limits, month_bounds, usage_day
 HASH = re.compile(r"[a-f0-9]{64}")
 FRIEND_ID = re.compile(r"[0-9]{1,19}")
 ADMIN_PATH = "/chat/admin"
+TABS = {
+    "overview": (f"{ADMIN_PATH}/", "개요"),
+    "members": (f"{ADMIN_PATH}/members", "회원"),
+    "invites": (f"{ADMIN_PATH}/invites", "초대 링크"),
+    "app": (f"{ADMIN_PATH}/app", "앱 버전"),
+    "costs": (f"{ADMIN_PATH}/costs", "비용"),
+    "items": (f"{ADMIN_PATH}/items", "아이템"),
+}
 USD = re.compile(r"[0-9]{1,4}(?:\.[0-9]{1,2})?")
 log = logging.getLogger(__name__)
 
@@ -33,6 +41,21 @@ def usd(value):
 
 def limit_amounts(daily, monthly):
     return {"dailyUnits": daily, "callMonthlyUsd": usd(monthly)}
+
+
+def positive_id(raw):
+    return int(raw) if FRIEND_ID.fullmatch(raw) and 0 < int(raw) <= 2**63 - 1 else None
+
+
+def admin_invite(row):
+    def iso(key):
+        value = row[key]
+        return value.isoformat() if value is not None else None
+
+    return {"id": row["id"], "kind": row["kind"], "note": row["note"], "state": row["state"],
+            "expiresAt": iso("expires_at"), "createdAt": iso("created_at"), "usedAt": iso("used_at"),
+            "revokedAt": iso("revoked_at"), "usedBy": {"friendId": row["used_by"], "name": row["name"]}
+            if row["used_by"] is not None else None}
 
 
 def overview_attention(now, members, call, images, app, expiring):
@@ -198,19 +221,45 @@ class AppAdmin:
         return row["count"]
 
     async def page(self, req):
-        await self.require_admin(req)
-        response = self.chat.unified_page("admin")
-        characters = self.chat.characters
-        if characters.enabled and characters.budget:
-            async with self.chat.store.pool.connection() as conn:
-                spent = await characters.spent(conn)
-            percent = round(spent * 100 / characters.budget)
-            display = f'<p class="caption">이번 달 그림 예산 사용률 {percent}%</p>'
-            response.body = response.body.replace(b"<!-- image-budget -->", display.encode("utf-8"))
-        if self.chat.decor.catalog:
-            response.body = response.body.replace(b"<!-- decor-items -->",
-                '<a href="/chat/admin/items" class="btn2">아이템</a>'.encode("utf-8"))
+        try:
+            await self.require_admin(req)
+        except Problem as error:
+            if error.code != "not_allowed" or "text/html" not in req.headers.get("Accept", ""):
+                raise
+            return self.page_status(403, "관리자만 볼 수 있어요")
+
+        path = req.path
+        if path == ADMIN_PATH:
+            raise web.HTTPMovedPermanently(location=f"{ADMIN_PATH}/")
+        canonical = path[:-1] if path != TABS["overview"][0] and path.endswith("/") else path
+        tab = next((key for key, (href, _) in TABS.items() if href == canonical), None)
+        if tab is None and canonical.rpartition("/")[0] == TABS["members"][0]:
+            if positive_id(canonical.rpartition("/")[2]) is not None:
+                tab = "members"
+        if tab is None:
+            return self.page_status(404, "없는 화면이에요", '<a href="/chat/admin/">개요로</a>')
+        if path != canonical:
+            raise web.HTTPMovedPermanently(location=req.rel_url.with_path(canonical, keep_query=True))
+        if tab == "items":
+            self.chat.decor.require_catalog()
+        response = self.chat.unified_page("admin-items" if tab == "items" else "admin")
+        links = []
+        for key, (href, label) in TABS.items():
+            current = ' aria-current="page"' if key == tab else ""
+            links.append(f'<a href="{href}"{current}>{label}</a>')
+        nav = '<nav class="admin-nav" aria-label="마롱이 관리"><div class="admin-tabs">' + "".join(links) + "</div></nav>"
+        response.body = response.body.replace(b"<!-- admin-tabs -->", nav.encode("utf-8"))
         return response
+
+    @staticmethod
+    def page_status(status, message, action=""):
+        return web.Response(status=status, content_type="text/html", text=f"""<!doctype html>
+<html lang="ko" data-theme="night"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>마롱이 관리</title><link rel="stylesheet" href="/chat/chat.css">
+<link rel="stylesheet" href="/chat/unified.css"></head>
+<body><main class="unified admin-layout"><section class="stack">
+<p>{message}</p>{action}</section></main></body></html>""")
 
     async def image_costs(self, req):
         await self.require_admin(req)
@@ -266,11 +315,6 @@ class AppAdmin:
         return {"id": item.id, "kind": item.kind, "slot": SLOTS.get(item.kind),
                 "name": str(item.name or "")[:20], "state": row["state"] if row else "new",
                 "starter": item.starter is True, "owners": row["owners"] if row else 0, "missing": missing}
-
-    async def decor_page(self, req):
-        self.chat.decor.require_catalog()
-        await self.require_admin(req)
-        return self.chat.unified_page("admin-items")
 
     async def decor_items(self, req):
         catalog = self.chat.decor.require_catalog()
@@ -328,15 +372,34 @@ class AppAdmin:
                 FROM marong.invites i LEFT JOIN marong.friends f ON f.id=i.used_by
                 ORDER BY i.created_at DESC,i.id DESC LIMIT 100
             """, (self.chat.sessions.now(),))).fetchall()
-        return self.chat._json(200, {"invites": [
-            {"id": r["id"], "kind": r["kind"], "note": r["note"], "state": r["state"],
-             "expiresAt": r["expires_at"].isoformat(),
-             "createdAt": r["created_at"].isoformat(),
-             "usedAt": r["used_at"].isoformat() if r["used_at"] else None,
-             "revokedAt": r["revoked_at"].isoformat() if r["revoked_at"] else None,
-             "usedBy": {"friendId": r["used_by"], "name": r["name"]} if r["used_by"] is not None else None}
-            for r in rows
-        ]})
+        return self.chat._json(200, {"invites": [admin_invite(row) for row in rows]})
+
+    async def revoke_invite(self, req):
+        await self.require_admin(req, write=True)
+        invite = positive_id(req.match_info["inviteId"])
+        if invite is None:
+            raise Problem("not_found", title="찾지 못함")
+        now = self.chat.sessions.now()
+        async with self.chat.store.pool.connection() as conn, conn.transaction():
+            row = await one(conn, """
+                UPDATE marong.invites SET revoked_at=%s
+                WHERE id=%s AND used_at IS NULL AND revoked_at IS NULL AND expires_at>%s
+                RETURNING id, kind, note, expires_at, created_at, used_at, revoked_at, used_by,
+                          NULL AS name
+            """, (now, invite, now))
+            if row is None:
+                row = await one(conn, """
+                    SELECT i.id,i.kind,i.note,i.expires_at,i.created_at,i.used_at,i.revoked_at,i.used_by,f.name
+                    FROM marong.invites i LEFT JOIN marong.friends f ON f.id=i.used_by WHERE i.id=%s
+                """, (invite,))
+        if row is None:
+            log.info("admin_invite_revoke invite=%d result=missing", invite)
+            raise Problem("not_found", title="찾지 못함")
+        if row["revoked_at"] is None:
+            log.info("admin_invite_revoke invite=%d result=closed", invite)
+            raise Problem("invite_closed")
+        log.info("admin_invite_revoke invite=%d result=revoked", invite)
+        return self.chat._json(200, {"invite": admin_invite({**row, "state": "revoked"})})
 
     async def list_members(self, req):
         await self.require_admin(req)
@@ -399,10 +462,10 @@ class AppAdmin:
 
     @staticmethod
     def friend_id(req):
-        raw = req.match_info["friendId"]
-        if not FRIEND_ID.fullmatch(raw) or not 0 < int(raw) <= 2**63 - 1:
+        friend = positive_id(req.match_info["friendId"])
+        if friend is None:
             raise Problem("invalid_input")
-        return int(raw)
+        return friend
 
     async def revoke(self, req):
         await self.require_admin(req, write=True)
@@ -471,14 +534,15 @@ class AppAdmin:
         return self.chat._json(200, self.limit_status(row))
 
     def register(self, router):
-        router.add_get(ADMIN_PATH + "/", self.page)
+        router.add_get(ADMIN_PATH, self.page)
+        router.add_get(ADMIN_PATH + "/{path:(?!api(?:/|$)).*}", self.page)
         router.add_get(ADMIN_PATH + "/api/overview", self.overview)
         router.add_get(ADMIN_PATH + "/api/image-costs", self.image_costs)
-        router.add_get(ADMIN_PATH + "/items", self.decor_page)
         router.add_get(ADMIN_PATH + "/api/items", self.decor_items)
         router.add_post(ADMIN_PATH + "/api/items/{itemId}/{action:list|unlist}", self.set_decor_listing)
         router.add_get(ADMIN_PATH + "/api/invites", self.list_invites)
         router.add_post(ADMIN_PATH + "/api/invites", self.create_invite)
+        router.add_post(ADMIN_PATH + "/api/invites/{inviteId}/revoke", self.revoke_invite)
         router.add_get(ADMIN_PATH + "/api/members", self.list_members)
         router.add_post(ADMIN_PATH + "/api/members/{friendId}/revoke", self.revoke)
         router.add_post(ADMIN_PATH + "/api/members/{friendId}/tickets", self.add_tickets)
