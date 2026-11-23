@@ -524,15 +524,15 @@ SCR-002의 표정 표(캐릭터를 쓸 때, 새 제안): 거는 중·말하는 �
 | 종류 | 화면이 보여 주는 것 |
 | --- | --- |
 | 접근 | 로그인이 없으면 SCR-164로 갔다가 돌아옴(공통 규칙). 남의 캐릭터·친구·요청은 모두 404 화면. 관리자는 Access 뒤(SCR-169) |
-| 입력 | 칸 아래 글과 쓴 값 유지(SCR-163#invalid, SCR-164#invalid, SCR-165#name-invalid, SCR-168#code-invalid, SCR-169#invite-invalid·#ticket-invalid, SCR-171#invalid, SCR-174#invalid) |
+| 입력 | 칸 아래 글과 쓴 값 유지(SCR-163#invalid, SCR-164#invalid, SCR-165#name-invalid, SCR-168#code-invalid, SCR-202#invite-invalid, SCR-201#ticket-invalid, SCR-171#invalid, SCR-174#invalid) |
 | 대상 | 없는·쓴·지난 초대 링크(SCR-163#not-found·#used·#expired), 없는 친구 코드(SCR-168#code-not-found), 사라진 요청(SCR-168#gone), 지운 캐릭터는 '찾지 못했어' |
 | 상태 변화 | 만들기 단계는 서버 상태로 화면을 바꿈(SCR-170\~174#stale), 다 만들지 않은 캐릭터의 적용(SCR-166#not-ready), 적용·되돌리기(SCR-166#applied, SCR-165#reverted) |
 | 반복 | 버튼이 응답까지 꺼짐. 같은 초대 링크의 두 번째 사용은 SCR-163#used, 같은 쌍의 두 번째 요청은 SCR-168#request-exists·#already |
 | 동시 | 작업이 도는 중의 쓰기(`job_running`)는 그리는 중 상태로 맞춤(SCR-170#busy, SCR-171#analyzing, SCR-172·173#drawing, SCR-165#delete-busy). 다른 기기의 통화는 SCR-001#call-busy, 서버가 꽉 차면 SCR-001#calls-full |
 | 한도 | 캐릭터 3개(SCR-165#full, SCR-170#limit), 다시 그리기 2번(SCR-173#limit), 그림 월 예산(SCR-170\~173#budget), 기기 코드 한 시간 5개(#code-limit), 틀린 코드 5번(SCR-164#blocked), 친구 요청 하루 10번(SCR-168#request-limit), 하루 사용량(SCR-165#usage-over, SCR-107#daily-limit, SCR-001#daily-limit) |
 | 바깥 서비스 | 그림·비전 모델 실패(SCR-171#refused·#failed, SCR-172#preview-failed, SCR-173#failed·#sheet-failed), 견본 소리 실패(SCR-167#sample-error), 통화 도구 대기(SCR-002#waiting). 나머지 화면은 그대로 써요 |
-| 데이터 노출 | 초대 주소는 만든 때 한 번만(SCR-169#created), 목록에는 토큰이 없음. 관리자 화면에 대화 글·기억 없음. 친구 화면에는 이름과 관계만 있고 상대의 친구 코드는 없음. 오류 메시지에는 `traceId`만 |
-| 비어 있음과 끊긴 답 | 캐릭터 없음(SCR-165#default-character), 친구 없음(SCR-168#empty), 초대·가입한 사람 없음(SCR-169#invites-empty·#members-empty), 견본 없음(SCR-167#no-sample), 사용량만 실패(SCR-165#usage-error). 흐르는 답은 없어요 |
+| 데이터 노출 | 초대 주소는 만든 때 한 번만(SCR-202#created), 목록에는 토큰이 없음. 관리자 화면에 대화 글·기억 없음. 친구 화면에는 이름과 관계만 있고 상대의 친구 코드는 없음. 오류 메시지에는 `traceId`만 |
+| 비어 있음과 끊긴 답 | 캐릭터 없음(SCR-165#default-character), 친구 없음(SCR-168#empty), 초대 없음(SCR-202#empty), 가입한 사람 없음(SCR-200#empty), 견본 없음(SCR-167#no-sample), 사용량만 실패(SCR-165#usage-error). 흐르는 답은 없어요 |
 | 화면 상태 | 위 상태마다 360px·430px 와이어프레임을 그려야 해요. 아직 그리지 않았어요 |
 | AI 답 | 입혀 보기의 말은 정해 둔 견본이라 모델을 부르지 않아요(SCR-166). 모델이 그린 그림과 읽은 특징표의 실패는 '바깥 서비스' 줄의 상태예요 |
 

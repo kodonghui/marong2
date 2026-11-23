@@ -21,7 +21,7 @@ from pg import ROOT, TestDB
 sys.path.insert(0, str(ROOT))
 from marong.app_admin import overview_attention
 from marong.app_chat import AppChat
-from marong.app_session import AppSessions, one
+from marong.app_session import AppSessions, one, token_hash
 from marong.unified_store import UnifiedStore
 from marong.usage import month_bounds, usage_day
 from tools.vertex_live.call_cost import MonthlyCost
@@ -31,6 +31,8 @@ NOW = datetime(2026, 11, 24, 19, 10, tzinfo=timezone.utc)
 OVERVIEW = "/chat/admin/api/overview"
 ORIGIN = "https://fixture.invalid"
 ADMIN_HASH = "a" * 64
+SCREENS = (("", "overview"), ("members", "members"), ("members/7", "members"),
+           ("invites", "invites"), ("app", "app"), ("costs", "costs"), ("items", "items"))
 
 
 class OverviewAttentionTest(unittest.TestCase):
@@ -301,6 +303,101 @@ class AdminTest(unittest.IsolatedAsyncioTestCase):
             await self.overview(500, "internal")
         with patch.object(self.chat.admin, "_overview_members", side_effect=psycopg.OperationalError):
             await self.overview(503, "db_unavailable")
+
+    async def test_tc620_html_tabs_and_csp(self):
+        self.chat.decor.catalog = object()
+        hrefs = {"overview": "/chat/admin/", **{name: f"/chat/admin/{name}"
+                 for name in ("members", "invites", "app", "costs", "items")}}
+        for path, tab in SCREENS:
+            with self.subTest(path=path):
+                response = await self.client.get(f"/chat/admin/{path}", headers=self.headers)
+                self.assertEqual((response.status, response.content_type), (200, "text/html"))
+                self.assertIn("script-src 'self'", response.headers["Content-Security-Policy"])
+                html = await response.text()
+                nav = html.split('<nav class="admin-nav"', 1)[1].split("</nav>", 1)[0]
+                self.assertEqual(nav.count("<a "), 6)
+                self.assertEqual(nav.count('aria-current="page"'), 1)
+                for key, href in hrefs.items():
+                    attribute = ' aria-current="page"' if key == tab else ''
+                    self.assertIn(f'<a href="{href}"{attribute}>', nav)
+
+    async def test_tc621_forbidden_unknown_and_redirect(self):
+        for path, _ in SCREENS:
+            for proof in ({}, {"Cf-Access-Jwt-Assertion": secrets.token_urlsafe()}):
+                with self.subTest(path=path):
+                    req = {**proof, "Accept": "text/html"}
+                    response = await self.client.get(f"/chat/admin/{path}", headers=req)
+                    self.assertEqual(response.status, 403)
+                    html = await response.text()
+                    self.assertIn("관리자만 볼 수 있어요", html)
+                    self.assertNotIn('class="admin-tabs"', html)
+        for path in ("foo", "members/abc", "members/0", "members/9223372036854775808"):
+            response = await self.client.get(f"/chat/admin/{path}", headers=self.headers)
+            self.assertEqual(response.status, 404)
+            self.assertIn("없는 화면이에요", await response.text())
+        redirect = await self.client.get("/chat/admin/members/?kind=link", headers=self.headers, allow_redirects=False)
+        self.assertEqual((redirect.status, redirect.headers["Location"]), (301, "/chat/admin/members?kind=link"))
+
+    async def make_invite(self):
+        token, expires = await self.sessions.create_invite("join")
+        ((ident,),) = self.db.admin("SELECT id FROM marong.invites WHERE token_hash=%s", (token_hash(token),))
+        return ident, token, expires
+
+    async def revoke_invite(self, ident, status, code=None, headers=None):
+        result = await self.client.post(f"/chat/admin/api/invites/{ident}/revoke",
+                                        headers=self.headers if headers is None else headers)
+        return await self.response(result, status, code)
+
+    async def join_invite(self, token):
+        return await self.client.post("/chat/api/join", headers={"Origin": ORIGIN},
+                                      json={"token": token, "name": "시험친구 가"})
+
+    async def test_tc635_revoke_statuses_and_idempotence(self):
+        ident, token, expires = await self.make_invite()
+        await self.revoke_invite(ident, 403, "not_allowed", headers={})
+        await self.revoke_invite(ident, 403, "cross_site", headers={**self.headers, "Origin": "https://other.invalid"})
+        await self.revoke_invite("abc", 404, "not_found")
+        await self.revoke_invite(99_999, 404, "not_found")
+        with patch("marong.app_admin.one", side_effect=RuntimeError):
+            await self.revoke_invite(ident, 500, "internal")
+        with self.assertLogs("marong.app_admin", "INFO") as events:
+            first = await self.revoke_invite(ident, 200)
+        self.assertEqual(events.output, [f"INFO:marong.app_admin:admin_invite_revoke invite={ident} result=revoked"])
+        self.assertEqual(first["invite"]["state"], "revoked")
+        self.assertEqual(datetime.fromisoformat(first["invite"]["revokedAt"]), NOW)
+        self.assertEqual(first, await self.revoke_invite(ident, 200))
+        await self.response(await self.join_invite(token), 410, "invite_expired")
+        self.now = expires + timedelta(seconds=1)
+        self.assertEqual(first, await self.revoke_invite(ident, 200))
+
+        used, used_token, _ = await self.make_invite()
+        self.assertEqual((await self.join_invite(used_token)).status, 201)
+        expired, _, expires = await self.make_invite()
+        self.now = expires + timedelta(seconds=1)
+        for closed in (used, expired):
+            await self.revoke_invite(closed, 409, "invite_closed")
+        self.assertEqual(self.db.admin("SELECT revoked_at FROM marong.invites WHERE id IN (%s,%s)", (used, expired)),
+                         [(None,), (None,)])
+        await self.store.close()
+        await self.revoke_invite(ident, 503, "db_unavailable")
+
+    async def test_tc635_join_and_revoke_compete_for_the_same_row(self):
+        ident, token, _ = await self.make_invite()
+        async with self.store.pool.connection() as conn, conn.transaction():
+            await one(conn, "SELECT id FROM marong.invites WHERE id=%s FOR UPDATE", (ident,))
+            tasks = [asyncio.create_task(self.join_invite(token)), asyncio.create_task(
+                self.client.post(f"/chat/admin/api/invites/{ident}/revoke", headers=self.headers))]
+            async with asyncio.timeout(4):
+                while True:
+                    await conn.execute("SELECT pg_stat_clear_snapshot()")
+                    waiting = await one(conn, """
+                        SELECT count(*) FROM pg_stat_activity WHERE usename=current_user AND wait_event_type='Lock'
+                    """)
+                    if waiting["count"] == 2:
+                        break
+                    await asyncio.sleep(.02)
+        joined, revoked = await asyncio.gather(*tasks)
+        self.assertIn((joined.status, revoked.status), {(201, 409), (410, 200)})
 
 
 if __name__ == "__main__":

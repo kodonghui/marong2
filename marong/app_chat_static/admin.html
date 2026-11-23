@@ -12,21 +12,11 @@
   <script src="/chat/admin.js" defer></script>
 </head>
 <body>
-  <main class="unified">
-    <header><h1>관리자</h1></header>
-    <!-- image-budget -->
-    <section class="stack" id="admin" aria-busy="true">
-      <p class="err" id="admin-error" role="status" hidden></p>
-      <p class="caption" id="admin-notice" role="status" hidden></p>
-      <div id="image-costs" class="card" hidden></div>
-      <!-- decor-items -->
-      <h2>초대 링크</h2>
-      <div class="stack" id="invite-controls"></div>
-      <ul class="stack records" id="invites"></ul>
-      <p class="caption" id="default-limits" hidden></p>
-      <h2>가입한 사람</h2>
-      <ul class="stack records" id="members"></ul>
-    </section>
+  <main class="unified admin-layout">
+    <header><h1>마롱이 관리</h1></header>
+    <!-- admin-tabs -->
+    <div class="admin-refresh" hidden><progress aria-label="다시 불러오는 중"></progress></div>
+    <section class="stack" id="admin" aria-busy="true"></section>
   </main>
 </body>
 </html>

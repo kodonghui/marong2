@@ -17,7 +17,13 @@ const FILES = { '/chat/': ['index.html', 'text/html'], '/chat/chat.js': ['chat.j
   '/chat/me': ['profile.html', 'text/html'],
   '/chat/profile.js': ['profile.js', 'text/javascript'],
   '/chat/admin/': ['admin.html', 'text/html'],
+  '/chat/admin/members': ['admin.html', 'text/html'],
+  '/chat/admin/invites': ['admin.html', 'text/html'],
+  '/chat/admin/app': ['admin.html', 'text/html'],
+  '/chat/admin/costs': ['admin.html', 'text/html'],
+  '/chat/admin/items': ['admin-items.html', 'text/html'],
   '/chat/admin.js': ['admin.js', 'text/javascript'],
+  '/chat/admin-items.js': ['admin-items.js', 'text/javascript'],
   '/chat/unified.js': ['unified.js', 'text/javascript'],
   '/chat/unified.css': ['unified.css', 'text/css'],
   '/chat/persona/': ['persona/index.html', 'text/html'],
@@ -25,6 +31,15 @@ const FILES = { '/chat/': ['index.html', 'text/html'], '/chat/chat.js': ['chat.j
   '/chat/persona/instructions': ['persona/instructions.html', 'text/html'],
   '/chat/persona/persona.css': ['persona/persona.css', 'text/css'],
   '/chat/persona/persona.js': ['persona/persona.js', 'text/javascript'] };
+const ADMIN_TABS = {'': '개요', members: '회원', invites: '초대 링크', app: '앱 버전', costs: '비용', items: '아이템'};
+
+function adminTabs(html, pathname) {
+  const active = pathname.split('/')[3] || '';
+  const tabs = Object.entries(ADMIN_TABS).map(([page, name]) =>
+    '<a href="/chat/admin/' + page + '"' + (active === page ? ' aria-current="page"' : '') + '>' + name + '</a>');
+  return html.replace('<!-- admin-tabs -->', '<nav class="admin-nav" aria-label="마롱이 관리">' +
+    '<div class="admin-tabs">' + tabs.join('') + '</div></nav>');
+}
 const ME = { name: '현경', textMax: 2000, delivery: { to: 'discord', reason: 'no_device' },
   ring: { to: 'discord', reason: 'ring_disabled', fullScreen: null } };
 
@@ -106,10 +121,14 @@ async function startChatSite({ waitMs = 1500 } = {}) {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
     const { pathname } = url;
-    if (FILES[pathname]) {
-      const [name, type] = FILES[pathname];
-      res.writeHead(200, { 'Content-Type': `${type}; charset=utf-8`, 'Cache-Control': 'no-store' });
-      res.end(fs.readFileSync(path.join(STATIC, name)));
+    const file = FILES[pathname] || (/^\/chat\/admin\/members\/\d+$/.test(pathname) ? FILES['/chat/admin/members'] : null);
+    if (file) {
+      const [name, type] = file;
+      const html = name.startsWith('admin') && type === 'text/html';
+      res.writeHead(200, { 'Content-Type': `${type}; charset=utf-8`, 'Cache-Control': 'no-store',
+        ...(html ? {'Content-Security-Policy': "script-src 'self'"} : {}) });
+      const bytes = fs.readFileSync(path.join(STATIC, name));
+      res.end(html ? adminTabs(bytes.toString('utf8'), pathname) : bytes);
       return;
     }
     if (pathname.startsWith('/face/v1/')) {
