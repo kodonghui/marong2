@@ -62,7 +62,7 @@ GPT가 TASK마다 상태·커밋·확인한 것을 적어요(AGENTS.md '구현�
 
 | TASK | 상태 | 커밋 | 확인한 것 |
 | --- | --- | --- | --- |
-| TASK-488 | 문서 정리 · 초안 PR 리뷰 대기 | 이 PR(`claude/app-update-docs-488`) | 기능 명세: SPEC-289 행에 ④, SPEC-294 행 끝에 SPEC-441, 8.8을 4절 표와 6절로 옮김. TC-597\~619와 TC-200\~229는 저장소에서 한 번씩만 정의됨(이 QA 문서에만). 이 기능의 릴리스 표기를 0.3.4(버전 코드 12)로 맞춤(TASK-487 행, 게시 조건, SPEC-442 ③, QA 게시 조건). BUG-112에 삼성 실기기 결과와 상태 `fixed`, BUG-113에 상태·원인 단계·회귀 시험. 남은 것: 실제 폰 TC-614\~616(0.3.4가 깔린 폰, 다음 게시 때) |
+| TASK-488 | 문서 정리 · PR #113 | `34c583d` | 기능 명세: SPEC-289 행에 ④, SPEC-294 행 끝에 SPEC-441, 8.8을 4절 표와 6절로 옮김. TC-597\~619와 TC-200\~229는 저장소에서 한 번씩만 정의됨(이 QA 문서에만). 이 기능의 릴리스 표기를 0.3.4(버전 코드 12)로 맞춤(TASK-487 행, 게시 조건, SPEC-442 ③, QA 게시 조건). BUG-112에 삼성 실기기 결과와 상태 `fixed`, BUG-113에 상태·원인 단계·회귀 시험. 남은 것: 실제 폰 TC-614\~616(0.3.4가 깔린 폰, 다음 게시 때) |
 | TASK-485 | 구현 · TC-609 통과 · 리뷰 대기 | `8b00b51` | Playwright의 가짜 앱 연결에서 360·430px 낮·밤과 여섯 상태를 확인했어요. 첫 통화 단추 활성화 전에 배너를 정하고, 통화 중에는 숨겼어요. |
 | TASK-489 | 구현 · TC-618 통과 · 리뷰 대기 | `8b00b51` | Playwright의 가짜 앱 연결에서 360·430px 낮·밤과 여섯 상태를 확인했어요. 업데이트 이벤트 뒤에도 마지막 메시지가 보였고, 메뉴와 사용량 안내, 입력 칸의 배치를 확인했어요. |
 | TASK-481 | 구현 · TC-603·604 통과 | `e1d8eff` | Android 16에서 `rare` 빠른 작업은 0.928초, 거절을 주입한 일반 작업은 `rare` 2.541초·`restricted` 1.818초에 APK 요청을 시작했어요. 각 시험에서 HTTP 요청 2건, 알림 0건을 확인했어요. |
@@ -145,7 +145,7 @@ cd apps/android/android && ./gradlew testDebugUnitTest lintDebug assembleDebug  
 | TASK-485 | 통화 홈 업데이트 배너: 여섯 상태, 앱 연결 `version` 3 이상일 때만, 500ms 안에 정함, 통화 중엔 숨김, `visibilitychange`·`marongupdate`에 다시 읽기 | SPEC-439, SCR-001#update-* | `tools/vertex_live/static/app.js`, `index.html`, `style.css` | TASK-484 | Codex | 0.5 | TC-609 통과(Playwright 360·430px, 낮·밤, 가짜 연결) |
 | TASK-486 | 서버 반영: 마이그레이션 023 적용, 봇(글 대화 배너 포함)·도구·통화 홈 반영, `backfill` 한 번(0.2.2\~0.3.2, 서버 폴더와 WBS 기록으로 확인). 감시를 켜기 전에 업데이트 기록 정리 명령과 1년 지난 줄을 매달 정리하는 타이머를 설치·확인(소유 역할로, ERD 2절). 준비 전에 서버를 시작할 때와 감시를 끌 때는 `MARONG_APP_UPDATE_PUSH=0`. 앞뒤 공백을 뺀 `0`만 끄며, 미설정·빈 값·`false`·`off`는 켜짐. 감시 스위치와 시작 로그 확인. 재시작은 조용할 때(최근 5분 친구 말 없음, 진행 중 통화 0). 되돌리기 스크립트 | SPEC-442 ①② | 서버(`marong-discord`, 통화 서버) | TASK-475\~480, TASK-485, TASK-489 | Codex | 0.5 | TC-617 통과, `update` 없는 API-105가 그대로 200, 버전 기록에 채운 줄 |
 | TASK-487 | 0.3.4(버전 코드 12) 빌드·서명, 에뮬레이터 시험 전부, 실제 삼성 폰 시험 TC-614\~616, 결과를 동희님께 보여 드린 뒤 `app-release publish --notes`로 게시. 0.3.2 폰에서 업데이트 데이터 메시지가 알림 없이 닿는지(TC-602) | SPEC-442 ③ | 앱 버전, 노트북, 서버 릴리스 폴더 | TASK-481\~483, TASK-486 | Codex | 0.75 | TC-602, TC-605, TC-614\~616 통과와 게시 기록(버전 기록에 노트) |
-| TASK-488 | PR #100과 이 PR이 합쳐진 뒤 문서 정리: SPEC-289 행에 ④, SPEC-294 행에 SPEC-441 예외, 4·6절에 8.8 합치기, TC 번호 겹침 확인 | 기능 명세 8.1, 8.8 | `docs/04-functional-spec/app-update.md`, `docs/12-qa/app-update.md` | PR #100 합침 | Claude | 0.1 | 4·6절과 8.8이 한 곳에 있음 |
+| TASK-488 | PR #100과 이 PR이 합쳐진 뒤 문서 정리: SPEC-289 행에 ④, SPEC-294 행에 SPEC-441 예외, 4·6절에 8.8 합치기, TC 번호 겹침 확인 | 기능 명세 8.1, 8.8 | `docs/04-functional-spec/app-update.md`, `docs/12-qa/app-update.md`, `docs/10-wbs/app-update.md`(11단계 진행 줄, 릴리스 표기), `.corthex/stages/app-update.json` | PR #100 합침 | Claude | 0.1 | 4·6절과 8.8이 한 곳에 있음 |
 | TASK-489 | 글 대화 업데이트 배너: SCR-001 배너와 같은 여섯 상태와 글, 앱 연결 `version` 3 이상일 때만, 머리 아래·메시지 목록 위, 첫 목록을 그리기 전에 정함(500ms), 통화 중에도 보임(누르면 `busy`), `visibilitychange`·`marongupdate`에 다시 읽기, 띠가 생겨도 마지막 말이 보이던 자리 유지 | SPEC-443, SCR-107#update-* | `marong/app_chat_static/chat.js`, `index.html`, `chat.css`, `apps/android/test/chat-page.e2e.cjs` | TASK-484 | Codex | 0.5 | TC-618 통과(Playwright 360·430px, 낮·밤, 가짜 연결). TC-619는 TASK-487의 에뮬레이터 시험에서 |
 
 ### 확인
