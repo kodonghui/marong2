@@ -119,7 +119,7 @@ WHERE deleted_at IS NULL AND status='ended' AND organize_status='failed' AND id 
 
 ## 통화 기억 배포 검증
 
-BUG-118~122 후속 반영은 리뷰와 병합 뒤에 진행한다. 동작 수정은 `09e0722`, BUG-117의 구간 설정 변경은 별도 커밋 `28c4e02`다. 통화가 없는 시간에 승인 범위의 파일로 아래 순서를 적용한다.
+BUG-118~122 후속 반영은 리뷰와 병합 뒤에 진행한다. 동작 수정은 `85567b1`, BUG-117의 구간 설정 변경은 별도 커밋 `7fe94a4`다. 통화가 없는 시간에 승인 범위의 파일로 아래 순서를 적용한다.
 
 1. `systemctl --user show marong-vertex-live -p WorkingDirectory --value`로 실제 릴리스의 `tools/vertex_live` 경로를 얻는다. DB와 현재 파일 및 사용자 유닛 설정을 백업하고 해시를 대조한다. 릴리스 루트에 정리기 import에 필요한 동일 버전의 `marong` 패키지가 있는지 확인한다. 되돌리기 스크립트 경로는 반영 전에 기록한다.
 2. 병합본의 `call_instruction.md`를 같은 디렉터리의 임시 파일을 거쳐 원자적으로 교체하고 SHA256을 확인한다. 웹 통화 서버는 다음 공급자 연결 때 이 파일을 읽는다. 비활성 디스코드 중계는 계속 정지하고, 중계를 되살릴 때 지시문과 코드 해시를 별도로 확인한다.
