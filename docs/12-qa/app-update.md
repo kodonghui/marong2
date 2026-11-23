@@ -266,3 +266,16 @@ Windows 시험 준비본은 `C:/tmp/marong-bug112/`의 `rtl-fixture.cjs`, `rtl-9
 - TC-610 `paused`에서 리뷰 당시 앱 코드는 중단 응답을 재확인하지 않고 `installing`을 반환했어요. 수정 뒤에는 마지막 확인이 10분을 넘은 후보에 대해 API-141을 다시 요청해요. `paused`(204)와 `superseded`(같은 버전의 다른 해시)는 `none`을 반환하고 후보를 지웠어요. `current`와 `offline`(연결 실패)은 각각 설치를 1회 커밋했어요.
 - TC-607의 API-105 계약 시험에 앱 본문 표본을 넣었어요. 다섯 보고 상태와 앱이 사용하는 실패 번호를 받아들이고 벨 설정을 유지하며 `installed`는 설치 이벤트로만 남기는 것을 로컬 PostgreSQL에서 확인했어요.
 - Android 16의 TC-222 회귀 시험에서 빠른 작업 2213은 3.629초, 프로세스 회수와 강제 Doze 뒤 알람 작업 2215는 209.363초에 코드 10을 설치했어요. 예비 경로에서는 2212·2213이 실행되지 않았어요.
+
+## BUG-116 글 대화 업데이트 배너의 대기 시간 시험이 간헐적으로 실패함
+
+- 상태는 열림이에요. 로컬 Windows Chromium의 TC-618에서 통화 중 설치를 눌렀을 때 대기 상태가 2,950ms 이상 유지된다는 단언이 간헐적으로 실패해요.
+- `apps/android`에서 `node --test --test-concurrency=1 test/*.e2e.cjs`를 실행했어요. `main` `f3bca34`에서는 두 번 모두 73개가 통과했고, 관리 화면 PR `d6912a7`에서는 81개 중 80개가 통과하고 이 사례 한 개가 실패했어요.
+- `node --test --test-name-pattern 'TC-618: busy' test/app-update-banners.e2e.cjs`를 같은 환경에서 교대로 다섯 번씩 실행했어요. `main` `f3bca34`와 DB·API PR #116 `03d083b` 모두 1개 통과·4개 실패였어요. 두 커밋에서 글 대화 시험과 시험 서버, 배너 스크립트·HTML·CSS의 차이는 0개였어요.
+
+```text
+✖ TC-618: busy for three seconds, failed for the same release, then none on retry
+assert.ok(await page.evaluate(() => window.updateFixture.busyFor) >= 2950)
+```
+
+- 이 기록은 로컬 시험의 재현 결과예요. 배너 동작 원인과 실제 폰에서의 영향은 후속 앱 업데이트 작업에서 확인해요.
