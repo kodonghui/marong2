@@ -1,0 +1,32 @@
+<!doctype html>
+<!-- SCR-220 업데이트 내역 목업(09, 기능 변경 4). 주소 뒤 ?state= 로 상태를 골라요:
+     normal(기본) filtered filter-empty empty skipped long loading error. 자료는 data.js(API-300 모양)예요. -->
+<html lang="ko" data-theme="night">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>업데이트 내역 목업</title>
+<link rel="stylesheet" href="../../marong/app_chat_static/chat.css">
+<link rel="stylesheet" href="../../marong/app_chat_static/unified.css">
+<link rel="stylesheet" href="changelog.css">
+</head>
+<body>
+<main class="unified admin-layout">
+  <header><h1>마롱이 관리</h1></header>
+  <nav class="admin-nav" aria-label="마롱이 관리"><div class="admin-tabs">
+    <a href="#">개요</a><a href="#">회원</a><a href="#">초대 링크</a><a href="#">앱 버전</a><a href="#">비용</a><a href="#">아이템</a><a href="#" aria-current="page">업데이트 내역</a>
+  </div></nav>
+  <section class="stack changes" id="admin" aria-busy="true">
+    <div class="changes-head">
+      <h2>업데이트 내역</h2>
+      <p class="caption">서비스에서 바뀐 것을 반영마다 적어요. 새것부터예요.</p>
+    </div>
+    <ul class="changes-chips" aria-label="영역 고르기"></ul>
+    <div class="changes-count" aria-live="polite"></div>
+    <div class="changes-groups"></div>
+  </section>
+</main>
+<script src="data.js"></script>
+<script src="screen.js"></script>
+</body>
+</html>

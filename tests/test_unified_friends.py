@@ -97,8 +97,8 @@ class FriendTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual([row["id"] for row in circle], [b_id])
                 self.assertEqual(circle[0]["shared"], b_notes)
                 seed = json.loads(await memory.seed(who))
-                self.assertEqual([row["name"] for row in seed["shared_friends"]], ["Fixture B"])
-                self.assertIn("Fixture close topic", seed["shared_friends"][0]["text"])
+                voice_friends = [{"name": "Fixture B", "label": "가까운 사이"}]
+                self.assertEqual(seed["shared_friends"], voice_friends)
                 [(note_id,)] = db.admin("SELECT id FROM marong.shared_notes WHERE friend_id=%s", (b_id,))
                 [(forget_id,)] = db.admin(
                     "INSERT INTO marong.memory_forgets(friend_id,via,request_key) VALUES(%s,'tool','fixture') RETURNING id",
@@ -106,11 +106,11 @@ class FriendTests(unittest.IsolatedAsyncioTestCase):
                 db.admin("""INSERT INTO marong.forget_marks(forget_id,friend_id,target_type,target_id,state)
                             VALUES(%s,%s,'shared_note',%s,'hidden')""", (forget_id, b_id, note_id))
                 self.assertIsNone((await store.friend_circle(a["user_key"], 32))[0]["shared"])
-                self.assertEqual(json.loads(await memory.seed(who))["shared_friends"][0]["text"], "")
+                self.assertEqual(json.loads(await memory.seed(who))["shared_friends"], voice_friends)
                 self.assertEqual((await http.patch("/chat/api/profile", headers=bb, json={"share": False})).status, 200)
                 self.assertIsNone((await store.friend_circle(a["user_key"], 32))[0]["shared"])
                 seed = json.loads(await memory.seed(who))
-                self.assertEqual(seed["shared_friends"][0]["text"], "")
+                self.assertEqual(seed["shared_friends"], voice_friends)
                 self.assertEqual((await http.delete(BASE + f"/{b_id}", headers=aa)).status, 204)
                 self.assertEqual((await state(bb))["friends"], [])
                 self.assertEqual((await send(b_code, aa)).status, 201)

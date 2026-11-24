@@ -4,21 +4,31 @@ import asyncio
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import json
+import os
+from pathlib import Path
+import re
 import secrets
+from statistics import median
 import sys
-from time import monotonic
+from tempfile import TemporaryDirectory
+from time import monotonic, time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from aiohttp.test_utils import TestClient, TestServer
+from cryptography.hazmat.primitives.asymmetric import rsa
+import jwt
 import psycopg
 from psycopg.rows import dict_row
 
 from pg import ROOT, TestDB
+from test_changelog import app_unit, server_unit, unit_bytes, write_unit
 
 sys.path.insert(0, str(ROOT))
+from marong.access import AccessConfig, AccessVerifier, email_hash
 from marong.app_admin import overview_attention
 from marong.app_chat import AppChat
 from marong.app_session import AppSessions, one, token_hash
@@ -29,10 +39,13 @@ from tools.vertex_live.call_cost import MonthlyCost
 
 NOW = datetime(2026, 11, 24, 19, 10, tzinfo=timezone.utc)
 OVERVIEW = "/chat/admin/api/overview"
+APP_VERSIONS = "/chat/admin/api/app-versions"
+CHANGES = "/chat/admin/api/changes"
 ORIGIN = "https://fixture.invalid"
 ADMIN_HASH = "a" * 64
 SCREENS = (("", "overview"), ("members", "members"), ("members/7", "members"),
-           ("invites", "invites"), ("app", "app"), ("costs", "costs"), ("items", "items"))
+           ("invites", "invites"), ("app", "app"), ("costs", "costs"), ("items", "items"),
+           ("changes", "changes"))
 
 
 class OverviewAttentionTest(unittest.TestCase):
@@ -66,6 +79,159 @@ class OverviewAttentionTest(unittest.TestCase):
                     self.assertNotIn("value", attention[0])
 
 
+class AdminChangesTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        address = "admin@example.invalid"
+        other = "guest@example.invalid"
+        config = AccessConfig("fixture.cloudflareaccess.com", "fixture", frozenset({address, other}))
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key())) | {"kid": "fixture"}
+        now = int(time())
+        verifier = AccessVerifier(config)
+        verifier.keys, verifier.fetched, verifier.expires = [jwk], now, now + 600
+
+        def headers(email):
+            proof = jwt.encode({"sub": "fixture", "email": email, "iat": now, "exp": now + 300,
+                                "aud": config.aud, "iss": f"https://{config.team}"},
+                               key, algorithm="RS256", headers={"kid": jwk["kid"]})
+            return {"Cf-Access-Jwt-Assertion": proof}
+
+        self.headers, self.guest = headers(address), headers(other)
+        chat = AppChat(SimpleNamespace(pool=None), SimpleNamespace(), None, verifier, None,
+                       origin=ORIGIN, sessions=SimpleNamespace(now=lambda: NOW), authentication="session",
+                       admin_email_hash=email_hash(address))
+        self.client = TestClient(TestServer(chat.web_app()))
+        await self.client.start_server()
+        self.addAsyncCleanup(self.client.close)
+        self.folder = Path(self.enterContext(TemporaryDirectory()))
+        self.enterContext(patch("marong.app_admin.CHANGELOG_DIR", self.folder, create=True))
+
+    async def changes(self, status=200, code=None, headers=None):
+        response = await self.client.get(CHANGES, headers=self.headers if headers is None else headers)
+        text = await response.text()
+        self.assertEqual(response.status, status, text[:160])
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(response.content_type, "application/problem+json" if code else "application/json")
+        data = json.loads(text)
+        if code:
+            self.assertEqual((data["status"], data["code"]), (status, code))
+        return data
+
+    async def test_tc704_contract_and_sort_order(self):
+        a = server_unit("20261124-a", evidence=["abc1234", "PR #9003", "PR #9002"])
+        a["items"].append(a["items"][0] | {"title": "시험 둘째 항목", "evidence": ["abc1234"]})
+        b = server_unit("20261124-b")
+        c = server_unit("20261124-c")
+        fallback = server_unit("20261122-old", deployedOn=None, backfilled=True, evidence=["abc1234"])
+        app = app_unit(deployedOn="2026-11-25")
+        for unit in (b, app, fallback, a, c):
+            write_unit(self.folder, unit)
+        github = "https://github.com/kodonghui/marong2"
+        evidence = {
+            "abc1234": {"label": "abc1234", "url": github + "/commit/abc1234"},
+            **{f"PR #{n}": {"label": f"PR #{n}", "url": f"{github}/pull/{n}"} for n in (9001, 9002, 9003)},
+        }
+        expected = []
+        for unit in (app, a, c, b, fallback):
+            response = {field: value for field, value in unit.items() if field != "format"}
+            response["sortOn"] = unit["deployedOn"] or "2026-11-22"
+            response["evidence"] = [evidence[label] for label in unit["evidence"]]
+            response["items"] = [item | {"evidence": [evidence[label] for label in item["evidence"] or unit["evidence"]]}
+                                 for item in unit["items"]]
+            expected.append(response)
+        self.assertEqual(await self.changes(), {"units": expected, "skipped": 0})
+
+    async def test_tc705_skip_invalid_duplicates_missing_and_unreadable(self):
+        valid = [server_unit(), app_unit()]
+        for unit in valid:
+            write_unit(self.folder, unit)
+        (self.folder / "20261124-broken.json").write_bytes(b'{"title":"fixture-private-marker"')
+        (self.folder / "20261124-big.json").write_bytes(b" " * 32769)
+        write_unit(self.folder, valid[0], "20261124-wrong.json")
+        with self.assertLogs("marong.admin_changes", "WARNING") as logs:
+            data = await self.changes()
+        self.assertEqual((len(data["units"]), data["skipped"]), (2, 3))
+        self.assertCountEqual([line.split("admin_changes ", 1)[1] for line in logs.output], [
+            "file=20261124-broken.json result=invalid reason=json", "file=20261124-big.json result=invalid reason=too_big",
+            "file=20261124-wrong.json result=invalid reason=name",
+        ])
+        duplicate = self.folder / "duplicate"
+        duplicate.mkdir()
+        write_unit(duplicate, valid[1])
+        write_unit(duplicate, app_unit("9.9.8"))
+        with patch("marong.app_admin.CHANGELOG_DIR", duplicate), self.assertLogs("marong.admin_changes", "WARNING") as logs:
+            self.assertEqual(await self.changes(), {"units": [], "skipped": 2})
+        self.assertEqual(sum(line.endswith("reason=duplicate") for line in logs.output), 2)
+        with patch("marong.app_admin.CHANGELOG_DIR", self.folder / "missing"), self.assertLogs("marong.admin_changes") as logs:
+            self.assertEqual(await self.changes(), {"units": [], "skipped": 0})
+        self.assertTrue(logs.output[0].endswith("admin_changes result=missing_dir"))
+        with patch.object(Path, "iterdir", side_effect=PermissionError):
+            await self.changes(500, "internal")
+
+    async def test_tc705_reads_only_regular_files(self):
+        entries = self.folder / "entries"
+        entries.mkdir()
+        outside = self.folder / "outside"
+        outside.mkdir()
+        source = write_unit(outside, server_unit("20261124-sihum-link"))
+        (entries / source.name).symlink_to(source)
+        directory = entries / "20261124-sihum-dir.json"
+        directory.mkdir()
+        rejected = [source.name, directory.name]
+        if hasattr(os, "mkfifo"):
+            fifo = entries / "20261124-sihum-fifo.json"
+            os.mkfifo(fifo)
+            rejected.append(fifo.name)
+        normal = server_unit()
+        write_unit(entries, normal)
+
+        with patch("marong.app_admin.CHANGELOG_DIR", entries), self.assertLogs("marong.admin_changes", "WARNING") as logs:
+            data = await self.changes()
+        self.assertEqual([unit["id"] for unit in data["units"]], [normal["id"]])
+        self.assertEqual(data["skipped"], len(rejected))
+        self.assertCountEqual([line.split("admin_changes ", 1)[1] for line in logs.output],
+                              [f"file={name} result=invalid reason=json" for name in rejected])
+
+    async def test_tc706_access_no_cache_privacy_and_latency(self):
+        with patch.object(Path, "iterdir", side_effect=AssertionError("must authenticate first")):
+            await self.changes(403, "not_allowed", headers=self.guest)
+            await self.changes(403, "not_allowed", headers={})
+        self.assertEqual(await self.changes(), {"units": [], "skipped": 0})
+        for index in range(300):
+            unit = server_unit(f"20261124-sihum-{index}")
+            unit["items"] *= 6
+            raw = unit_bytes(unit).ljust(3072, b" ")
+            (self.folder / f"{unit['id']}.json").write_bytes(raw)
+        durations = []
+        for _ in range(5):
+            start = monotonic()
+            data = await self.changes()
+            durations.append(monotonic() - start)
+            self.assertEqual((len(data["units"]), data["skipped"]), (300, 0))
+            self.assertIsNone(re.search(r"@|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}|[A-Za-z0-9_-]{21,}",
+                                        json.dumps(data, ensure_ascii=False)))
+        milliseconds = median(durations) * 1000
+        print(f"TC-706 300 x 3072 B, 5 requests, median {milliseconds:.1f} ms")
+        self.assertLess(milliseconds, 500)
+
+    async def test_tc710_changes_page_path(self):
+        response = await self.client.get("/chat/admin/changes", headers=self.headers)
+        self.assertEqual((response.status, response.content_type), (200, "text/html"))
+        nav = (await response.text()).split('<nav class="admin-nav"', 1)[1].split("</nav>", 1)[0]
+        self.assertEqual(re.findall(r"<a [^>]+>([^<]+)</a>", nav),
+                         ["개요", "회원", "초대 링크", "앱 버전", "비용", "아이템", "업데이트 내역"])
+        self.assertEqual(nav.count('aria-current="page"'), 1)
+        self.assertIn('href="/chat/admin/changes" aria-current="page"', nav)
+        for suffix, status in (("/", 301), ("/x", 404)):
+            response = await self.client.get("/chat/admin/changes" + suffix, headers=self.headers, allow_redirects=False)
+            self.assertEqual(response.status, status)
+            if status == 301:
+                self.assertEqual(response.headers["Location"], "/chat/admin/changes")
+        for path, _ in SCREENS:
+            response = await self.client.get(f"/chat/admin/{path}", headers={"Accept": "text/html"})
+            self.assertEqual(response.status, 403, path)
+
+
 class AdminTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.db = TestDB()
@@ -82,15 +248,20 @@ class AdminTest(unittest.IsolatedAsyncioTestCase):
         self.now = NOW
         self.sessions = AppSessions(self.store.pool, secrets.token_bytes(32), contact_schedule=(3, 8, 22),
                                     now=lambda: self.now)
-        self.chat = AppChat(self.store, SimpleNamespace(friend_cards=None), None, None, None,
-                            origin=ORIGIN, sessions=self.sessions, authentication="session",
-                            admin_email_hash=ADMIN_HASH)
         self.proof = secrets.token_urlsafe()
         self.headers = {"Cf-Access-Jwt-Assertion": self.proof, "Origin": ORIGIN}
-        self.chat.access = SimpleNamespace(check=AsyncMock(side_effect=self.access))
-        self.client = TestClient(TestServer(self.chat.web_app()))
-        await self.client.start_server()
-        self.addAsyncCleanup(self.client.close)
+        self.chat, self.client = await self.start_client()
+
+    async def start_client(self, catalog=None):
+        chat = AppChat(self.store, SimpleNamespace(friend_cards=None), None, None, None,
+                       origin=ORIGIN, sessions=self.sessions, authentication="session",
+                       admin_email_hash=ADMIN_HASH)
+        chat.decor.catalog = catalog
+        chat.access = SimpleNamespace(check=AsyncMock(side_effect=self.access))
+        client = TestClient(TestServer(chat.web_app()))
+        await client.start_server()
+        self.addAsyncCleanup(client.close)
+        return chat, client
 
     async def access(self, proof):
         return "ok", ADMIN_HASH if proof == self.proof else "b" * 64
@@ -231,8 +402,8 @@ class AdminTest(unittest.IsolatedAsyncioTestCase):
         latest = {"versionName": "0.3.3", "versionCode": 11,
                   "publishedAt": (NOW - timedelta(hours=30)).isoformat()}
         app = {"latest": latest, "paused": False, "devices": [
-            {"behind": True, "events": [], "friend": "시험친구 가", "friendId": friend},
-            {"behind": False, "events": [], "friend": "시험친구 나", "friendId": friend + 1},
+            {"behind": True, "removedAt": None, "events": [], "friend": "시험친구 가", "friendId": friend},
+            {"behind": False, "removedAt": None, "events": [], "friend": "시험친구 나", "friendId": friend + 1},
         ]}
         with patch.object(self.chat.admin, "read_app_versions", return_value=app):
             data = await self.overview()
@@ -249,6 +420,42 @@ class AdminTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("시험친구", str(data))
         self.assertNotIn("friendId", str(data))
         self.assertNotIn("events", str(data))
+
+    async def add_update_phones(self, specs):
+        for friend_id in sorted({owner for owner, _ in specs}):
+            self.db.admin("INSERT INTO marong.friends (id, name) OVERRIDING SYSTEM VALUE VALUES (%s, %s)",
+                          (friend_id, "시험친구 가"))
+        phones = [(str(uuid4()), secrets.token_urlsafe()) for _ in specs]
+        for (install, registration), (owner, version) in zip(phones, specs):
+            await self.store.app_device_put(install, owner, registration, "granted", version, None, None)
+        return phones
+
+    async def test_tc654_overview_excludes_removed_phones(self):
+        active, removed = await self.add_update_phones([(7, "0.3.2"), (7, "0.2.4")])
+        await self.store.drop_fid(*removed)
+        published_at = (NOW - timedelta(hours=30)).isoformat()
+        release = SimpleNamespace(name="0.3.3", code=11, published_at=published_at)
+        latest = {"versionName": release.name, "versionCode": release.code, "publishedAt": published_at}
+        with patch.object(self.chat.releases, "manifest", return_value=release):
+            for count in (1, 0):
+                data = await self.overview()
+                self.assertEqual(data["app"], {"latest": latest, "paused": False, "devices": count, "behind": count})
+                alerts = [row["value"] for row in data["attention"] if row["kind"] == "app_behind"]
+                self.assertEqual(alerts, [1] if count else [])
+                if count:
+                    await self.store.drop_fid(*active)
+
+    async def test_tc659_overview_and_app_versions_share_behind_count(self):
+        phones = await self.add_update_phones([(7, "0.3.2"), (7, "0.2.4"), (7, "0.3.3"), (8, "0.3.1")])
+        await self.store.drop_fid(*phones[1])
+        release = SimpleNamespace(name="0.3.3", code=11, published_at=(NOW - timedelta(hours=30)).isoformat())
+        with patch.object(self.chat.releases, "manifest", return_value=release):
+            versions = await self.response(await self.client.get(APP_VERSIONS, headers=self.headers), 200)
+            overview = await self.overview()
+        self.assertEqual([(row["friendId"], row["phone"]) for row in versions["devices"] if row["behind"]],
+                         [(7, 1), (8, 1)])
+        self.assertEqual((overview["app"]["devices"], overview["app"]["behind"]), (3, 2))
+        self.assertEqual([row["value"] for row in overview["attention"] if row["kind"] == "app_behind"], [2])
 
     async def test_tc623_partial_timeout_and_pool_limit(self):
         self.assertEqual((await self.overview())["attention"], [])
@@ -319,7 +526,7 @@ class AdminTest(unittest.IsolatedAsyncioTestCase):
     async def test_tc620_html_tabs_and_csp(self):
         self.chat.decor.catalog = object()
         hrefs = {"overview": "/chat/admin/", **{name: f"/chat/admin/{name}"
-                 for name in ("members", "invites", "app", "costs", "items")}}
+                 for name in ("members", "invites", "app", "costs", "items", "changes")}}
         for path, tab in SCREENS:
             with self.subTest(path=path):
                 response = await self.client.get(f"/chat/admin/{path}", headers=self.headers)
@@ -327,7 +534,7 @@ class AdminTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("script-src 'self'", response.headers["Content-Security-Policy"])
                 html = await response.text()
                 nav = html.split('<nav class="admin-nav"', 1)[1].split("</nav>", 1)[0]
-                self.assertEqual(nav.count("<a "), 6)
+                self.assertEqual(nav.count("<a "), 7)
                 self.assertEqual(nav.count('aria-current="page"'), 1)
                 for key, href in hrefs.items():
                     attribute = ' aria-current="page"' if key == tab else ''
@@ -349,6 +556,55 @@ class AdminTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("없는 화면이에요", await response.text())
         redirect = await self.client.get("/chat/admin/members/?kind=link", headers=self.headers, allow_redirects=False)
         self.assertEqual((redirect.status, redirect.headers["Location"]), (301, "/chat/admin/members?kind=link"))
+
+    async def test_tc652_items_page_with_catalog_disabled(self):
+        address = uuid4().hex + chr(64) + "example.invalid"
+        config = AccessConfig("fixture.cloudflareaccess.com", "fixture", frozenset({address}))
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key()))
+        jwk["kid"] = "fixture"
+        now = int(time())
+        verifier = AccessVerifier(config)
+        verifier.keys = [jwk]
+        verifier.fetched = now
+        verifier.expires = now + 600
+        proof = jwt.encode({"sub": "fixture", "email": address, "iat": now, "exp": now + 300,
+                            "aud": config.aud, "iss": f"https://{config.team}"},
+                           key, algorithm="RS256", headers={"kid": jwk["kid"]})
+        self.chat.access = verifier
+        self.chat.admin.email_hash = email_hash(address)
+        self.assertIsNone(self.chat.decor.catalog)
+        self.assertEqual(self.db.admin("SELECT count(*) FROM marong.friend_profiles"), [(0,)])
+
+        headers = {"Cf-Access-Jwt-Assertion": proof, "Origin": ORIGIN, "Accept": "text/html"}
+        for method, path in (("GET", "/api/items"), ("POST", "/api/items/fixture/list"),
+                             ("POST", "/api/items/fixture/unlist")):
+            response = await self.client.request(method, "/chat/admin" + path, headers=headers)
+            await self.response(response, 404, "not_found")
+        refused = await self.client.get("/chat/admin/items", headers={"Accept": "text/html"})
+        self.assertEqual((refused.status, refused.content_type), (403, "text/html"))
+
+        for path, _ in SCREENS:
+            with self.subTest(path=path):
+                response = await self.client.get(f"/chat/admin/{path}", headers=headers)
+                self.assertEqual((response.status, response.content_type), (200, "text/html"))
+                html = await response.text()
+                self.assertIn('href="/chat/admin/items"', html)
+                if path == "items":
+                    self.assertIn('href="/chat/admin/items" aria-current="page"', html)
+                    self.assertIn('id="item-admin"', html)
+
+    async def test_tc658_items_api_distinguishes_catalog_and_admin_access(self):
+        path = "/chat/admin/api/items"
+        item = SimpleNamespace(id="fixture-item", kind="hat", name="시험친구 가", starter=False)
+        catalog = SimpleNamespace(set="fixture", items={item.id: item}, check=lambda _: [])
+        _, enabled = await self.start_client(catalog)
+        listed = await self.response(await enabled.get(path, headers=self.headers), 200)
+        self.assertEqual([row["id"] for row in listed["items"]], [item.id])
+        headers = {"Cf-Access-Jwt-Assertion": secrets.token_urlsafe()}
+        await self.response(await enabled.get(path, headers=headers), 403, "not_allowed")
+
+        await self.response(await self.client.get(path, headers=self.headers), 404, "not_found")
 
     async def make_invite(self):
         token, expires = await self.sessions.create_invite("join")

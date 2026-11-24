@@ -4,6 +4,8 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import replace
+from datetime import datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -17,6 +19,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from pg import TestDB
 from test_app_update import ROOT, apk, fixture
 from test_app_chat import AUD, HK_EMAIL, ORIGIN, STRANGER, TEAM, Certs, auth, prepare, problem
+from test_app_chat import fcm_bad_request, fcm_unregistered, mock_fcm
 from marong import fcm
 from marong.access import AccessConfig, AccessVerifier, email_hash
 from marong.app_chat import AppChat
@@ -220,6 +223,44 @@ class PushWatcherTests(unittest.IsolatedAsyncioTestCase):
         failures = [n for kind, n, status in self.events() if kind == "push_failed" and status == 500]
         self.assertEqual(failures, [1, 2, 3])
         self.assertEqual(len(sender.messages), 4)
+
+    async def test_tc724_real_sender_retains_fid_and_retries_only_the_400(self):
+        self.add_phone(1)
+        self.add_phone(2)
+        fixture(self.folder, code=13)
+        requests = []
+
+        def answer(message):
+            phone_one = message["fid"] == fid(1)
+            requests.append(1 if phone_one else 2)
+            return fcm_bad_request() if phone_one else fcm_unregistered()
+
+        sender = mock_fcm(answer)
+        self.addAsyncCleanup(sender.close)
+        watcher = self.watcher(sender)
+        with self.assertLogs("marong.fcm", level="INFO") as logs:
+            await watcher.poll()
+            self.assertCountEqual(requests, [1, 2])
+            for round_number, timepoint in enumerate((660, 1320, 1980), 2):
+                self.time = timepoint
+                self.db.admin("UPDATE marong.app_update_events SET at = now() - interval '11 minutes' "
+                              "WHERE kind = 'push_failed'")
+                await watcher.poll()
+                self.assertCountEqual(requests, [1] * min(round_number, 3) + [2])
+
+        def failures(ident):
+            return self.db.admin("SELECT attempt, status FROM marong.app_update_events "
+                                 "WHERE install_id=%s AND kind='push_failed' ORDER BY attempt", (phone(ident),))
+
+        def state(ident):
+            return self.db.admin("SELECT fid IS NOT DISTINCT FROM %s, fid IS NULL, dropped_at IS NOT NULL "
+                                 "FROM marong.app_devices WHERE install_id=%s", (fid(ident), phone(ident)))
+
+        self.assertEqual(failures(1), [(1, 500), (2, 500), (3, 500)])
+        self.assertEqual(failures(2), [(1, 410)])
+        self.assertEqual(state(1), [(True, False, False)])
+        self.assertEqual(state(2), [(False, True, True)])
+        self.assertEqual(sum("fcm_send_status kind=app_update http=400 " in line for line in logs.output), 3)
 
     async def test_switch_defaults_on_and_only_zero_disables_it(self):
         sender = FakeFCM()
@@ -492,7 +533,8 @@ class UpdateAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([row["phone"] for row in first_friend], list(range(1, 21)))
         self.assertEqual([row["behind"] for row in first_friend], [False] * 19 + [True])
         self.assertEqual(set(first_friend[0]), {"friend", "friendId", "phone", "appVersion", "seenAt", "notifications",
-                                               "events", "behind"})
+                                               "events", "behind", "removedAt"})
+        self.assertTrue(all(row["removedAt"] is None for row in data["devices"]))
         self.assertEqual([event["status"] for event in first_friend[-1]["events"]], list(range(25, 5, -1)))
         self.assertEqual(data["devices"][20]["friendId"], 2)
         self.assertEqual(data["devices"][20]["friend"], data["devices"][19]["friend"])
@@ -503,6 +545,43 @@ class UpdateAPITests(unittest.IsolatedAsyncioTestCase):
         raw = json.dumps(data)
         for secret in ("install_id", "installId", "fid", "email", "waiting_quiet"):
             self.assertNotIn(secret, raw)
+
+    async def test_tc653_admin_removed_phone_recovers_after_report(self):
+        release = replace(fixture(self.folder, code=11), name="0.3.3")
+        (self.folder / "release.json").write_text(json.dumps(release.manifest()), encoding="utf-8")
+        self.db.admin("""
+            INSERT INTO marong.friends (id, name) OVERRIDING SYSTEM VALUE VALUES (7, '시험친구 가')
+            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+        """)
+        login = await self.store.app_login(email_hash(HK_EMAIL))
+        with patch.object(self.store, "app_login", return_value={**login, "friend_id": 7}):
+            for number, version in ((1, "0.3.2"), (2, "0.2.4")):
+                self.assertEqual((await self.report(number, appVersion=version)).status, 201)
+            await self.store.drop_fid(phone(2), fid(2))
+            ((dropped_at,),) = self.db.admin("SELECT dropped_at FROM marong.app_devices WHERE install_id = %s",
+                                            (phone(2),))
+            targets = await self.store.app_update_targets(11, (0, 3, 3), limit=20)
+            self.assertEqual([target["install_id"] for target in targets], [UUID(phone(1))])
+
+            async def devices():
+                response = await self.http.get("/chat/admin/api/app-versions", headers=self.headers)
+                self.assertEqual(response.status, 200)
+                return (await response.json())["devices"]
+
+            first, removed = await devices()
+            for row in (first, removed):
+                self.assertEqual(set(row), {"friend", "friendId", "phone", "appVersion", "seenAt", "notifications",
+                                            "events", "behind", "removedAt"})
+                self.assertEqual((row["friendId"], row["friend"]), (7, "시험친구 가"))
+            self.assertEqual((first["phone"], first["behind"], first["removedAt"]), (1, True, None))
+            self.assertEqual((removed["phone"], removed["behind"]), (2, False))
+            removed_at = datetime.fromisoformat(removed["removedAt"])
+            self.assertEqual(removed_at, dropped_at)
+            self.assertEqual(removed_at.utcoffset(), timedelta(0))
+
+            self.assertEqual((await self.report(2, appVersion="0.2.4")).status, 200)
+            self.assertEqual([(row["phone"], row["behind"], row["removedAt"]) for row in await devices()],
+                             [(1, True, None), (2, True, None)])
 
 
 class ReleaseHistoryTests(unittest.TestCase):

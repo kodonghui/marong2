@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "id": "20261122-daily-limit",
+  "kind": "server",
+  "title": "기본 하루 한도 입력 검사",
+  "deployedOn": "2026-11-22",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #96"
+  ],
+  "items": [
+    {
+      "type": "fixed",
+      "area": "admin",
+      "title": "기본 하루 한도 입력",
+      "before": "기록 없음",
+      "after": "기본 하루 한도에 범위 밖 값을 넣으면 막아요",
+      "evidence": []
+    }
+  ]
+}

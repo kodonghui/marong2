@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "id": "20261123-app-update-034",
+  "kind": "server",
+  "title": "앱 업데이트 배너",
+  "deployedOn": "2026-11-23",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #105",
+    "PR #108"
+  ],
+  "items": [
+    {
+      "type": "added",
+      "area": "web",
+      "title": "업데이트 배너",
+      "before": "없음",
+      "after": "통화 홈과 글 대화에 새 앱 버전 배너가 보여요",
+      "evidence": [
+        "PR #108"
+      ]
+    }
+  ]
+}

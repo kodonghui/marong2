@@ -198,12 +198,6 @@ async def fcm_checks():
        and msg["data"] == {"kind": "proactive", "open": "/chat/"}, msg)
     script.append(httpx.Response(200, json={}))
     ok(await sender.send(msg) == "ok" and len(issued) == 1, "the OAuth token is reused")
-    gone = {"error": {"status": "NOT_FOUND", "details": [
-        {"@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError", "errorCode": "UNREGISTERED"}]}}
-    script.append(httpx.Response(404, json=gone))
-    ok(await sender.send(msg) == "gone", "404 UNREGISTERED drops the device")
-    script.append(httpx.Response(400, json={"error": {"status": "INVALID_ARGUMENT"}}))
-    ok(await sender.send(msg) == "gone", "400 INVALID_ARGUMENT drops the device")
     script.extend([httpx.Response(429, headers={"Retry-After": "3"}, json={}), httpx.Response(200, json={})])
     ok(await sender.send(msg) == "ok" and waits[-1] == 3, f"429 follows Retry-After: {waits}")
     waits.clear()
@@ -266,8 +260,177 @@ async def fcm_checks():
         ok(loaded.project == "from-env" and fcm_module.FCM.from_credentials(tmp, {}).project == "from-key",
            "FCM_PROJECT_ID overrides the key's project")
         await loaded.close()
-    print("PASS FCM HTTP v1: OAuth with the service account, 200, UNREGISTERED, INVALID_ARGUMENT, 429 Retry-After, "
+    print("PASS TC-126 FCM HTTP v1: OAuth with the service account, 200, 429 Retry-After, "
           "503, timeouts, 10 s budget, 401 and 403 with one warning an hour, key loading")
+
+
+def fcm_error(http_status, status=None, *details):
+    error = {"status": status, "message": "시험오류글"}
+    if details:
+        error["details"] = list(details)
+    return httpx.Response(http_status, json={"error": error})
+
+
+def fcm_detail(code):
+    return {"@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError", "errorCode": code}
+
+
+def fcm_bad_request(field="message.android.ttl"):
+    return fcm_error(400, "INVALID_ARGUMENT", {"@type": "type.googleapis.com/google.rpc.BadRequest",
+                     "fieldViolations": [{"field": field, "description": "시험설명글"}, {"field": "message.fid"}]})
+
+
+def fcm_unregistered():
+    return fcm_error(404, "NOT_FOUND", fcm_detail("UNREGISTERED"))
+
+
+FCM_FIXTURE_FID = "f" * 20
+FCM_FIXTURE_TOKEN = "_".join(("oauth", "fixture"))
+
+
+def mock_fcm(answer, **kwargs):
+    pem = KEY.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                            serialization.NoEncryption()).decode()
+    account = fcm_module.ServiceAccount(HK_EMAIL, "fixture", pem, "fixture-project")
+
+    def handler(request):
+        if str(request.url) == fcm_module.TOKEN_URL:
+            return httpx.Response(200, json={"access_token": FCM_FIXTURE_TOKEN})
+        assert str(request.url) == fcm_module.SEND_URL.format(project=account.project_id)
+        assert request.headers["Authorization"] == f"Bearer {FCM_FIXTURE_TOKEN}"
+        return answer(json.loads(request.content)["message"])
+
+    return fcm_module.FCM(account, http=httpx.AsyncClient(transport=httpx.MockTransport(handler)), **kwargs)
+
+
+def fcm_cases():
+    """SPEC-510 §3.1, with the expected status-log fields after kind."""
+    return [
+        ([fcm_unregistered()], "gone", "http=404 status=NOT_FOUND code=UNREGISTERED field=-"),
+        ([fcm_error(404, "NOT_FOUND")], "failed", "http=404 status=NOT_FOUND code=- field=-"),
+        ([httpx.Response(404, text="<html>error</html>")], "failed", "http=404 status=- code=- field=-"),
+        ([fcm_error(400, "INVALID_ARGUMENT")], "failed", "http=400 status=INVALID_ARGUMENT code=- field=-"),
+        ([fcm_bad_request()], "failed", "http=400 status=INVALID_ARGUMENT code=- field=message.android.ttl"),
+        ([fcm_error(400, "INVALID_ARGUMENT", fcm_detail("INVALID_ARGUMENT"))], "failed",
+         "http=400 status=INVALID_ARGUMENT code=INVALID_ARGUMENT field=-"),
+        ([fcm_error(400, "INVALID_ARGUMENT", fcm_detail("UNREGISTERED"))], "failed",
+         "http=400 status=INVALID_ARGUMENT code=UNREGISTERED field=-"),
+        ([fcm_error(404, "NOT_FOUND", {"errorCode": "UNREGISTERED"})], "failed",
+         "http=404 status=NOT_FOUND code=- field=-"),
+        ([fcm_error(403, "PERMISSION_DENIED", fcm_detail("SENDER_ID_MISMATCH"))], "auth", None),
+        ([httpx.Response(503), fcm_unregistered()], "gone", "http=404 status=NOT_FOUND code=UNREGISTERED field=-"),
+    ]
+
+
+async def scripted_fcm_send(answers, *, update=False, sends=1, sleep_extra=0):
+    script, waits = deque(answers), []
+    requests = 0
+    logs = io.StringIO()
+    capture = logging.StreamHandler(logs)
+    logger = logging.getLogger("marong.fcm")
+    previous = logger.level
+
+    def answer(_message):
+        nonlocal requests
+        requests += 1
+        response = script.popleft()
+        if response == "timeout":
+            raise httpx.ReadTimeout("시험오류글")
+        return response
+
+    async def sleep(seconds):
+        waits.append(seconds)
+
+    sender = mock_fcm(answer, monotonic=lambda: sum(waits) + len(waits) * sleep_extra, sleep=sleep)
+    msg = (fcm_module.app_update(FCM_FIXTURE_FID, 13) if update else
+           fcm_module.notice(FCM_FIXTURE_FID, "proactive", "시험알림글", channel=TALK, ttl_s=60))
+    logger.setLevel(logging.INFO)
+    logger.addHandler(capture)
+    try:
+        results = [await sender.send(msg) for _ in range(sends)]
+    finally:
+        logger.removeHandler(capture)
+        logger.setLevel(previous)
+        await sender.close()
+    return results, requests, waits, logs.getvalue().splitlines()
+
+
+async def fcm_classification_checks():
+    for index, (answers, expected, _) in enumerate(fcm_cases(), 1):
+        results, requests, waits, _ = await scripted_fcm_send(answers)
+        ok((results, requests, waits) == ([expected], len(answers), [1] if index == 10 else []),
+           f"TC-720 response {index}: got {results}, {requests} requests, waits {waits}")
+    results, requests, waits, _ = await scripted_fcm_send(fcm_cases()[-1][0], update=True)
+    ok((results, requests, waits) == (["failed"], 1, []), "TC-720 app_update does not retry inline")
+    for response, expected in (
+        (httpx.Response(404, json=[]), "failed"),
+        (httpx.Response(404, json={"error": {"details": fcm_detail("UNREGISTERED")}}), "failed"),
+        (fcm_error(404, "NOT_FOUND", fcm_detail(["UNREGISTERED"])), "failed"),
+        (fcm_error(404, "NOT_FOUND", fcm_detail("INTERNAL"), fcm_detail("UNREGISTERED")), "gone"),
+        (fcm_error(401, "UNAUTHENTICATED", fcm_detail("THIRD_PARTY_AUTH_ERROR")), "auth"),
+        (fcm_error(405, "METHOD_NOT_ALLOWED", fcm_detail("UNREGISTERED")), "failed"),
+    ):
+        results, requests, waits, _ = await scripted_fcm_send([response])
+        ok((results, requests, waits) == ([expected], 1, []), f"TC-720 additional HTTP {response.status_code} case")
+    print("PASS TC-720 10 response scenarios, no inline retry for app updates, 6 additional cases")
+
+
+async def fcm_log_checks():
+    opaque = "_".join(("x" * 11, "y" * 11))
+
+    def status(fields, result):
+        return f"fcm_send_status kind=proactive {fields} result={result}"
+
+    def check_log(actual, expected, label):
+        private = ("시험오류글", "시험설명글", "시험알림글", FCM_FIXTURE_FID, FCM_FIXTURE_TOKEN, opaque)
+        ok(not any(value in line for value in private for line in actual), f"TC-721 {label}: no private values")
+        ok(actual == expected, f"TC-721 {label}: expected log lines")
+
+    for index, (answers, result, fields) in enumerate(fcm_cases(), 1):
+        if result == "auth":
+            _, _, _, actual = await scripted_fcm_send(answers * 2, sends=2)
+            expected = ["fcm_auth_failed status=403 code=SENDER_ID_MISMATCH"]
+        else:
+            _, _, _, actual = await scripted_fcm_send(answers)
+            expected = [status(fields, result)]
+        check_log(actual, expected, f"response {index}")
+
+    unavailable = status("http=503 status=- code=- field=-", "failed")
+    timeout = "fcm_send_error ReadTimeout"
+    invalid_field = status("http=400 status=INVALID_ARGUMENT code=- field=other", "failed")
+    package_field = "message.android.restricted_package_name"
+    field_prefix = "http=400 status=INVALID_ARGUMENT code=- field="
+    for label, answers, sleep_extra, expected in (
+        ("success", [httpx.Response(200)], 0, []),
+        ("retry success", [httpx.Response(503), httpx.Response(200)], 0, []),
+        ("invalid code", [fcm_error(404, "NOT_FOUND", fcm_detail("unregistered"))], 0,
+         [status("http=404 status=NOT_FOUND code=other field=-", "failed")]),
+        ("overlong field", [fcm_bad_request("a" * 100)], 0, [invalid_field]),
+        ("FID as field", [fcm_bad_request(FCM_FIXTURE_FID)], 0, [invalid_field]),
+        ("token as field", [fcm_bad_request(FCM_FIXTURE_TOKEN)], 0, [invalid_field]),
+        ("FID inside field path", [fcm_bad_request(f"message.data.{FCM_FIXTURE_FID}")], 0, [invalid_field]),
+        ("token inside field path", [fcm_bad_request(f"message.data.{FCM_FIXTURE_TOKEN}")], 0, [invalid_field]),
+        ("opaque segment inside field path", [fcm_bad_request(f"message.data.{opaque}")], 0, [invalid_field]),
+        ("message field", [fcm_bad_request("message")], 0, [status(field_prefix + "message", "failed")]),
+        ("validate_only field", [fcm_bad_request("validate_only")], 0,
+         [status(field_prefix + "validate_only", "failed")]),
+        ("long Android field", [fcm_bad_request(package_field)], 0, [status(field_prefix + package_field, "failed")]),
+        ("long Android JSON field", [fcm_bad_request("message.android.restrictedPackageName")], 0,
+         [status(field_prefix + "message.android.restrictedPackageName", "failed")]),
+        ("FID after an Android field", [fcm_bad_request(f"{package_field}.{FCM_FIXTURE_FID}")], 0, [invalid_field]),
+        ("token after an Android field", [fcm_bad_request(f"{package_field}.{FCM_FIXTURE_TOKEN}")], 0, [invalid_field]),
+        ("indexed field path", [fcm_bad_request("message.data[0].value")], 0,
+         [status("http=400 status=INVALID_ARGUMENT code=- field=message.data[0].value", "failed")]),
+        ("three rejected attempts", [httpx.Response(503)] * 3, 0, [unavailable]),
+        ("timeout after HTTP", [httpx.Response(503), "timeout", "timeout"], 0, [timeout, timeout, unavailable]),
+        ("budget exhausted after HTTP", [httpx.Response(503)], 10, [unavailable]),
+        ("Retry-After exceeds budget", [httpx.Response(429, headers={"Retry-After": "30"})], 0,
+         [status("http=429 status=- code=- field=-", "failed")]),
+        ("only timeouts", ["timeout"] * 3, 0, [timeout] * 3),
+    ):
+        _, _, _, actual = await scripted_fcm_send(answers, sleep_extra=sleep_extra)
+        check_log(actual, expected, label)
+    print("PASS TC-721 31 rejection, retry, and log privacy scenarios")
 
 
 # ── the in-app chat against the database ─────────────────────────────────────
@@ -318,6 +481,7 @@ async def main(db):
             await trace_checks(http, chat)
         await settle(chat)
         await own_runner_checks(store, agent, client, access, push, logs)
+        await fcm_notify_checks(db, store, logs)
     finally:
         root.removeHandler(capture)
         await access.http.aclose()
@@ -952,6 +1116,39 @@ async def put_device(db, install, fid):
              "WHERE install_id = %s", (fid, install))
 
 
+async def fcm_notify_checks(db, store, logs):
+    friend = db.admin("INSERT INTO marong.friends(name) VALUES (%s) RETURNING id", ("시험친구 가",))[0][0]
+    phones = [(uuid.uuid4(), char * 20) for char in ("f", "g")]
+    for install, fid in phones:
+        db.admin("INSERT INTO marong.app_devices (install_id, friend_id, fid, notifications, app_version) "
+                 "VALUES (%s,%s,%s,'granted','0.2.2')", (install, friend, fid))
+
+    def state(phone):
+        install, fid = phone
+        return db.admin("SELECT fid IS NOT DISTINCT FROM %s, fid IS NULL, dropped_at IS NOT NULL "
+                        "FROM marong.app_devices WHERE install_id = %s", (fid, install))[0]
+
+    responses = dict.fromkeys((fid for _, fid in phones), fcm_bad_request())
+    sender = mock_fcm(lambda msg: responses[msg["fid"]])
+    push = AppPush(store, sender)
+    kept = (True, False, False)
+    try:
+        ok(await push.notify(friend, "proactive", "시험알림글") == (0, 2)
+           and all(state(phone) == kept for phone in phones), "TC-722 both 400 responses preserve the FIDs")
+        ok("fcm_send kind=proactive devices=2 ok=0 gone=0 auth=0 failed=2" in logs.getvalue(),
+           "TC-722 both 400 responses counted as failed")
+        responses.update({phones[0][1]: fcm_unregistered(), phones[1][1]: httpx.Response(200)})
+        ok(await push.notify(friend, "proactive", "시험알림글") == (1, 2)
+           and state(phones[0]) == (False, True, True) and state(phones[1]) == kept,
+           "TC-722 only the unregistered phone is dropped")
+        responses[phones[1][1]] = fcm_error(404, "NOT_FOUND")
+        ok(await push.notify(friend, "proactive", "시험알림글") == (0, 1) and state(phones[1]) == kept,
+           "TC-722 404 without registration details preserves the second FID")
+    finally:
+        await sender.close()
+    print("PASS TC-722 notification fan-out preserves FIDs except on confirmed unregistration")
+
+
 async def page_checks(http):
     r = await http.get("/chat", allow_redirects=False)
     ok(r.status == 302 and r.headers["Location"] == "/chat/", "/chat → /chat/")
@@ -1016,6 +1213,8 @@ async def list_checks(db, http):
 
 if __name__ == "__main__":
     asyncio.run(fcm_checks())
+    asyncio.run(fcm_classification_checks())
+    asyncio.run(fcm_log_checks())
     db = TestDB()
     try:
         prepare(db)

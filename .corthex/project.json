@@ -15,7 +15,9 @@
     "usage-limit",
     "call-connect",
     "pet-app",
-    "admin"
+    "admin",
+    "continuity",
+    "fcm-unregistered"
   ],
   "records": {
     "kind": "notion",

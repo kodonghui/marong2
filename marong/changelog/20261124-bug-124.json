@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "20261124-bug-124",
+  "kind": "server",
+  "title": "관리 아이템 화면 열기",
+  "deployedOn": "2026-11-24",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #125",
+    "PR #126"
+  ],
+  "items": [
+    {
+      "type": "fixed",
+      "area": "admin",
+      "title": "아이템 탭",
+      "before": "관리 페이지의 아이템 탭을 누르면 404였어요",
+      "after": "아이템 탭이 열려요",
+      "evidence": []
+    }
+  ]
+}

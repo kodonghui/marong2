@@ -11,6 +11,7 @@ import re
 from aiohttp import web
 from psycopg.errors import QueryCanceled
 
+from .admin_changes import CHANGELOG_DIR, load_units, sort_day
 from .app_chat import Problem
 from .app_release import utc_timestamp, version_parts
 from .app_session import one
@@ -23,6 +24,7 @@ from .usage import effective_limits, month_bounds, usage_day
 HASH = re.compile(r"[a-f0-9]{64}")
 FRIEND_ID = re.compile(r"[0-9]{1,19}")
 ADMIN_PATH = "/chat/admin"
+CHANGE_REPO = "https://github.com/kodonghui/marong2"
 TABS = {
     "overview": (f"{ADMIN_PATH}/", "개요"),
     "members": (f"{ADMIN_PATH}/members", "회원"),
@@ -30,6 +32,7 @@ TABS = {
     "app": (f"{ADMIN_PATH}/app", "앱 버전"),
     "costs": (f"{ADMIN_PATH}/costs", "비용"),
     "items": (f"{ADMIN_PATH}/items", "아이템"),
+    "changes": (f"{ADMIN_PATH}/changes", "업데이트 내역"),
 }
 USD = re.compile(r"[0-9]{1,4}(?:\.[0-9]{1,2})?")
 log = logging.getLogger(__name__)
@@ -45,6 +48,26 @@ def limit_amounts(daily, monthly):
 
 def positive_id(raw):
     return int(raw) if FRIEND_ID.fullmatch(raw) and 0 < int(raw) <= 2**63 - 1 else None
+
+
+def change_sort_key(unit):
+    pr = max((int(label[4:]) for label in unit["evidence"] if label.startswith("PR #")), default=0)
+    return sort_day(unit), pr, unit["id"]
+
+
+def change_evidence(labels):
+    return [{"label": label, "url": f"{CHANGE_REPO}/pull/{label[4:]}" if label.startswith("PR #")
+             else f"{CHANGE_REPO}/commit/{label}"} for label in labels]
+
+
+def change_public(unit):
+    evidence = change_evidence(unit["evidence"])
+    result = {field: value for field, value in unit.items() if field != "format"}
+    result.update(sortOn=sort_day(unit), evidence=evidence, items=[
+        item | {"evidence": change_evidence(item["evidence"]) if item["evidence"] else evidence}
+        for item in unit["items"]
+    ])
+    return result
 
 
 def admin_invite(row):
@@ -113,6 +136,16 @@ class AppAdmin:
         await self.require_admin(req)
         return self.chat._json(200, await self.read_app_versions())
 
+    async def changes(self, req):
+        """API-300: read change records without querying account data."""
+        await self.require_admin(req)
+        try:
+            units, skipped = await asyncio.to_thread(load_units, CHANGELOG_DIR)
+        except OSError:
+            raise Problem("internal") from None
+        units.sort(key=change_sort_key, reverse=True)
+        return self.chat._json(200, {"units": [change_public(unit) for unit in units], "skipped": skipped})
+
     async def read_app_versions(self, conn=None):
         releases = self.chat.releases
 
@@ -120,20 +153,26 @@ class AppAdmin:
             return releases.manifest(), releases.paused(), releases.history()
 
         latest, paused, history = await asyncio.to_thread(read_releases)
-        devices = await self.chat.store.admin_app_devices(conn=conn)
+        device_rows = await self.chat.store.admin_app_devices(conn=conn)
         fetches = await self.chat.store.admin_app_fetches(conn=conn)
         current = version_parts(latest.name) if latest else None
         ordered = sorted(reversed(history), key=lambda entry: utc_timestamp(entry["at"]), reverse=True)
+        devices = []
+        for row in device_rows:
+            removed_at = row["dropped_at"]
+            devices.append({
+                "friend": row["friend"], "friendId": row["friend_id"], "phone": row["phone"],
+                "appVersion": row["app_version"], "seenAt": row["seen_at"].isoformat(),
+                "notifications": row["notifications"], "events": row["events"],
+                "removedAt": removed_at.astimezone(timezone.utc).isoformat() if removed_at is not None else None,
+                "behind": removed_at is None and current is not None and version_parts(row["app_version"]) < current,
+            })
         return {
             "latest": {"versionCode": latest.code, "versionName": latest.name,
                        "publishedAt": latest.published_at} if latest else None,
             "paused": paused,
             "releases": [{key: value for key, value in entry.items() if key != "file"} for entry in ordered],
-            "devices": [{"friend": row["friend"], "friendId": row["friend_id"], "phone": row["phone"],
-                         "appVersion": row["app_version"], "seenAt": row["seen_at"].isoformat(),
-                         "notifications": row["notifications"], "events": row["events"],
-                         "behind": current is not None and version_parts(row["app_version"]) < current}
-                        for row in devices],
+            "devices": devices,
             "fetches": [{"friend": row["friend"], "friendId": row["friend_id"], "items": row["items"]}
                         for row in fetches],
         }
@@ -168,7 +207,8 @@ class AppAdmin:
         return self.chat._json(200, {
             "members": members, "callMonth": call, "images": images, "usageToday": usage,
             "attention": overview_attention(now, members, call, images, app, expiring),
-            "app": {"latest": app["latest"], "paused": app["paused"], "devices": len(app["devices"]),
+            "app": {"latest": app["latest"], "paused": app["paused"],
+                    "devices": sum(phone["removedAt"] is None for phone in app["devices"]),
                     "behind": sum(phone["behind"] for phone in app["devices"])} if app is not None else None,
         })
 
@@ -240,8 +280,6 @@ class AppAdmin:
             return self.page_status(404, "없는 화면이에요", '<a href="/chat/admin/">개요로</a>')
         if path != canonical:
             raise web.HTTPMovedPermanently(location=req.rel_url.with_path(canonical, keep_query=True))
-        if tab == "items":
-            self.chat.decor.require_catalog()
         response = self.chat.unified_page("admin-items" if tab == "items" else "admin")
         links = []
         for key, (href, label) in TABS.items():
@@ -537,6 +575,7 @@ class AppAdmin:
         router.add_get(ADMIN_PATH, self.page)
         router.add_get(ADMIN_PATH + "/{path:(?!api(?:/|$)).*}", self.page)
         router.add_get(ADMIN_PATH + "/api/overview", self.overview)
+        router.add_get(ADMIN_PATH + "/api/changes", self.changes)
         router.add_get(ADMIN_PATH + "/api/image-costs", self.image_costs)
         router.add_get(ADMIN_PATH + "/api/items", self.decor_items)
         router.add_post(ADMIN_PATH + "/api/items/{itemId}/{action:list|unlist}", self.set_decor_listing)

@@ -121,7 +121,7 @@ class ConnectServerTests(IsolatedAsyncioTestCase):
         await store.open()
         self.addAsyncCleanup(store.close)
         browser = str(uuid4())
-        call, _ = await store.start_call(person, browser, "fixture", "fixture")
+        call, *_ = await store.start_call(person, browser, "fixture", "fixture")
 
         async def start():
             return await store.start_segment(person, call, browser, "fixture", await_provider=True)

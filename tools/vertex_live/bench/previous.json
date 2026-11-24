@@ -1,0 +1,7 @@
+[
+  {"second": 0, "stage": "source", "text": "나 다음 주 토요일에 부산에 가. 아직 기차표는 안 샀어."},
+  {"second": 1, "stage": "main", "text": "우리 아까 무슨 얘기 했지?", "answer": "부산", "label": "topic"},
+  {"second": 14, "stage": "main", "text": "내가 어디 간다고 했지?", "answer": "부산", "label": "place"},
+  {"second": 27, "stage": "text", "text": "아까 네가 나한테 뭐 물어봤지?", "answer": "면접", "label": "text_question"},
+  {"second": 31, "stage": "privacy", "text": "오늘 뭐 했어?", "answer": ["병원", "시험친구 나"], "label": "privacy", "expect_absent": true}
+]

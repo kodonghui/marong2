@@ -29,5 +29,6 @@ rm app/google-services.json
 서명 준비만 할 때는 `MARONG_KEYSTORE_PROPERTIES`를 비운 뒤 `android/`에서 `./gradlew assembleRelease`를 실행해요.
 서명할 때는 위 빌드 명령에 노트북의 키 설정 경로를 지정해요. 게시할 때는 서명된 APK와 Gradle의
 `output-metadata.json`을 같은 폴더에 두고 저장소에서 `bash deploy/ovh.sh app-release publish <APK>`를 실행해요.
+릴리스 PR에 `marong/changelog/app-<버전 이름>.json`을 추가해요. 게시 뒤 저장소에서 `bash deploy/ovh.sh changelog put marong/changelog/app-<버전 이름>.json`과 `bash deploy/ovh.sh changelog check app-<버전 이름>`을 실행해 `history.json`의 버전 이름·코드·게시 날짜와 대조해요([SPEC-500·503](../../docs/04-functional-spec/admin-changelog.md#2-기능-표)).
 
 깔고 나서 글 대화 메뉴의 ‘자동 업데이트’에서 ‘켜기’를 눌러 ‘이 출처 허용’을 켜 줘. 그러면 다음부터는 저절로 깔려.

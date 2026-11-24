@@ -7,6 +7,7 @@
    fallback, late captions, a goodbye that starts after the answer, text input.
 """
 import asyncio,base64,json,struct,tempfile,time
+from datetime import datetime,timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock,patch
@@ -112,11 +113,11 @@ class Browser:
 class Store:
     """Just enough of MemoryStore to see how the call ends."""
     def __init__(self):self.finished=[]
-    async def start_call(self,p,client_id,voice,build,entrypoint):return 'call-1',False
+    async def start_call(self,p,client_id,voice,build,entrypoint):return 'call-1',False,datetime.now(timezone.utc)
     async def start_segment(self,p,call_id,client_id,model,**options):return 'segment-1'
     async def segment_ready(self,segment):pass
     async def record_connection(self,segment,**report):pass
-    async def seed(self,p,call_id):return ''
+    async def seed(self,p,call_id,*,memory_limit=30):return ''
     async def save_turn(self,*a):return 1
     async def record_transport(self,*a):pass
     async def revision(self,p):return 0

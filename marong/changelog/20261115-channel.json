@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "id": "20261115-channel",
+  "kind": "server",
+  "title": "디스코드 서버 채널 대화",
+  "deployedOn": "2026-11-15",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #21"
+  ],
+  "items": [
+    {
+      "type": "improved",
+      "area": "legacy",
+      "title": "서버 채널에서 대화",
+      "before": "디스코드 서버 채널의 말은 모두 버렸어요",
+      "after": "부르지 않은 말도 읽고, 부르거나 이어 말할 때 답해요",
+      "evidence": []
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "20261124-bug114",
+  "kind": "server",
+  "title": "웹 통화 다시 잇기",
+  "deployedOn": "2026-11-24",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #115",
+    "PR #118"
+  ],
+  "items": [
+    {
+      "type": "fixed",
+      "area": "call",
+      "title": "같은 웹에서 다시 잇기",
+      "before": "같은 웹 화면에서 통화가 끊긴 뒤 다시 이어지지 않았어요",
+      "after": "같은 웹 화면에서 다시 이어져요",
+      "evidence": []
+    }
+  ]
+}

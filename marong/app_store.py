@@ -185,7 +185,7 @@ class AppStore:
     async def admin_app_devices(self, *, conn=None) -> list[dict]:
         query = """
             WITH recent AS (
-                SELECT install_id, friend_id, app_version, notifications, seen_at, created_at,
+                SELECT install_id, friend_id, app_version, notifications, seen_at, created_at, dropped_at,
                        row_number() OVER (PARTITION BY friend_id ORDER BY seen_at DESC, install_id) AS rank
                 FROM marong.app_devices WHERE seen_at > now() - interval '90 days'
             ), visible AS (
@@ -194,7 +194,7 @@ class AppStore:
                 FROM recent d JOIN marong.friends f ON f.id = d.friend_id WHERE d.rank <= 20
                 ORDER BY f.name, d.friend_id, phone LIMIT 200
             )
-            SELECT d.friend, d.friend_id, d.phone, d.app_version, d.seen_at, d.notifications,
+            SELECT d.friend, d.friend_id, d.phone, d.app_version, d.seen_at, d.notifications, d.dropped_at,
                    coalesce(events.items, '[]'::jsonb) AS events
             FROM visible d
             LEFT JOIN LATERAL (

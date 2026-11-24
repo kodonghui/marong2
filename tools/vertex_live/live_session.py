@@ -14,10 +14,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from aiohttp import ClientSession,ClientTimeout,WSMsgType
-from memory_tools import TranscriptRecorder,execute_tool
+from marong import continuity
+from marong.continuity import BUDGET_GOODBYE, RING_ANSWERED_TEXT
+from memory_tools import CALL_GREETING_TEXT,TranscriptRecorder,execute_tool
 from hangup import Consent
 from call_search import queries as search_queries
 from call_shop import FAILED as SHOP_FAILED, LIMIT as SHOP_LIMIT, READS as SHOP_READS
+from call_tuning import BASE, DEFAULTS
 from quiet_mic import QuietMic, level
 from tool_trace import step as trace_step
 from connect_reports import playback_report,timing_report
@@ -41,9 +44,6 @@ SEARCH_CUT_SLACK_S=2.0
 OUTPUT_RATE=24000
 # A call Marong placed at a time the friend set (docs/app-ring.md): the friend's answer opens it with this text,
 # once, on the connection that answered the ring. It is not a turn of the friend's and is never recorded.
-RING_ANSWERED_TEXT='(전화 연결됨)'
-CALL_GREETING_TEXT='통화를 막 시작했어. 한국어로 짧고 편안하게 인사해 줘.'
-BUDGET_GOODBYE='(이번 달 통화를 더 할 수 없어서 곧 끊어야 해. 금액은 말하지 말고, 다음에 또 얘기하자고 한 문장으로 인사해.)'
 RING_CLAIM_S=1
 # The picture a hello call carries (docs/04-functional-spec/call-first.md SPEC-268): served by the bot under /chat/.
 TOPIC_KEY=re.compile(r'v[0-9]{1,3}/[a-z0-9-]{1,40}')
@@ -67,6 +67,7 @@ class LiveSession:
         self.shop=None;self.shop_reads=int(resume.get('shop_reads',0))
         self.wait_enabled=False;self.waiting=False
         self.call_id=str(uuid.uuid4());self.segment=None;self.logical_resumed=False
+        self.call_started_at = datetime.now(timezone.utc)
         self.stop=asyncio.Event();self.reset=asyncio.Event();self.available=asyncio.Event()
         self.controls=asyncio.Queue(maxsize=64);self.audio=deque();self.pending=deque()
         self.output=asyncio.Queue(maxsize=256);self.tasks=set();self.explicit=False
@@ -222,7 +223,7 @@ class LiveSession:
             return SHOP_FAILED
         self.shop_reads += 1
         self.resume.update(shop_reads=self.shop_reads,owner=self.owner,call_id=self.call_id,updated=time.time(),
-                           revision=self.revision)
+                           call_started_at=self.call_started_at,revision=self.revision)
         result = await self.shop(query.strip())
         if result.get("ok") and self.p and getattr(self.p, "unified", False) and self.store:
             await self.store.daily_usage.record(self.p.friend_id, shop_reads=1)
@@ -278,7 +279,7 @@ class LiveSession:
                     now=time.monotonic();allowance=min(96000.,allowance+(now-last)*32000);last=now
                     if len(msg.data)>32000 or len(msg.data)%2 or len(msg.data)>allowance:continue
                     allowance-=len(msg.data)
-                    if not self.ready:continue
+                    if not self.ready and not self.hold_continuity_audio():continue
                     if self.tuning and self.tuning['text_handoff']:
                         self.input_history.append((now,msg.data))
                         while self.input_history and now-self.input_history[0][0]>1:
@@ -322,9 +323,14 @@ class LiveSession:
                         if self.close_reason=='budget_hard_stop':continue
                         text=str(item.get('text',''))[:2000]
                         if not text:continue
-                        if self.hold_greeting and text==CALL_GREETING_TEXT:
-                            if not self.greeting_queued:self.background(self.queue_greeting({
-                                'clientContent':{'turns':[{'role':'user','parts':[{'text':text}]}],'turnComplete':True}}))
+                        if text == CALL_GREETING_TEXT:
+                            greeting = {'clientContent': {'turns': [{'role': 'user', 'parts': [{'text': text}]}],
+                                                          'turnComplete': True}}
+                            if self.hold_greeting:
+                                if not self.greeting_queued:
+                                    self.background(self.queue_greeting(greeting))
+                            else:
+                                await self.queue_greeting(greeting)
                             continue
                         key=str(item.get('id') or uuid.uuid4())[:100]
                         self.consent.note('user','text:'+key,text);self.activity_at=time.monotonic()
@@ -355,7 +361,7 @@ class LiveSession:
 
     async def run(self):
         if self.store and self.p:
-            self.call_id,self.logical_resumed=await self.store.start_call(
+            self.call_id,self.logical_resumed,self.call_started_at=await self.store.start_call(
                 self.p,self.client_id,self.voice,BUILD,
                 entrypoint='discord' if self.entry_transport=='discord' else 'web')
             self.mark('callRow')
@@ -368,6 +374,7 @@ class LiveSession:
                 self.call_safety=CallSafety(self.store,self.p,self.call_id,self.headers,PROJECT)
         elif self.resume.get('owner')==self.owner and time.time()-self.resume.get('updated',0)<600:
             self.call_id=self.resume.get('call_id',self.call_id)
+            self.call_started_at = self.resume.get('call_started_at', self.call_started_at)
         self.d.update(build=BUILD,callId=self.call_id,startedAt=time.time(),providerInterruptions=0,providerReconnects=0)
         self.log_transport(self.entry_transport or ('webrtc' if self.rtc else 'pcm'),'start')
         if self.resume.get('owner')==self.owner and self.resume.get('call_id')==self.call_id and time.time()-self.resume.get('updated',0)<600 and self.resume.get('revision')==self.revision:
@@ -465,16 +472,55 @@ class LiveSession:
             and not self.in_turn and self.controls.empty() and not (self.rtc and self.rtc.queued_ms()>0)
             and all(task.done() for task in tool_tasks.values()))
 
-    async def open_provider(self,stack,handle,seed,memory,tuning,mode,*,ring=None,timeout=20,handoff=False):
+    def hold_continuity_audio(self):
+        return continuity.MODE == "on" and self.p is not None and not self.handle
+
+    async def pick_previous(self, segment, now):
+        if continuity.MODE == "off" or not self.store or not self.p:
+            return [], []
+        started = time.monotonic()
+        try:
+            recent, older, report = await self.store.previous_conversation(self.p, self.call_id, now, segment)
+        except Exception:
+            recent, older = [], []
+            report = continuity.record_pick(segment, turns=0, chars=0, conversations=0,
+                                            ms=round((time.monotonic() - started) * 1000), result="error")
+        self.d["continuity"] = report
+        return (recent, older) if continuity.MODE == "on" else ([], [])
+
+    async def open_with_previous(self, stack, seed, tuning, mode, previous, now, segment, *, ring=None, handoff=False):
+        if not previous:
+            return await self.open_provider(stack, self.handle if not handoff else None, seed,
+                                            handoff or bool(self.p and self.segment), tuning, mode, ring=ring,
+                                            timeout=10 if handoff else 20, handoff=handoff)
+        history = continuity.history_message(previous, self.p.name, now, segment)
+        async with AsyncExitStack() as attempt:
+            try:
+                upstream = await self.open_provider(attempt, None, seed, True, tuning, mode, ring=ring,
+                                                    timeout=10, handoff=handoff, history=history)
+            except ConnectionError as error:
+                if str(error) != "setup_rejected":
+                    raise
+            else:
+                await stack.enter_async_context(attempt.pop_all())
+                return upstream
+        self.d["continuity"]["result"] = "fallback"
+        print("continuity_fallback", flush=True)
+        fallback = continuity.fallback_seed(seed, previous, self.p.name, now, segment)
+        return await self.open_provider(stack, None, fallback, True, tuning, mode, ring=ring,
+                                        timeout=10, handoff=handoff)
+
+    async def open_provider(self,stack,handle,seed,memory,tuning,mode,*,ring=None,timeout=20,handoff=False,history=None):
         url=f'wss://{self.location}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent'
         http=await stack.enter_async_context(ClientSession(timeout=ClientTimeout(total=None,connect=15)))
         upstream=await stack.enter_async_context(http.ws_connect(
             url,headers=await self.headers(),max_msg_size=2_000_000,heartbeat=20))
-        options={'hangup':self.hangup}
+        options={'hangup':self.hangup, 'call_started_at':self.call_started_at}
         if mode:options['search']=mode
         if ring:options['ring']=ring
         if tuning:options['tuning']=tuning
         if handoff:options['handoff']=True
+        if history:options["initial_history"]=True
         if self.store and hasattr(self.store, "friend_memory_enabled"):
             options["friend_memory"] = self.store.friend_memory_enabled()
         if self.p and hasattr(self.store,'friend_instruction'):
@@ -489,6 +535,10 @@ class LiveSession:
             first=await upstream.receive(timeout=timeout)
             if first.type not in (WSMsgType.TEXT,WSMsgType.BINARY) or 'setupComplete' not in json.loads(first.data):
                 raise ConnectionError('setup_rejected')
+            if history:
+                if self.reset.is_set():
+                    raise ConnectionError("continuity_context_reset")
+                await upstream.send_json(history)
             if trace:
                 trace.record(result='ok')
         return upstream
@@ -518,24 +568,34 @@ class LiveSession:
             else:await self.queue_greeting(greeting)
 
     async def run_provider(self,upstream,ledger,usage_mode,tuning,lead_in):
-        if not usage_mode or not self.segment:
-            await self.provider(upstream)
-            return
+        segment = self.segment
         entrypoint='discord' if self.entry_transport=='discord' else 'web'
         async def check_budget():
-            if not self.stop.is_set() and self.hanging_up is None and self.segment==meter.segment:
+            if not self.stop.is_set() and self.hanging_up is None and self.segment==segment:
                 state=await self.store.monthly_cost.status(entrypoint)
                 if (state=='hard_stop' and not self.stop.is_set() and self.hanging_up is None
-                        and self.segment==meter.segment):
+                        and self.segment==segment):
                     self.begin_budget_goodbye()
-        meter=ledger.meter(self.call_id,self.segment,entrypoint,self.model,usage_mode,self.searches,
-                           tuning=tuning['name'] if tuning else None,after_flush=check_budget)
+        meter = None
+        if usage_mode and segment:
+            meter=ledger.meter(self.call_id,segment,entrypoint,self.model,usage_mode,self.searches,
+                               tuning=tuning['name'] if tuning else None,after_flush=check_budget)
         try:await self.provider(upstream,meter,lead_in=lead_in)
         finally:
-            meter.close()
-            if self.quiet_mic:
-                try:await asyncio.wait_for(self.store.record_mic(meter.segment,*self.quiet_mic.counts()),.4)
+            if meter:meter.close()
+            if segment and self.quiet_mic:
+                try:await asyncio.wait_for(self.store.record_mic(segment,*self.quiet_mic.counts()),.4)
                 except Exception:self.d['micCountsFailed']=True
+
+    async def load_tuning(self):
+        try:
+            tuning = await asyncio.wait_for(self.store.tuning(), .4)
+            if tuning is not None:
+                return tuning
+        except Exception:
+            pass
+        print('call_tuning_fallback', flush=True)
+        return {'name': BASE, **DEFAULTS}
 
     async def google_loop(self):
         delay=1
@@ -566,26 +626,35 @@ class LiveSession:
                         lead_in=warmed.lead_in
                         usage_mode=warmed.usage_mode
                     else:
-                        self.audio.clear()
+                        if not self.hold_continuity_audio():self.audio.clear()
                         seed='';self.segment=None;tuning=None
-                        if usage_mode and self.p:
-                            try:tuning=await asyncio.wait_for(self.store.tuning(),.4)
-                            except Exception:print('call_tuning_fallback',flush=True)
+                        segment_kind = "reconnect" if self.logical_resumed and not self.ring_greet else "start"
+                        opened_at = datetime.now(timezone.utc)
+                        previous, older = [], []
                         if self.store and self.p:
+                            tuning = await self.load_tuning()
                             try:
-                                segment_options={'tuning':tuning['name']} if tuning else {}
+                                segment_options={'tuning':tuning['name']}
                                 if self.entry_transport!='discord':
                                     segment_options['await_provider']=True
-                                memory_options={'memory_limit':tuning['seed_call_memories']} if tuning else {}
                                 self.segment=await asyncio.wait_for(self.store.start_segment(
                                     self.p,self.call_id,self.client_id,self.model,**segment_options),3)
-                                seed=await asyncio.wait_for(self.store.seed(self.p,self.call_id,**memory_options),1)
-                                self.d['memoryConnected']=True
-                            except Exception:self.d['memoryConnected']=False
+                            except Exception:
+                                self.d['memoryConnected']=False
+                            else:
+                                if not self.handle:
+                                    previous, older = await self.pick_previous(segment_kind, opened_at)
+                                date_options = {"as_of": opened_at, "older": older} if continuity.MODE == "on" else {}
+                                try:
+                                    seed=await asyncio.wait_for(self.store.seed(
+                                        self.p,self.call_id,memory_limit=tuning['seed_call_memories'],**date_options),1)
+                                    self.d['memoryConnected']=True
+                                except Exception:
+                                    self.d['memoryConnected']=False
                         mode=self.search_mode()
                         try:
-                            upstream=await self.open_provider(stack,self.handle,seed,bool(self.p and self.segment),
-                                                              tuning,mode,ring=self.ring_info)
+                            upstream=await self.open_with_previous(stack,seed,tuning,mode,previous,opened_at,
+                                                                   segment_kind,ring=self.ring_info)
                         except Exception as error:
                             if isinstance(error, ConnectionError) and str(error)=='setup_rejected' and self.handle:
                                 self.handle=None;self.pending.clear()
@@ -599,6 +668,11 @@ class LiveSession:
                             except Exception:print('segment_ready_write_error',flush=True)
                             self.timing_segment=self.timing_segment or self.segment
                         if self.entry_transport!='discord':self.mark('providerReady')
+                        if self.hold_continuity_audio() and previous:
+                            ready_at = time.monotonic()
+                            self.audio = deque((ready_at, frame) for _, frame in self.audio)
+                        elif self.hold_continuity_audio():
+                            self.audio.clear()
                     self.search_live=mode=='on'
                     self.configure_mic(tuning)
                     await self.ready_message();delay=1
@@ -624,11 +698,16 @@ class LiveSession:
         async with AsyncExitStack() as stack:
             tuning=await asyncio.wait_for(self.store.tuning(),.4)
             if not tuning:return False
+            opened_at = datetime.now(timezone.utc)
+            previous, older = await self.pick_previous("handoff", opened_at)
+            date_options = {"as_of": opened_at, "older": older} if continuity.MODE == "on" else {}
             seed=await asyncio.wait_for(self.store.seed(self.p,self.call_id,
-                memory_limit=tuning['seed_call_memories'],history_chars=tuning['handoff_chars']),1)
+                memory_limit=tuning['seed_call_memories'],history_chars=tuning['handoff_chars'],**date_options),1)
             mode=self.search_mode()
             if not quiet():return False
-            upstream=await asyncio.wait_for(self.open_provider(stack,None,seed,True,tuning,mode,timeout=10,handoff=True),10)
+            upstream=await asyncio.wait_for(self.open_with_previous(
+                stack, seed, tuning, mode, previous, opened_at, "handoff", handoff=True,
+            ), 21 if previous else 10)
             if not quiet():return False
             replacement=await asyncio.wait_for(self.store.start_segment(self.p,self.call_id,self.client_id,self.model,
                 tuning=tuning['name'],handoff_from=self.segment),1)
@@ -788,7 +867,8 @@ class LiveSession:
                 received=datetime.now(timezone.utc) if isinstance(usage,dict) else None
                 update=data.get('sessionResumptionUpdate',{})
                 if update.get('resumable') and update.get('newHandle'):
-                    self.handle=update['newHandle'];self.resume.update(handle=self.handle,owner=self.owner,call_id=self.call_id,revision=self.revision,updated=time.time())
+                    self.handle=update['newHandle'];self.resume.update(handle=self.handle,owner=self.owner,call_id=self.call_id,
+                        call_started_at=self.call_started_at,revision=self.revision,updated=time.time())
                     ack=update.get('lastConsumedClientMessageIndex')
                     if ack is not None:
                         while self.pending and self.pending[0][0]<=int(ack):self.pending.popleft()

@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "id": "app-0.3.3",
+  "kind": "app",
+  "title": "자동 업데이트가 늦던 문제",
+  "deployedOn": "2026-11-23",
+  "app": {
+    "versionName": "0.3.3",
+    "versionCode": 11
+  },
+  "backfilled": true,
+  "evidence": [
+    "PR #100",
+    "PR #106"
+  ],
+  "items": [
+    {
+      "type": "fixed",
+      "area": "app",
+      "title": "앱을 내렸을 때 업데이트",
+      "before": "앱을 내려 두면 자동 업데이트 설치가 늦어졌어요",
+      "after": "앱을 내린 뒤에도 확인된 업데이트를 다시 시도해 설치해요",
+      "evidence": []
+    }
+  ]
+}

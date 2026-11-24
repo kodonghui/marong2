@@ -1,8 +1,8 @@
-# 마롱이 관리 페이지 API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/admin.md(SPEC-450~457), 도메인: docs/01-domain/admin.md, 표 설명: docs/05-erd/admin.md(새 표 없음, 통화 함수 call.month_budget 하나)
+# 마롱이 관리 페이지 API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/admin.md(SPEC-450~457), 도메인: docs/01-domain/admin.md, 표 설명: docs/05-erd/admin.md(새 표 없음, 통화 함수 call.month_budget 하나). 2026-11-24 기능 변경 3(같은 날 체크포인트 통과, D148·D161): API-280 app.devices·app.behind 설명(SPEC-460). 같은 날 기능 변경 4(체크포인트 통과 D172): API-300 업데이트 내역(docs/04-functional-spec/admin-changelog.md, SPEC-500~504)
 openapi: 3.1.0
 info:
   title: 마롱이 관리 페이지 API
-  version: 0.1.0-draft
+  version: 0.3.0-draft
   description: |-
     관리 페이지 다시 만들기(part admin, 2026-11-23 체크포인트 통과 D135)가 새로 더하는 API 두 개예요. 관리 페이지의 나머지 API는 지금 계약 그대로 읽어요: 초대 링크·회원·한도·티켓·로그인 끊기(api/unified.openapi.yaml의 API-235~243), 그림 비용·아이템(api/pet-app.openapi.yaml의 API-263~266), 앱 버전(api/app-update.openapi.yaml의 API-267, PR #101). 그 형식은 이 파일에서 다시 정하지 않아요.
 
@@ -19,6 +19,15 @@ info:
     3. 거두기(API-281)는 같은 요청을 두 번 받아도 같은 결과예요(이미 거둔 링크 → 200, `revokedAt` 그대로). 쓴 링크와 기간 지난 링크는 409 `invite_closed`예요. API-281은 동희님이 '초대 링크 거두기'를 더하기로 답한 뒤에만 구현해요(질문 2).
 
     깨지는 변경: 없음. 두 경로 모두 새것이고, 지금 경로와 응답은 그대로예요.
+
+    0.2.0(2026-11-24 기능 변경 3, D146. 같은 날 체크포인트 통과: D148 3-9·3-10, D161): 응답 모양은 그대로이고 API-280 `app.devices`의 뜻만 바뀌어요. `devices`는 앱 지워진 폰(API-267 0.3.0의 `removedAt`이 있는 폰)을 뺀 수예요. `behind`는 식이 그대로이고 API-267의 `behind`가 앱 지워진 폰에서 false라 그 폰이 들지 않아요(SPEC-460).
+
+    0.3.0(2026-11-24 기능 변경 4 '업데이트 내역', 같은 날 체크포인트 통과 D172. 0.2.0은 먼저 합쳐진 기능 변경 3(PR #127)이 씀): 읽기 API 하나(API-300 `GET /chat/admin/api/changes`)를 더해요. API-282~299는 위대로 이 part에 남겨 두고, 같은 날 다른 설계와 겹치지 않게 300번을 잡았어요.
+    1. 내역은 DB가 아니라 저장소 폴더 `marong/changelog/`의 JSON 파일이에요(반영 단위마다 하나, SPEC-500). 운영에서는 앱 서버 코드 자리의 같은 폴더를 요청마다 읽어요. 캐시·쓰기·쿼리 값이 없어요.
+    2. 형식이 틀린 파일은 빼고 그 수를 `skipped`로 줘요. 응답은 200이에요(SPEC-501).
+    3. 근거 주소(`url`)는 서버가 만들어요(공개 저장소의 PR·커밋 주소).
+    4. 페이지 `/chat/admin/changes`(SCR-220)는 HTML이라 이 계약에 넣지 않았어요.
+    깨지는 변경: 없음. 새 경로 하나이고 다른 경로와 응답은 그대로예요.
 servers:
 - url: https://marong.corthex-hq.com
 paths:
@@ -215,6 +224,92 @@ paths:
           $ref: '#/components/responses/Internal'
         '503':
           $ref: '#/components/responses/DbUnavailable'
+  /chat/admin/api/changes:
+    get:
+      operationId: getAdminChanges
+      summary: 업데이트 내역
+      description: 업데이트 내역 화면(SCR-220)이 불러요. 저장소 폴더 `marong/changelog/`(운영은 앱 서버 코드 자리의 같은 폴더)의 반영 단위 파일을 모두 읽어, 형식 검사를 지난 단위를 새것부터 줘요(SPEC-501, 차례는 명세 3.3). 틀린 파일은 빼고 `skipped`에 세요. 폴더가 없으면 빈 목록이에요. 2026-11-24 기능 변경 4, 같은 날 체크포인트 통과(D172).
+      security:
+      - cfAccess: []
+      x-corthex:
+        id: API-300
+        status: active
+        spec:
+        - SPEC-500
+        - SPEC-501
+        terms: [CTX-026, TERM-176, TERM-270, TERM-271]
+        omit:
+          '400': 입력이 없음(쿼리·본문 없음)
+          '401': 관리자 확인은 증명이 없어도 403 not_allowed(머리 설명)
+          '404': 경로가 가리키는 것이 없음. 폴더가 없어도 200 빈 목록
+          '409': 읽기만 함
+          '429': 관리자 한 명이 화면을 열 때만 불러요. 횟수 제한 없음
+          '503': DB를 읽지 않음. 파일을 읽지 못하면 500
+      responses:
+        '200':
+          description: 반영 단위 목록(새것부터)과 읽지 못한 파일 수
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminChanges'
+              examples:
+                normal:
+                  summary: 서버 단위 하나와 앱 단위 하나(지난 내역 초안의 줄)
+                  value:
+                    units:
+                    - id: 20261124-admin
+                      kind: server
+                      title: 관리 페이지 다시 만들기
+                      deployedOn: '2026-11-24'
+                      sortOn: '2026-11-24'
+                      app: null
+                      backfilled: true
+                      evidence:
+                      - label: 'PR #116'
+                        url: https://github.com/kodonghui/marong2/pull/116
+                      items:
+                      - type: improved
+                        area: admin
+                        title: 관리 페이지 화면 나누기
+                        before: 관리자 화면 하나에 초대 링크·회원·비용이 함께 있었어요
+                        after: 개요·회원·초대 링크·앱 버전·비용·아이템 여섯 탭으로 나눠 봐요
+                        evidence:
+                        - label: 'PR #116'
+                          url: https://github.com/kodonghui/marong2/pull/116
+                    - id: app-0.3.4
+                      kind: app
+                      title: 새 버전 바로 받기와 지금 설치
+                      deployedOn: '2026-11-23'
+                      sortOn: '2026-11-23'
+                      app:
+                        versionName: 0.3.4
+                        versionCode: 12
+                      backfilled: true
+                      evidence:
+                      - label: 'PR #110'
+                        url: https://github.com/kodonghui/marong2/pull/110
+                      items:
+                      - type: improved
+                        area: app
+                        title: 새 버전 받기
+                        before: 기록 없음
+                        after: 새 버전이 나오면 몇 분 안에 받아 두고, 홈과 글 대화에서 '지금 설치'로 깔아요
+                        evidence:
+                        - label: 'PR #110'
+                          url: https://github.com/kodonghui/marong2/pull/110
+                    skipped: 0
+                empty:
+                  summary: 폴더가 없거나 비었음
+                  value:
+                    units: []
+                    skipped: 0
+        '403':
+          $ref: '#/components/responses/AdminForbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
 components:
   x-corthex:
     errors:
@@ -531,11 +626,11 @@ components:
               devices:
                 type: integer
                 minimum: 0
-                description: API-267 `devices`의 길이(90일 안에 보고한 폰)
+                description: API-267 `devices` 가운데 `removedAt`이 null인 폰 수(90일 안에 보고했고 앱이 지워지지 않은 폰, 0.2.0 기능 변경 3)
               behind:
                 type: integer
                 minimum: 0
-                description: 그 가운데 `behind`가 참인 폰 수
+                description: 그 가운데 `behind`가 참인 폰 수(앱 지워진 폰은 API-267의 `behind`가 false라 들지 않음)
         attention:
           type: array
           description: 주의 항목(TERM-241). 기능 명세 3.3의 차례, 종류마다 많아야 한 줄
@@ -584,3 +679,153 @@ components:
         invite:
           description: API-240의 줄과 같은 모양(api/unified.openapi.yaml의 Invite, 다시 정하지 않음). 거둔 뒤라 `state`는 revoked이고 `revokedAt`이 있어요
           $ref: './unified.openapi.yaml#/components/schemas/Invite'
+    AdminChanges:
+      type: object
+      additionalProperties: false
+      description: 업데이트 내역(API-300, 0.3.0). 단위 차례는 명세 3.3(sortOn 늦은 것부터, 같은 날은 근거의 가장 큰 PR 번호가 큰 것부터, 그다음 id 거꾸로)
+      required:
+      - units
+      - skipped
+      properties:
+        units:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChangeUnit'
+        skipped:
+          type: integer
+          minimum: 0
+          description: 읽지 못해 뺀 파일 수(깨짐, 32KB 넘음, 형식 틀림, 개인 정보 패턴, id 겹침)
+    ChangeUnit:
+      type: object
+      additionalProperties: false
+      description: 반영 단위 하나(TERM-271). 저장소 파일 `marong/changelog/<id>.json`과 같은 값에 `sortOn`과 근거 주소를 더한 것
+      required:
+      - id
+      - kind
+      - title
+      - deployedOn
+      - sortOn
+      - app
+      - backfilled
+      - evidence
+      - items
+      properties:
+        id:
+          type: string
+          description: 서버는 반영 폴더 이름(임의 글자를 뺀 것)이나 지난 반영의 `<날짜>-pr<번호>`, 앱은 `app-<버전 이름>`
+          pattern: ^([0-9]{8}-[a-z0-9][a-z0-9-]{0,39}|app-(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))$
+        kind:
+          type: string
+          enum:
+          - server
+          - app
+        title:
+          type: string
+          minLength: 1
+          maxLength: 40
+        deployedOn:
+          type:
+          - string
+          - 'null'
+          format: date
+          description: 반영일(한국 시각 날짜). 지난 기록에서 반영 기록을 찾지 못한 서버 단위만 null
+        sortOn:
+          type: string
+          format: date
+          description: 차례에 쓰는 날짜. deployedOn이 있으면 그 값, null이면 id 앞 여덟 자리
+        app:
+          description: 앱 단위만. 서버 단위는 null
+          oneOf:
+          - type: 'null'
+          - type: object
+            additionalProperties: false
+            required:
+            - versionName
+            - versionCode
+            properties:
+              versionName:
+                type: string
+                pattern: ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$
+              versionCode:
+                type: integer
+                minimum: 1
+        backfilled:
+          type: boolean
+          description: 지난 기록에서 채운 단위(SPEC-504)
+        evidence:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/ChangeEvidence'
+        items:
+          type: array
+          minItems: 1
+          maxItems: 30
+          items:
+            $ref: '#/components/schemas/ChangeItem'
+    ChangeItem:
+      type: object
+      additionalProperties: false
+      required:
+      - type
+      - area
+      - title
+      - before
+      - after
+      - evidence
+      properties:
+        type:
+          type: string
+          description: added 추가, improved 개선, fixed 수정, removed 제거
+          enum:
+          - added
+          - improved
+          - fixed
+          - removed
+        area:
+          type: string
+          description: app 앱, web 웹, call 통화, chat 대화, admin 관리, legacy 카톡·디스코드
+          enum:
+          - app
+          - web
+          - call
+          - chat
+          - admin
+          - legacy
+        title:
+          type: string
+          minLength: 1
+          maxLength: 40
+        before:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: 변경 전. added면 '없음', 근거가 없으면 '기록 없음'(지난 기록만)
+        after:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: 변경 후. removed면 '없음', 근거가 없으면 '기록 없음'(지난 기록만)
+        evidence:
+          type: array
+          minItems: 1
+          maxItems: 10
+          description: 파일에서 항목의 근거가 비면 서버가 단위의 근거를 넣어 줘요
+          items:
+            $ref: '#/components/schemas/ChangeEvidence'
+    ChangeEvidence:
+      type: object
+      additionalProperties: false
+      required:
+      - label
+      - url
+      properties:
+        label:
+          type: string
+          description: 'PR #<번호> 또는 커밋 해시(7~40자)'
+          pattern: '^(PR #[1-9][0-9]{0,4}|[0-9a-f]{7,40})$'
+        url:
+          type: string
+          format: uri
+          pattern: ^https://github\.com/kodonghui/marong2/(pull/[1-9][0-9]{0,4}|commit/[0-9a-f]{7,40})$

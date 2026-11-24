@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "id": "app-0.3.4",
+  "kind": "app",
+  "title": "새 버전 바로 받기와 지금 설치",
+  "deployedOn": "2026-11-23",
+  "app": {
+    "versionName": "0.3.4",
+    "versionCode": 12
+  },
+  "backfilled": true,
+  "evidence": [
+    "PR #107",
+    "PR #110"
+  ],
+  "items": [
+    {
+      "type": "improved",
+      "area": "app",
+      "title": "새 버전 받기",
+      "before": "기록 없음",
+      "after": "새 버전이 나오면 몇 분 안에 받아 두고, 홈과 글 대화에서 '지금 설치'로 깔아요",
+      "evidence": []
+    }
+  ]
+}

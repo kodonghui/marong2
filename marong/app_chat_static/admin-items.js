@@ -7,14 +7,7 @@
   const list = document.getElementById('item-list');
   const error = document.getElementById('item-error');
   const state = {listed: '올림', unlisted: '내림', new: '새 아이템'};
-  const tabs = document.querySelector('.admin-tabs');
-  if (tabs) {
-    const markOverflow = () => {
-      tabs.parentElement.dataset.overflow = String(tabs.scrollLeft + tabs.clientWidth < tabs.scrollWidth - 1);
-    };
-    new ResizeObserver(markOverflow).observe(tabs);
-    tabs.addEventListener('scroll', markOverflow, {passive: true});
-  }
+  Unified.fitAdminTabs(document.querySelector('.admin-tabs'));
 
   function render(item) {
     const card = node('li', '', 'card');
@@ -38,6 +31,11 @@
   async function load() {
     const result = await request(api);
     screen.setAttribute('aria-busy', 'false');
+    if (result.status === 404) {
+      signal(error);
+      list.replaceChildren(node('li', '꾸미기가 꺼져 있어요', 'caption'));
+      return;
+    }
     if (result.status !== 200) {
       signal(error, '아이템을 불러오지 못했어요', result);
       list.replaceChildren(button('다시 보기', load, 'btn2'));

@@ -36,7 +36,7 @@ async def scenario(db, store):
     caller, = db.admin("INSERT INTO call.callers(friend_id) VALUES (%s) RETURNING id", (friend,))[0]
     principal = Principal(caller, friend, "fixture-usage")
     client = str(uuid4())
-    call, _ = await store.start_call(principal, client, "fixture", "fixture")
+    call, *_ = await store.start_call(principal, client, "fixture", "fixture")
     segment = await store.start_segment(principal, call, client, MODEL)
     for when, rate in ((AT, 3), (AT + timedelta(seconds=1), 6)):
         db.admin(
@@ -121,7 +121,7 @@ async def monthly(db, store):
     caller, = db.admin("INSERT INTO call.callers(friend_id) VALUES (%s) RETURNING id", (friend,))[0]
     principal = Principal(caller, friend, "fixture-month")
     client = str(uuid4())
-    call, _ = await store.start_call(principal, client, "fixture", "fixture")
+    call, *_ = await store.start_call(principal, client, "fixture", "fixture")
     measured = await store.start_segment(principal, call, client, MODEL)
     estimated = await store.start_segment(principal, call, client, MODEL)
     await store.finish(principal, call, True)
