@@ -82,6 +82,9 @@ async def person_budget_blocked(person):
 
 def read_instruction():
     text=INSTRUCTION_FILE.read_text(encoding='utf-8').strip()
+    base, marker, privacy = text.partition("\n\n<!-- MARONG_CONTINUITY=on -->\n")
+    if marker:
+        text = base + "\n\n" + privacy if continuity.MODE == "on" else base
     if not text:raise ValueError('call_instruction.md is empty')
     return text
 

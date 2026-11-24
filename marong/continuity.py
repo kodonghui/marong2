@@ -117,10 +117,10 @@ def length_label(start: datetime, end: datetime) -> str:
     return f"{max(0, (end - start) // timedelta(minutes=1))}분"
 
 
-def fit_conversations(rows: list[dict]) -> list[dict]:
+def fit_row_budget(rows: list[dict], max_chars: int = 1500) -> list[dict]:
     result = []
     for row in rows:
-        if len(json.dumps([*result, row], ensure_ascii=False)) > 1500:
+        if len(json.dumps([*result, row], ensure_ascii=False)) > max_chars:
             break
         result.append(row)
     return result

@@ -174,6 +174,16 @@ class ContinuityLiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("'when'은 'as_of' 기준" in part["text"] for part in parts))
         self.assertTrue(any("합성 현재 통화" in part["text"] for part in parts))
 
+    async def test_sensitive_topics_instruction_is_only_added_on(self):
+        server = await check_setup()
+        rule = "건강·마음·성·돈·연애 얘기는 친구가 이번 통화에서 먼저 꺼내기 전에는 먼저 말하지 마."
+        for mode in ("off", "shadow", "on"):
+            with patch.object(continuity, "MODE", mode):
+                setup = server.setup(call_started_at=STARTED)["setup"]
+            base = setup["systemInstruction"]["parts"][0]["text"]
+            self.assertEqual(rule in base, mode == "on")
+            self.assertNotIn("<!-- MARONG_CONTINUITY=on -->", base)
+
 
 if __name__ == "__main__":
     unittest.main()

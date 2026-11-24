@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import redirect_stdout
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from io import StringIO
 import json
@@ -15,6 +16,7 @@ from psycopg.rows import dict_row
 
 from call_memory import MemoryStore, Principal, memory_scope
 from fixture_database import BOT_DSN, CALL_DSN, database
+from organizer import Organizer
 from fakes import ScriptedLLM, message, text
 from marong import continuity
 from marong.agent import Agent, Incoming
@@ -34,6 +36,10 @@ def admin(sql, params=()):
 
 
 class ContinuityStoreTests(unittest.IsolatedAsyncioTestCase):
+    @classmethod
+    def setUpClass(cls):
+        database.apply_unified()
+
     def fixture(self):
         suffix = uuid4().hex
         self.user, self.other = f"fixture-{suffix}-a", f"fixture-{suffix}-b"
@@ -226,6 +232,77 @@ class ContinuityStoreTests(unittest.IsolatedAsyncioTestCase):
                 baseline = await prompt(self.root)
                 self.assertNotIn("# 방금 통화", baseline)
                 self.assertNotIn('"when"', baseline)
+        finally:
+            await store.close()
+
+    async def test_voice_friendships_use_only_name_and_relationship(self):
+        person = self.fixture()
+        [(other,)] = admin("SELECT friend_id FROM marong.people WHERE user_key=%s", (self.other,))
+        admin("UPDATE marong.friends SET share=true WHERE id=%s", (other,))
+        admin("INSERT INTO marong.friendships(friend_a,friend_b,close,close_a,close_b) VALUES(%s,%s,true,true,true)",
+              (person.friend_id, other))
+        admin("INSERT INTO marong.shared_notes(friend_id,content,close_content) VALUES(%s,'합성 공유 내용','합성 가까운 근황')",
+              (other,))
+        store = MemoryStore(CALL_DSN)
+        await store.open()
+        try:
+            with patch.dict("os.environ", {"MARONG_FRIENDS": "1"}):
+                unified = json.loads(await store.seed(replace(person, unified=True)))["shared_friends"]
+                original = json.loads(await store.seed(person))["shared_friends"]
+                timed = json.loads(await store.seed(person, as_of=NOW))["shared_friends"]
+            expected = [{"name": "시험친구 나", "label": "가까운 사이"}]
+            self.assertEqual(unified, expected)
+            self.assertEqual(timed, expected)
+            self.assertTrue(any("합성 공유 내용" in row.get("text", "") for row in original))
+        finally:
+            await store.close()
+
+    async def test_organizer_accepts_only_eligible_turn_ids_for_each_card_field(self):
+        person = self.fixture()
+        store = MemoryStore(CALL_DSN)
+        await store.open()
+
+        async def organize(call_id, extractor):
+            worker = Organizer(store, extractor)
+            admin("UPDATE call.calls SET organize_status='pending' WHERE id=%s", (call_id,))
+            state = {"call_id": str(call_id), "caller_id": person.caller_id, "saved": 0}
+            await worker.organize(state | await worker.load(state))
+            return await store.one(
+                "SELECT summary,decided,undecided,todos,ask_next FROM call.cards WHERE call_id=%s", (call_id,),
+            )
+
+        try:
+            with patch.object(continuity, "MODE", "on"):
+                for good_summary in (True, False):
+                    call_id = self.call(person, NOW - timedelta(days=1), count=10)
+                    rows = admin("SELECT id,role FROM call.turns WHERE call_id=%s ORDER BY seq", (call_id,))
+                    first, assistant, forgotten, *_ = [item[0] for item in rows]
+                    admin("UPDATE call.turns SET forgotten_at=now() WHERE id=%s", (forgotten,))
+
+                    async def extract(turns):
+                        self.assertNotIn(forgotten, {row["id"] for row in turns})
+                        return {
+                            "summary": {"text": "합성 요약", "turn_ids": [first if good_summary else assistant]},
+                            "decided": [{"text": "합성 결정", "turn_ids": [first]},
+                                        {"text": "근거 없는 결정", "turn_ids": [first, 9_999_999]}],
+                            "undecided": [{"text": "근거가 모델 말뿐", "turn_ids": [assistant]}],
+                            "todos": [{"text": "잊은 근거가 있는 할 일", "turn_ids": [forgotten]}],
+                            "ask_next": [{"text": "합성 다음 질문", "turn_ids": [assistant]}],
+                            "memories": [{"quote": "합성 통화 1"}, {"quote": "합성 근거 없음"}],
+                        }, {}
+
+                    card = await organize(call_id, extract)
+                    self.assertEqual(card["summary"], "합성 요약" if good_summary else "합성 통화 1")
+                    self.assertEqual(card["decided"], ["합성 결정"])
+                    self.assertEqual(card["undecided"], [])
+                    self.assertEqual(card["todos"], [])
+                    self.assertEqual(card["ask_next"], ["합성 다음 질문"])
+                short = self.call(person, NOW - timedelta(hours=2), count=1)
+                never = AsyncMock(side_effect=AssertionError("short call must skip extraction"))
+                self.assertIsNone(await organize(short, never))
+                status = await store.one("SELECT organize_status FROM call.calls WHERE id=%s", (short,))
+                self.assertEqual(status["organize_status"], "skipped")
+                never.assert_not_awaited()
         finally:
             await store.close()
 

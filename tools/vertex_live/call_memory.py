@@ -19,10 +19,10 @@ from psycopg_pool import AsyncConnectionPool
 from call_usage import Ledger
 from call_cost import MonthlyCost
 from call_tuning import BASE
-from marong.continuity import as_of_label, length_label, record_pick
+from marong.continuity import as_of_label, fit_row_budget, length_label, record_pick
 from marong.continuity_db import read_previous
 from marong.room_scope import writing_room
-from marong.friend_scope import accepted_circle
+from marong.friend_scope import RELATIONSHIP, accepted_circle
 from marong.relative_time import relative_time
 from marong.usage import Usage, configured_limit
 
@@ -116,7 +116,7 @@ def pack(items, budget):
     return result
 
 
-def seed_json(friend, sources, history_chars=4000, *, as_of=None, older=()):
+def seed_json(friend, sources, history_chars=4000, *, as_of=None, older=(), names_only=False):
     budgets = {"kakao_notes": 1000, "kakao_summaries": 1500, "kakao_recent": 1500,
                "shared_friends": 1500, "call_memories": 1500, "call_cards": 1500, "current_call": history_chars}
     payload = {"as_of": as_of_label(as_of), "friend": friend} if as_of is not None else {"friend": friend}
@@ -125,6 +125,9 @@ def seed_json(friend, sources, history_chars=4000, *, as_of=None, older=()):
             payload["recent_conversations"] = list(older)
             continue
         rows = sources.get(key, [])
+        if names_only and key == "shared_friends":
+            payload[key] = fit_row_budget(rows, budget)
+            continue
         if as_of is not None:
             timed = []
             for row in rows:
@@ -305,24 +308,32 @@ class MemoryStore:
               AND NOT EXISTS(SELECT 1 FROM call.source_exclusions x WHERE x.caller_id=%(caller)s AND x.source_type='kakao_message' AND x.source_id=m.id::text)
             """ + self.keep_source("message", "m.id") + self.keep_source("message", "m.reply_to") + """
               ORDER BY id DESC LIMIT 10""", params)
-        # Other people contribute only the existing, explicitly shared notes.
-        friends = [] if p.unified or p.private_rooms is not None else await self.all("""SELECT f.name,fs.label,s.content,
-          CASE WHEN fs.close THEN s.close_content ELSE '' END AS close_content
-          FROM marong.friendships fs JOIN marong.friends f
-            ON f.id=CASE WHEN fs.friend_a=%s THEN fs.friend_b ELSE fs.friend_a END
-          LEFT JOIN LATERAL(SELECT n.content,n.close_content FROM marong.shared_notes n WHERE n.friend_id=f.id
-          """ + self.keep_source("shared_note", "n.id") + """ ORDER BY n.id DESC LIMIT 1) s ON true
-          WHERE %s IN(fs.friend_a,fs.friend_b) AND f.share AND coalesce(to_jsonb(fs)->>'state','accepted')='accepted' ORDER BY f.id LIMIT 8""", (p.friend_id,p.friend_id))
-        for row in friends:
-            row['content'] = (row['content'] or '') + '\n' + (row.pop('close_content') or '')
+        names_only = p.unified or as_of is not None
+        friends = []
+        if not p.unified and p.private_rooms is None:
+            columns = f"f.name,{RELATIONSHIP}" if names_only else (
+                "f.name,fs.label,s.content,CASE WHEN fs.close THEN s.close_content ELSE '' END AS close_content"
+            )
+            join_notes = "" if names_only else (
+                "LEFT JOIN LATERAL(SELECT n.content,n.close_content FROM marong.shared_notes n WHERE n.friend_id=f.id"
+                + self.keep_source("shared_note", "n.id") + " ORDER BY n.id DESC LIMIT 1) s ON true"
+            )
+            friends = await self.all(f"""SELECT {columns}
+              FROM marong.friendships fs JOIN marong.friends f
+                ON f.id=CASE WHEN fs.friend_a=%s THEN fs.friend_b ELSE fs.friend_a END
+              {join_notes}
+              WHERE %s IN(fs.friend_a,fs.friend_b) AND f.share
+              AND coalesce(to_jsonb(fs)->>'state','accepted')='accepted' ORDER BY f.id LIMIT 8""", (p.friend_id,p.friend_id))
+            if not names_only:
+                for row in friends:
+                    row['content'] = (row['content'] or '') + '\n' + (row.pop('close_content') or '')
         if p.unified and os.getenv("MARONG_FRIENDS") == "1":
             try:
-                query = accepted_circle(self.keep_source("shared_note", "x.id"))
-                circle = await asyncio.wait_for(self.all(query, {"friend": p.friend_id, "limit": 20}), .7)
+                friends = await asyncio.wait_for(
+                    self.all(accepted_circle(names_only=True), {"friend": p.friend_id, "limit": 20}), .7,
+                )
             except (Error, TimeoutError):
-                circle = []
-            friends = [{"name": row["name"], "label": row["label"], "close": row["close"],
-                        "content": "\n".join(filter(None, (row["shared"], row["shared_close"])))} for row in circle]
+                friends = []
         dates = ",c.started_at AS call_started_at" if as_of is not None else ""
         memories = await self.all(f"""SELECT m.id,m.content,m.created_at,'call_memory' AS source{dates} FROM call.memories m
           JOIN call.calls c ON c.id=m.call_id WHERE m.caller_id=%s AND m.status='active' AND c.deleted_at IS NULL
@@ -341,7 +352,7 @@ class MemoryStore:
               + self.keep_source("call_turn", "t.id") + " ORDER BY t.seq DESC LIMIT 40", (p.caller_id,call_id))
         sources = {"kakao_notes": notes, "kakao_summaries": summaries, "kakao_recent": recent,
                    "shared_friends": friends, "call_memories": memories, "call_cards": cards, "current_call": history}
-        return seed_json(p.name, sources, history_chars, as_of=as_of, older=older)
+        return seed_json(p.name, sources, history_chars, as_of=as_of, older=older, names_only=names_only)
 
     async def recall(self,p,query):
         query=normalized(query)[:100]

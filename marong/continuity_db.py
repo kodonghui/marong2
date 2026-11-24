@@ -3,7 +3,7 @@
 from datetime import datetime
 
 from marong.continuity import (
-    LOOKBACK, SIGNAL_TEXTS, Span, Turn, display_turns, fit_conversations,
+    LOOKBACK, SIGNAL_TEXTS, Span, Turn, display_turns, fit_row_budget,
     length_label, older_conversations, recent_turns, shortened,
 )
 from marong.relative_time import relative_time
@@ -116,7 +116,7 @@ async def read_previous(conn, scope, identity, now, current_call, *, voice, mark
         await _summarize(conn, text_cte, call_cte, params, group, now, identity["name"], voice, marks)
         for group in older
     ]
-    return recent, fit_conversations(summaries)
+    return recent, fit_row_budget(summaries)
 
 
 async def _summarize(conn, text_cte, call_cte, params, group, now, name, voice, marks):
