@@ -92,7 +92,7 @@
 | TASK-528 | 구현 및 시험 완료 | `4ee1918`, `efabfc9`, `b43f1c3` | 설정 시작 시 읽기와 숫자 진단 시험 2건, `shadow`와 `off`의 모델 메시지 동일성 확인. |
 | TASK-529 | 구현 및 시험 완료 | `faa419d` | TC-178·685 통과. 모드·대본 조합 6개, 정답·오답 100%·0%, 시간·토큰·비용 출력. Windows 음성 합성으로 18개 PCM 대본 작성. |
 | TASK-530 | 합성 실측 완료, TC-675 재측정 통과 | `faa419d`, `ed905ff` | 초기 49회 유효, 3,065.965초, 비용 0.488173달러. 수정된 입력의 TC-675는 추가 10회 유효, 215.247초, 비용 0.068288달러. 정확도·지연·토큰·비용은 아래 표 참조. |
-| TASK-531 | 운영 반영 보류 | `ffbe6c1`(반영 대상) | 카카오는 이번 반영에서 제외했다. 앱·웹 글 대화가 `/opt/marong`의 실행 환경과 응답 지시문을 사용해 통화·정리·앱 세 서비스의 1단계 `off`와 2단계 `shadow`를 반영 전 중단했다. [사전 대조](#task-531-운영-반영-사전-대조) 참조. |
+| TASK-531 | 1단계 `off`·2단계 `shadow` 반영 | `ffbe6c1` | 운영 통화·정리·앱 세 서비스의 파일 14개 적용. 카카오는 제외했다. [운영 적용 파일](#task-531-운영-적용-파일)과 [반영 기록](#task-531-반영-기록) 참조. |
 | TASK-532 | 진행 표와 초안 PR 설명 정리 | `03377b0`, `16acb6e` | TASK별 상태·커밋·시험, 합성 실측 비용 및 별도 운영 승인 지점을 기록했다. |
 | TASK-533 | 끝 | PR #120(`107c224`와 그 뒤 커밋) | 2026-11-24 답대로 C-1\~C-8을 spec.md(SPEC-004·017·024, 3.1, 5.4)·requirements.md(REQ-022)·unified.md(SPEC-382)·call-cost.md(SPEC-182)에 반영, 바뀌기 전 글은 각 문서 끝 '바뀐 승인 글'. 질문 6 '보내도 됨'·질문 7 '써도 됨'(항목 78)과 C-9 '지금 반영'(항목 77)을 기록하고 3.11 반영 순서에서 BUG-117 단계를 뺌. 단계 기록 01\~10·12 통과, README '시작 가능' |
 | TASK-534 | 운영에 설정 2행 추가 및 확인 | 사전 기록 `ff80295`, BUG-117 기록 PR #122 (`d66f87d`) | 2026-11-24 KST 사용자님 "넣어도 됨"(마롱이 항목 86, 설정 행 추가 승인). `ctx32k-20261124`와 `ctx16k-20261124`를 한 번씩 추가했다. 저장 위치 `/home/opc/marong-deploy/20261124-continuity-tuning.MKmbnOQS/`의 `before.json` 488바이트, `after.json` 1,369바이트, 권한 각각 600. 두 `jq` 출력 모두 `true`. 15:07 KST 읽기 조회에서 활성 `base-20261116`, 설정 3행 확인. TC-688은 압축 8,192·4,096, 답 상한 1,024, VAD 700·100, 기억 상한 30의 객체 값 일치와 TC-644 격리 회귀 1건 통과를 확인했다. BUG-117 반영 14:34:52 KST 후 303초간 오류와 `call_tuning_fallback` 각 0건. 전체 setup 직렬화 비교 기록이 없고 첫 웹 통화 구간은 15:07 KST에도 `waiting_for_first_call`이었다. 모델 호출 0회, 비용 0달러. |
@@ -154,4 +154,48 @@ TASK-530 종료 뒤 기존 측정 프로세스를 닫고, 기억 블록을 채�
 - 앱의 기존 대상 4개와 통화·정리의 기존 대상 6개는 18:34 KST에 `1a29477`과 일치했다. 통화 런타임의 변경 대상 `tool_trace.py`도 일치했다.
 - 후속 확인에서 앱 진입점과 `app_chat`, `agent`, `store`, `config` 모듈의 경로는 `/opt/marong-app`이었다. 실행 중인 프로세스의 Python 경로는 `/opt/marong/.venv/bin/python`, 작업 디렉터리는 `/opt/marong`이었다. `run_app.main`은 이 경로의 `.env`를 읽는다. 글 답변의 `Agent._system`에서 호출하는 `Agent.persona`는 실효 설정 기준으로 `/opt/marong/prompt.md`와 `/opt/marong/knowledge`를 읽는다.
 - 2026-11-24 18:45:31 KST 읽기 확인에서 `marong-vertex-live`·`marong-voice-memory` 사용자 유닛과 `marong-app`·`marong` 시스템 유닛은 `active`였다. 통화 `/healthz`와 앱 `/chat/healthz`는 HTTP 200이었다. 활성 구간 설정은 `base-20261116`이었다.
-- 앱이 `/opt/marong`에 의존할 경우 중단하라는 지시에 따라 DB·파일 백업, 파일 교체, 설정 변경, 유닛 재시작 전에 중단했다. 세 서비스의 1·2단계 반영 시각과 복구 스크립트 경로는 없다. 배포 후 5분 로그, 적용 파일 SHA-256, 지시문 해시, `continuity_pick`은 미검증이다.
+- 18:45에는 공용 실행 환경과 자료의 의존성으로 반영을 중단했다. 이후 중단 조건은 `/opt/marong`의 코드나 공용 파일을 바꿔야 할 때라고 사용자님이 명확히 했다. 아래 파일만으로 배포할 수 있음을 확인했고 기존 venv 및 vendor로 새 모듈을 가져오는 데 성공했다. 배포된 앱과 통화 코드의 import 확인에서 `/opt/marong` 프로젝트 코드에서 가져온 모듈은 0개였다.
+
+### TASK-531 운영 적용 파일
+
+앱 경로는 `/opt/marong-app/`이다. 통화·정리의 공통 경로는 `~/marong-deploy/20261119-unified-cutover.qAcbv7Wm/voice-runtime/`이다. 통화·정리에서 쓰는 `marong` 모듈도 앱 경로에서 가져온다.
+
+| 경로 기준 | 파일 | 적용 이유 |
+| --- | --- | --- |
+| 앱 | `marong/agent.py` | SPEC-483 글 답변 맥락 및 추적에서 비공개 통화 자료 가리기 |
+| 앱 | `marong/store.py` | 1:1 글 답변에 필요한 통화 자료 범위 제한과 `shadow` 결과 기록 |
+| 앱 | `marong/continuity.py` | 모드, 직전 대화 제한, `continuity_pick` 결과 기록 |
+| 앱 | `marong/continuity_db.py` | 친구 범위 안에서 통화·글 대화 자료 선택 |
+| 앱 | `marong/friend_scope.py` | 통화에서 통합 친구의 이름·관계만 선택할 수 있도록 쿼리 제공 |
+| 앱 | `marong/relative_time.py` | 한국 시각 기준 상대 시각 표기 |
+| 앱 및 통화·정리 | `tools/vertex_live/tool_trace.py` | 글 답변 추적에서 비공개 입력·출력 가리기 지원 및 통화 런타임 사본 일치 |
+| 통화·정리 | `tools/vertex_live/server.py` | 모드에 따라 통화 지시문과 초기 기록 설정 적용 |
+| 통화·정리 | `tools/vertex_live/live_session.py` | 새 구간의 대화 선택과 `shadow` 진단 기록 |
+| 통화·정리 | `tools/vertex_live/call_memory.py` | 직전 대화 조회와 모드별 통화 기억 생성 |
+| 통화·정리 | `tools/vertex_live/call_instruction.md` | 기능이 켜졌을 때만 쓸 지시문 절 |
+| 통화·정리 | `tools/vertex_live/memory_tools.py` | 내부 통화 시작 신호를 공통 목록에서 참조 |
+| 통화·정리 | `tools/vertex_live/organizer.py` | 기능이 켜졌을 때 통화 카드의 턴 근거 검증 |
+| 통화 사용자 유닛 | `~/.config/systemd/user/marong-vertex-live.service.d/zzzzzzzzzz-continuity.conf` | `MARONG_CONTINUITY` 모드 적용 |
+| 정리 사용자 유닛 | `~/.config/systemd/user/marong-voice-memory.service.d/zzzzzzzzzz-continuity.conf` | 같은 모드 적용 |
+| 앱 시스템 유닛 | `/etc/systemd/system/marong-app.service.d/zzzzzzzzzz-continuity.conf` | 같은 모드 적용 |
+
+`/opt/marong`의 코드·설정·지시문·참고 자료·venv와 두 서비스의 vendor 경로는 읽기만 했다. 신규 패키지 설치나 마이그레이션은 없었다.
+
+복구 스크립트는 `~/marong-deploy/20261124-continuity.g5t7osk4/rollback.sh`에 먼저 준비했다. 같은 디렉터리의 `manifest.json`에 대상별 배포 전후 SHA-256을 기록했다. `backup/`에 PostgreSQL 백업 27,368,956바이트와 기존 파일 11개를 보관했다. DB 백업의 목차는 788줄이었고 백업 파일 2개와 보관한 원본 11개의 SHA-256을 확인했다. 기존에 없던 코드 3개와 drop-in 3개는 복구 시 보존 경로로 이동하도록 구성했다.
+
+업데이트 내역 없음(보이는 변화 없음). `off`와 `shadow`는 사용자 응답에 새 대화 맥락을 넣지 않는다.
+
+### TASK-531 반영 기록
+
+| 서비스 | 1단계 `off` 시작(KST) | 2단계 `shadow` 시작(KST) |
+| --- | --- | --- |
+| `marong-vertex-live` | 2026-11-24 18:57:23 | 2026-11-24 19:02:31 |
+| `marong-voice-memory` | 2026-11-24 18:57:23 | 2026-11-24 19:02:31 |
+| `marong-app` | 2026-11-24 18:57:23 | 2026-11-24 19:02:31 |
+
+- 각 재시작 직전 최근 120초 메시지, 진행 통화, 최근 600초 신호가 있는 일시정지 통화, 열린 구간, 통화 벨, 작업 중 정리기는 모두 0건이었다. 최근 600초에 신호가 없는 일시정지 행 1건은 보존했다. 두 단계에서 활성 구간 설정은 `base-20261116`이었다.
+- 두 단계에서 세 유닛은 지정한 모드로 `active`였고 시작 뒤 자동 재시작은 0건이었다. 통화 `/healthz`와 앱 `/chat/healthz`는 HTTP 200이었다. 파일 14개의 SHA-256은 모두 `ffbe6c1`과 일치했다. 카카오 코드·공용 설정·지시문 등의 비교 대상 6개도 배포 전후 해시가 일치했다.
+- `off` 확인은 300초 동안 오류 0건이었다. 조회된 로그는 통화 4건, 정리 4건, 앱 24건이었다.
+- `shadow` 확인도 300초 동안 오류 0건이었다. 조회된 로그는 통화 4건, 정리 4건, 앱 22건이었다. 이 시간에 운영 앱 답변은 0건, 운영 `continuity_pick`은 0건이었다. 실제 운영 글 답변의 기록은 첫 답변 대기다.
+- 기존 venv에서 통화 런타임 모듈 6개와 앱 경로 모듈 4개, 앱 진입점과 관련 모듈 10개의 import를 확인했다. 배포 전 백업과 배포된 `off`·`shadow` 코드를 각각 실행해 같은 합성 입력에서 통화 지시문·seed·setup, 앱 지시문·통화 맥락의 SHA-256 5개가 모두 일치했다. 통화 지시문은 `f0813c5b3f660343068437949f037999cae8a59a70aee9b47efd4955fa21059c`였다.
+- 가짜 모델 응답을 연결한 `AppAgent._reply`에서 각 모드 합성 응답 1건을 확인했다. 모델 요청 본문 SHA-256은 배포 전·`off`·`shadow`에서 `a143eb4b566e1539ed94916f0be64b99a2404c4916ba526499c39a9074a014e7`로 같았다. `continuity_pick`은 `off` 0건, 설치된 `shadow`에서 `ok` 1건이었다. 가짜 연결 통화 시험 `test_continuity_live.py` 10건도 통과했다.
