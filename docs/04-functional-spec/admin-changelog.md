@@ -1,7 +1,7 @@
 # 관리 페이지 업데이트 내역: 기능 명세(기능 변경 4)
 
 상태: 초안(proposed), 2026-11-24 KST, Claude. 체크포인트 전이에요. 이 문서의 행은 모두 proposed예요. 승인된 [관리 페이지 명세](admin.md)의 SPEC-450과 3.1 표가 바뀌는 곳은 [요구사항의 기능 변경 목록 4](../02-prd/admin-changelog.md#기능-변경-목록-4승인된-항목이-바뀌는-곳)의 4-5·4-6에서 따로 물어요. 답을 받기 전에는 admin.md를 고치지 않았어요.
-입력: [요구사항](../02-prd/admin-changelog.md) REQ-620\~625와 시작 값, [흐름](../03-user-flow/) FL-215·216, [도메인](../01-domain/admin-changelog.md) TERM-270·271, 승인된 [관리 페이지 명세](admin.md) 1절 공통 규칙과 SPEC-450·458, 앱 업데이트 명세의 버전 기록(TERM-222, `history.json`), [AGENTS.md](../../AGENTS.md) '서버 반영', `deploy/ovh.sh`(`app-release` 명령), `marong/app_chat_static/unified.js`(`node`, `link`, `request`, `shortDate`), `main` `1a29477`.
+입력: [요구사항](../02-prd/admin-changelog.md) REQ-620\~625와 시작 값, [흐름](../03-user-flow/) FL-215·216, [도메인](../01-domain/admin-changelog.md) TERM-270·271, 승인된 [관리 페이지 명세](admin.md) 1절 공통 규칙과 SPEC-450·458, 앱 업데이트 명세의 버전 기록(TERM-222, `history.json`), [AGENTS.md](../../AGENTS.md) '서버 반영', `deploy/ovh.sh`(`app-release` 명령), `marong/app_chat_static/unified.js`(`node`, `link`, `request`, `shortDate`), `main` `1a29477`(같은 날 기능 변경 3이 합쳐진 `23549d6` 위로 다시 올림).
 뒤 단계: 05 바뀜 없음(표 없음), 06 [`api/admin.openapi.yaml`](../../api/admin.openapi.yaml)의 API-300, 07 SCR-220, 08 [admin-changelog.md](../08-screens/admin-changelog.md), 10 TASK-540\~545, 12 TC-700\~713가 이 SPEC 번호를 따라가요.
 표시: [사실] 코드·기록에서 확인, [새 제안] Claude가 새로 정한 숫자·문구·이름, [추정] 근거 있는 짐작.
 ID 번호: SPEC-500\~504(잡아 둔 범위 SPEC-500\~509).

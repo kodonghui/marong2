@@ -53,7 +53,7 @@
         },
         {
           "level": "info",
-          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜. TERM-270 업데이트 내역·TERM-271 반영 단위 더함, CTX-026 관리 화면에 화면 하나. 새 CTX 없음. 기록은 docs/01-domain/admin-changelog.md 0절, TERM-176 글 바뀜은 4-1로 따로 질문",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR #129(kodonghui/claude-admin-changelog-design), 기준 main 1a29477을 기능 변경 3이 합쳐진 23549d6 위로 다시 올림, 체크포인트 전): 바뀜. TERM-270 업데이트 내역·TERM-271 반영 단위 더함, CTX-026 관리 화면에 화면 하나. 새 CTX 없음. 기록은 docs/01-domain/admin-changelog.md 0절, TERM-176 글 바뀜은 4-1로 따로 질문",
           "at": "2026-11-24"
         }
       ],
@@ -115,7 +115,7 @@
         },
         {
           "level": "info",
-          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜. REQ-620~625(proposed), 시작 값, 기능 변경 목록 4-1~4-12(답 칸 빔), 체크포인트 질문 0~7. docs/02-prd/admin-changelog.md",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR #129(kodonghui/claude-admin-changelog-design), 기준 main 1a29477을 기능 변경 3이 합쳐진 23549d6 위로 다시 올림, 체크포인트 전): 바뀜. REQ-620~625(proposed), 시작 값, 기능 변경 목록 4-1~4-12(답 칸 빔), 체크포인트 질문 0~7. docs/02-prd/admin-changelog.md",
           "at": "2026-11-24"
         }
       ],
@@ -166,7 +166,7 @@
         },
         {
           "level": "info",
-          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜. FL-215 업데이트 내역 보기, FL-216 반영 때 업데이트 내역 쓰기 더함(lint 0). FL-200 메모 줄은 4-4로 따로 질문",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR #129(kodonghui/claude-admin-changelog-design), 기준 main 1a29477을 기능 변경 3이 합쳐진 23549d6 위로 다시 올림, 체크포인트 전): 바뀜. FL-215 업데이트 내역 보기, FL-216 반영 때 업데이트 내역 쓰기 더함(lint 0). FL-200 메모 줄은 4-4로 따로 질문",
           "at": "2026-11-24"
         }
       ],
@@ -233,7 +233,7 @@
         },
         {
           "level": "info",
-          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜. SPEC-500~504(proposed): 파일 형식·API-300·SCR-220·반영 때 put/check·지난 내역. SPEC-450의 경로·탭 수는 4-5·4-6로 따로 질문. docs/04-functional-spec/admin-changelog.md",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR #129(kodonghui/claude-admin-changelog-design), 기준 main 1a29477을 기능 변경 3이 합쳐진 23549d6 위로 다시 올림, 체크포인트 전): 바뀜. SPEC-500~504(proposed): 파일 형식·API-300·SCR-220·반영 때 put/check·지난 내역. SPEC-450의 경로·탭 수는 4-5·4-6로 따로 질문. docs/04-functional-spec/admin-changelog.md",
           "at": "2026-11-24"
         }
       ],
@@ -283,7 +283,7 @@
         },
         {
           "level": "info",
-          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜 없음. 내역은 DB가 아니라 저장소 파일(marong/changelog/<id>.json)이에요(질문 3의 추천 B). C를 고르면 다시 씀",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR #129(kodonghui/claude-admin-changelog-design), 기준 main 1a29477을 기능 변경 3이 합쳐진 23549d6 위로 다시 올림, 체크포인트 전): 바뀜 없음. 내역은 DB가 아니라 저장소 파일(marong/changelog/<id>.json)이에요(질문 3의 추천 B). C를 고르면 다시 씀",
           "at": "2026-11-24"
         }
       ],
@@ -334,7 +334,7 @@
         },
         {
           "level": "info",
-          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜. api/admin.openapi.yaml 0.3.0-draft에 API-300 GET /chat/admin/api/changes와 스키마 넷(proposed). 0.2.0은 기능 변경 3이 씀, 늦게 합치는 쪽이 번호를 올림. PyYAML로 읽기 확인",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR #129(kodonghui/claude-admin-changelog-design), 기준 main 1a29477을 기능 변경 3이 합쳐진 23549d6 위로 다시 올림, 체크포인트 전): 바뀜. api/admin.openapi.yaml 0.3.0-draft에 API-300 GET /chat/admin/api/changes와 스키마 넷(proposed). 0.2.0은 기능 변경 3이 씀, 늦게 합치는 쪽이 번호를 올림. PyYAML로 읽기 확인",
           "at": "2026-11-24"
         }
       ],
@@ -385,7 +385,7 @@
         },
         {
           "level": "info",
-          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜. SCR-220 업데이트 내역(/chat/admin/changes)을 SCR-169 아래에 더함(proposed), sitemap.md 그림 lint 0",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR #129(kodonghui/claude-admin-changelog-design), 기준 main 1a29477을 기능 변경 3이 합쳐진 23549d6 위로 다시 올림, 체크포인트 전): 바뀜. SCR-220 업데이트 내역(/chat/admin/changes)을 SCR-169 아래에 더함(proposed), sitemap.md 그림 lint 0",
           "at": "2026-11-24"
         }
       ],
@@ -447,7 +447,7 @@
         },
         {
           "level": "info",
-          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜. SCR-220 상태 표(docs/08-screens/admin-changelog.md). admin.md 1절·1.1절의 탭 글은 4-7·4-8로 따로 질문. 4-7에 '처음 그릴 때 지금 탭이 보이게 밂'을 새로 제안(360px에서 탭 일곱 폭 합 505px > 탭 줄 328px)",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR #129(kodonghui/claude-admin-changelog-design), 기준 main 1a29477을 기능 변경 3이 합쳐진 23549d6 위로 다시 올림, 체크포인트 전): 바뀜. SCR-220 상태 표(docs/08-screens/admin-changelog.md). admin.md 1절·1.1절의 탭 글은 4-7·4-8로 따로 질문. 4-7에 '처음 그릴 때 지금 탭이 보이게 밂'을 새로 제안(360px에서 탭 일곱 폭 합 505px > 탭 줄 328px)",
           "at": "2026-11-24"
         }
       ],
@@ -492,7 +492,7 @@
         },
         {
           "level": "info",
-          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 토큰 바뀜 없음, 목업 더함: design/admin-changelog-mockup.html, design/admin-changelog/(screen.html·changelog.css·screen.js·data.js, 그림 셋). Edge 158 headless로 360·430·1024·1280·1440px 아홉 상태(리뷰 뒤 #unreadable 더함) 가로 넘침 0을 측정",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR #129(kodonghui/claude-admin-changelog-design), 기준 main 1a29477을 기능 변경 3이 합쳐진 23549d6 위로 다시 올림, 체크포인트 전): 토큰 바뀜 없음, 목업 더함: design/admin-changelog-mockup.html, design/admin-changelog/(screen.html·changelog.css·screen.js·data.js, 그림 셋). Edge 158 headless로 360·430·1024·1280·1440px 아홉 상태(리뷰 뒤 #unreadable 더함) 가로 넘침 0을 측정",
           "at": "2026-11-24"
         }
       ],
@@ -559,7 +559,7 @@
         },
         {
           "level": "info",
-          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜. TASK-540~545(docs/10-wbs/admin-changelog.md, 체크포인트 전 시작 불가), 지난 내역 초안(반영 단위 47, 항목 79, 반영 폴더 63개 대조). README에 D170·D171, 패키지·ID 범위·겹치는 파일·순서 줄",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR #129(kodonghui/claude-admin-changelog-design), 기준 main 1a29477을 기능 변경 3이 합쳐진 23549d6 위로 다시 올림, 체크포인트 전): 바뀜. TASK-540~545(docs/10-wbs/admin-changelog.md, 체크포인트 전 시작 불가), 지난 내역 초안(반영 단위 47, 항목 79, 반영 폴더 63개 대조). README에 D170·D171, 패키지·ID 범위·겹치는 파일·순서 줄",
           "at": "2026-11-24"
         }
       ],
@@ -621,7 +621,7 @@
         },
         {
           "level": "info",
-          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜. TC-700~713(docs/12-qa/admin-changelog.md). TC-620 글은 4-9로 따로 질문, TC-637·640·641은 그대로 다시 돌림",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR #129(kodonghui/claude-admin-changelog-design), 기준 main 1a29477을 기능 변경 3이 합쳐진 23549d6 위로 다시 올림, 체크포인트 전): 바뀜. TC-700~713(docs/12-qa/admin-changelog.md). TC-620 글은 4-9로 따로 질문, TC-637·640·641은 그대로 다시 돌림",
           "at": "2026-11-24"
         }
       ],
