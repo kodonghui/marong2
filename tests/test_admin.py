@@ -4,21 +4,25 @@ import asyncio
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import json
 import secrets
 import sys
-from time import monotonic
+from time import monotonic, time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from aiohttp.test_utils import TestClient, TestServer
+from cryptography.hazmat.primitives.asymmetric import rsa
+import jwt
 import psycopg
 from psycopg.rows import dict_row
 
 from pg import ROOT, TestDB
 
 sys.path.insert(0, str(ROOT))
+from marong.access import AccessConfig, AccessVerifier, email_hash
 from marong.app_admin import overview_attention
 from marong.app_chat import AppChat
 from marong.app_session import AppSessions, one, token_hash
@@ -349,6 +353,43 @@ class AdminTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("없는 화면이에요", await response.text())
         redirect = await self.client.get("/chat/admin/members/?kind=link", headers=self.headers, allow_redirects=False)
         self.assertEqual((redirect.status, redirect.headers["Location"]), (301, "/chat/admin/members?kind=link"))
+
+    async def test_tc652_items_page_with_catalog_disabled(self):
+        address = uuid4().hex + chr(64) + "example.invalid"
+        config = AccessConfig("fixture.cloudflareaccess.com", "fixture", frozenset({address}))
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key()))
+        jwk["kid"] = "fixture"
+        now = int(time())
+        verifier = AccessVerifier(config)
+        verifier.keys = [jwk]
+        verifier.fetched = now
+        verifier.expires = now + 600
+        proof = jwt.encode({"sub": "fixture", "email": address, "iat": now, "exp": now + 300,
+                            "aud": config.aud, "iss": f"https://{config.team}"},
+                           key, algorithm="RS256", headers={"kid": jwk["kid"]})
+        self.chat.access = verifier
+        self.chat.admin.email_hash = email_hash(address)
+        self.assertIsNone(self.chat.decor.catalog)
+        self.assertEqual(self.db.admin("SELECT count(*) FROM marong.friend_profiles"), [(0,)])
+
+        headers = {"Cf-Access-Jwt-Assertion": proof, "Origin": ORIGIN, "Accept": "text/html"}
+        for method, path in (("GET", "/api/items"), ("POST", "/api/items/fixture/list"),
+                             ("POST", "/api/items/fixture/unlist")):
+            response = await self.client.request(method, "/chat/admin" + path, headers=headers)
+            await self.response(response, 404, "not_found")
+        refused = await self.client.get("/chat/admin/items", headers={"Accept": "text/html"})
+        self.assertEqual((refused.status, refused.content_type), (403, "text/html"))
+
+        for path, _ in SCREENS:
+            with self.subTest(path=path):
+                response = await self.client.get(f"/chat/admin/{path}", headers=headers)
+                self.assertEqual((response.status, response.content_type), (200, "text/html"))
+                html = await response.text()
+                self.assertIn('href="/chat/admin/items"', html)
+                if path == "items":
+                    self.assertIn('href="/chat/admin/items" aria-current="page"', html)
+                    self.assertIn('id="item-admin"', html)
 
     async def make_invite(self):
         token, expires = await self.sessions.create_invite("join")

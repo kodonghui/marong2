@@ -240,8 +240,6 @@ class AppAdmin:
             return self.page_status(404, "없는 화면이에요", '<a href="/chat/admin/">개요로</a>')
         if path != canonical:
             raise web.HTTPMovedPermanently(location=req.rel_url.with_path(canonical, keep_query=True))
-        if tab == "items":
-            self.chat.decor.require_catalog()
         response = self.chat.unified_page("admin-items" if tab == "items" else "admin")
         links = []
         for key, (href, label) in TABS.items():
