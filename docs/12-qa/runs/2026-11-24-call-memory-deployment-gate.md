@@ -46,12 +46,12 @@ static/face/v1/23-mouth-wide-open-eyes-closed.webp
 
 | 항목 | 결과 |
 | --- | --- |
-| TC-644 · BUG-117 | 합침, 운영 반영 보류. 마롱이 항목 77(2026-11-24 03시대 KST)에 따라 대화 이어 주기 설계(항목 78)에서 컨텍스트 창 압축 값을 정한 뒤 반영한다. 원래 PR의 격리 회귀 통과. |
+| TC-644 · BUG-117 | 격리 회귀 1건 통과. 설정 동등성 확인 후 14:34:52 KST 반영, 303초 로그에서 오류와 `call_tuning_fallback` 각 0건. 첫 웹 통화 대기. |
 | TC-645 · BUG-118 | 반영. 운영 지시문 SHA256이 승인본과 `main`에 일치했다. |
 | TC-646~648 · BUG-119~121 | 반영. 격리 회귀, 승인본 6개 해시, import, 서비스 302초 확인 통과. 실통화 확인 대기. |
 | TC-649 · BUG-122 | 반영. 정리기가 승인 파일을 둔 배포 폴더에서 실행됐고 302초 동안 두 서비스가 `active`였다. |
 
-다음 통화 서버 반영에서도 승인된 `85567b1`의 `live_session.py`를 기준으로 삼는다. `main`의 파일에는 압축 값 확정 뒤 반영할 BUG-117 변경이 포함돼 있다.
+03시대 BUG-118~122 반영에서는 승인된 `85567b1`의 `live_session.py`를 사용했다. 14시대 BUG-117 반영 뒤에는 운영과 최신 `main`의 파일 해시가 같다.
 
 카드 두 개의 숨김은 마롱이 항목 77(2026-11-24 03시대 KST)에서 승인됐다. [실행 결과와 복구 명령](#카드-두-건-숨김)
 
@@ -78,7 +78,7 @@ static/face/v1/23-mouth-wide-open-eyes-closed.webp
 - 03:47:39 KST에 `systemd-analyze --user verify marong-voice-memory.service`가 `Failed to initialize manager: No such device or address`와 종료 코드 1을 반환했다. 재시작 전에 파일 6개를 복원하고 적용하려던 drop-in을 백업 폴더로 옮긴 뒤 사용자 유닛 설정을 다시 읽었다. 복구 명령의 출력은 `ROLLBACK_COMPLETE`였다. 시험 파일과 표정 이미지는 기존 파일을 유지했다.
 - 03:48:17 KST 재조회에서 6개 파일 모두 반영 전 해시와 일치했다. 통화 서버 PID `440904`와 정리기 PID `3187623` 모두 이전과 같고 `active`였으며, 각 서비스의 자동 재시작은 0회였다. 통화 서버의 로컬 `/healthz`는 HTTP 200을 반환했다. 정리기의 실행 경로는 복구 전부터 사용한 `/home/opc/marong-vertex-test/app/organizer.py`다.
 - SSH 실행 환경에 `XDG_RUNTIME_DIR` 값이 없었다. 복구된 유닛을 읽기 검증한 결과 기본 환경은 종료 코드 1, 사용자 런타임 경로와 버스 주소를 명시한 환경은 종료 코드 0을 반환했다. 새 drop-in의 검증, 서비스 재시작과 반영 뒤 5분 로그 확인은 다음 반영 때 수행한다.
-- 이 시도의 BUG-118~122 운영 반영은 복구로 종료됐다. 당시 카드 숨김은 선행 조건 미충족으로 대기 상태였다. BUG-117은 항목 77 결정에 따라 압축 값 확정 뒤 반영한다.
+- 이 시도의 BUG-118~122 운영 반영은 복구로 종료됐다. 당시 카드 숨김과 BUG-117 반영은 대기 상태였다.
 
 ### 서버 백업과 복구 명령
 
@@ -95,7 +95,7 @@ bash /home/opc/marong-deploy/20261124-bug118-122.Ioj1ff/deploy.sh rollback
 - 파일 교체 뒤 `85567b1`의 SHA256 6개, 새 모듈 import 및 설치한 정리기 유닛 검증이 통과했다. 열린 통화, 최근 3분 신호, 미완료 정리, 연결과 통화 로그 이벤트는 재시작 직전 모두 0건이었다. 시험 파일과 운영 표정 이미지는 기존 파일을 유지했다.
 - 두 서비스의 `ActiveEnterTimestamp`는 03:53:25 KST다. 03:53:26 KST에 통화 서버 PID `449003`, 정리기 PID `448999`, 두 서비스 `active` 및 로컬 HTTP 200을 확인했다. 정리기는 `/home/opc/marong-deploy/20261119-unified-cutover.qAcbv7Wm/voice-runtime/tools/vertex_live/organizer.py`로 전환됐다.
 - 03:58:28 KST에 302초 검증을 통과했다. 유닛 필터로 조회한 로그 8줄에서 오류 0건이었다. 두 PID와 `active` 상태, HTTP 200, SHA256 6개가 유지됐고 자동 재시작은 0회였다. 03:53:26~03:58:53 KST에 시작된 통화는 0건이어서 실통화 검증은 대기 중이다.
-- 운영 `live_session.py`는 승인된 `85567b1`의 해시 `223b81253363c353a60ee34055cd90785255c09c13716eb44619dce2f031567b`다. BUG-117을 포함한 `main`의 해시는 위 표에 있다.
+- 이 시점의 운영 `live_session.py`는 승인된 `85567b1`의 해시 `223b81253363c353a60ee34055cd90785255c09c13716eb44619dce2f031567b`였다.
 
 ```bash
 bash /home/opc/marong-deploy/20261124-bug118-122-retry.hPaIjN/deploy.sh rollback
@@ -110,3 +110,26 @@ bash /home/opc/marong-deploy/20261124-bug118-122-retry.hPaIjN/deploy.sh rollback
 ```bash
 sudo -n -u postgres psql -X -d marong -v action=restore -v marker=2026-11-23T18:58:53.324029Z -f - < /home/opc/marong-deploy/20261124-bug118-122-retry.hPaIjN/card-hide.sql
 ```
+
+## BUG-117 설정 동등성 검증과 운영 반영
+
+- 마롱이 항목 77(2026-11-24 KST)에서 기존 기본값과 운영 구간 설정의 일치를 조건으로 BUG-117의 반영을 승인했다. `85567b1`과 당시 `main` `437a17a1a78b72a85c7da995e7350e5a5a25b871` 사이에 바뀐 런타임 파일은 `tools/vertex_live/live_session.py` 한 개였다. 운영 파일의 반영 전 SHA256은 `85567b1`의 `223b81253363c353a60ee34055cd90785255c09c13716eb44619dce2f031567b`였다.
+- 14:28:13 KST에 운영 venv에서 외부 연결을 막고 `server.setup()`을 두 번 호출했다. `tuning=None`과 운영 DB의 `base-20261116` 행을 입력한 결과다. 실제로 선택된 행도 `base-20261116`이었다.
+
+| 비교 항목 | `tuning=None` | `base-20261116` |
+| --- | --- | --- |
+| `generationConfig.maxOutputTokens` | 1,024 | 1,024 |
+| `realtimeInputConfig.automaticActivityDetection` | `prefixPaddingMs=100`, `silenceDurationMs=700` | 동일 |
+| `contextWindowCompression` | `triggerTokens=8192`, `slidingWindow.targetTokens=4096` | 동일 |
+| `seed()`의 `memory_limit` 및 행의 `seed_call_memories` | 30 | 30 |
+
+세 setup 항목은 객체 비교에서 일치했다. TC-644 격리 회귀 시험 한 건도 통과했다. 운영 파일 백업은 `/home/opc/marong-deploy/20261124-bug117.mJE8w8/backup/live_session.py`에 있다.
+
+```bash
+bash /home/opc/marong-deploy/20261124-bug117.mJE8w8/deploy.sh rollback
+```
+
+- 사전 조회의 `resting` 통화 1건은 연결과 열린 구간이 0개였다. `server.py`가 재연결 상태에 사용하는 600초가 지난 뒤에도 `live` 0건, 최근 10분 `resting` 0건, 최근 3분 신호 0건, 열린 구간 0건을 확인했다. 이전 `resting` 행은 유지했다.
+- `live_session.py` 한 파일을 교체하고 승인본 해시와 운영 venv의 import를 확인했다. 재시작 직전 위 조건을 다시 확인했다. 통화 서버의 `ActiveEnterTimestamp`는 14:34:52 KST였고, 14:34:53 KST에 새 PID `508621`의 `active` 상태와 HTTP 200을 확인했다.
+- 14:39:56 KST에 303초 검증을 마쳤다. 통화 서버는 같은 PID로 `active`였고 자동 재시작 0회, HTTP 200이었다. 통화 서버 유닛 로그 4줄에서 오류와 `call_tuning_fallback`은 각각 0건이었다. 구간 조회는 `waiting_for_first_call`을 반환해 첫 웹 통화 대기로 기록했다.
+- 운영 파일과 최신 `main`(`def10ad8bac0d554f8b2dfa71e804996dd6873d0`)의 `live_session.py` SHA256은 모두 `961fc4cc8fd4c14d119d516b6e316a5d032fa773ea2892650bb1409bddc89060`이었다. 운영 구간 설정은 `base-20261116`을 사용한다.
