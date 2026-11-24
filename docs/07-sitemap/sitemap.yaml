@@ -379,7 +379,7 @@
           access: 동희님(Cloudflare Access)
           status: active
           flows: [FL-200, FL-177, FL-179, FL-171]
-          terms: [CTX-026, CTX-029, CTX-006, CTX-021, TERM-190, TERM-192, TERM-199, TERM-200, TERM-014, TERM-242]  # TERM-242: 관리 페이지 기능 변경 3(2026-11-24, 체크포인트 전 제안)
+          terms: [CTX-026, CTX-029, CTX-006, CTX-021, TERM-190, TERM-192, TERM-199, TERM-200, TERM-014, TERM-242]  # TERM-242: 관리 페이지 기능 변경 3(2026-11-24, 체크포인트 통과 D147)
     - id: SCR-202
       name: 관리자 초대 링크
       path: /chat/admin/invites
@@ -393,7 +393,7 @@
       access: 동희님(Cloudflare Access)
       status: active
       flows: [FL-201]
-      terms: [CTX-021, TERM-093, TERM-100, TERM-221, TERM-222, TERM-223, TERM-242]  # TERM-242: 관리 페이지 기능 변경 3(2026-11-24, 체크포인트 전 제안)
+      terms: [CTX-021, TERM-093, TERM-100, TERM-221, TERM-222, TERM-223, TERM-242]  # TERM-242: 관리 페이지 기능 변경 3(2026-11-24, 체크포인트 통과 D147)
     - id: SCR-204
       name: 관리자 비용
       path: /chat/admin/costs

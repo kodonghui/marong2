@@ -8,7 +8,7 @@
 /* 08 단계 와이어프레임: 회색, 시스템 글꼴, 자리표시 글. 색과 토큰은 09 단계(지금 unified.css·chat.css와 design/base.tokens.json)에서 와요.
    원본은 docs/08-screens/admin.md. 상태마다 한 칸이에요. 폭 360px와 430px를 나란히, 그 아래에 노트북 폭 1280px와 1440px(넓은 배치, 1024px부터, 1.1절)를 그려요.
    숫자와 이름은 지어낸 값이에요. 노트북 칸은 페이지 폭에 맞게 줄여 보여요(zoom).
-   2026-11-24 기능 변경 3(체크포인트 전 제안): SCR-186#decor-off, SCR-201#app-removed, SCR-203#app-removed 칸을 더했어요. */
+   2026-11-24 기능 변경 3(같은 날 체크포인트 통과, D147): SCR-186#decor-off, SCR-201#app-removed, SCR-203#app-removed 칸을 더했어요. */
 :root { --page:#f4f4f4; --surface:#fff; --line:#cfcfcf; --text:#222; --muted:#666; --fill:#e6e6e6; --strong:#444 }
 * { box-sizing: border-box }
 body { margin:0; background:var(--page); color:var(--text); font:14px/1.5 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; padding:24px 16px 48px }
@@ -205,7 +205,7 @@ const SCREENS = [
   ["SCR-204#error", ["T:비용", "W:잠깐 문제가 생겼어요. 다시 해 볼까요?", "B:다시 해 볼게요"], "L1"],
   ["SCR-204#forbidden", ["H:마롱이 관리", "E:관리자만 볼 수 있어요"], "L1"],
  ]],
- ["scr186", "SCR-186 아이템(탭 줄과 넓은 폭의 본문 폭, 꾸미기 꺼짐 안내는 기능 변경 3 제안)", "/chat/admin/items · 상태는 pet-app.md 그대로(#decor-off는 기능 변경 3 제안) · 넓은 폭: 칸을 나누지 않고 pet-app.md의 표(썸네일·id·종류·이름·상태·받은 사람 수·단추)가 본문 폭으로 늘어남", "L1", [
+ ["scr186", "SCR-186 아이템(탭 줄과 넓은 폭의 본문 폭, 꾸미기 꺼짐 안내는 기능 변경 3)", "/chat/admin/items · 상태는 pet-app.md 그대로(#decor-off는 기능 변경 3) · 넓은 폭: 칸을 나누지 않고 pet-app.md의 표(썸네일·id·종류·이름·상태·받은 사람 수·단추)가 본문 폭으로 늘어남", "L1", [
   ["SCR-186#default", ["T:아이템", "K:전체*|새것|올림|내림", "@a^", "R:리본 · 착용|올림 · 받은 사람 2", "B:내리기", "@a~", "TH:|id|종류|이름|상태|받은 사람|", "TB:▢|ribbon|착용|리본|올림|2|!내리기"]],
   ["SCR-186#decor-off", ["T:아이템", "E:꾸미기가 꺼져 있어요"]],
  ]],

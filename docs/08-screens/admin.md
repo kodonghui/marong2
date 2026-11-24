@@ -1,11 +1,11 @@
 # 관리 페이지 다시 만들기: 화면 상태(08)
 
-상태: 2026-11-23 체크포인트 통과(D135, 노트북 폭 1.1절은 D141). 처음 초안은 같은 날 새벽 KST, Claude 마롱이 봇. 아직 만들지 않았어요. 새 화면 다섯(SCR-200\~204)과 바뀌는 화면 둘(SCR-169 개요, SCR-186 탭 줄)이에요.
+상태: 2026-11-23 체크포인트 통과(D135, 노트북 폭 1.1절은 D141, 기능 변경 3의 새 상태 셋은 2026-11-24 D147). 처음 초안은 같은 날 새벽 KST, Claude 마롱이 봇. 아직 만들지 않았어요. 새 화면 다섯(SCR-200\~204)과 바뀌는 화면 둘(SCR-169 개요, SCR-186 탭 줄)이에요.
 입력: [사이트맵](../07-sitemap/sitemap.yaml)의 SCR-169·186·200\~204, [기능 명세](../04-functional-spec/admin.md) SPEC-450\~460과 3.1\~3.6절, API 계약 [`api/admin.openapi.yaml`](../../api/admin.openapi.yaml)(API-280·281), [`api/unified.openapi.yaml`](../../api/unified.openapi.yaml)(API-235\~243), [`api/pet-app.openapi.yaml`](../../api/pet-app.openapi.yaml)(API-263\~266), 앱 업데이트 PR #101의 `api/app-update.openapi.yaml`(API-267, 기능 변경 3으로 0.3.0-draft의 `removedAt`), 지금 화면 정의 [unified.md](unified.md)의 SCR-169, [usage-limit.md](usage-limit.md)의 SCR-169, [pet-app.md](pet-app.md)의 SCR-186.
 바탕: 지금 관리자 화면의 문구는 한 글자도 바꾸지 않고 옮겨요(아래 6절의 대응표). 새 문구는 [새 제안]이에요. 토큰과 부품은 [`design/README.md`](../../design/README.md)와 지금 `unified.css`·`chat.css`를 따르고 새 토큰은 더하지 않아요(D67, 09 단계).
 와이어프레임: [`design/admin-wireframe.html`](../../design/admin-wireframe.html)(회색, 시스템 글꼴, 상태마다 한 칸, 폭 360px와 430px 나란히, 그 아래 노트북 폭 1280px와 1440px. 맨 위에 폭 넘어가기 768px·1024px). 숫자와 이름은 지어낸 값이에요.
 노트북 폭(2026-11-23 기능 변경, D140, 같은 날 체크포인트 통과 D141\~D144): [1.1절](#11-넓은-폭노트북)의 넓은 배치를 더했어요. 승인된 폰 배치(360·430px)는 바뀌지 않아요. 승인된 글이 바뀌는 곳은 [요구사항의 기능 변경 목록 2](../02-prd/admin.md#노트북-폭-기능-변경-목록-2)예요.
-기능 변경 3(2026-11-24, D145·D146, 체크포인트 전): 새 상태 셋(SCR-186#decor-off, SCR-201#app-removed, SCR-203#app-removed)을 더하고 SCR-201·203의 폰 줄 글과 SCR-186(9절)에 '기능 변경 3-x 제안'을 붙여 고쳤어요([기능 변경 목록 3](../02-prd/admin.md#꾸미기-꺼짐-안내와-앱-지워진-폰-기능-변경-목록-3)). 답을 받기 전까지 승인된 글 그대로예요. 새 문구 '꾸미기가 꺼져 있어요'와 '앱 지워짐'은 동희님이 답한 말 그대로예요.
+기능 변경 3(2026-11-24, D145·D146)도 같은 날 체크포인트를 통과했어요(D147\~D149·D160\~D163). 새 상태 셋(SCR-186#decor-off, SCR-201#app-removed, SCR-203#app-removed)을 더하고 SCR-201·203의 폰 줄 글과 SCR-186(9절)을 고쳐 'D148 3-x'를 적었어요([기능 변경 목록 3](../02-prd/admin.md#꾸미기-꺼짐-안내와-앱-지워진-폰-기능-변경-목록-3)). 앱 지워진 폰 줄의 자리는 D162, 개요의 폰 수는 D161이에요. 새 문구 '꾸미기가 꺼져 있어요'와 '앱 지워짐'은 동희님이 답한 말 그대로예요.
 
 | 번호 | 화면 | 경로 | 절 |
 | --- | --- | --- | --- |
@@ -17,7 +17,7 @@
 | SCR-202 | 초대 링크 | `/chat/admin/invites` | [5](#5-scr-202-초대-링크) |
 | SCR-203 | 앱 버전 | `/chat/admin/app` | [7](#7-scr-203-앱-버전) |
 | SCR-204 | 비용 | `/chat/admin/costs` | [8](#8-scr-204-비용) |
-| SCR-186 | 아이템(탭 줄. 기능 변경 3 제안: 꾸미기 꺼짐 안내) | `/chat/admin/items` | [9](#9-scr-186-아이템) |
+| SCR-186 | 아이템(탭 줄. 기능 변경 3: 꾸미기 꺼짐 안내) | `/chat/admin/items` | [9](#9-scr-186-아이템) |
 | 대응표 | 지금 SCR-169 상태 → 새 상태 | | [6](#6-지금-scr-169-상태가-가는-곳) |
 
 ## 1. 공통
@@ -74,11 +74,11 @@
 | 공통 | 탭 줄. #stale의 얇은 막대는 탭 줄 아래 전체 폭 | | | #forbidden, #not-found, 화면 전체의 #error |
 | SCR-169 | | '손볼 일': #loading의 회색 한 줄, #attention, #calm, #card-unknown | '지금' 카드: #loading의 카드 다섯 자리(두 개씩), #attention, #calm, #cards, #card-unknown, #no-release | #error, #forbidden |
 | SCR-200 | | 사람 줄: #loading의 줄 세 자리, #normal, #unlinked, #empty('아직 가입한 사람이 없어요') | 위: #loading의 한 줄 자리, #normal·#empty의 기본 한도 줄. 아래: #unlinked의 '아직 잇지 않은 기존 친구' | #error, #forbidden |
-| SCR-201 | | 회원 줄: #error 밖의 모든 상태. #loading은 줄 세 자리, #missing은 골라진 줄 없음. #limits-saved·#ticket-added 뒤에는 그 사람 줄의 '한도 · …'·'티켓 n장'도 응답 값으로 바뀜 | 위: 머리, #missing, #limits-saved·#ticket-added·#revoked의 띠. 첫 칸(한도·오늘): #call-month-unknown, #limits-edit·#limits-custom·#limits-saving·#limits-saved·#limits-invalid, #ticket·#ticket-invalid·#ticket-added. 둘째 칸(로그인·폰): #revoke-confirm, #revoked, #phones, #phones-none, #phones-cap, #phones-unknown, #app-removed(기능 변경 3 제안). #loading은 머리 한 줄과 두 칸에 둘씩 | #error(API-236 실패라 회원 줄도 없음) |
+| SCR-201 | | 회원 줄: #error 밖의 모든 상태. #loading은 줄 세 자리, #missing은 골라진 줄 없음. #limits-saved·#ticket-added 뒤에는 그 사람 줄의 '한도 · …'·'티켓 n장'도 응답 값으로 바뀜 | 위: 머리, #missing, #limits-saved·#ticket-added·#revoked의 띠. 첫 칸(한도·오늘): #call-month-unknown, #limits-edit·#limits-custom·#limits-saving·#limits-saved·#limits-invalid, #ticket·#ticket-invalid·#ticket-added. 둘째 칸(로그인·폰): #revoke-confirm, #revoked, #phones, #phones-none, #phones-cap, #phones-unknown, #app-removed(기능 변경 3). #loading은 머리 한 줄과 두 칸에 둘씩 | #error(API-236 실패라 회원 줄도 없음) |
 | SCR-202 | | 만들기: #loading의 단추 자리, '새 링크 만들기', #creating, #prefilled, #created, #invite-invalid, #member-missing | 목록: #loading의 줄 세 자리, 칩, #normal, #all, #invite-open, #invite-used, #invite-expired, #invite-revoked, #open-empty, #empty, #revoke-confirm, #revoked-now, #invite-closed | #error |
-| SCR-203 | '최신 …', #paused의 띠, #no-release, #loading의 한 줄 | 폰: #loading의 둘, #normal의 폰, #device-open, #no-devices, #unknown-value, #same-name, #cap, #app-removed(기능 변경 3 제안) | 버전 기록: #loading의 셋, #normal·#paused의 버전 기록, #backfilled | #error, #forbidden |
+| SCR-203 | '최신 …', #paused의 띠, #no-release, #loading의 한 줄 | 폰: #loading의 둘, #normal의 폰, #device-open, #no-devices, #unknown-value, #same-name, #cap, #app-removed(기능 변경 3) | 버전 기록: #loading의 셋, #normal·#paused의 버전 기록, #backfilled | #error, #forbidden |
 | SCR-204 | | 통화: #loading, #normal, #call-warn, #call-danger, #call-unknown | 가운데 사람마다 통화: #loading, #normal, #person-unknown. 오른쪽 그림: #loading, #normal, #images-unknown | #error, #forbidden |
-| SCR-186 | | | | 모든 상태(pet-app.md). #default는 표 한 줄. #decor-off는 안내 한 줄(기능 변경 3 제안) |
+| SCR-186 | | | | 모든 상태(pet-app.md). #default는 표 한 줄. #decor-off는 안내 한 줄(기능 변경 3) |
 
 - 그룹 하나만 실패하거나 비면(SCR-169#card-unknown, SCR-201#phones-unknown, SCR-204#call-unknown·#images-unknown 등) 그 칸 안에서만 보이고 다른 칸은 그대로예요.
 - 불러오는 중(#loading)의 회색 자리도 같은 칸에 그려서 받은 뒤 자리가 움직이지 않아요.
@@ -160,7 +160,7 @@ Purpose: 한 사람의 한도·사용량·로그인·폰을 한 화면에서 보
 | 이름, 마롱이 이름, 계정 한도, 유효 한도, 오늘 사용량, 티켓, 로그인 수, 마지막 사용, 이번 달 통화 비용 | API-236(그 `friendId`의 줄) |
 | 바꾼 뒤의 계정 한도 | API-243 |
 | 티켓 잔액 | API-237 |
-| 이 사람의 폰(버전, 뒤처짐, 마지막 보고. 기능 변경 3-13 제안: 앱 지워짐) | API-267 `devices`에서 `friendId`가 같은 줄(명세 3.5). 앱 지워짐은 `removedAt`(명세 SPEC-460) |
+| 이 사람의 폰(버전, 뒤처짐, 마지막 보고. D148 3-13: 앱 지워짐) | API-267 `devices`에서 `friendId`가 같은 줄(명세 3.5). 앱 지워짐은 `removedAt`(명세 SPEC-460) |
 
 | Action | Result | Failure |
 | --- | --- | --- |
@@ -190,7 +190,7 @@ Purpose: 한 사람의 한도·사용량·로그인·폰을 한 화면에서 보
 | SCR-201#phones-none | '90일 안에 보고한 폰이 없어요' | API-267#200(그 `friendId`의 폰 없음) |
 | SCR-201#phones-cap | 폰 줄 20개 아래 회색 글 '최근 보고한 20대만 보여요'. `devices`가 200줄이면 폰이 0대여도 '폰이 많아 일부만 보여요'와 '앱 버전에서 보기' | API-267#200(그 `friendId`의 폰이 20줄, 또는 `devices` 200줄, PR #101 SPEC-438의 상한) |
 | SCR-201#phones-unknown | 폰 그룹만 '지금 못 불러왔어요' | API-267#403·500·503, 네트워크 실패 |
-| SCR-201#app-removed | 앱 지워진 폰 줄은 '폰 2 · 0.2.4 · 앱 지워짐 · 마지막 보고 11월 21일 오후 9:40'('앱 지워짐'은 회색 표, '뒤처짐'은 없음). 줄 차례는 API 차례 그대로예요. 앱 지워진 줄도 20줄 상한에 들어서 #phones-cap의 '최근 보고한 20대만 보여요'는 지금처럼 줄 수로 나와요. 기능 변경 3-13 제안(SPEC-460) | API-267#200(그 폰의 `removedAt`이 있음) |
+| SCR-201#app-removed | 앱 지워진 폰 줄은 '폰 2 · 0.2.4 · 앱 지워짐 · 마지막 보고 11월 21일 오후 9:40'('앱 지워짐'은 회색 표, '뒤처짐'은 없음). 줄 차례는 API 차례 그대로예요. 앱 지워진 줄도 20줄 상한에 들어서 #phones-cap의 '최근 보고한 20대만 보여요'는 지금처럼 줄 수로 나와요. D148 3-13(SPEC-460) | API-267#200(그 폰의 `removedAt`이 있음) |
 | SCR-201#error | 공통#error | API-236#500·503, API-243#403(`cross_site`)·503, API-237#403(`cross_site`)·503, API-241#403(`cross_site`)·500 |
 
 ## 5. SCR-202 초대 링크
@@ -259,7 +259,7 @@ Purpose: 새 버전을 올린 뒤 폰마다 받았는지, 어디서 멈췄는지
 | Data | Source |
 | --- | --- |
 | 최신 릴리스(버전 이름·코드, 올린 때), 멈춤 | API-267 `latest`, `paused` |
-| 폰(친구 이름, 친구 ID, 폰 순번, 앱 버전, 뒤처짐, 마지막 보고, 알림 권한, 업데이트 기록 20줄. 기능 변경 3-12 제안: 앱 지워진 때). 친구마다 최근 20대, 모두 200대까지 | API-267 `devices`(앱 지워진 때는 `removedAt`) |
+| 폰(친구 이름, 친구 ID, 폰 순번, 앱 버전, 뒤처짐, 마지막 보고, 알림 권한, 업데이트 기록 20줄. D148 3-12: 앱 지워진 때). 친구마다 최근 20대, 모두 200대까지 | API-267 `devices`(앱 지워진 때는 `removedAt`) |
 | 친구마다 받아 감 20줄(100명까지). 폰 줄과는 `friendId`로 맞춰요 | API-267 `fetches` |
 | 버전 기록(올림·멈춤·다시 켬, 릴리스 노트, 기록에서 채움) | API-267 `releases` |
 
@@ -272,20 +272,20 @@ Purpose: 새 버전을 올린 뒤 폰마다 받았는지, 어디서 멈췄는지
 | State | What the user sees and can do | From responses |
 | --- | --- | --- |
 | SCR-203#loading | 맨 위 줄, 폰 줄 둘, 기록 줄 셋 자리 회색 | |
-| SCR-203#normal | 맨 위 '최신 0.3.3(11) · 11월 24일 오후 2:00에 올림'. 그룹 '폰': 뒤처진 폰이 먼저(기능 변경 3-12 제안: 뒤처진 폰 → 그 밖 → 앱 지워진 폰), 줄마다 '시험친구 가 · 폰 1', '0.3.2 · 뒤처짐'(빨간 표) 또는 '0.3.3', '마지막 보고 11월 24일 오후 2:03', 알림이 꺼졌으면 '알림 꺼짐'. 그룹 '버전 기록': 새것부터 '0.3.3(11) 올림 · 11월 24일 오후 2:00'과 그 아래 릴리스 노트 | API-267#200 |
+| SCR-203#normal | 맨 위 '최신 0.3.3(11) · 11월 24일 오후 2:00에 올림'. 그룹 '폰': 뒤처진 폰이 먼저(D148 3-12: 뒤처진 폰 → 그 밖 → 앱 지워진 폰), 줄마다 '시험친구 가 · 폰 1', '0.3.2 · 뒤처짐'(빨간 표) 또는 '0.3.3', '마지막 보고 11월 24일 오후 2:03', 알림이 꺼졌으면 '알림 꺼짐'. 그룹 '버전 기록': 새것부터 '0.3.3(11) 올림 · 11월 24일 오후 2:00'과 그 아래 릴리스 노트 | API-267#200 |
 | SCR-203#paused | 맨 위에 노란 띠 '업데이트 멈춤 중 · 폰이 새로 받지 않아요'. 단추 없음 | API-267#200(`paused=true`) |
 | SCR-203#device-open | 펼친 줄 아래 기록 줄(명세 3.6의 문구, 새것부터)과 같은 친구의 받아 감 줄. 마지막 상태가 '확인 창 기다림'이면 그 줄이 굵고 '앱을 열어 지금 설치를 눌러야 해요' | API-267#200 |
 | SCR-203#backfilled | 버전 기록 줄 끝에 회색 표 '기록에서 채움'. 크기·SHA-256이 없는 줄은 그 칸을 그리지 않음 | API-267#200(`backfilled=true`) |
 | SCR-203#no-release | '아직 올린 버전이 없어요' | API-267#200(`latest=null`, `releases` 빈 목록) |
 | SCR-203#no-devices | 폰 그룹 '90일 안에 보고한 폰이 없어요' | API-267#200(`devices` 빈 목록) |
-| SCR-203#app-removed | 앱 지워진 폰 줄은 폰 그룹 맨 끝에 '시험친구 가 · 폰 2', '0.2.4 · 앱 지워짐'(회색 표, '뒤처짐' 없음), '마지막 보고 11월 21일 오후 9:40'. 펼치면 맨 위에 '앱 지워짐 · 11월 22일 오후 6:14', 그 아래 기록 줄(명세 3.6). 기능 변경 3-12 제안(SPEC-460) | API-267#200(`removedAt` 있음, 계약 예시 `removed`) |
+| SCR-203#app-removed | 앱 지워진 폰 줄은 폰 그룹 맨 끝에 '시험친구 가 · 폰 2', '0.2.4 · 앱 지워짐'(회색 표, '뒤처짐' 없음), '마지막 보고 11월 21일 오후 9:40'. 펼치면 맨 위에 '앱 지워짐 · 11월 22일 오후 6:14', 그 아래 기록 줄(명세 3.6). D148 3-12(SPEC-460) | API-267#200(`removedAt` 있음, 계약 예시 `removed`) |
 | SCR-203#unknown-value | 모르는 `kind`·`state`는 그 값 이름 그대로 한 줄 | API-267#200(목록 밖의 값) |
 | SCR-203#same-name | `friendId`가 다른데 이름이 같은 친구가 둘 이상이면 그 이름 뒤에 번호를 붙여 '시험친구 가(7) · 폰 1'처럼 보여요 | API-267#200 |
 | SCR-203#cap | 폰이 20줄인 친구의 마지막 줄 아래 '이 사람은 최근 보고한 20대만 보여요'. `devices`가 200줄이면 폰 그룹 맨 위에 '폰이 많아 200대까지만 보여요', `fetches`가 100칸이면 '받아 간 사람이 많아 100명까지만 보여요'(회색 글) | API-267#200(상한에 닿음, PR #101 SPEC-438) |
 | SCR-203#error | 공통#error | API-267#503(`db_unavailable`), API-267#500 |
 | SCR-203#forbidden | 공통#forbidden | API-267#403(`not_allowed`) |
 
-기능 변경 3-9·3-10 제안: 개요(SCR-169#cards)의 '폰 n대 중 m대 뒤처짐'은 앱 지워진 폰을 n에도 m에도 세지 않아요(API-280 `app.devices`·`app.behind`). 그래서 이 화면의 폰 줄 수가 n보다 많을 수 있어요.
+D148 3-9·3-10: 개요(SCR-169#cards)의 '폰 n대 중 m대 뒤처짐'은 앱 지워진 폰을 n에도 m에도 세지 않아요(API-280 `app.devices`·`app.behind`). 그래서 이 화면의 폰 줄 수가 n보다 많을 수 있어요.
 
 설치 ID, FCM 설치 ID, APK 파일 이름은 API-267에 없어서 이 화면에도 없어요. 릴리스 노트, 친구 이름처럼 사람이 쓴 글은 `textContent`로만 넣어요(명세 1절 8).
 
@@ -321,7 +321,7 @@ Purpose: 이번 달 통화 비용이 월 예산의 어디쯤인지, 누가 얼�
 
 [pet-app.md](pet-app.md)의 SCR-186 정의 그대로예요. 바뀌는 곳은 위에 공통 탭 줄이 생기는 것 하나예요(지금 탭 '아이템'이 골라짐). 1024px 이상에서는 다른 관리 화면과 같은 본문 폭(최대 1200px)이 되고 표의 칸이 한 줄에 늘어서요([1.1절](#11-넓은-폭노트북), 기능 변경 2-2, D142). 상태와 동작은 그대로예요. 이번 달 그림 비용 줄은 SCR-169 카드와 SCR-204로 가요(기능 변경 목록 10). SCR-186#forbidden은 공통#forbidden이에요.
 
-기능 변경 3-2 제안(2026-11-24, D145, SPEC-459): 꾸미기가 꺼진 서버에서는 상태가 하나 더 있어요. SCR-186#decor-off는 탭 줄 아래 '꾸미기가 꺼져 있어요' 한 줄이고, 오류 줄('아이템을 불러오지 못했어요'와 추적 id), '다시 보기', 아이템 줄과 단추가 없어요. API-263의 404일 때만이고, 그 밖의 실패는 지금처럼 #error예요. 상태 줄은 [pet-app.md](pet-app.md)의 SCR-186 상태 표에 있어요(기능 변경 3-1).
+D148 3-2(2026-11-24, D145, SPEC-459): 꾸미기가 꺼진 서버에서는 상태가 하나 더 있어요. SCR-186#decor-off는 탭 줄 아래 '꾸미기가 꺼져 있어요' 한 줄이고, 오류 줄('아이템을 불러오지 못했어요'와 추적 id), '다시 보기', 아이템 줄과 단추가 없어요. API-263의 404일 때만이고, 그 밖의 실패는 지금처럼 #error예요. 상태 줄은 [pet-app.md](pet-app.md)의 SCR-186 상태 표에 있어요(기능 변경 3-1).
 
 ## 10. 확인
 
@@ -330,5 +330,5 @@ Purpose: 이번 달 통화 비용이 월 예산의 어디쯤인지, 누가 얼�
 - 긴 글: 메모 40자, 이름 12자, 릴리스 노트 300자는 줄바꿈해 모두 보이고(글은 `textContent`로만), 360px에서 숫자 카드의 글이 두 줄이 되어도 자리가 넘치지 않아요.
 - 와이어프레임은 위 상태마다 한 칸이에요(공통 상태는 한 번만). 360px와 430px를 나란히 그렸고, 그 아래에 1280px와 1440px를 그렸어요(1.1절, D140). 맨 위 '폭 넘어가기'에 같은 상태를 768px(한 줄 기둥)와 1024px(넓은 배치 시작)로 그렸어요.
 - 넓은 폭(1.1절): 위 상태가 모두 1.1절 '상태가 놓이는 칸' 표의 한 칸에 있어요. 2026-11-23 헤드리스 Chrome으로 와이어프레임 칸 312개(넓은 칸 156개)를 그려 가로 넘침 0건, 넓은 칸끼리 겹침 0건을 봤어요. 폰 칸 154개는 `main`(`f3b73a4`)의 와이어프레임과 요소 위치(태그·글·좌표)로 견줘서 클래스 이름 말고 같았고, 픽셀로 견줘서 아래 손봄 둘이 닿는 칸 8개 밖에서는 페이지 위치에 따른 그리기 차이만 있었어요(점선 테두리·흐림의 1\~12px, 칸 높이 반올림 1px. `main`끼리 페이지 위치만 옮겨도 똑같이 생김).
-- 기능 변경 3(2026-11-24, 제안): 새 상태 셋(SCR-186#decor-off, SCR-201#app-removed, SCR-203#app-removed)이 1.1절 '상태가 놓이는 칸' 표에 있고 와이어프레임에 한 칸씩 더했어요. API-267 0.3.0의 `removedAt`과 API-263의 404에 상태가 있어요.
+- 기능 변경 3(2026-11-24, D147): 새 상태 셋(SCR-186#decor-off, SCR-201#app-removed, SCR-203#app-removed)이 1.1절 '상태가 놓이는 칸' 표에 있고 와이어프레임에 한 칸씩 더했어요. API-267 0.3.0의 `removedAt`과 API-263의 404에 상태가 있어요.
 - 손봄(뜻이 바뀌지 않음, 2026-11-23): 와이어프레임에 남아 있던 거두기의 제안 표시 '(제안 · 질문 2)'를 지웠어요(D137에서 지우기로 한 것). 예시 이름 '동호'를 합성 이름 '시험친구 다'로 바꿨어요(SCR-200#unlinked, SCR-202#all·#invite-revoked).

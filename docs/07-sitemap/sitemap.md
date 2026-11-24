@@ -395,12 +395,12 @@ flowchart TD
 | --- | --- | --- | --- | --- | --- |
 | SCR-169 | 관리자 개요(D136 1-12로 바뀜) | `/chat/admin/` | 동희님(Cloudflare Access) | FL-200 | CTX-026, CTX-029, TERM-173, TERM-176, TERM-190, TERM-192, TERM-199, TERM-200, TERM-240, TERM-241 |
 | SCR-200 | 관리자 회원 | `/chat/admin/members` | 동희님(Cloudflare Access) | FL-200, FL-177 | CTX-026, CTX-029, TERM-176, TERM-190, TERM-192, TERM-199, TERM-200 |
-| SCR-201 | 관리자 회원 한 사람 | `/chat/admin/members/:friendId` | 동희님(Cloudflare Access) | FL-200, FL-177, FL-179, FL-171 | CTX-026, CTX-029, CTX-006, CTX-021, TERM-014, TERM-190, TERM-192, TERM-199, TERM-200, TERM-242(제안) |
+| SCR-201 | 관리자 회원 한 사람 | `/chat/admin/members/:friendId` | 동희님(Cloudflare Access) | FL-200, FL-177, FL-179, FL-171 | CTX-026, CTX-029, CTX-006, CTX-021, TERM-014, TERM-190, TERM-192, TERM-199, TERM-200, TERM-242 |
 | SCR-202 | 관리자 초대 링크 | `/chat/admin/invites` | 동희님(Cloudflare Access) | FL-200, FL-169, FL-170, FL-171 | CTX-026, TERM-173 |
-| SCR-203 | 관리자 앱 버전 | `/chat/admin/app` | 동희님(Cloudflare Access) | FL-201 | CTX-021, TERM-093, TERM-100, TERM-221\~223, TERM-242(제안) |
+| SCR-203 | 관리자 앱 버전 | `/chat/admin/app` | 동희님(Cloudflare Access) | FL-201 | CTX-021, TERM-093, TERM-100, TERM-221\~223, TERM-242 |
 | SCR-204 | 관리자 비용 | `/chat/admin/costs` | 동희님(Cloudflare Access) | FL-200 | CTX-006, CTX-031, TERM-014, TERM-032 |
 
-관리 페이지 기능 변경 3(2026-11-24, D145·D146, 체크포인트 전 제안): SCR-201·203의 용어에 TERM-242(앱 지워진 폰)를 더했어요. 화면 수, 경로, 흐름, 보드는 그대로예요. 아이템(SCR-186)의 꾸미기 꺼짐 안내와 두 화면의 앱 지워진 폰 줄은 08 화면 상태(SCR-186#decor-off, SCR-201#app-removed, SCR-203#app-removed)예요.
+관리 페이지 기능 변경 3(2026-11-24, D145·D146, 같은 날 체크포인트 통과 D147): SCR-201·203의 용어에 TERM-242(앱 지워진 폰)를 더했어요. 화면 수, 경로, 흐름, 보드는 그대로예요. 아이템(SCR-186)의 꾸미기 꺼짐 안내와 두 화면의 앱 지워진 폰 줄은 08 화면 상태(SCR-186#decor-off, SCR-201#app-removed, SCR-203#app-removed)예요.
 
 ### 슬라이드
 

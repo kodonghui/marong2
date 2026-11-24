@@ -1,4 +1,4 @@
-# 마롱이 앱 자동 업데이트 API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/app-update.md(SPEC-284~302, 2026-11-22 변경 SPEC-430~442), 도메인: docs/01-domain/app-update.md(CTX-021). DB: 릴리스 폴더(SPEC 3.1, 8.3)와 2026-11-22부터 업데이트 기록 TBL-182(marong/migrations/023_app_update_events.sql). 코드(구현은 GPT): marong/app_chat.py, marong/app_release.py, tools/app_release.py, apps/android/.../AppUpdate.java. 2026-11-24 관리 페이지 기능 변경 3(체크포인트 전 제안): API-267 폰 줄의 removedAt(docs/04-functional-spec/admin.md SPEC-460)
+# 마롱이 앱 자동 업데이트 API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/app-update.md(SPEC-284~302, 2026-11-22 변경 SPEC-430~442), 도메인: docs/01-domain/app-update.md(CTX-021). DB: 릴리스 폴더(SPEC 3.1, 8.3)와 2026-11-22부터 업데이트 기록 TBL-182(marong/migrations/023_app_update_events.sql). 코드(구현은 GPT): marong/app_chat.py, marong/app_release.py, tools/app_release.py, apps/android/.../AppUpdate.java. 2026-11-24 관리 페이지 기능 변경 3(같은 날 체크포인트 통과, D148·D160): API-267 폰 줄의 removedAt(docs/04-functional-spec/admin.md SPEC-460)
 openapi: 3.1.0
 info:
   title: 마롱이 앱 자동 업데이트 API
@@ -21,7 +21,7 @@ info:
     7. (0.2.0) 폰의 업데이트 상태 보고는 새 경로가 아니라 기기 보고(API-105, `api/app-chat.openapi.yaml`)의 선택 칸 `update`예요. 업데이트 데이터 메시지(FCM)는 HTTP 계약이 아니라 기능 명세 SPEC-431의 형식이에요.
     8. (0.2.0, 2026-11-23 코드 검토 반영) API-267의 `fetches`는 친구마다 한 칸이고 그 안의 `items`가 20줄까지예요. 버전 기록 줄의 `backfilled`는 `history.json`과 같이 published 줄에 늘 있고, 서버는 `history.json` 줄에서 `file`을 빼고 줘요. 업데이트 기록 줄에 시도 번호 `attempt`가 늘고, `state` 줄에는 `installed`가 없어요(설치됨은 `kind: installed` 하나). 폰의 기록은 지금 그 폰의 친구 때의 줄만이에요.
     9. (0.2.0, 2026-11-23 보안 검토 반영) 폰 줄과 받아 감 칸에 친구 ID `friendId`(관리 페이지 회원 API와 같은 번호)를 더해요. 친구 이름은 겹치거나 바뀔 수 있어요. `devices`는 친구마다 최근 20대·모두 200대, `fetches`는 100명까지예요. 관리 페이지는 릴리스 노트를 `textContent`로만 그려요.
-    10. (0.3.0, 2026-11-24 관리 페이지 기능 변경 3, D146, 체크포인트 전 제안. 기능 변경 목록 3-6·3-7) API-267 폰 줄에 필수 칸 `removedAt`(앱 지워진 때, TBL-101 `dropped_at`, 없으면 null)을 더해요. `behind`는 `removedAt`이 null이고 앱 버전이 최신 릴리스보다 낮을 때만 true예요. 앱 지워진 폰은 뒤처진 폰이 아니에요(docs/04-functional-spec/admin.md SPEC-460). 그 밖의 칸과 상한은 0.2.0 그대로예요.
+    10. (0.3.0, 2026-11-24 관리 페이지 기능 변경 3, D146. 같은 날 체크포인트에서 승인: D148 3-6·3-7, 계약 0.3.0 변경은 D160) API-267 폰 줄에 필수 칸 `removedAt`(앱 지워진 때, TBL-101 `dropped_at`, 없으면 null)을 더해요. `behind`는 `removedAt`이 null이고 앱 버전이 최신 릴리스보다 낮을 때만 true예요. 앱 지워진 폰은 뒤처진 폰이 아니에요(docs/04-functional-spec/admin.md SPEC-460). 그 밖의 칸과 상한은 0.2.0 그대로예요.
 
     깨지는 변경(0.2.0까지): 없음. 모두 새 경로예요. 0.2.1 앱은 이 경로를 부르지 않아요. 0.2.0의 API-267도 새 경로예요.
     깨지는 변경(0.3.0): API-267 응답에 필수 칸이 하나 늘고, 앱 지워진 폰의 `behind`가 true에서 false로 바뀌어요. 이 응답을 읽는 곳은 관리 페이지(`admin.js`)와 개요(API-280의 서버 함수)뿐이라 같은 구현 패키지에서 함께 바꿔요(TASK-503·504). 폰 앱은 이 경로를 부르지 않아요.

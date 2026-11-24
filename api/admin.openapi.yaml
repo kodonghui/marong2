@@ -1,4 +1,4 @@
-# 마롱이 관리 페이지 API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/admin.md(SPEC-450~457), 도메인: docs/01-domain/admin.md, 표 설명: docs/05-erd/admin.md(새 표 없음, 통화 함수 call.month_budget 하나). 2026-11-24 기능 변경 3(체크포인트 전 제안): API-280 app.devices·app.behind 설명(SPEC-460)
+# 마롱이 관리 페이지 API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/admin.md(SPEC-450~457), 도메인: docs/01-domain/admin.md, 표 설명: docs/05-erd/admin.md(새 표 없음, 통화 함수 call.month_budget 하나). 2026-11-24 기능 변경 3(같은 날 체크포인트 통과, D148·D161): API-280 app.devices·app.behind 설명(SPEC-460)
 openapi: 3.1.0
 info:
   title: 마롱이 관리 페이지 API
@@ -20,7 +20,7 @@ info:
 
     깨지는 변경: 없음. 두 경로 모두 새것이고, 지금 경로와 응답은 그대로예요.
 
-    0.2.0(2026-11-24 기능 변경 3, D146, 체크포인트 전 제안. 기능 변경 목록 3-9·3-10): 응답 모양은 그대로이고 API-280 `app.devices`의 뜻만 바뀌어요. `devices`는 앱 지워진 폰(API-267 0.3.0의 `removedAt`이 있는 폰)을 뺀 수예요. `behind`는 식이 그대로이고 API-267의 `behind`가 앱 지워진 폰에서 false라 그 폰이 들지 않아요(SPEC-460).
+    0.2.0(2026-11-24 기능 변경 3, D146. 같은 날 체크포인트 통과: D148 3-9·3-10, D161): 응답 모양은 그대로이고 API-280 `app.devices`의 뜻만 바뀌어요. `devices`는 앱 지워진 폰(API-267 0.3.0의 `removedAt`이 있는 폰)을 뺀 수예요. `behind`는 식이 그대로이고 API-267의 `behind`가 앱 지워진 폰에서 false라 그 폰이 들지 않아요(SPEC-460).
 servers:
 - url: https://marong.corthex-hq.com
 paths:
