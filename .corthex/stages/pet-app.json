@@ -38,9 +38,14 @@
           "level": "info",
           "message": "docs/03-user-flow/FL-185~192(아이 소개·목소리, 1인칭, 화두 장면, 일기, 꾸미기 상점, 입히기·반응, 일기장 꾸미기, 관리자 아이템). 용어 검사 통과",
           "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "관리 페이지 기능 변경 3(D145·D146, 2026-11-24, 설계 PR claude/admin-decor-off-app-removed, 기준 main 1a29477, 체크포인트 전): FL-192에 '꾸미기가 켜져 있나? · REQ-586' 분기와 끝 칸 '꾸미기가 꺼져 있어요'(목록 3-3), 그림 문법 손봄(main에서 diagram-check 18건 → 0건, 뜻 그대로)",
+          "at": "2026-11-24"
         }
       ],
-      "updated": "2026-11-21T08:07:22+00:00"
+      "updated": "2026-11-24T06:43:54+00:00"
     },
     "04-functional-spec": {
       "state": "in_progress",
@@ -51,9 +56,14 @@
           "level": "info",
           "message": "docs/04-functional-spec/pet-app.md: SPEC-406~429, AI-40~43, AI-30·31 바꿈. D119 그림 월 예산 없음, D120 사진도 보여 주기(SPEC-428). 고양이 사진 그리기 시험 숫자 3.3·3.13. 용어 검사 통과",
           "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "관리 페이지 기능 변경 3(D145·D146, 2026-11-24, 설계 PR claude/admin-decor-off-app-removed, 기준 main 1a29477, 체크포인트 전): 1절 5의 MARONG_DECOR=0 줄에 관리 페이지 아이템 화면은 '꾸미기가 꺼져 있어요'(admin SPEC-459)라는 한 줄을 제안(목록 3-4). API-263~265의 404는 그대로",
+          "at": "2026-11-24"
         }
       ],
-      "updated": "2026-11-21T08:07:22+00:00"
+      "updated": "2026-11-24T06:43:54+00:00"
     },
     "05-erd": {
       "state": "in_progress",
@@ -103,9 +113,14 @@
           "level": "info",
           "message": "docs/08-screens/pet-app.md: SCR-180~186 상태. 질문 A는 기본값 '반려동물 캐릭터만'으로 진행",
           "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "관리 페이지 기능 변경 3(D145·D146, 2026-11-24, 설계 PR claude/admin-decor-off-app-removed, 기준 main 1a29477, 체크포인트 전): SCR-186 상태 표에 SCR-186#decor-off(API-263#404) 줄을 더하고 #error의 From에서 404를 뺌(목록 3-1)",
+          "at": "2026-11-24"
         }
       ],
-      "updated": "2026-11-21T08:07:22+00:00"
+      "updated": "2026-11-24T06:43:54+00:00"
     },
     "09-mockup": {
       "state": "in_progress",
