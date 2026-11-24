@@ -10,6 +10,7 @@
 #   rollback     마롱이를 끄고 옛 봇(kakao-bot)을 다시 켬
 #   restart      마롱이 다시 켜기 / stop  마롱이 끄기 / status  상태 보기
 #   logs         로그 보기(Ctrl+C 로 나옴)
+#   changelog    업데이트 내역 파일 배포: changelog put <파일> | check <id> | rollback <id>
 #   prompt       prompt.md·welcome.txt·knowledge/ 만 올림. 재시작 없이 다음 메시지부터 반영
 #   admin …      기록 보기: admin friends | people | rooms | show <이름 또는 #키> [개수] | stats
 #                친구 고치기: admin link <#키> <친구> | unlink <#키> | share <친구> on|off
@@ -218,6 +219,38 @@ case "${1:-}" in
         ;;
       *) echo '사용법: bash deploy/ovh.sh app-release publish <APK> --notes "<릴리스 노트>" | status | pause | resume | history | backfill'; exit 2 ;;
     esac
+    ;;
+  changelog)
+    action=${2:-}
+    argument=${3:-}
+    if [[ $# != 3 ]]; then
+      echo '사용법: bash deploy/ovh.sh changelog put <파일> | check <id> | rollback <id>'
+      exit 2
+    fi
+    case "$action" in
+      put)
+        file=$argument
+        name=${file##*/}
+        if [[ $name != *.json ]]; then echo 'invalid name'; exit 2; fi
+        id=${name%.json}
+        ;;
+      check|rollback)
+        id=$argument
+        file="marong/changelog/$id.json"
+        ;;
+      *) echo 'invalid action'; exit 2 ;;
+    esac
+    if [[ ! $id =~ ^([0-9]{8}-[a-z0-9][a-z0-9-]{0,39}|app-(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))$ ]]; then
+      echo 'invalid name'
+      exit 2
+    fi
+    command="cd /opt/marong-app && sudo -n flock /run/lock/marong-changelog.lock /opt/marong/.venv/bin/python -m marong.admin_changes $action $id \"\$HOME/marong-deploy\""
+    if [[ $action == rollback ]]; then
+      on_server "$command" < /dev/null
+    else
+      if [[ ! -f $file ]]; then echo 'invalid source_file'; exit 2; fi
+      on_server "$command" < "$file"
+    fi
     ;;
   backup)
     on_server 'sudo install -d -m 700 -o postgres -g postgres /var/backups/marong &&

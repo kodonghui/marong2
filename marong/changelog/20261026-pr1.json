@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "id": "20261026-pr1",
+  "kind": "server",
+  "title": "카톡: 1:1 얘기 나누기와 연달아 온 말",
+  "deployedOn": null,
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #1",
+    "PR #2"
+  ],
+  "items": [
+    {
+      "type": "improved",
+      "area": "legacy",
+      "title": "1:1에서 한 얘기 나누기",
+      "before": "한 친구가 1:1에서 한 얘기를 다른 친구의 1:1에서 마롱이가 몰랐어요(요약이 쌓일 때만 메모를 만듦)",
+      "after": "1:1에서 한 얘기를 바로 공유해서 다른 친구와의 대화에서도 알아요",
+      "evidence": [
+        "PR #1"
+      ]
+    },
+    {
+      "type": "improved",
+      "area": "legacy",
+      "title": "연달아 온 말에 한 번에 답하기",
+      "before": "기록 없음",
+      "after": "연달아 온 말을 묶어 한 번에 답하고, 단체방에서는 친구마다 따로 묶어요",
+      "evidence": [
+        "PR #1",
+        "PR #2"
+      ]
+    }
+  ]
+}

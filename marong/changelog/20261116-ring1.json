@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "20261116-ring1",
+  "kind": "server",
+  "title": "마롱이가 거는 전화 켬",
+  "deployedOn": "2026-11-16",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #27",
+    "6d91f25"
+  ],
+  "items": [
+    {
+      "type": "added",
+      "area": "app",
+      "title": "마롱이가 거는 전화",
+      "before": "없음",
+      "after": "정한 시간과 '지금 전화해 줘'에 앱 벨이 울려요(1분 안)",
+      "evidence": []
+    }
+  ]
+}

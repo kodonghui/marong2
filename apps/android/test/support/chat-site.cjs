@@ -22,6 +22,7 @@ const FILES = { '/chat/': ['index.html', 'text/html'], '/chat/chat.js': ['chat.j
   '/chat/admin/app': ['admin.html', 'text/html'],
   '/chat/admin/costs': ['admin.html', 'text/html'],
   '/chat/admin/items': ['admin-items.html', 'text/html'],
+  '/chat/admin/changes': ['admin.html', 'text/html'],
   '/chat/admin.js': ['admin.js', 'text/javascript'],
   '/chat/admin-items.js': ['admin-items.js', 'text/javascript'],
   '/chat/unified.js': ['unified.js', 'text/javascript'],
@@ -31,7 +32,7 @@ const FILES = { '/chat/': ['index.html', 'text/html'], '/chat/chat.js': ['chat.j
   '/chat/persona/instructions': ['persona/instructions.html', 'text/html'],
   '/chat/persona/persona.css': ['persona/persona.css', 'text/css'],
   '/chat/persona/persona.js': ['persona/persona.js', 'text/javascript'] };
-const ADMIN_TABS = {'': '개요', members: '회원', invites: '초대 링크', app: '앱 버전', costs: '비용', items: '아이템'};
+const ADMIN_TABS = {'': '개요', members: '회원', invites: '초대 링크', app: '앱 버전', costs: '비용', items: '아이템', changes: '업데이트 내역'};
 
 function adminTabs(html, pathname) {
   const active = pathname.split('/')[3] || '';

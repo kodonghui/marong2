@@ -57,6 +57,26 @@ const items = {set: 'fixture', items: [{id: 'fixture-item', name, starter: false
 const fixture = {'/overview': overview, '/members': members, '/app-versions': versions,
   '/invites': {invites: inviteRows}, '/image-costs': costs, '/items': items};
 
+const pr = {label: 'PR #9001', url: 'https://github.com/kodonghui/marong2/pull/9001'};
+const commit = {label: 'abc1234', url: 'https://github.com/kodonghui/marong2/commit/abc1234'};
+const change = {type: 'improved', area: 'admin', title: '시험 내역 한눈에 보기',
+  before: '화면마다 바뀐 항목을 따로 찾았어요', after: '업데이트 내역에서 변경 전과 변경 후를 함께 봐요', evidence: [pr]};
+const changeUnit = {id: '20261124-sihum', kind: 'server', title: '시험 반영 가', deployedOn: '2026-11-24',
+  sortOn: '2026-11-24', app: null, backfilled: false, evidence: [pr], items: [change]};
+const normalChanges = {skipped: 0, units: [
+  {...changeUnit, items: [change, {...change, area: 'call', title: '시험 통화 설정',
+    before: '설정 화면 세 곳을 열어야 했어요', after: '통화 설정을 한곳에서 확인해요'},
+  {...change, area: 'web', type: 'fixed', title: '시험 웹 화면'}]},
+  {...changeUnit, id: 'app-9.9.9', kind: 'app', deployedOn: '2026-11-23', sortOn: '2026-11-23',
+    title: '시험 반영 나', app: {versionName: '9.9.9', versionCode: 999}, backfilled: true,
+    evidence: [commit], items: [{...change, area: 'app', title: '시험 앱 설정', before: '기록 없음', evidence: [commit]},
+      {...change, area: 'legacy', title: '시험 알림', type: 'added', before: '없음', evidence: [commit]}]},
+]};
+const longChanges = {...normalChanges, units: [{...changeUnit, title: '가'.repeat(40), items: [
+  {...change, title: '나'.repeat(40), before: 'T'.repeat(100), after: '변'.repeat(100), evidence: [pr, commit]},
+  ...normalChanges.units[0].items.slice(1),
+]}, normalChanges.units[1]]};
+
 async function open(t, viewport = {width: 430, height: 820}, launchOptions) {
   const site = await startChatSite();
   t.after(() => site.close());
@@ -103,6 +123,202 @@ async function open(t, viewport = {width: 430, height: 820}, launchOptions) {
   }
   return {page, state, site, visit, seen, errors, maxActive: () => maxActive};
 }
+
+test('TC-707 changes states, text safety, retry and stale refresh', options, async t => {
+  const {page, state, site, visit, seen, errors} = await open(t);
+  await page.clock.install({time: new Date(date)});
+  let release;
+  state['/changes'] = () => new Promise(resolve => { release = resolve; });
+  await page.goto(site.url + root + '/changes');
+  const content = page.locator('#admin');
+  assert.equal(await page.locator('html').getAttribute('data-theme'), 'night');
+  const chips = content.getByRole('group', {name: '영역'});
+  await content.getByRole('heading', {name: '업데이트 내역'}).waitFor({timeout: 2000});
+  assert.equal(await chips.getByRole('button').count(), 7);
+  assert.equal(await content.locator('.s-head').count(), 2);
+  assert.equal(await content.locator('.s-row').count(), 3);
+  const position = await chips.boundingBox();
+  await page.waitForFunction(() => document.querySelector('#admin')?.getAttribute('aria-busy') === 'true');
+  release(normalChanges);
+  await content.getByText('반영 2번 · 항목 5개').waitFor();
+  assert.deepEqual(await chips.boundingBox(), position);
+  await content.getByRole('heading', {name: '11월 24일 · 시험 반영 가'}).waitFor();
+  assert.match(await content.locator('.change-unit .caption').nth(0).textContent(), /서버 반영 · PR #9001/);
+  assert.match(await content.locator('.change-unit .caption').nth(1).textContent(), /앱 9\.9\.9\(999\) · abc1234/);
+  const first = content.getByRole('table').first();
+  assert.deepEqual(await first.getByRole('columnheader').allTextContents(), ['구분', '영역', '항목', '변경 전', '변경 후', '근거']);
+  const evidence = first.getByRole('link').first();
+  assert.equal(await evidence.getAttribute('target'), '_blank');
+  assert.equal(await evidence.getAttribute('rel'), 'noopener noreferrer');
+  assert.equal(await evidence.getAttribute('href'), pr.url);
+
+  await chips.getByRole('button', {name: '통화'}).click();
+  await page.evaluate(() => {
+    window.changesVisibility = value => {
+      Object.defineProperty(document, 'visibilityState', {configurable: true, value});
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+    window.changesVisibility('hidden');
+  });
+  await page.clock.fastForward(61_000);
+  state['/changes'] = normalChanges;
+  await page.evaluate(() => window.changesVisibility('visible'));
+  await content.locator('xpath=self::*[@aria-busy="false"]').waitFor();
+  assert.deepEqual(seen, [['GET', '/changes'], ['GET', '/changes']]);
+  assert.equal(await chips.getByRole('button', {name: '통화'}).getAttribute('aria-pressed'), 'true');
+  await content.getByText('반영 1번 · 항목 1개').waitFor();
+
+  const unsafeText = '<img src=x onerror=alert(1)>';
+  const imageRequests = [];
+  page.on('request', req => { if (req.url().endsWith('/x')) imageRequests.push(req.url()); });
+  state['/changes'] = {skipped: 2, units: [{...changeUnit, deployedOn: null, sortOn: '2025-11-24',
+    backfilled: true, items: [{...change, before: '기록 없음', after: unsafeText}]}]};
+  await visit('/changes');
+  await content.getByRole('heading', {name: '2025년 11월 24일 · 시험 반영 가'}).waitFor();
+  await content.getByText('반영일 기록 없음 · 날짜는 PR을 합친 날 · 서버 반영', {exact: false}).waitFor();
+  await content.getByText('지난 기록에서 채움').waitFor();
+  await content.getByText('읽지 못한 내역 파일 2개는 빼고 보여요').waitFor();
+  assert.equal(await content.locator('.c-after').textContent(), '변경 후' + unsafeText);
+  assert.equal(await content.locator('.c-before.unknown').count(), 1);
+  assert.deepEqual(imageRequests, []);
+
+  for (const [skipped, message] of [[0, '아직 적은 업데이트 내역이 없어요'], [3, '내역 파일 3개를 읽지 못했어요']]) {
+    state['/changes'] = {skipped, units: []};
+    await visit('/changes');
+    await content.getByText(message, {exact: true}).waitFor();
+    assert.equal(await chips.locator('button:disabled').count(), 7);
+    assert.equal(await content.getByText('빼고 보여요', {exact: false}).count(), 0);
+  }
+
+  state['/changes'] = 500;
+  await visit('/changes');
+  await content.getByText('잠깐 문제가 생겼어요. 다시 해 볼까요?').waitFor();
+  assert.equal(await chips.locator('button:disabled').count(), 7);
+  await page.route('**/chat/admin/api/changes', route => route.abort(), {times: 1});
+  await content.getByRole('button', {name: '다시 해 볼게요'}).click();
+  await content.locator('xpath=self::*[@aria-busy="false"]').waitFor();
+  await content.getByText('잠깐 문제가 생겼어요. 다시 해 볼까요?').waitFor();
+  state['/changes'] = normalChanges;
+  await content.getByRole('button', {name: '다시 해 볼게요'}).click();
+  await content.getByText('반영 2번 · 항목 5개').waitFor();
+  assert.deepEqual(seen, [['GET', '/changes'], ['GET', '/changes']]);
+  state['/changes'] = 403;
+  await visit('/changes');
+  await content.getByText('관리자만 볼 수 있어요').waitFor();
+  assert.equal(await page.locator('.admin-tabs').count(), 0);
+  assert.deepEqual(errors, []);
+});
+
+test('TC-708 filters and counts without refetching', options, async t => {
+  const {page, state, visit, seen} = await open(t);
+  state['/changes'] = normalChanges;
+  await visit('/changes');
+  const chips = page.getByRole('group', {name: '영역'});
+  assert.deepEqual(await chips.getByRole('button').allTextContents(), ['전체', '앱', '웹', '통화', '대화', '관리', '카톡·디스코드']);
+  assert.ok((await chips.getByRole('button').evaluateAll(buttons => buttons.map(b => b.offsetHeight))).every(height => height >= 44));
+  await chips.getByRole('button', {name: '통화'}).click();
+  await page.getByText('반영 1번 · 항목 1개').waitFor();
+  assert.equal(await page.locator('.change-unit').count(), 1);
+  assert.deepEqual(await page.locator('.c-title').allTextContents(), ['시험 통화 설정']);
+  assert.deepEqual(await chips.locator('[aria-pressed="true"]').allTextContents(), ['통화']);
+  await chips.getByRole('button', {name: '대화'}).click();
+  await page.getByText('이 영역의 내역이 없어요').waitFor();
+  assert.equal(await page.locator('.changes-count p').count(), 0);
+  await page.getByRole('button', {name: '전체 보기'}).click();
+  await page.getByText('반영 2번 · 항목 5개').waitFor();
+  await chips.getByRole('button', {name: '통화'}).click();
+  await chips.getByRole('button', {name: '전체', exact: true}).click();
+  await page.getByText('반영 2번 · 항목 5개').waitFor();
+  assert.deepEqual(seen, [['GET', '/changes']]);
+
+  state['/changes'] = {...normalChanges, skipped: 2};
+  await visit('/changes');
+  await chips.getByRole('button', {name: '대화'}).click();
+  await page.getByText('이 영역의 내역이 없어요').waitFor();
+  await page.getByText('읽지 못한 내역 파일 2개는 빼고 보여요').waitFor();
+
+});
+
+test('TC-709 card and table widths, current tab, keyboard and accessibility tree', options, async t => {
+  const {page, state, visit, seen} = await open(t, {width: 360, height: 820});
+  const classic = await open(t, {width: 1024, height: 320}, {ignoreDefaultArgs: ['--hide-scrollbars']});
+  const checks = [];
+  for (const [browser, widths] of [[{page, state, visit}, [360, 430, 1024, 1280, 1440]], [classic, [1024, 1280]]]) {
+    for (const width of widths) {
+      await browser.page.setViewportSize({width, height: browser === classic ? 320 : 820});
+      for (const data of [normalChanges, longChanges]) {
+        browser.state['/changes'] = data;
+        await browser.visit('/changes');
+        const layout = await browser.page.evaluate(() => {
+          const tabs = document.querySelector('.admin-tabs');
+          const tab = tabs.querySelector('[aria-current]');
+          const table = document.querySelector('.change-table');
+          const [before, after] = table.querySelectorAll('tbody tr:first-child :is(.c-before,.c-after)');
+          const bounds = tabs.getBoundingClientRect();
+          const current = tab.getBoundingClientRect();
+          return {
+            viewport: innerWidth, document: document.documentElement.scrollWidth,
+            cellsOverflowing: [...table.querySelectorAll('th, td')].filter(e => e.scrollWidth > e.clientWidth + 1).length,
+            tabs: tabs.children.length, tabsFit: tabs.scrollWidth <= tabs.clientWidth,
+            currentVisible: current.left >= bounds.left - 1 && current.right <= bounds.right + 1,
+            table: getComputedStyle(table).display,
+            row: getComputedStyle(before.parentElement).display,
+            cols: [...table.querySelectorAll('th')].map(th => Math.round(th.getBoundingClientRect().width)),
+            halves: before.offsetTop === after.offsetTop && before.offsetLeft < after.offsetLeft,
+          };
+        });
+        assert.equal(layout.viewport, width);
+        assert.ok(layout.document <= width);
+        assert.equal(layout.cellsOverflowing, 0);
+        assert.equal(layout.tabs, 7);
+        assert.ok(layout.currentVisible);
+        assert.ok(layout.halves);
+        if (width < 1024) {
+          assert.equal(layout.table, 'grid');
+          assert.equal(layout.row, 'flex');
+        } else {
+          assert.equal(layout.table, 'table');
+          assert.equal(layout.row, 'table-row');
+          assert.deepEqual(layout.cols.filter((_, i) => [0, 1, 5].includes(i)), [72, 104, 112]);
+          assert.ok(layout.tabsFit);
+        }
+        checks.push([width, data === longChanges ? 'long' : 'normal', browser === classic ? 'classic' : 'default']);
+      }
+    }
+  }
+  t.diagnostic(`${checks.length} width and state combinations, 0 overflowing cells`);
+
+  const tabOrder = ['전체', '앱', '웹', '통화', '대화', '관리', '카톡·디스코드', 'PR #9001', 'PR #9001'];
+  for (const width of [360, 1280]) {
+    await page.setViewportSize({width, height: 820});
+    state['/changes'] = normalChanges;
+    await visit('/changes');
+    const table = page.getByRole('table').first();
+    const accessibility = await table.ariaSnapshot();
+    for (const header of ['구분', '영역', '항목', '변경 전', '변경 후', '근거']) {
+      assert.match(accessibility, new RegExp(`columnheader "${header}"`));
+    }
+    assert.match(accessibility, /cell .*화면마다 바뀐 항목을 따로 찾았어요/);
+    const headers = await table.locator('tbody tr').first().locator('td').evaluateAll(cells => cells.map(cell =>
+      [...cell.headers.split(' ')].map(id => document.getElementById(id)?.textContent).join(' ')));
+    assert.deepEqual(headers, ['구분', '영역', '항목', '변경 전', '변경 후', '근거']);
+    await page.locator('.admin-tabs [aria-current]').focus();
+    for (const label of tabOrder) {
+      await page.keyboard.press('Tab');
+      assert.equal(await page.locator(':focus').textContent(), label);
+    }
+    if (process.env.ADMIN_CHANGELOG_CAPTURE_DIR) {
+      await page.locator(':focus').blur();
+      await page.evaluate(() => scrollTo(0, 0));
+      await page.screenshot({path: path.join(process.env.ADMIN_CHANGELOG_CAPTURE_DIR,
+        width === 360 ? 'phone-360.png' : 'laptop-1280.png'), fullPage: true, animations: 'disabled'});
+    }
+  }
+  await page.getByRole('button', {name: '통화'}).click();
+  await page.setViewportSize({width: 430, height: 820});
+  await page.getByText('반영 1번 · 항목 1개').waitFor();
+  assert.deepEqual(seen, [['GET', '/changes']]);
+});
 
 test('TC-626 overview alerts, cards, partial failure, forbidden and stale reload', options, async t => {
   const {page, state, visit, seen, errors} = await open(t);

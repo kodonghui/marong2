@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "20261116-roomy-apply",
+  "kind": "server",
+  "title": "대화 넉넉하게",
+  "deployedOn": "2026-11-16",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #28",
+    "a2dc9a0"
+  ],
+  "items": [
+    {
+      "type": "improved",
+      "area": "chat",
+      "title": "친구 먼저 지시문",
+      "before": "식단·운동 부탁도 '전문가와 상담해 봐'로 물리는 등 대화가 빡빡했어요",
+      "after": "친구 먼저인 지시문으로 바꿔 더 편하게 받아 줘요",
+      "evidence": []
+    },
+    {
+      "type": "improved",
+      "area": "chat",
+      "title": "기억 찾기",
+      "before": "기록 없음",
+      "after": "최근 15턴을 기억하고, 키워드와 임베딩을 합쳐 지난 기억을 찾아요",
+      "evidence": []
+    }
+  ]
+}

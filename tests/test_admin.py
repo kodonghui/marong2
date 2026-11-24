@@ -5,8 +5,12 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
+from pathlib import Path
+import re
 import secrets
+from statistics import median
 import sys
+from tempfile import TemporaryDirectory
 from time import monotonic, time
 from types import SimpleNamespace
 import unittest
@@ -20,6 +24,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from pg import ROOT, TestDB
+from test_changelog import app_unit, server_unit, unit_bytes, write_unit
 
 sys.path.insert(0, str(ROOT))
 from marong.access import AccessConfig, AccessVerifier, email_hash
@@ -34,10 +39,12 @@ from tools.vertex_live.call_cost import MonthlyCost
 NOW = datetime(2026, 11, 24, 19, 10, tzinfo=timezone.utc)
 OVERVIEW = "/chat/admin/api/overview"
 APP_VERSIONS = "/chat/admin/api/app-versions"
+CHANGES = "/chat/admin/api/changes"
 ORIGIN = "https://fixture.invalid"
 ADMIN_HASH = "a" * 64
 SCREENS = (("", "overview"), ("members", "members"), ("members/7", "members"),
-           ("invites", "invites"), ("app", "app"), ("costs", "costs"), ("items", "items"))
+           ("invites", "invites"), ("app", "app"), ("costs", "costs"), ("items", "items"),
+           ("changes", "changes"))
 
 
 class OverviewAttentionTest(unittest.TestCase):
@@ -69,6 +76,135 @@ class OverviewAttentionTest(unittest.TestCase):
                 self.assertEqual([(row["kind"], row["level"]) for row in attention], expected)
                 if paused:
                     self.assertNotIn("value", attention[0])
+
+
+class AdminChangesTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        address = "admin@example.invalid"
+        other = "guest@example.invalid"
+        config = AccessConfig("fixture.cloudflareaccess.com", "fixture", frozenset({address, other}))
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key())) | {"kid": "fixture"}
+        now = int(time())
+        verifier = AccessVerifier(config)
+        verifier.keys, verifier.fetched, verifier.expires = [jwk], now, now + 600
+
+        def headers(email):
+            proof = jwt.encode({"sub": "fixture", "email": email, "iat": now, "exp": now + 300,
+                                "aud": config.aud, "iss": f"https://{config.team}"},
+                               key, algorithm="RS256", headers={"kid": jwk["kid"]})
+            return {"Cf-Access-Jwt-Assertion": proof}
+
+        self.headers, self.guest = headers(address), headers(other)
+        chat = AppChat(SimpleNamespace(pool=None), SimpleNamespace(), None, verifier, None,
+                       origin=ORIGIN, sessions=SimpleNamespace(now=lambda: NOW), authentication="session",
+                       admin_email_hash=email_hash(address))
+        self.client = TestClient(TestServer(chat.web_app()))
+        await self.client.start_server()
+        self.addAsyncCleanup(self.client.close)
+        self.folder = Path(self.enterContext(TemporaryDirectory()))
+        self.enterContext(patch("marong.app_admin.CHANGELOG_DIR", self.folder, create=True))
+
+    async def changes(self, status=200, code=None, headers=None):
+        response = await self.client.get(CHANGES, headers=self.headers if headers is None else headers)
+        text = await response.text()
+        self.assertEqual(response.status, status, text[:160])
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(response.content_type, "application/problem+json" if code else "application/json")
+        data = json.loads(text)
+        if code:
+            self.assertEqual((data["status"], data["code"]), (status, code))
+        return data
+
+    async def test_tc704_contract_and_sort_order(self):
+        a = server_unit("20261124-a", evidence=["abc1234", "PR #9003", "PR #9002"])
+        a["items"].append(a["items"][0] | {"title": "시험 둘째 항목", "evidence": ["abc1234"]})
+        b = server_unit("20261124-b")
+        c = server_unit("20261124-c")
+        fallback = server_unit("20261122-old", deployedOn=None, backfilled=True, evidence=["abc1234"])
+        app = app_unit(deployedOn="2026-11-25")
+        for unit in (b, app, fallback, a, c):
+            write_unit(self.folder, unit)
+        github = "https://github.com/kodonghui/marong2"
+        evidence = {
+            "abc1234": {"label": "abc1234", "url": github + "/commit/abc1234"},
+            **{f"PR #{n}": {"label": f"PR #{n}", "url": f"{github}/pull/{n}"} for n in (9001, 9002, 9003)},
+        }
+        expected = []
+        for unit in (app, a, c, b, fallback):
+            response = {field: value for field, value in unit.items() if field != "format"}
+            response["sortOn"] = unit["deployedOn"] or "2026-11-22"
+            response["evidence"] = [evidence[label] for label in unit["evidence"]]
+            response["items"] = [item | {"evidence": [evidence[label] for label in item["evidence"] or unit["evidence"]]}
+                                 for item in unit["items"]]
+            expected.append(response)
+        self.assertEqual(await self.changes(), {"units": expected, "skipped": 0})
+
+    async def test_tc705_skip_invalid_duplicates_missing_and_unreadable(self):
+        valid = [server_unit(), app_unit()]
+        for unit in valid:
+            write_unit(self.folder, unit)
+        (self.folder / "20261124-broken.json").write_bytes(b'{"title":"fixture-private-marker"')
+        (self.folder / "20261124-big.json").write_bytes(b" " * 32769)
+        write_unit(self.folder, valid[0], "20261124-wrong.json")
+        with self.assertLogs("marong.admin_changes", "WARNING") as logs:
+            data = await self.changes()
+        self.assertEqual((len(data["units"]), data["skipped"]), (2, 3))
+        self.assertCountEqual([line.split("admin_changes ", 1)[1] for line in logs.output], [
+            "file=20261124-broken.json result=invalid reason=json", "file=20261124-big.json result=invalid reason=too_big",
+            "file=20261124-wrong.json result=invalid reason=name",
+        ])
+        duplicate = self.folder / "duplicate"
+        duplicate.mkdir()
+        write_unit(duplicate, valid[1])
+        write_unit(duplicate, app_unit("9.9.8"))
+        with patch("marong.app_admin.CHANGELOG_DIR", duplicate), self.assertLogs("marong.admin_changes", "WARNING") as logs:
+            self.assertEqual(await self.changes(), {"units": [], "skipped": 2})
+        self.assertEqual(sum(line.endswith("reason=duplicate") for line in logs.output), 2)
+        with patch("marong.app_admin.CHANGELOG_DIR", self.folder / "missing"), self.assertLogs("marong.admin_changes") as logs:
+            self.assertEqual(await self.changes(), {"units": [], "skipped": 0})
+        self.assertTrue(logs.output[0].endswith("admin_changes result=missing_dir"))
+        with patch.object(Path, "iterdir", side_effect=PermissionError):
+            await self.changes(500, "internal")
+
+    async def test_tc706_access_no_cache_privacy_and_latency(self):
+        with patch.object(Path, "iterdir", side_effect=AssertionError("must authenticate first")):
+            await self.changes(403, "not_allowed", headers=self.guest)
+            await self.changes(403, "not_allowed", headers={})
+        self.assertEqual(await self.changes(), {"units": [], "skipped": 0})
+        for index in range(300):
+            unit = server_unit(f"20261124-sihum-{index}")
+            unit["items"] *= 6
+            raw = unit_bytes(unit).ljust(3072, b" ")
+            (self.folder / f"{unit['id']}.json").write_bytes(raw)
+        durations = []
+        for _ in range(5):
+            start = monotonic()
+            data = await self.changes()
+            durations.append(monotonic() - start)
+            self.assertEqual((len(data["units"]), data["skipped"]), (300, 0))
+            self.assertIsNone(re.search(r"@|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}|[A-Za-z0-9_-]{21,}",
+                                        json.dumps(data, ensure_ascii=False)))
+        milliseconds = median(durations) * 1000
+        print(f"TC-706 300 x 3072 B, 5 requests, median {milliseconds:.1f} ms")
+        self.assertLess(milliseconds, 500)
+
+    async def test_tc710_changes_page_path(self):
+        response = await self.client.get("/chat/admin/changes", headers=self.headers)
+        self.assertEqual((response.status, response.content_type), (200, "text/html"))
+        nav = (await response.text()).split('<nav class="admin-nav"', 1)[1].split("</nav>", 1)[0]
+        self.assertEqual(re.findall(r"<a [^>]+>([^<]+)</a>", nav),
+                         ["개요", "회원", "초대 링크", "앱 버전", "비용", "아이템", "업데이트 내역"])
+        self.assertEqual(nav.count('aria-current="page"'), 1)
+        self.assertIn('href="/chat/admin/changes" aria-current="page"', nav)
+        for suffix, status in (("/", 301), ("/x", 404)):
+            response = await self.client.get("/chat/admin/changes" + suffix, headers=self.headers, allow_redirects=False)
+            self.assertEqual(response.status, status)
+            if status == 301:
+                self.assertEqual(response.headers["Location"], "/chat/admin/changes")
+        for path, _ in SCREENS:
+            response = await self.client.get(f"/chat/admin/{path}", headers={"Accept": "text/html"})
+            self.assertEqual(response.status, 403, path)
 
 
 class AdminTest(unittest.IsolatedAsyncioTestCase):
@@ -365,7 +501,7 @@ class AdminTest(unittest.IsolatedAsyncioTestCase):
     async def test_tc620_html_tabs_and_csp(self):
         self.chat.decor.catalog = object()
         hrefs = {"overview": "/chat/admin/", **{name: f"/chat/admin/{name}"
-                 for name in ("members", "invites", "app", "costs", "items")}}
+                 for name in ("members", "invites", "app", "costs", "items", "changes")}}
         for path, tab in SCREENS:
             with self.subTest(path=path):
                 response = await self.client.get(f"/chat/admin/{path}", headers=self.headers)
@@ -373,7 +509,7 @@ class AdminTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("script-src 'self'", response.headers["Content-Security-Policy"])
                 html = await response.text()
                 nav = html.split('<nav class="admin-nav"', 1)[1].split("</nav>", 1)[0]
-                self.assertEqual(nav.count("<a "), 6)
+                self.assertEqual(nav.count("<a "), 7)
                 self.assertEqual(nav.count('aria-current="page"'), 1)
                 for key, href in hrefs.items():
                     attribute = ' aria-current="page"' if key == tab else ''

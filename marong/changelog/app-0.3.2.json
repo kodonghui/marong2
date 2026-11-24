@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "id": "app-0.3.2",
+  "kind": "app",
+  "title": "통화 화면을 다시 열지 않고 벨 받기",
+  "deployedOn": "2026-11-22",
+  "app": {
+    "versionName": "0.3.2",
+    "versionCode": 10
+  },
+  "backfilled": true,
+  "evidence": [
+    "PR #89"
+  ],
+  "items": [
+    {
+      "type": "improved",
+      "area": "app",
+      "title": "벨 받기",
+      "before": "기록 없음",
+      "after": "통화 화면을 다시 열지 않고 지금 화면에서 벨을 받아요",
+      "evidence": []
+    }
+  ]
+}

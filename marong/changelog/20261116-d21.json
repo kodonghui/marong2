@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "20261116-d21",
+  "kind": "server",
+  "title": "앱 글 대화 읽음·대답 중",
+  "deployedOn": "2026-11-16",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #16",
+    "b33e5bc"
+  ],
+  "items": [
+    {
+      "type": "added",
+      "area": "app",
+      "title": "읽음과 대답 중 표시",
+      "before": "없음",
+      "after": "글 대화에 읽음과 '대답 중'이 보여요",
+      "evidence": []
+    },
+    {
+      "type": "improved",
+      "area": "app",
+      "title": "글 대화 창(앱 0.2.1)",
+      "before": "기록 없음",
+      "after": "앱 0.2.1부터 글 대화가 따로 된 창으로 열려요",
+      "evidence": []
+    }
+  ]
+}

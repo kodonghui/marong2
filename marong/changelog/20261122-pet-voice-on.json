@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "id": "20261122-pet-voice-on",
+  "kind": "server",
+  "title": "반려동물 1인칭 말투 켬",
+  "deployedOn": "2026-11-22",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #91"
+  ],
+  "items": [
+    {
+      "type": "added",
+      "area": "chat",
+      "title": "반려동물 1인칭",
+      "before": "없음",
+      "after": "반려동물 캐릭터가 글·선톡·통화에서 그 아이의 1인칭으로 말해요",
+      "evidence": []
+    }
+  ]
+}

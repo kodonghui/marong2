@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "id": "20261122-pet-scenes-on-98",
+  "kind": "server",
+  "title": "화두·일기 장면 그림 켬",
+  "deployedOn": "2026-11-22",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #92",
+    "PR #97",
+    "PR #98"
+  ],
+  "items": [
+    {
+      "type": "added",
+      "area": "chat",
+      "title": "장면 그림",
+      "before": "없음",
+      "after": "화두와 일기에 내 캐릭터가 나오는 장면 그림이 붙어요",
+      "evidence": []
+    }
+  ]
+}

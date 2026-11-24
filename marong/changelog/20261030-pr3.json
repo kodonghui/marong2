@@ -1,0 +1,30 @@
+{
+  "format": 1,
+  "id": "20261030-pr3",
+  "kind": "server",
+  "title": "카톡: 설정은 관리자만, 가까운 사이는 근황까지",
+  "deployedOn": "2026-10-30",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #3"
+  ],
+  "items": [
+    {
+      "type": "fixed",
+      "area": "legacy",
+      "title": "친구 설정은 관리자만",
+      "before": "친구가 1:1에서 한 말을 듣고 마롱이가 공유 설정을 스스로 끌 수 있었어요",
+      "after": "공유 같은 설정은 관리자만 바꾸고, 친구의 말은 요청으로만 남아요",
+      "evidence": []
+    },
+    {
+      "type": "improved",
+      "area": "chat",
+      "title": "가까운 사이의 근황 나누기",
+      "before": "다른 친구 얘기는 취향·하는 일 정도만 여섯 줄까지 알았어요",
+      "after": "가까운 사이로 정한 친구끼리는 1:1에서 근황까지 나눠요",
+      "evidence": []
+    }
+  ]
+}

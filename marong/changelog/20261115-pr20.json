@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "id": "20261115-pr20",
+  "kind": "server",
+  "title": "통화 중 실시간 검색",
+  "deployedOn": "2026-11-15",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #20"
+  ],
+  "items": [
+    {
+      "type": "added",
+      "area": "call",
+      "title": "통화 중 검색",
+      "before": "없음",
+      "after": "날씨·뉴스처럼 지금 정보를 통화 중에 구글 검색으로 찾아 말해요(통화마다 10번까지)",
+      "evidence": []
+    }
+  ]
+}

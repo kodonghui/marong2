@@ -798,8 +798,172 @@
     else failure(content, reply);
   }
 
+  const changeAreas = {all: '전체', app: '앱', web: '웹', call: '통화', chat: '대화', admin: '관리', legacy: '카톡·디스코드'};
+  const changeTypes = {added: '추가', improved: '개선', fixed: '수정', removed: '제거'};
+  const changeColumns = {type: '구분', area: '영역', title: '항목', before: '변경 전', after: '변경 후', ev: '근거'};
+  const currentKoreanYear = new Intl.DateTimeFormat('ko-KR', {timeZone: 'Asia/Seoul', year: 'numeric'});
+  let changeArea = 'all', changeData, changeChips, changeCount, changeGroups;
+
+  function changeLinks(parent, evidence) {
+    for (const [index, {label, url}] of evidence.entries()) {
+      if (index) parent.append(node('span', ' · ', 'sep'));
+      const proof = link(label, url, '');
+      proof.target = '_blank';
+      proof.rel = 'noopener noreferrer';
+      parent.append(proof);
+    }
+  }
+
+  function changeTable(unit, title, items) {
+    const table = node('table', '', 'change-table');
+    table.setAttribute('role', 'table');
+    const cols = node('colgroup');
+    const head = node('thead');
+    const headings = node('tr');
+    head.setAttribute('role', 'rowgroup');
+    headings.setAttribute('role', 'row');
+    for (const [key, label] of Object.entries(changeColumns)) {
+      cols.append(node('col', '', 'k-' + key));
+      const th = node('th', label);
+      th.id = `change-${unit.id}-${key}`;
+      th.scope = 'col';
+      th.setAttribute('role', 'columnheader');
+      headings.append(th);
+    }
+    head.append(headings);
+    const body = node('tbody');
+    body.setAttribute('role', 'rowgroup');
+    for (const item of items) {
+      const row = node('tr');
+      row.setAttribute('role', 'row');
+      for (const [key, heading] of Object.entries(changeColumns)) {
+        const cell = node('td', '', 'c-' + key);
+        cell.setAttribute('role', 'cell');
+        cell.setAttribute('headers', `change-${unit.id}-${key}`);
+        if (key === 'type') {
+          const badge = node('span', changeTypes[item.type], 'change-badge');
+          badge.dataset.type = item.type;
+          cell.append(badge);
+        } else if (key === 'area') {
+          cell.textContent = changeAreas[item.area];
+        } else if (key === 'title') {
+          cell.textContent = item.title;
+        } else {
+          const label = node('span', heading, 'c-label');
+          label.setAttribute('aria-hidden', 'true');
+          cell.append(label);
+          if (key === 'ev') changeLinks(cell, item.evidence);
+          else {
+            cell.append(document.createTextNode(item[key]));
+            cell.classList.toggle('unknown', ['없음', '기록 없음'].includes(item[key]));
+          }
+        }
+        row.append(cell);
+      }
+      body.append(row);
+    }
+    table.append(node('caption', title + ' 항목'), cols, head, body);
+    return table;
+  }
+
+  function changeGroup(unit, items) {
+    const [year, month, day] = unit.sortOn.split('-').map(Number);
+    const prefix = Number.parseInt(currentKoreanYear.format(new Date()), 10) === year ? '' : year + '년 ';
+    const title = `${prefix}${month}월 ${day}일 · ${unit.title}`;
+    const head = node('div', '', 'change-unit-head');
+    head.append(node('h2', title));
+    if (unit.backfilled) head.append(node('span', '지난 기록에서 채움', 'change-tag'));
+    const publication = unit.app ? `앱 ${unit.app.versionName}(${unit.app.versionCode})` : '서버 반영';
+    const description = caption((unit.deployedOn ? '' : '반영일 기록 없음 · 날짜는 PR을 합친 날 · ') + publication + ' · ');
+    changeLinks(description, unit.evidence);
+    const article = node('article', '', 'change-unit');
+    article.append(head, description, changeTable(unit, title, items));
+    return article;
+  }
+
+  function changesMessage(message) {
+    const box = node('div', '', 'changes-message');
+    box.append(node('p', message));
+    changeGroups.replaceChildren(box);
+    return box;
+  }
+
+  function selectChangeArea(area, focus = false) {
+    changeArea = area;
+    for (const chip of changeChips.querySelectorAll('button')) {
+      const selected = chip.dataset.area === changeArea;
+      chip.setAttribute('aria-pressed', String(selected));
+      if (focus && selected) chip.focus();
+    }
+    if (changeData) drawChanges();
+  }
+
+  function drawChanges() {
+    const {units, skipped} = changeData;
+    for (const chip of changeChips.querySelectorAll('button')) chip.disabled = !units.length;
+    changeCount.replaceChildren();
+    if (!units.length) {
+      changesMessage(skipped ? `내역 파일 ${skipped}개를 읽지 못했어요` : '아직 적은 업데이트 내역이 없어요');
+      return;
+    }
+    const matches = units.map(unit => [unit, unit.items.filter(item => changeArea === 'all' || item.area === changeArea)])
+      .filter(([, items]) => items.length);
+    if (matches.length) {
+      const count = matches.reduce((sum, [, items]) => sum + items.length, 0);
+      changeCount.append(caption(`반영 ${matches.length}번 · 항목 ${count}개`));
+    }
+    if (skipped) changeCount.append(node('p', `읽지 못한 내역 파일 ${skipped}개는 빼고 보여요`, 'changes-note'));
+    if (matches.length) changeGroups.replaceChildren(...matches.map(([unit, items]) => changeGroup(unit, items)));
+    else {
+      const box = changesMessage('이 영역의 내역이 없어요');
+      box.append(button('전체 보기', () => selectChangeArea('all', true), 'retry'));
+    }
+  }
+
+  function changesLayout() {
+    const head = node('div', '', 'changes-head');
+    head.append(node('h2', '업데이트 내역'), caption('서비스에서 바뀐 것을 반영마다 적어요. 새것부터예요.'));
+    changeChips = node('ul', '', 'changes-chips');
+    changeChips.setAttribute('role', 'group');
+    changeChips.setAttribute('aria-label', '영역');
+    for (const [key, label] of Object.entries(changeAreas)) {
+      const chip = button(label, () => selectChangeArea(key), '');
+      chip.dataset.area = key;
+      chip.setAttribute('aria-pressed', String(key === changeArea));
+      const item = node('li');
+      item.append(chip);
+      changeChips.append(item);
+    }
+    changeCount = node('div', '', 'changes-count');
+    changeCount.setAttribute('aria-live', 'polite');
+    changeGroups = node('div', '', 'changes-groups');
+    content.classList.add('changes', 'stack');
+    content.replaceChildren(head, changeChips, changeCount, changeGroups);
+  }
+
+  async function changesPage(initial) {
+    if (!changeChips) changesLayout();
+    if (initial) {
+      changeCount.replaceChildren();
+      const skeleton = node('div', '', 'changes-skeleton');
+      skeleton.setAttribute('aria-hidden', 'true');
+      skeleton.append(...['s-head', 's-row', 's-row', 's-head', 's-row'].map(name => node('span', '', name)));
+      changeGroups.replaceChildren(skeleton);
+    }
+    const reply = await request(base + '/changes');
+    if (reply.status === 200 && reply.body) {
+      changeData = reply.body;
+      drawChanges();
+    } else {
+      changeData = null;
+      for (const chip of changeChips.querySelectorAll('button')) chip.disabled = true;
+      changeCount.replaceChildren();
+      failure(changeGroups, reply);
+    }
+  }
+
   const loaders = {overview: overviewPage, members: friendId ? memberPage : membersPage,
-    invites: invitePage, app: appPage, costs: costsPage};
+    invites: invitePage, app: appPage, costs: costsPage, changes: changesPage};
 
   async function load(stale = false) {
     if (loading || writing) return;
@@ -815,11 +979,7 @@
     }
   }
 
-  if (tabs) {
-    const markOverflow = () => { nav.dataset.overflow = String(tabs.scrollLeft + tabs.clientWidth < tabs.scrollWidth - 1); };
-    new ResizeObserver(markOverflow).observe(tabs);
-    tabs.addEventListener('scroll', markOverflow, {passive: true});
-  }
+  Unified.fitAdminTabs(tabs);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') hiddenAt = Date.now();
     else {
