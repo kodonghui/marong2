@@ -141,6 +141,26 @@ class ToolTraceTest(unittest.IsolatedAsyncioTestCase):
                 disabled, *_ = send(1)
                 self.assertEqual(disabled["inputs"]["message"]["content"], text_trace.MASKED)
 
+    async def test_private_call_context_and_echo_stay_out_of_owner_trace(self):
+        from marong.continuity import RecentCall
+
+        recent = RecentCall("10분 전", "4분", (PRIVATE_FIXTURE,))
+        with patch.object(text_trace, "_show_owner_app_io", return_value=True):
+            with text_trace.step("app_turn", surface="app_chat") as span:
+                span.app_message(1, "Show this exact test message")
+                context = await text_trace.app_read(
+                    "call_context", AsyncMock(return_value={"recent_call": recent, "items": []}),
+                )
+                self.assertIs(context["recent_call"], recent)
+                text_trace.mask_private_reply()
+                with text_trace.app_step("model_request") as model:
+                    model.io(outputs={"response": {"content": PRIVATE_FIXTURE}})
+                span.app_reply(PRIVATE_FIXTURE)
+        root, read, model = self.capture.traces[-1]
+        self.assertEqual(read["outputs"]["records"]["recent_call"], {"type": "RecentCall"})
+        self.assertEqual(model["outputs"]["response"]["content"], text_trace.MASKED)
+        self.assertEqual(root["outputs"]["reply"]["content"], text_trace.MASKED)
+
     def test_masked_app_payload_keeps_only_known_shape(self):
         fixture = {
             "messages": [{"role": "user", "content": PRIVATE_FIXTURE}],
