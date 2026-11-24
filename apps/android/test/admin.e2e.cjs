@@ -34,6 +34,10 @@ const versions = {latest, paused: false, devices: [
   {kind: 'published', at: date, versionName: '0.3.3', versionCode: 11, notes: '시험 노트', backfilled: false},
   {kind: 'published', at: '2026-11-21T05:00:00Z', versionName: '0.3.2', versionCode: 10, backfilled: true},
 ], fetches: [{friend: name, friendId: 7, items: [{versionCode: 11, at: date}]}]};
+const removedAt = '2026-11-22T09:14:00Z';
+const activePhone = {...device, removedAt: null, notifications: 'granted', events: []};
+const removedPhone = {...activePhone, phone: 2, appVersion: '0.2.4', behind: false, removedAt,
+  seenAt: '2026-11-21T12:40:00Z', events: [{kind: 'push_failed', versionCode: 11, status: 410, attempt: 1, at: removedAt}]};
 const overview = {members: {count: 3, unlinked: 1}, usageToday: usage,
   app: {latest, paused: false, devices: 2, behind: 1},
   callMonth: {month: '2026-11', spentUsd: '121.40', budgetUsd: '150.00', percent: 80, state: 'warn'},
@@ -74,7 +78,11 @@ async function open(t, viewport = {width: 430, height: 820}, launchOptions) {
       if (typeof data === 'number') {
         const code = {400: 'invalid_input', 403: 'not_allowed', 404: 'not_found', 409: 'invite_closed'}[data] || 'internal';
         active--;
-        await route.fulfill({status: data, json: {code, traceId: '0123456789abcdef'}});
+        await route.fulfill({status: data, contentType: 'application/problem+json',
+          json: {code, traceId: '0123456789abcdef'}});
+      } else if (data?.contentType) {
+        active--;
+        await route.fulfill(data);
       } else {
         active--;
         await route.fulfill(data?.status === 204 ? {status: 204} : {status: data?.status || 200, json: data?.json || data});
@@ -353,11 +361,171 @@ async function inspectLayout(page, width, suffix) {
   assert.ok(capture.page <= width, JSON.stringify({suffix, width, ...capture}));
   assert.equal(capture.main, Math.min(width < 1024 ? 720 : 1200, capture.viewport - (width < 1024 ? 32 : 64)));
   assert.deepEqual(capture.cols, width < 1024 ? (suffix === '/items' ? [] : suffix === '/members/7' ? [1, 1] : [1])
-    : ({'/': [2], '/members': [2], '/members/7': [2, 2], '/invites': [2], '/app#friend=7': [2], '/costs': [3], '/items': []})[suffix]);
+    : ({'/': [2], '/members': [2], '/members/7': [2, 2], '/invites': [2], '/app': [2],
+      '/app#friend=7': [2], '/costs': [3], '/items': []})[suffix]);
   assert.equal(capture.overflow, false, JSON.stringify({suffix, width, ...capture}));
   assert.equal(capture.hitboxes, true, JSON.stringify({suffix, width, ...capture}));
   if (width >= 1024) assert.equal(capture.tabs, capture.tabScroll);
 }
+
+test('TC-655 removed phones appear in app versions and member details', options, async t => {
+  const {page, state, visit, errors} = await open(t);
+  const rows = page.locator('details.admin-device');
+  const memberPhones = page.locator('section').filter({has: page.getByRole('heading', {name: '이 사람의 폰', exact: true})});
+  for (const [theme, time] of [['chestnut', date], ['night', '2026-11-24T13:30:00Z']]) {
+    await page.clock.setFixedTime(new Date(time));
+    for (const width of [360, 430, 1280]) {
+      await page.setViewportSize({width, height: 820});
+      state['/app-versions'] = {...versions, fetches: [], devices: [activePhone, removedPhone]};
+      await visit('/app');
+      assert.deepEqual(await rows.locator('summary > span:first-child').allTextContents(),
+        [name + ' · 폰 1', name + ' · 폰 2']);
+      const summary = rows.nth(1).locator('summary');
+      assert.equal(await summary.getByText('0.2.4 · 앱 지워짐', {exact: true}).count(), 1);
+      assert.equal(await summary.getByText('뒤처짐').count(), 0);
+      const colorOf = element => getComputedStyle(element).color;
+      assert.equal(await summary.getByText('0.2.4 · 앱 지워짐', {exact: true}).evaluate(colorOf),
+        await summary.getByText(/^마지막 보고 /).evaluate(colorOf));
+      await summary.click();
+      const records = await rows.nth(1).locator('li').allTextContents();
+      assert.equal(records[0], '앱 지워짐 · 11월 22일 오후 6:14');
+      assert.equal(records[1], '보내기 실패(410) · 1번째 · 11월 22일 오후 6:14');
+      assert.equal(await page.locator('html').getAttribute('data-theme'), theme);
+      await inspectLayout(page, width, '/app');
+      if (theme === 'chestnut' && width === 1280 && process.env.MARONG_ADMIN_SCREENSHOTS) {
+        await page.screenshot({path: path.join(process.env.MARONG_ADMIN_SCREENSHOTS, 'app-removed.png')});
+      }
+
+      await visit('/members/7');
+      await memberPhones.getByText('폰 2 · 0.2.4 · 앱 지워짐 · 마지막 보고 11월 21일 오후 9:40', {exact: true}).waitFor();
+      await inspectLayout(page, width, '/members/7');
+
+      state['/app-versions'] = versions;
+      await visit('/app');
+      assert.equal(await rows.getByText('앱 지워짐').count(), 0);
+      assert.equal(await rows.getByText('뒤처짐').count(), 1);
+
+      state['/app-versions'] = {...versions, devices: Array.from({length: 20}, (_, index) =>
+        index === 1 ? removedPhone : {...activePhone, phone: index + 1})};
+      await visit('/members/7');
+      await memberPhones.getByText('최근 보고한 20대만 보여요', {exact: true}).waitFor();
+      const phones = await memberPhones.getByText(/^폰 \d+ · /).allTextContents();
+      assert.equal(phones.length, 20);
+      assert.match(phones[1], /^폰 2 · 0\.2\.4 · 앱 지워짐 · /);
+      await inspectLayout(page, width, '/members/7');
+    }
+  }
+  assert.deepEqual(errors, []);
+});
+
+test('TC-659 overview, app versions and member details agree on phones behind', options, async t => {
+  const {page, state, visit, errors} = await open(t);
+  await page.clock.setFixedTime(new Date('2026-11-24T19:10:00Z'));
+  const published = {...latest, publishedAt: '2026-11-23T13:10:00Z'};
+  state['/members'].members.push({...baseMember, friendId: 8});
+  state['/app-versions'] = {...versions, latest: published, devices: [
+    activePhone, removedPhone, {...activePhone, phone: 3, appVersion: '0.3.3', behind: false},
+    {...activePhone, friendId: 8, appVersion: '0.3.1'},
+  ]};
+  state['/overview'] = {...overview, app: {latest: published, paused: false, devices: 3, behind: 2},
+    attention: [{kind: 'app_behind', level: 'warn', value: 2, target: root + '/app'}]};
+  await visit();
+  assert.equal(await page.getByText('최신 0.3.3 · 폰 3대 중 2대 뒤처짐', {exact: true}).count(), 1);
+  assert.equal(await page.getByRole('link', {name: '새 버전을 아직 받지 못한 폰 2대', exact: true}).count(), 1);
+
+  await visit('/app');
+  const rows = page.locator('details.admin-device');
+  assert.deepEqual(await rows.evaluateAll(elements => elements.map(element => element.dataset.phone)),
+    ['7:1', '8:1', '7:3', '7:2']);
+  assert.equal(await rows.getByText('뒤처짐').count(), 2);
+  const memberPhones = page.locator('section').filter({has: page.getByRole('heading', {name: '이 사람의 폰', exact: true})});
+  let behind = 0;
+  for (const id of [7, 8]) {
+    await visit('/members/' + id);
+    await memberPhones.getByText(/^폰 1 · .* · 뒤처짐 · /).waitFor();
+    behind += await memberPhones.getByText('뒤처짐').count();
+  }
+  assert.equal(behind, 2);
+  assert.deepEqual(errors, []);
+});
+
+test('TC-656 items show the decor-off notice only for 404', options, async t => {
+  const {page, state, visit, seen, errors} = await open(t);
+  const screen = page.locator('#item-admin');
+  for (const [theme, time] of [['chestnut', date], ['night', '2026-11-24T13:30:00Z']]) {
+    await page.clock.setFixedTime(new Date(time));
+    for (const width of [360, 430, 1280]) {
+      await page.setViewportSize({width, height: 820});
+      state['/items'] = 404;
+      await visit('/items');
+      assert.deepEqual(await screen.locator('#item-list > *').allTextContents(), ['꾸미기가 꺼져 있어요']);
+      assert.equal(await screen.locator('#item-error').isVisible(), false);
+      assert.equal(await screen.getByRole('button').count(), 0);
+      assert.deepEqual(seen, [['GET', '/items']]);
+      assert.equal(await page.locator('.admin-tabs [aria-current="page"]').innerText(), '아이템');
+      assert.equal(await page.locator('html').getAttribute('data-theme'), theme);
+      await inspectLayout(page, width, '/items');
+      if (theme === 'chestnut' && width === 1280 && process.env.MARONG_ADMIN_SCREENSHOTS) {
+        await page.screenshot({path: path.join(process.env.MARONG_ADMIN_SCREENSHOTS, 'decor-off.png')});
+      }
+
+      for (const status of [403, 500, 503]) {
+        state['/items'] = status;
+        await visit('/items');
+        assert.match(await screen.locator('#item-error').innerText(), /아이템을 불러오지 못했어요.*0123456789abcdef/s);
+        assert.equal(await screen.getByRole('button', {name: '다시 보기'}).count(), 1);
+      }
+      state['/items'] = {...items, items: []};
+      await screen.getByRole('button', {name: '다시 보기'}).click();
+      await screen.getByText('등록할 아이템이 없어요').waitFor();
+      assert.equal(await screen.locator('#item-error').isVisible(), false);
+      state['/items'] = items;
+      await visit('/items');
+      assert.equal(await screen.getByRole('heading', {name}).count(), 1);
+    }
+  }
+  assert.deepEqual(errors, []);
+});
+
+test('TC-658 a non-Problem 404 also shows the decor-off notice', options, async t => {
+  const {page, state, visit, seen, errors} = await open(t, {width: 360, height: 820});
+  await page.clock.setFixedTime(new Date(date));
+  state['/items'] = {status: 404, contentType: 'text/plain', body: 'Not Found'};
+  await visit('/items');
+  assert.deepEqual(await page.locator('#item-list > *').allTextContents(), ['꾸미기가 꺼져 있어요']);
+  assert.equal(await page.locator('#item-error').isVisible(), false);
+  assert.deepEqual(seen, [['GET', '/items']]);
+  assert.deepEqual(errors, []);
+});
+
+test('TC-656 items keep retry for a failed request and for a request over 10 seconds', options, async t => {
+  const {page, visit, errors} = await open(t, {width: 360, height: 820});
+  const screen = page.locator('#item-admin');
+  const retry = screen.getByRole('button', {name: '다시 보기'});
+  const endpoint = '**/chat/admin/api/items';
+  await page.clock.install({time: new Date(date)});
+  await page.route(endpoint, route => route.abort(), {times: 1});
+  await visit('/items');
+  assert.equal(await screen.locator('#item-error').innerText(), '아이템을 불러오지 못했어요');
+
+  let stalled;
+  const requestStarted = new Promise(resolve => { stalled = resolve; });
+  await page.route(endpoint, stalled, {times: 1});
+  await retry.click();
+  const route = await requestStarted;
+  try {
+    const failed = page.waitForEvent('requestfailed', request => request === route.request());
+    await page.clock.fastForward(10_000);
+    await failed;
+  } finally {
+    await route.abort();
+  }
+  assert.equal(await screen.locator('#item-error').innerText(), '아이템을 불러오지 못했어요');
+  await retry.click();
+  await screen.getByRole('heading', {name}).waitFor();
+  assert.equal(await screen.locator('#item-error').isVisible(), false);
+  assert.deepEqual(errors, []);
+});
 
 test('TC-637, TC-638, TC-640 and TC-641 layouts from 360px through 1440px', options, async t => {
   const {page, state, visit, errors} = await open(t);

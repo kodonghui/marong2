@@ -38,6 +38,11 @@
   async function load() {
     const result = await request(api);
     screen.setAttribute('aria-busy', 'false');
+    if (result.status === 404) {
+      signal(error);
+      list.replaceChildren(node('li', '꾸미기가 꺼져 있어요', 'caption'));
+      return;
+    }
     if (result.status !== 200) {
       signal(error, '아이템을 불러오지 못했어요', result);
       list.replaceChildren(button('다시 보기', load, 'btn2'));

@@ -4,6 +4,8 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import replace
+from datetime import datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -492,7 +494,8 @@ class UpdateAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([row["phone"] for row in first_friend], list(range(1, 21)))
         self.assertEqual([row["behind"] for row in first_friend], [False] * 19 + [True])
         self.assertEqual(set(first_friend[0]), {"friend", "friendId", "phone", "appVersion", "seenAt", "notifications",
-                                               "events", "behind"})
+                                               "events", "behind", "removedAt"})
+        self.assertTrue(all(row["removedAt"] is None for row in data["devices"]))
         self.assertEqual([event["status"] for event in first_friend[-1]["events"]], list(range(25, 5, -1)))
         self.assertEqual(data["devices"][20]["friendId"], 2)
         self.assertEqual(data["devices"][20]["friend"], data["devices"][19]["friend"])
@@ -503,6 +506,43 @@ class UpdateAPITests(unittest.IsolatedAsyncioTestCase):
         raw = json.dumps(data)
         for secret in ("install_id", "installId", "fid", "email", "waiting_quiet"):
             self.assertNotIn(secret, raw)
+
+    async def test_tc653_admin_removed_phone_recovers_after_report(self):
+        release = replace(fixture(self.folder, code=11), name="0.3.3")
+        (self.folder / "release.json").write_text(json.dumps(release.manifest()), encoding="utf-8")
+        self.db.admin("""
+            INSERT INTO marong.friends (id, name) OVERRIDING SYSTEM VALUE VALUES (7, '시험친구 가')
+            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+        """)
+        login = await self.store.app_login(email_hash(HK_EMAIL))
+        with patch.object(self.store, "app_login", return_value={**login, "friend_id": 7}):
+            for number, version in ((1, "0.3.2"), (2, "0.2.4")):
+                self.assertEqual((await self.report(number, appVersion=version)).status, 201)
+            await self.store.drop_fid(phone(2), fid(2))
+            ((dropped_at,),) = self.db.admin("SELECT dropped_at FROM marong.app_devices WHERE install_id = %s",
+                                            (phone(2),))
+            targets = await self.store.app_update_targets(11, (0, 3, 3), limit=20)
+            self.assertEqual([target["install_id"] for target in targets], [UUID(phone(1))])
+
+            async def devices():
+                response = await self.http.get("/chat/admin/api/app-versions", headers=self.headers)
+                self.assertEqual(response.status, 200)
+                return (await response.json())["devices"]
+
+            first, removed = await devices()
+            for row in (first, removed):
+                self.assertEqual(set(row), {"friend", "friendId", "phone", "appVersion", "seenAt", "notifications",
+                                            "events", "behind", "removedAt"})
+                self.assertEqual((row["friendId"], row["friend"]), (7, "시험친구 가"))
+            self.assertEqual((first["phone"], first["behind"], first["removedAt"]), (1, True, None))
+            self.assertEqual((removed["phone"], removed["behind"]), (2, False))
+            removed_at = datetime.fromisoformat(removed["removedAt"])
+            self.assertEqual(removed_at, dropped_at)
+            self.assertEqual(removed_at.utcoffset(), timedelta(0))
+
+            self.assertEqual((await self.report(2, appVersion="0.2.4")).status, 200)
+            self.assertEqual([(row["phone"], row["behind"], row["removedAt"]) for row in await devices()],
+                             [(1, True, None), (2, True, None)])
 
 
 class ReleaseHistoryTests(unittest.TestCase):
