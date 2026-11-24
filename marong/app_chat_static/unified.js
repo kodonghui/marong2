@@ -2,7 +2,7 @@
 
 const Unified = (() => {
   function theme() {
-    if (document.querySelector('.admin-layout')) return;
+    if (location.pathname === '/chat/admin/changes') return;
     const hour = Math.floor((Date.now() / 3_600_000 + 9) % 24);
     const cream = hour >= 8 && hour < 20;
     document.documentElement.dataset.theme = cream ? 'chestnut' : 'night';

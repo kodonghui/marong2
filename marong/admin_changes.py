@@ -132,7 +132,7 @@ def load_units(folder: Path = CHANGELOG_DIR) -> tuple[list[dict], int]:
     skipped = 0
     codes = Counter()
     for path in paths:
-        if path.suffix != ".json":
+        if not path.name.endswith(".json"):
             continue
         try:
             unit, reason = validate_unit(path, _read_unit(path))

@@ -830,7 +830,9 @@ test('TC-641 places loading and error states in the approved columns and keeps t
   };
   const wide = await order();
   assert.equal(wide.filter(item => item.sidebar).length, 3);
-  assert.ok(wide.slice(6, 9).every(item => item.sidebar));
+  assert.deepEqual(wide.slice(0, 7).map(item => item.name),
+    ['/', '/members', '/invites', '/app', '/costs', '/items', '/changes'].map(suffix => root + suffix));
+  assert.ok(wide.slice(7, 10).every(item => item.sidebar));
   await page.setViewportSize({width: 360, height: 820});
   await visit('/members/7');
   const narrow = await order();
