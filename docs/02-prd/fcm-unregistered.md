@@ -1,6 +1,6 @@
 # FCM 등록 해제 판단: 요구사항
 
-상태: 2026-11-24 초안(Claude). **체크포인트 전**이고 새 요구사항은 모두 `proposed`예요. 요청·기준선·바뀌는 승인 항목·체크포인트 질문은 [01 도메인](../01-domain/fcm-unregistered.md)에 있어요.
+상태: 2026-11-24 체크포인트 통과(D181\~D185, 승인한 사람 사용자님, [01 도메인 8.1절](../01-domain/fcm-unregistered.md#81-체크포인트-답2026-11-24)). 새 요구사항은 active예요. 요청·기준선·바뀐 승인 항목·체크포인트 답은 [01 도메인](../01-domain/fcm-unregistered.md)에 있어요.
 입력: [01 도메인](../01-domain/fcm-unregistered.md)의 5.1 규칙과 TERM-280, 승인 요구사항 REQ-111·112·118([app-chat.md](../app-chat.md)), REQ-124·130([app-ring.md](../app-ring.md)), REQ-282([call-first.md](call-first.md)), REQ-553·556([app-update.md](app-update.md)), PR #127로 더해진 REQ-587(admin).
 ID 번호: REQ-630·631(이 패키지 범위 630\~639, [10 WBS 안내](../10-wbs/README.md#id-범위)).
 
@@ -20,8 +20,8 @@ ID 번호: REQ-630·631(이 패키지 범위 630\~639, [10 WBS 안내](../10-wbs
 
 | ID | Requirement | Type | Priority | Context | Source | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| REQ-630 | FCM이 보내기에 등록 해제 답(TERM-280: HTTP 404와 FCM 상세 코드 `UNREGISTERED`)을 주면 시스템은 그 폰의 FID를 지워야 하고, 그 밖의 거절(HTTP 400, 등록 해제가 확인되지 않은 404, 401·403, 429·5xx)에는 FID를 지키고 그 보내기를 실패로 처리해야 한다. 글 알림, 벨, 업데이트 메시지 모두 같다. | functional | Must | CTX-020, CTX-021 | D180, 보고서, FCM 문서 | proposed |
-| REQ-631 | FCM이 보내기를 거절해 그 보내기가 등록 해제나 실패로 끝나면, 시스템은 그 보내기마다 로그 한 줄에 메시지 종류, HTTP 상태, FCM 상위 상태, FCM 상세 코드, 틀린 칸 이름, 결과를 남겨야 한다. 키·권한 거절(401·403)은 지금처럼 1시간에 한 번 경고로 남기되 FCM 상세 코드를 더해야 한다. 어느 로그에도 메시지 글·FID·토큰·FCM 오류 메시지는 남기지 않아야 한다. | non-functional | Should | CTX-020, CTX-021 | 보고서(원인을 알 수 없었음), 기존(REQ-118), 새 제안(칸 이름, 질문 3) | proposed |
+| REQ-630 | FCM이 보내기에 등록 해제 답(TERM-280: HTTP 404와 FCM 상세 코드 `UNREGISTERED`)을 주면 시스템은 그 폰의 FID를 지워야 하고, 그 밖의 거절(HTTP 400, 등록 해제가 확인되지 않은 404, 401·403, 429·5xx)에는 FID를 지키고 그 보내기를 실패로 처리해야 한다. 글 알림, 벨, 업데이트 메시지 모두 같다. | functional | Must | CTX-020, CTX-021 | D180, 보고서, FCM 문서 | active(D181, D183) |
+| REQ-631 | FCM이 보내기를 거절해 그 보내기가 등록 해제나 실패로 끝나면, 시스템은 그 보내기마다 로그 한 줄에 메시지 종류, HTTP 상태, FCM 상위 상태, FCM 상세 코드, 틀린 칸 이름, 결과를 남겨야 한다. 키·권한 거절(401·403)은 지금처럼 1시간에 한 번 경고로 남기되 FCM 상세 코드를 더해야 한다. 어느 로그에도 메시지 글·FID·토큰·FCM 오류 메시지는 남기지 않아야 한다. | non-functional | Should | CTX-020, CTX-021 | 보고서(원인을 알 수 없었음), 기존(REQ-118), 새 제안(칸 이름, 질문 3) | active(D181, D184) |
 
 ## 승인 요구사항과의 관계
 
