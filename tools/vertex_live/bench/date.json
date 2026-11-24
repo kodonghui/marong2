@@ -1,0 +1,4 @@
+[
+  {"second": 0, "text": "내 면접 언제였어?", "answer": ["어제", "23일"], "label": "interview_date"},
+  {"second": 14, "text": "우리 마지막 통화 언제였지?", "answer": "어제", "label": "last_call_date"}
+]

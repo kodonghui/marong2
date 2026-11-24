@@ -62,8 +62,8 @@ def turn(role, text):
     return {"role": role, "parts": [{"text": text}]}
 
 
-def setup_message(model, voice, *, history, pressure):
-    instruction = (
+def setup_message(model, voice, *, history, pressure, instruction=None):
+    instruction = instruction or (
         "시험친구 가와 한국어로 짧게 전화로 대화해. 이어지는 대화의 최근 주제에 대해 한 문장으로 말해. "
         "통화가 이어지는 중이면 친구가 먼저 말할 때까지 기다리고 인사하지 마. "
         "친구가 처음에 한 말을 물으면 처음 제시한 도형 이름만 답해."
