@@ -163,7 +163,7 @@
 .changes-note {font-size: 13px; color: var(--muted)}
 .changes-groups {display: grid; gap: 24px}
 .change-unit {display: grid; gap: 8px; min-width: 0}
-.change-unit-head {display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px}
+.change-unit-head {display: flex; flex-direction: column; align-items: flex-start; gap: 4px 8px}
 .change-unit-head h2 {font-size: 16px}
 .change-unit .caption a {color: var(--muted)}
 .change-tag {
@@ -213,6 +213,7 @@
 }
 
 @media (min-width: 1024px) {
+  .change-unit-head {flex-direction: row; flex-wrap: wrap; align-items: baseline}
   .change-table {display: table; table-layout: fixed; border: 1px solid var(--line); border-radius: 0}
   .change-table thead {position: static; width: auto; height: auto; overflow: visible; clip-path: none; display: table-header-group}
   .change-table tbody {display: table-row-group}
@@ -222,7 +223,7 @@
     text-align: left; vertical-align: top; background: var(--surface);
   }
   .change-table th {font-size: 13px; font-weight: 700; color: var(--muted); background: var(--raised); border-top: 0}
-  .change-table .c-label, .change-table .sep {display: none}
+  .change-table .c-label, .change-table .c-ev .c-label, .change-table .sep {display: none}
   .change-table .c-ev a {display: block; width: fit-content}
   .change-table col.k-type {width: 72px}
   .change-table col.k-area {width: 104px}

@@ -256,6 +256,7 @@ test('TC-709 card and table widths, current tab, keyboard and accessibility tree
           const [before, after] = table.querySelectorAll('tbody tr:first-child :is(.c-before,.c-after)');
           const bounds = tabs.getBoundingClientRect();
           const current = tab.getBoundingClientRect();
+          const backfilled = document.querySelector('.change-tag');
           return {
             viewport: innerWidth, document: document.documentElement.scrollWidth,
             cellsOverflowing: [...table.querySelectorAll('th, td')].filter(e => e.scrollWidth > e.clientWidth + 1).length,
@@ -265,6 +266,8 @@ test('TC-709 card and table widths, current tab, keyboard and accessibility tree
             row: getComputedStyle(before.parentElement).display,
             cols: [...table.querySelectorAll('th')].map(th => Math.round(th.getBoundingClientRect().width)),
             halves: before.offsetTop === after.offsetTop && before.offsetLeft < after.offsetLeft,
+            labels: [...table.querySelectorAll('.c-label')].filter(label => getComputedStyle(label).display !== 'none').length,
+            badgeBelow: backfilled.getBoundingClientRect().top >= backfilled.previousElementSibling.getBoundingClientRect().bottom,
           };
         });
         assert.equal(layout.viewport, width);
@@ -276,11 +279,15 @@ test('TC-709 card and table widths, current tab, keyboard and accessibility tree
         if (width < 1024) {
           assert.equal(layout.table, 'grid');
           assert.equal(layout.row, 'flex');
+          assert.equal(layout.labels, 9);
+          assert.ok(layout.badgeBelow);
         } else {
           assert.equal(layout.table, 'table');
           assert.equal(layout.row, 'table-row');
           assert.deepEqual(layout.cols.filter((_, i) => [0, 1, 5].includes(i)), [72, 104, 112]);
           assert.ok(layout.tabsFit);
+          assert.equal(layout.labels, 0);
+          assert.equal(layout.badgeBelow, false);
         }
         checks.push([width, data === longChanges ? 'long' : 'normal', browser === classic ? 'classic' : 'default']);
       }
