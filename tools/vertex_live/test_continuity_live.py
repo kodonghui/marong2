@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 from aiohttp import WSMsgType
 
 import live_session
+from call_tuning import parse_tuning
 from marong import continuity
 from test_hangup import Browser, HTTP, Store, Upstream, check_setup, until
 
@@ -160,6 +161,74 @@ class ContinuityLiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics["continuity"]["result"], "fallback")
         self.assertEqual(len(picks), 1)
         self.assertEqual(log.count("continuity_fallback"), 1)
+
+    async def test_reset_reselects_history_and_preserves_same_call(self):
+        server = await check_setup()
+        timeline = []
+        first, second = Provider(timeline), Provider(timeline)
+        sockets = iter((first, second))
+        screen = Screen(timeline)
+        store = HistoryStore()
+        current = ["합성 이전 기억"]
+
+        async def pick(person, call_id, now, segment):
+            store.picks.append((call_id, segment))
+            turns = [continuity.Turn(1, "text", now - timedelta(minutes=2), "user", current[0])]
+            return turns, [], continuity.record_pick(segment, turns=1, chars=len(current[0]),
+                                                       conversations=0, ms=1, result="ok")
+
+        store.previous_conversation = pick
+        session = live_session.LiveSession(
+            screen, "fixture", store, SimpleNamespace(revision=0, name="시험친구 가"),
+            server.setup, AsyncMock(return_value={}), {}, {},
+            "fixture", "fixture", "fixture", "fixture-client",
+        )
+        with patch.object(continuity, "MODE", "on"), patch.object(
+            live_session, "ClientSession", lambda **_: HTTP(next(sockets)),
+        ):
+            task = asyncio.create_task(session.run())
+            try:
+                await until(lambda: screen.kinds().count("ready") == 1)
+                self.assertTrue(any("합성 이전 기억" in str(value) for _, value in first.sent))
+                session.handle = "stale-handle"
+                current[0] = "합성 새 글"
+                session.reset.set()
+                await until(lambda: screen.kinds().count("ready") == 2)
+                self.assertEqual(store.picks, [("call-1", "start"), ("call-1", "reconnect")])
+                self.assertNotIn("handle", second.sent[0][1]["setup"]["sessionResumption"])
+                self.assertTrue(any("합성 새 글" in str(value) for _, value in second.sent))
+                self.assertFalse(any("합성 이전 기억" in str(value) for _, value in second.sent))
+            finally:
+                screen.say({"type": "stop"})
+                await asyncio.wait_for(task, 3)
+
+    async def test_handoff_seeds_history_before_sending_lead_in(self):
+        server = await check_setup()
+        timeline = []
+        first, warmed = Provider(timeline), Provider(timeline)
+        sockets = iter((first, warmed))
+        screen = Screen(timeline)
+        store = HistoryStore()
+        store.tuning = AsyncMock(return_value=parse_tuning("base-20261116", ["text_handoff=on"]))
+        session = live_session.LiveSession(
+            screen, "fixture", store, SimpleNamespace(revision=0, name="시험친구 가"),
+            server.setup, AsyncMock(return_value={}), {}, {},
+            "fixture", "fixture", "fixture", "fixture-client",
+        )
+        with patch.object(continuity, "MODE", "on"), patch.object(
+            live_session, "ClientSession", lambda **_: HTTP(next(sockets)),
+        ):
+            task = asyncio.create_task(session.run())
+            try:
+                await until(lambda: "ready" in screen.kinds())
+                self.assertTrue(await session.prepare_handoff(lambda: True, "turn"))
+                self.assertEqual([next(iter(value)) for _, value in warmed.sent], ["setup", "clientContent"])
+                history = warmed.sent[1][1]["clientContent"]["turns"]
+                self.assertIn("인사하지 마", history[-1]["parts"][0]["text"])
+                self.assertEqual(store.picks[-1], ("call-1", "handoff"))
+            finally:
+                screen.say({"type": "stop"})
+                await asyncio.wait_for(task, 3)
 
     async def test_timed_seed_guide_and_instruction_limit(self):
         server = await check_setup()

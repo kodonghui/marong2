@@ -310,7 +310,7 @@ def setup(handle=None,seed='',memory=False,hangup=False,search=None,ring=None,tu
       'realtimeInputConfig':{'automaticActivityDetection':{'silenceDurationMs':700,'prefixPaddingMs':100}},
       'contextWindowCompression':{'triggerTokens':8192,'slidingWindow':{'targetTokens':4096}},
       'sessionResumption':resume,'inputAudioTranscription':{},'outputAudioTranscription':{},'explicitVadSignal':True}}
-    if initial_history:
+    if initial_history and not handle:
         result["setup"]["historyConfig"] = {"initialHistoryInClientContent": True}
     if character is not None:
         result["setup"]["systemInstruction"]["parts"].append(
