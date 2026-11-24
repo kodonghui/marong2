@@ -1,6 +1,6 @@
 # FCM 등록 해제 판단: 기능 명세
 
-상태: 2026-11-24 체크포인트 통과(D181\~D185, 승인한 사람 사용자님, [01 도메인 8.1절](../01-domain/fcm-unregistered.md#81-체크포인트-답2026-11-24)). 새 행은 active예요. 바뀐 승인 행(SPEC-117·126·131·430, app-update 8.5, PR #127로 바뀐 SPEC-460·438·8.6)은 답(D182)대로 그 문서에서 고쳤고, 바뀌기 전 글은 [01 도메인 7절](../01-domain/fcm-unregistered.md#7-바뀌는-승인-항목항목마다-따로-여쭤요)에 있어요.
+상태: 2026-11-24 체크포인트 통과(D181\~D186, 승인한 사람 사용자님, [01 도메인 8.1절](../01-domain/fcm-unregistered.md#81-체크포인트-답2026-11-24)). 새 행은 active예요. 바뀐 승인 행(SPEC-117·126·131·430, app-update 8.5, PR #127로 바뀐 SPEC-460·438·8.6)은 답(D182)대로 그 문서에서 고쳤고, 바뀌기 전 글은 [01 도메인 7절](../01-domain/fcm-unregistered.md#7-바뀌는-승인-항목항목마다-따로-여쭤요)에 있어요.
 입력: [요구사항](../02-prd/fcm-unregistered.md) REQ-630·631, [도메인](../01-domain/fcm-unregistered.md) TERM-280과 4절(지금 동작), 승인 명세 [app-chat.md](../app-chat.md)(SPEC-117·126), [app-ring.md](../app-ring.md)(SPEC-131), [app-update.md](app-update.md)(SPEC-430·435, 8.5), [call-first.md](call-first.md)(SPEC-266), [unified.md](unified.md)(SPEC-383).
 기준 코드: `main` `1a29477`(운영 `marong-app` 파일과 해시가 같음, 2026-11-24).
 표시: [사실] 코드·공식 문서에서 확인, [새 제안] 이 명세에서 Claude가 정한 것, [추정] 근거 있는 짐작. 예시의 FID·메시지는 모두 지어낸 값이에요.
@@ -10,7 +10,7 @@ ID 번호: SPEC-510\~512(이 패키지 범위 510\~519).
 
 - 바뀌는 코드는 `marong/fcm.py` 하나예요. 결과 이름 넷(`ok`·`gone`·`auth`·`failed`)과 그 이름을 읽는 곳(`AppPush._send`, `AppUpdatePush._send`의 `FAILURE_STATUS`)은 그대로이고, `gone`의 뜻만 좁아져요.
 - 보내기 한 번의 10초 예산, 429·500·502·503·504와 연결 오류의 다시 보내기(1초·2초 또는 `Retry-After` 10초까지), 업데이트 메시지는 보내기 안에서 다시 보내지 않음, 401이면 토큰 버림, 키 문제 경고 1시간 한 번은 모두 그대로예요.
-- 표·마이그레이션·API·앱·화면은 바뀌지 않아요. 켜고 끄는 설정은 두지 않는 것이 추천이고, AGENTS.md 규칙의 예외라 사용자님 답을 기다려요(질문 5, D186).
+- 표·마이그레이션·API·앱·화면은 바뀌지 않아요. 켜고 끄는 설정(drop-in의 `Environment=`)은 두지 않아요. AGENTS.md 규칙의 예외이고, 사용자님 직접 답 "설정 없이 넣어도 됨"(마롱이 항목 96 e1770, 2026-11-24 KST)으로 정했어요(질문 5, D186). 반영하면 바로 바뀌고, 되돌리기는 백업한 `fcm.py`로 바꾸고 `marong-app.service`를 재시작해요.
 - 로그에는 메시지 글, FID, 설치 ID, 이메일, OAuth 토큰, FCM 오류 메시지(`error.message`, `fieldViolations[].description`)을 남기지 않아요(REQ-118).
 
 ## 2. 기능 표
