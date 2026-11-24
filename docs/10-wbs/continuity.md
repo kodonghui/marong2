@@ -92,7 +92,7 @@
 | TASK-528 | 구현 및 시험 완료 | `4ee1918`, `efabfc9`, `b43f1c3` | 설정 시작 시 읽기와 숫자 진단 시험 2건, `shadow`와 `off`의 모델 메시지 동일성 확인. |
 | TASK-529 | 구현 및 시험 완료 | `faa419d` | TC-178·685 통과. 모드·대본 조합 6개, 정답·오답 100%·0%, 시간·토큰·비용 출력. Windows 음성 합성으로 18개 PCM 대본 작성. |
 | TASK-530 | 합성 실측 완료, TC-675 재측정 통과 | `faa419d`, `ed905ff` | 초기 49회 유효, 3,065.965초, 비용 0.488173달러. 수정된 입력의 TC-675는 추가 10회 유효, 215.247초, 비용 0.068288달러. 정확도·지연·토큰·비용은 아래 표 참조. |
-| TASK-531 | 운영 반영 보류 | `ffbe6c1`(반영 대상) | 운영 카카오 게이트웨이가 `/opt/marong`의 코드로 실행 중이고 관련 파일 4개의 기준 차이를 확인했다. 1단계 `off`와 2단계 `shadow` 모두 반영 전 중단했다. [사전 대조](#task-531-운영-반영-사전-대조) 참조. |
+| TASK-531 | 운영 반영 보류 | `ffbe6c1`(반영 대상) | 카카오는 이번 반영에서 제외했다. 앱·웹 글 대화가 `/opt/marong`의 실행 환경과 응답 지시문을 사용해 통화·정리·앱 세 서비스의 1단계 `off`와 2단계 `shadow`를 반영 전 중단했다. [사전 대조](#task-531-운영-반영-사전-대조) 참조. |
 | TASK-532 | 진행 표와 초안 PR 설명 정리 | `03377b0`, `16acb6e` | TASK별 상태·커밋·시험, 합성 실측 비용 및 별도 운영 승인 지점을 기록했다. |
 | TASK-533 | 끝 | PR #120(`107c224`와 그 뒤 커밋) | 2026-11-24 답대로 C-1\~C-8을 spec.md(SPEC-004·017·024, 3.1, 5.4)·requirements.md(REQ-022)·unified.md(SPEC-382)·call-cost.md(SPEC-182)에 반영, 바뀌기 전 글은 각 문서 끝 '바뀐 승인 글'. 질문 6 '보내도 됨'·질문 7 '써도 됨'(항목 78)과 C-9 '지금 반영'(항목 77)을 기록하고 3.11 반영 순서에서 BUG-117 단계를 뺌. 단계 기록 01\~10·12 통과, README '시작 가능' |
 | TASK-534 | 운영에 설정 2행 추가 및 확인 | 사전 기록 `ff80295`, BUG-117 기록 PR #122 (`d66f87d`) | 2026-11-24 KST 사용자님 "넣어도 됨"(마롱이 항목 86, 설정 행 추가 승인). `ctx32k-20261124`와 `ctx16k-20261124`를 한 번씩 추가했다. 저장 위치 `/home/opc/marong-deploy/20261124-continuity-tuning.MKmbnOQS/`의 `before.json` 488바이트, `after.json` 1,369바이트, 권한 각각 600. 두 `jq` 출력 모두 `true`. 15:07 KST 읽기 조회에서 활성 `base-20261116`, 설정 3행 확인. TC-688은 압축 8,192·4,096, 답 상한 1,024, VAD 700·100, 기억 상한 30의 객체 값 일치와 TC-644 격리 회귀 1건 통과를 확인했다. BUG-117 반영 14:34:52 KST 후 303초간 오류와 `call_tuning_fallback` 각 0건. 전체 setup 직렬화 비교 기록이 없고 첫 웹 통화 구간은 15:07 KST에도 `waiting_for_first_call`이었다. 모델 호출 0회, 비용 0달러. |
@@ -142,16 +142,16 @@ TASK-530 종료 뒤 기존 측정 프로세스를 닫고, 기억 블록을 채�
 
 ### TASK-531 운영 반영 사전 대조
 
-2026-11-24 18:34 KST 운영의 카카오 게이트웨이 `marong.service`가 `/opt/marong`에서 `run.py`로 실행 중이었다. 이 진입점은 해당 사본의 `marong.agent`와 `marong.store`를 가져온다. 글 답변의 SPEC-483을 반영할 대상이다. `marong-app`은 같은 작업 디렉터리를 사용하지만 실행 파일은 `/opt/marong-app/run_app.py`였다.
+2026-11-24 18:34 KST에 카카오 게이트웨이 `marong.service`가 `/opt/marong/run.py`로 실행되고 해당 사본의 `marong.agent`와 `marong.store`를 가져오는 것을 확인했다. 후속 지시에 따라 이번 반영의 대상은 통화 서버 `marong-vertex-live`, 정리기 `marong-voice-memory`, 앱 서버 `marong-app`이며 카카오는 제외한다.
 
-| `/opt/marong` 기준 경로 | 운영 SHA-256 앞 12자리 | `1a29477` SHA-256 앞 12자리 |
-| --- | --- | --- |
-| `run.py` | `bf483b5c700b` | `4c8d3ac92161` |
-| `marong/agent.py` | `61ef9df4891a` | `c6dbc17d3932` |
-| `marong/store.py` | `47d54dd9cc8c` | `6b75cb80e5fa` |
-| `marong/friend_scope.py` | 파일 없음 | `185736710a22` |
+| `/opt/marong` 기준 경로 | 운영 SHA-256 앞 12자리 | `1a29477` SHA-256 앞 12자리 | 이전 버전과 운영 코드 차이 |
+| --- | --- | --- | --- |
+| `run.py` | `bf483b5c700b` | `4c8d3ac92161` | 이전 버전. `abeefd64`의 파일과 바이트 일치. `main`은 승인 기준과 함수 구문이 다르다. |
+| `marong/agent.py` | `61ef9df4891a` | `c6dbc17d3932` | 이전 버전과 운영 변형이 섞여 있다. `Agent._system`, `Agent.persona`, `Agent._reply`를 포함해 30개 함수 중 29개가 `d6d4d813`과 구문 일치한다. `Agent.ask`는 해당 버전의 함수 내부 반복 대신 `answer_with_tools`에 위임하는 운영 변형이다. 위임 방식은 저장소에도 이후 도입됐으며 운영 함수와 구문이 같은 버전은 비교한 Git 이력에서 찾지 못했다. |
+| `marong/store.py` | `47d54dd9cc8c` | `6b75cb80e5fa` | 이전 버전. `d6d4d813`의 파일과 바이트 일치. `Store.call_context`, `Store.discord_context`는 승인 기준과 함수 구문이 다르다. |
+| `marong/friend_scope.py` | 파일 없음 | `185736710a22` | 이전 파일 구성. `70de918`에서 `accepted_circle` 함수를 담은 파일을 추가했다. |
 
-- 함수 구문을 비교해 카카오 시작점 `main`, 지시문 생성 `Agent._system`, 통화 기억 조회 `Store.call_context`의 구현 차이를 확인했다. `ffbe6c1`의 공용 파일을 반영하기 전에 카카오 사본의 동작을 보존하는 적용본과 검증 기준이 필요하다.
-- 앱의 기존 대상 4개와 통화·정리의 기존 대상 6개는 `1a29477`과 일치했다. 통화 런타임의 변경 대상 `tool_trace.py`도 추가로 일치했다.
-- 읽기 확인에서 `marong-vertex-live`·`marong-voice-memory` 사용자 유닛과 `marong-app`·`marong` 시스템 유닛은 `active`였다. 통화 `/healthz`와 앱 `/chat/healthz`는 HTTP 200이었다. `marong-discord`는 시스템·사용자 유닛에서 `inactive`였다. 활성 구간 설정은 `base-20261116`이었다.
-- 1·2단계 배포 시각과 복구 스크립트는 없다. DB·파일 백업, 파일 교체, 설정 변경, 유닛 재시작 전 중단했다. 배포 후 로그 5분, 적용 파일 해시, 지시문 해시, `continuity_pick`은 미검증이다.
+- 앱의 기존 대상 4개와 통화·정리의 기존 대상 6개는 18:34 KST에 `1a29477`과 일치했다. 통화 런타임의 변경 대상 `tool_trace.py`도 일치했다.
+- 후속 확인에서 앱 진입점과 `app_chat`, `agent`, `store`, `config` 모듈의 경로는 `/opt/marong-app`이었다. 실행 중인 프로세스의 Python 경로는 `/opt/marong/.venv/bin/python`, 작업 디렉터리는 `/opt/marong`이었다. `run_app.main`은 이 경로의 `.env`를 읽는다. 글 답변의 `Agent._system`에서 호출하는 `Agent.persona`는 실효 설정 기준으로 `/opt/marong/prompt.md`와 `/opt/marong/knowledge`를 읽는다.
+- 2026-11-24 18:45:31 KST 읽기 확인에서 `marong-vertex-live`·`marong-voice-memory` 사용자 유닛과 `marong-app`·`marong` 시스템 유닛은 `active`였다. 통화 `/healthz`와 앱 `/chat/healthz`는 HTTP 200이었다. 활성 구간 설정은 `base-20261116`이었다.
+- 앱이 `/opt/marong`에 의존할 경우 중단하라는 지시에 따라 DB·파일 백업, 파일 교체, 설정 변경, 유닛 재시작 전에 중단했다. 세 서비스의 1·2단계 반영 시각과 복구 스크립트 경로는 없다. 배포 후 5분 로그, 적용 파일 SHA-256, 지시문 해시, `continuity_pick`은 미검증이다.
