@@ -50,9 +50,14 @@
           "level": "info",
           "message": "기능 변경 3 체크포인트 통과(D147~D149·D160~D163, 2026-11-24, 질문 0~6 모두 추천안, PR #127): 9.4절에 답과 결정 표(D147~D149·D160~D163), 결과·다음을 적고 상태·ID 줄, TERM-242, 규칙 ④, 5절 API-267 줄, 핫스팟 줄(answered D160)의 제안 표시를 지움",
           "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜. TERM-270 업데이트 내역·TERM-271 반영 단위 더함, CTX-026 관리 화면에 화면 하나. 새 CTX 없음. 기록은 docs/01-domain/admin-changelog.md 0절, TERM-176 글 바뀜은 4-1로 따로 질문",
+          "at": "2026-11-24"
         }
       ],
-      "updated": "2026-11-24T07:07:45+00:00"
+      "updated": "2026-11-24T07:31:05+00:00"
     },
     "02-prd": {
       "state": "done",
@@ -107,9 +112,14 @@
           "level": "info",
           "message": "기능 변경 3 체크포인트 통과(D147~D149·D160~D163, 2026-11-24, 질문 0~6 모두 추천안, PR #127): 결정 표에 D147~D149·D160~D163, REQ-586·587 active, 시작 값 두 줄에 D161·D162, 목록 3의 답 칸 '바꿈(D148 3-x)'과 '이 목록이 바뀐 글의 변경 기록' 한 줄, 질문 답 줄. REQ-572·577과 시작 값의 제안 표시를 'D148 3-x'로",
           "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜. REQ-620~625(proposed), 시작 값, 기능 변경 목록 4-1~4-12(답 칸 빔), 체크포인트 질문 0~7. docs/02-prd/admin-changelog.md",
+          "at": "2026-11-24"
         }
       ],
-      "updated": "2026-11-24T07:07:45+00:00"
+      "updated": "2026-11-24T07:31:05+00:00"
     },
     "03-user-flow": {
       "state": "done",
@@ -153,9 +163,14 @@
           "level": "info",
           "message": "기능 변경 3 체크포인트 통과(D147~D149·D160~D163, 2026-11-24, 질문 0~6 모두 추천안, PR #127): FL-192 꺼짐 분기 줄(D148 3-3)과 FL-201 칸 H 줄(D148 3-14), Serves 줄의 제안 표시를 지움. 그림은 바뀜 없음",
           "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜. FL-215 업데이트 내역 보기, FL-216 반영 때 업데이트 내역 쓰기 더함(lint 0). FL-200 메모 줄은 4-4로 따로 질문",
+          "at": "2026-11-24"
         }
       ],
-      "updated": "2026-11-24T07:07:45+00:00"
+      "updated": "2026-11-24T07:31:05+00:00"
     },
     "04-functional-spec": {
       "state": "done",
@@ -215,9 +230,14 @@
           "level": "info",
           "message": "기능 변경 3 체크포인트 통과(D147~D149·D160~D163, 2026-11-24, 질문 0~6 모두 추천안, PR #127): SPEC-459·460 active(D147), SPEC-453·456 상태 칸 'D148 3-x, 2026-11-24 바뀜', 3.2·3.3·3.5·3.6과 추적 표의 제안 표시를 'D148 3-x'로. 다른 part의 3-1·3-4·3-6도 승인(D148)",
           "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜. SPEC-500~504(proposed): 파일 형식·API-300·SCR-220·반영 때 put/check·지난 내역. SPEC-450의 경로·탭 수는 4-5·4-6로 따로 질문. docs/04-functional-spec/admin-changelog.md",
+          "at": "2026-11-24"
         }
       ],
-      "updated": "2026-11-24T07:07:45+00:00"
+      "updated": "2026-11-24T07:31:05+00:00"
     },
     "05-erd": {
       "state": "done",
@@ -260,9 +280,14 @@
           "level": "info",
           "message": "기능 변경 3 체크포인트(D147, 2026-11-24): '바뀜 없음'으로 기록(오랑이 덧붙임). TBL-101 dropped_at이 이미 있어 새 표·칸·마이그레이션이 없어요",
           "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜 없음. 내역은 DB가 아니라 저장소 파일(marong/changelog/<id>.json)이에요(질문 3의 추천 B). C를 고르면 다시 씀",
+          "at": "2026-11-24"
         }
       ],
-      "updated": "2026-11-24T07:07:45+00:00"
+      "updated": "2026-11-24T07:31:05+00:00"
     },
     "06-api": {
       "state": "done",
@@ -306,9 +331,14 @@
           "level": "info",
           "message": "기능 변경 3 체크포인트 통과(D147~D149·D160~D163, 2026-11-24, 질문 0~6 모두 추천안, PR #127): api/admin.openapi.yaml 0.2.0과 api/app-update.openapi.yaml 0.3.0 설명의 '체크포인트 전 제안'을 승인 표시(D148·D160·D161)로 바꿈. 계약 모양은 바뀜 없음",
           "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜. api/admin.openapi.yaml 0.3.0-draft에 API-300 GET /chat/admin/api/changes와 스키마 넷(proposed). 0.2.0은 기능 변경 3이 씀, 늦게 합치는 쪽이 번호를 올림. PyYAML로 읽기 확인",
+          "at": "2026-11-24"
         }
       ],
-      "updated": "2026-11-24T07:07:45+00:00"
+      "updated": "2026-11-24T07:31:05+00:00"
     },
     "07-sitemap": {
       "state": "done",
@@ -352,9 +382,14 @@
           "level": "info",
           "message": "기능 변경 3 체크포인트 통과(D147~D149·D160~D163, 2026-11-24, 질문 0~6 모두 추천안, PR #127): sitemap.md·sitemap.yaml의 TERM-242 표시에서 '제안'을 지우고 D147을 적음. 화면·경로는 바뀜 없음",
           "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜. SCR-220 업데이트 내역(/chat/admin/changes)을 SCR-169 아래에 더함(proposed), sitemap.md 그림 lint 0",
+          "at": "2026-11-24"
         }
       ],
-      "updated": "2026-11-24T07:07:45+00:00"
+      "updated": "2026-11-24T07:31:05+00:00"
     },
     "08-screen-states": {
       "state": "done",
@@ -409,9 +444,14 @@
           "level": "info",
           "message": "기능 변경 3 체크포인트 통과(D147~D149·D160~D163, 2026-11-24, 질문 0~6 모두 추천안, PR #127): SCR-186#decor-off(pet-app 08), SCR-201#app-removed, SCR-203#app-removed와 바뀐 글의 제안 표시를 'D148 3-x'로, 상태 줄에 D147·D161·D162, 와이어프레임 머리 주석도",
           "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜. SCR-220 상태 표(docs/08-screens/admin-changelog.md). admin.md 1절·1.1절의 탭 글은 4-7·4-8로 따로 질문. 4-7에 '처음 그릴 때 지금 탭이 보이게 밂'을 새로 제안(360px에서 탭 일곱 폭 합 505px > 탭 줄 328px)",
+          "at": "2026-11-24"
         }
       ],
-      "updated": "2026-11-24T07:07:45+00:00"
+      "updated": "2026-11-24T07:31:05+00:00"
     },
     "09-mockup": {
       "state": "done",
@@ -449,9 +489,14 @@
           "level": "info",
           "message": "기능 변경 3 체크포인트(D147, 2026-11-24): '바뀜 없음'으로 기록(오랑이 덧붙임). 새 토큰이 없고 '앱 지워짐' 표는 지금 부품의 흐린 글이에요",
           "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 토큰 바뀜 없음, 목업 더함: design/admin-changelog-mockup.html, design/admin-changelog/(screen.html·changelog.css·screen.js·data.js, 그림 셋). Edge 158 headless로 360·430·1024·1280·1440px 아홉 상태(리뷰 뒤 #unreadable 더함) 가로 넘침 0을 측정",
+          "at": "2026-11-24"
         }
       ],
-      "updated": "2026-11-24T07:07:45+00:00"
+      "updated": "2026-11-24T07:31:05+00:00"
     },
     "10-wbs": {
       "state": "done",
@@ -511,9 +556,14 @@
           "level": "info",
           "message": "기능 변경 3 체크포인트 통과(D147~D149·D160~D163, 2026-11-24, 질문 0~6 모두 추천안, PR #127): 인계 '상태'·'시작'(마롱이 지시)·'반영'(D163 설정 없음, 운영 반영은 사용자님 승인 뒤), 끝 조건과 TASK-502~505에 TC-658·659, 11단계 표 '시작 전(마롱이 지시 기다림)'. README에 결정 줄, 패키지 행, ID 표(TC 653~659, D147~149·160~163 씀, D164~169 남음), 순서 13",
           "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜. TASK-540~545(docs/10-wbs/admin-changelog.md, 체크포인트 전 시작 불가), 지난 내역 초안(반영 단위 47, 항목 79, 반영 폴더 63개 대조). README에 D170·D171, 패키지·ID 범위·겹치는 파일·순서 줄",
+          "at": "2026-11-24"
         }
       ],
-      "updated": "2026-11-24T07:07:45+00:00"
+      "updated": "2026-11-24T07:31:05+00:00"
     },
     "12-qa": {
       "state": "done",
@@ -568,9 +618,14 @@
           "level": "info",
           "message": "기능 변경 3 체크포인트 통과(D147~D149·D160~D163, 2026-11-24, 질문 0~6 모두 추천안, PR #127): TC-658(다른 이유의 404가 '꺼짐'으로 보이는 경우, D149 덧붙임)과 TC-659(뒤처짐을 세는 네 곳이 같은 값, D160 덧붙임)를 더하고, TC-657에 API-263 404의 Content-Type·code 확인을 더함. 남는 번호 TC-642·660~669",
           "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "업데이트 내역 기능 변경 4(D170·D171, 2026-11-24, 설계 PR kodonghui/claude-admin-changelog-design, 기준 main 1a29477, 체크포인트 전): 바뀜. TC-700~713(docs/12-qa/admin-changelog.md). TC-620 글은 4-9로 따로 질문, TC-637·640·641은 그대로 다시 돌림",
+          "at": "2026-11-24"
         }
       ],
-      "updated": "2026-11-24T07:07:45+00:00"
+      "updated": "2026-11-24T07:31:05+00:00"
     }
   }
 }

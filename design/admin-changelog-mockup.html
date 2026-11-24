@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>업데이트 내역 목업</title>
+<style>
+/* 09 단계 목업: SCR-220 업데이트 내역(기능 변경 4). 원본은 docs/08-screens/admin-changelog.md.
+   칸마다 design/admin-changelog/screen.html을 그 폭의 iframe으로 열어서, 폭마다 미디어 질의가 실제처럼 바뀌어요.
+   색·글꼴·탭 줄은 지금 marong/app_chat_static/chat.css·unified.css 그대로이고, 새 부품 CSS는 design/admin-changelog/changelog.css예요.
+   '(예시)'가 붙은 맨 위 단위와 '긴 글' 상태는 지어낸 줄이고, 나머지는 docs/10-wbs/admin-changelog-backfill.md의 실제 지난 내역 줄이에요. */
+:root {--page:#0e1222; --surface:#1c2340; --line:#b4b2c630; --text:#f4f1ea; --muted:#b4b2c6}
+* {box-sizing: border-box}
+body {margin: 0; padding: 24px 16px 48px; background: var(--page); color: var(--text);
+  font: 14px/1.5 "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif}
+h1 {font-size: 22px; margin: 0 0 4px}
+.lead {color: var(--muted); margin: 0 0 16px; max-width: 80ch}
+nav.jump {display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 24px}
+nav.jump a {color: var(--text); border: 1px solid var(--line); padding: 4px 10px; border-radius: 999px; text-decoration: none; font-size: 13px}
+section.state {margin: 0 0 40px}
+section.state h2 {font: 600 15px/1.4 ui-monospace, Consolas, monospace; margin: 0 0 4px}
+section.state p {margin: 0 0 12px; color: var(--muted); max-width: 90ch}
+.pair {display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start}
+.frame {border: 1px solid var(--line); border-radius: 12px; overflow: hidden; flex: none; max-width: 100%}
+.frame .w {font: 11px ui-monospace, Consolas, monospace; color: var(--muted); padding: 4px 8px; border-bottom: 1px dashed var(--line)}
+.frame iframe {display: block; border: 0}
+.phone {width: 362px} .phone iframe {width: 360px; height: 760px}
+.laptop {width: 642px; height: 482px} .laptop .box {width: 640px; height: 450px; overflow: hidden}
+.laptop iframe {width: 1280px; height: 900px; transform: scale(.5); transform-origin: 0 0}
+</style>
+</head>
+<body>
+<h1>SCR-220 업데이트 내역 목업</h1>
+<p class="lead">관리 페이지 일곱째 탭이에요. 반영 한 번이 그룹 하나이고, 그룹 아래 항목마다 '변경 전'·'변경 후'를 나란히 보여요. 폰(360px)은 카드, 노트북(1280px, 1024px부터)은 여섯 칸 표예요. 노트북 칸은 반으로 줄여 보여요. 칸 안은 직접 눌러 볼 수 있어요(칩 거르기, 근거 링크).</p>
+<nav class="jump" aria-label="상태로 가기"></nav>
+<main id="states"></main>
+<script>
+const STATES = [
+  ["normal", "SCR-220#normal · #backfilled · #no-date", "새것부터. 맨 위 '(예시)'는 앞으로 쓸 내역 모양이고, 그 아래는 실제 지난 내역이에요(지난 기록에서 채움 표). 맨 아래 PR #1 단위는 반영 기록이 없어 PR을 합친 날로 놓였어요."],
+  ["filtered", "SCR-220#filtered", "칩 '통화'를 고른 모양. 통화 항목만 남고 통화 항목이 없는 그룹은 숨어요. 세는 줄도 거른 수로 바뀌어요."],
+  ["filter-empty", "SCR-220#filter-empty", "칩 '대화'를 골랐는데 이 목록에 대화 항목이 없을 때."],
+  ["skipped", "SCR-220#skipped", "검사를 통과하지 못한 내역 파일 2개를 빼고 보여 줄 때."],
+  ["long", "SCR-220#long", "이름 40자, 항목 40자, 변경 전·후 100자, 긴 영문 경로, 꺾쇠가 든 글(글자 그대로 보여요). 지어낸 줄이에요."],
+  ["empty", "SCR-220#empty", "내역 파일이 하나도 없을 때. 칩은 꺼져요."],
+  ["loading", "SCR-220#loading", "받는 동안 자리만 잡아요."],
+  ["error", "공통#error", "API-300이 500이거나 네트워크가 끊겼을 때."],
+];
+const jump = document.querySelector("nav.jump"), box = document.getElementById("states");
+function frame(cls, label, src) {
+  const f = document.createElement("div"); f.className = "frame " + cls;
+  const w = document.createElement("div"); w.className = "w"; w.textContent = label;
+  const i = document.createElement("iframe"); i.src = src; i.loading = "lazy"; i.title = label;
+  if (cls === "laptop") { const b = document.createElement("div"); b.className = "box"; b.append(i); f.append(w, b); }
+  else f.append(w, i);
+  return f;
+}
+for (const [key, name, note] of STATES) {
+  const a = document.createElement("a"); a.href = "#" + key; a.textContent = key; jump.append(a);
+  const s = document.createElement("section"); s.className = "state"; s.id = key;
+  const h = document.createElement("h2"); h.textContent = name;
+  const p = document.createElement("p"); p.textContent = note;
+  const pair = document.createElement("div"); pair.className = "pair";
+  const src = "admin-changelog/screen.html?state=" + key;
+  pair.append(frame("phone", "폰 360px", src), frame("laptop", "노트북 1280px(반으로 줄임)", src));
+  s.append(h, p, pair); box.append(s);
+}
+</script>
+</body>
+</html>

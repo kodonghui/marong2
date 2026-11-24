@@ -427,3 +427,29 @@ flowchart TD
 - 화면: SCR-203 앱 버전, SCR-204 비용
 - 흐름: FL-201 새 버전을 올린 뒤 폰들이 받는지 보기, FL-200의 비용 분기
 - 볼 점: 앱 버전은 API-267을 읽기만 하고 단추가 없어요. 뒤처진 폰을 펼치면 보냄부터 설치까지의 기록이 보여요. 비용은 통화(UTC 달)와 그림(한국 시각 달)을 따로 보여요.
+
+## 관리 페이지 업데이트 내역(기능 변경 4, 2026-11-24 제안)
+
+체크포인트 전 제안이에요(D170·D171, [도메인](../01-domain/admin-changelog.md)). 관리 페이지 탭 줄 끝에 일곱째 화면 '업데이트 내역'(SCR-220)이 늘어요. 서비스 전체(앱·웹·통화·대화·관리·카톡·디스코드)에서 바뀐 것을 반영 단위마다 묶어 '변경 전·변경 후'로 보여요. 화면 정의는 [08 admin-changelog.md](../08-screens/admin-changelog.md), API는 `api/admin.openapi.yaml`의 API-300이에요. 다른 화면의 경로와 흐름은 그대로이고, 탭 줄의 글(개요 · 회원 · 초대 링크 · 앱 버전 · 비용 · 아이템 · 업데이트 내역)만 바뀌어요([기능 변경 목록 4](../02-prd/admin-changelog.md#기능-변경-목록-4승인된-항목이-바뀌는-곳)의 4-5·4-7에서 따로 물어요).
+
+```mermaid
+flowchart TD
+  %% grammar: structure
+  U169["SCR-169 개요<br/>/chat/admin/"]
+  A203["SCR-203<br/>앱 버전<br/>/chat/admin/app"]
+  A220["SCR-220<br/>업데이트 내역<br/>/chat/admin/changes"]
+  GH["근거 PR·커밋<br/>공개 저장소<br/>새 창"]
+  U169 -->|"탭"| A220
+  A203 -->|"탭"| A220
+  A220 -->|"근거 링크"| GH
+  classDef outside stroke-dasharray: 5 5
+  class U169,A203,GH outside
+```
+
+업데이트 내역은 탭 줄의 한 칸이라 어느 관리 화면에서도 한 번에 가요. 그림에는 개요와 앱 버전 두 곳만 그렸어요. 점선 칸은 이미 있는 화면과 관리 페이지 밖(공개 저장소)이에요.
+
+| ID | 이름 | 경로 | 누가 보나 | 흐름 | 용어 |
+| --- | --- | --- | --- | --- | --- |
+| SCR-220 | 관리자 업데이트 내역(proposed) | `/chat/admin/changes` | 동희님(Cloudflare Access) | FL-215 | CTX-026, TERM-176, TERM-270, TERM-271 |
+
+화면이 없는 흐름: FL-216(반영 때 업데이트 내역 쓰기)은 저장소 PR과 `deploy/ovh.sh changelog`예요.
