@@ -284,6 +284,10 @@ def fcm_unregistered():
     return fcm_error(404, "NOT_FOUND", fcm_detail("UNREGISTERED"))
 
 
+FCM_FIXTURE_FID = "f" * 20
+FCM_FIXTURE_TOKEN = "_".join(("oauth", "fixture"))
+
+
 def mock_fcm(answer, **kwargs):
     pem = KEY.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                             serialization.NoEncryption()).decode()
@@ -291,9 +295,9 @@ def mock_fcm(answer, **kwargs):
 
     def handler(request):
         if str(request.url) == fcm_module.TOKEN_URL:
-            return httpx.Response(200, json={"access_token": "oauth-fixture"})
+            return httpx.Response(200, json={"access_token": FCM_FIXTURE_TOKEN})
         assert str(request.url) == fcm_module.SEND_URL.format(project=account.project_id)
-        assert request.headers["Authorization"] == "Bearer oauth-fixture"
+        assert request.headers["Authorization"] == f"Bearer {FCM_FIXTURE_TOKEN}"
         return answer(json.loads(request.content)["message"])
 
     return fcm_module.FCM(account, http=httpx.AsyncClient(transport=httpx.MockTransport(handler)), **kwargs)
@@ -338,8 +342,8 @@ async def scripted_fcm_send(answers, *, update=False, sends=1, sleep_extra=0):
         waits.append(seconds)
 
     sender = mock_fcm(answer, monotonic=lambda: sum(waits) + len(waits) * sleep_extra, sleep=sleep)
-    msg = (fcm_module.app_update("f" * 20, 13) if update else
-           fcm_module.notice("f" * 20, "proactive", "시험알림글", channel=TALK, ttl_s=60))
+    msg = (fcm_module.app_update(FCM_FIXTURE_FID, 13) if update else
+           fcm_module.notice(FCM_FIXTURE_FID, "proactive", "시험알림글", channel=TALK, ttl_s=60))
     logger.setLevel(logging.INFO)
     logger.addHandler(capture)
     try:
@@ -372,11 +376,13 @@ async def fcm_classification_checks():
 
 
 async def fcm_log_checks():
+    opaque = "_".join(("x" * 11, "y" * 11))
+
     def status(fields, result):
         return f"fcm_send_status kind=proactive {fields} result={result}"
 
     def check_log(actual, expected, label):
-        private = ("시험오류글", "시험설명글", "시험알림글", "f" * 20, "oauth-fixture")
+        private = ("시험오류글", "시험설명글", "시험알림글", FCM_FIXTURE_FID, FCM_FIXTURE_TOKEN, opaque)
         ok(not any(value in line for value in private for line in actual), f"TC-721 {label}: no private values")
         ok(actual == expected, f"TC-721 {label}: expected log lines")
 
@@ -391,13 +397,20 @@ async def fcm_log_checks():
 
     unavailable = status("http=503 status=- code=- field=-", "failed")
     timeout = "fcm_send_error ReadTimeout"
+    invalid_field = status("http=400 status=INVALID_ARGUMENT code=- field=other", "failed")
     for label, answers, sleep_extra, expected in (
         ("success", [httpx.Response(200)], 0, []),
         ("retry success", [httpx.Response(503), httpx.Response(200)], 0, []),
         ("invalid code", [fcm_error(404, "NOT_FOUND", fcm_detail("unregistered"))], 0,
          [status("http=404 status=NOT_FOUND code=other field=-", "failed")]),
-        ("overlong field", [fcm_bad_request("a" * 100)], 0,
-         [status("http=400 status=INVALID_ARGUMENT code=- field=other", "failed")]),
+        ("overlong field", [fcm_bad_request("a" * 100)], 0, [invalid_field]),
+        ("FID as field", [fcm_bad_request(FCM_FIXTURE_FID)], 0, [invalid_field]),
+        ("token as field", [fcm_bad_request(FCM_FIXTURE_TOKEN)], 0, [invalid_field]),
+        ("FID inside field path", [fcm_bad_request(f"message.data.{FCM_FIXTURE_FID}")], 0, [invalid_field]),
+        ("token inside field path", [fcm_bad_request(f"message.data.{FCM_FIXTURE_TOKEN}")], 0, [invalid_field]),
+        ("opaque segment inside field path", [fcm_bad_request(f"message.data.{opaque}")], 0, [invalid_field]),
+        ("indexed field path", [fcm_bad_request("message.data[0].value")], 0,
+         [status("http=400 status=INVALID_ARGUMENT code=- field=message.data[0].value", "failed")]),
         ("three rejected attempts", [httpx.Response(503)] * 3, 0, [unavailable]),
         ("timeout after HTTP", [httpx.Response(503), "timeout", "timeout"], 0, [timeout, timeout, unavailable]),
         ("budget exhausted after HTTP", [httpx.Response(503)], 10, [unavailable]),
@@ -407,7 +420,7 @@ async def fcm_log_checks():
     ):
         _, _, _, actual = await scripted_fcm_send(answers, sleep_extra=sleep_extra)
         check_log(actual, expected, label)
-    print("PASS TC-721 19 rejection, retry, and log privacy scenarios")
+    print("PASS TC-721 25 rejection, retry, and log privacy scenarios")
 
 
 # ── the in-app chat against the database ─────────────────────────────────────

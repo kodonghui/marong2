@@ -33,7 +33,8 @@ RING_TTL_S = 45
 RING_LINE_MAX = 30
 LOG_KIND = re.compile(r"[a-z_]{1,20}")
 LOG_STATUS_OR_CODE = re.compile(r"[A-Z_]{1,40}")
-LOG_FIELD = re.compile(r"[A-Za-z0-9_.\[\]]{1,80}")
+LOG_FIELD = re.compile(r"message(?:\.[A-Za-z_][A-Za-z0-9_]*(?:\[[0-9]+\])?)+")
+OPAQUE_FIELD_PART = re.compile(r"[A-Za-z0-9_]{16,}")
 
 
 @dataclass(frozen=True)
@@ -126,6 +127,19 @@ def _log_value(value: object, pattern: re.Pattern[str]) -> str:
     return value if isinstance(value, str) and pattern.fullmatch(value) else "other"
 
 
+def _log_field(value: object, fid: object, token: str) -> str:
+    if value is None:
+        return "-"
+    if not isinstance(value, str) or len(value) > 80 or not LOG_FIELD.fullmatch(value):
+        return "other"
+    # A path segment may contain an identifier. FIDs are at least 16 characters.
+    if OPAQUE_FIELD_PART.search(value) or any(
+        isinstance(secret, str) and secret and secret in value for secret in (fid, token)
+    ):
+        return "other"
+    return value
+
+
 class FCM:
     def __init__(self, account: ServiceAccount, project_id: str | None = None, http: httpx.AsyncClient | None = None,
                  *, clock=time.time, monotonic=time.monotonic, sleep=asyncio.sleep):
@@ -183,7 +197,8 @@ class FCM:
         # App updates persist and schedule their own numbered attempts (SPEC-430).
         retries = () if kind == "app_update" else RETRY_GAPS_S
         last_http = None
-        status = code = field = None
+        status = code = None
+        field = "-"
         result = "failed"
         for attempt in range(len(retries) + 1):
             left = end - self.monotonic()
@@ -206,7 +221,8 @@ class FCM:
             if r.status_code == 200:
                 return "ok"
             last_http = r.status_code
-            status, code, field = _error(r)
+            status, code, response_field = _error(r)
+            field = _log_field(response_field, message.get("fid"), token)
             if last_http == 404 and code == "UNREGISTERED":
                 result = "gone"
                 break
@@ -227,6 +243,5 @@ class FCM:
         if last_http is not None:
             log.info("fcm_send_status kind=%s http=%s status=%s code=%s field=%s result=%s",
                      _log_value(kind, LOG_KIND), last_http if 100 <= last_http <= 599 else "other",
-                     _log_value(status, LOG_STATUS_OR_CODE), _log_value(code, LOG_STATUS_OR_CODE),
-                     _log_value(field, LOG_FIELD), result)
+                     _log_value(status, LOG_STATUS_OR_CODE), _log_value(code, LOG_STATUS_OR_CODE), field, result)
         return result
