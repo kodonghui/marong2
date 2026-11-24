@@ -33,8 +33,25 @@ RING_TTL_S = 45
 RING_LINE_MAX = 30
 LOG_KIND = re.compile(r"[a-z_]{1,20}")
 LOG_STATUS_OR_CODE = re.compile(r"[A-Z_]{1,40}")
-LOG_FIELD = re.compile(r"message(?:\.[A-Za-z_][A-Za-z0-9_]*(?:\[[0-9]+\])?)+")
+FIELD_SEGMENT = r"[A-Za-z_][A-Za-z0-9_]*(?:\[[0-9]+\])?"
+LOG_FIELD = re.compile(rf"{FIELD_SEGMENT}(?:\.{FIELD_SEGMENT})*")
 OPAQUE_FIELD_PART = re.compile(r"[A-Za-z0-9_]{16,}")
+# Documented FCM Message fields whose names overlap with the shape of an identifier.
+# https://firebase.google.com/docs/reference/fcm/rest/v1/projects.messages
+LONG_FCM_FIELDS = frozenset({
+    "bandwidth_constrained_ok", "bandwidthConstrainedOk",
+    "default_light_settings", "defaultLightSettings",
+    "default_vibrate_timings", "defaultVibrateTimings",
+    "light_off_duration", "lightOffDuration",
+    "light_on_duration", "lightOnDuration",
+    "live_activity_token", "liveActivityToken",
+    "notification_count", "notificationCount",
+    "notification_priority", "notificationPriority",
+    "remote_notification", "remoteNotification",
+    "restricted_package_name", "restrictedPackageName",
+    "restricted_satellite_ok", "restrictedSatelliteOk",
+    "use_as_v1_data_message", "useAsV1DataMessage",
+})
 
 
 @dataclass(frozen=True)
@@ -132,10 +149,10 @@ def _log_field(value: object, fid: object, token: str) -> str:
         return "-"
     if not isinstance(value, str) or len(value) > 80 or not LOG_FIELD.fullmatch(value):
         return "other"
-    # A path segment may contain an identifier. FIDs are at least 16 characters.
-    if OPAQUE_FIELD_PART.search(value) or any(
-        isinstance(secret, str) and secret and secret in value for secret in (fid, token)
-    ):
+    if any(isinstance(secret, str) and secret and secret in value for secret in (fid, token)):
+        return "other"
+    # FIDs are at least 16 characters. A documented field name can be that long too.
+    if any(part not in LONG_FCM_FIELDS for part in OPAQUE_FIELD_PART.findall(value)):
         return "other"
     return value
 

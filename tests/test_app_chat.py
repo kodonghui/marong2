@@ -398,6 +398,8 @@ async def fcm_log_checks():
     unavailable = status("http=503 status=- code=- field=-", "failed")
     timeout = "fcm_send_error ReadTimeout"
     invalid_field = status("http=400 status=INVALID_ARGUMENT code=- field=other", "failed")
+    package_field = "message.android.restricted_package_name"
+    field_prefix = "http=400 status=INVALID_ARGUMENT code=- field="
     for label, answers, sleep_extra, expected in (
         ("success", [httpx.Response(200)], 0, []),
         ("retry success", [httpx.Response(503), httpx.Response(200)], 0, []),
@@ -409,6 +411,14 @@ async def fcm_log_checks():
         ("FID inside field path", [fcm_bad_request(f"message.data.{FCM_FIXTURE_FID}")], 0, [invalid_field]),
         ("token inside field path", [fcm_bad_request(f"message.data.{FCM_FIXTURE_TOKEN}")], 0, [invalid_field]),
         ("opaque segment inside field path", [fcm_bad_request(f"message.data.{opaque}")], 0, [invalid_field]),
+        ("message field", [fcm_bad_request("message")], 0, [status(field_prefix + "message", "failed")]),
+        ("validate_only field", [fcm_bad_request("validate_only")], 0,
+         [status(field_prefix + "validate_only", "failed")]),
+        ("long Android field", [fcm_bad_request(package_field)], 0, [status(field_prefix + package_field, "failed")]),
+        ("long Android JSON field", [fcm_bad_request("message.android.restrictedPackageName")], 0,
+         [status(field_prefix + "message.android.restrictedPackageName", "failed")]),
+        ("FID after an Android field", [fcm_bad_request(f"{package_field}.{FCM_FIXTURE_FID}")], 0, [invalid_field]),
+        ("token after an Android field", [fcm_bad_request(f"{package_field}.{FCM_FIXTURE_TOKEN}")], 0, [invalid_field]),
         ("indexed field path", [fcm_bad_request("message.data[0].value")], 0,
          [status("http=400 status=INVALID_ARGUMENT code=- field=message.data[0].value", "failed")]),
         ("three rejected attempts", [httpx.Response(503)] * 3, 0, [unavailable]),
@@ -420,7 +430,7 @@ async def fcm_log_checks():
     ):
         _, _, _, actual = await scripted_fcm_send(answers, sleep_extra=sleep_extra)
         check_log(actual, expected, label)
-    print("PASS TC-721 25 rejection, retry, and log privacy scenarios")
+    print("PASS TC-721 31 rejection, retry, and log privacy scenarios")
 
 
 # ── the in-app chat against the database ─────────────────────────────────────
