@@ -1,6 +1,6 @@
 # 관리 페이지 업데이트 내역: 시험 계획(12단계, 기능 변경 4)
 
-상태: 초안(proposed), 2026-11-24 KST, Claude. 체크포인트 전이에요. 시험을 쓰고 돌리는 쪽은 GPT예요([AGENTS.md](../../AGENTS.md)). 작업은 [작업 목록](../10-wbs/admin-changelog.md)의 TASK-540\~545예요.
+상태: 2026-11-24 체크포인트 통과(D172, [도메인 0.4절](../01-domain/admin-changelog.md#04-체크포인트-답2026-11-24)). TC-711(반영 뒤 맞춰 보기)은 꼭 돌려요(D175). 처음 초안은 같은 날 KST, Claude. 시험을 쓰고 돌리는 쪽은 GPT예요([AGENTS.md](../../AGENTS.md)). 작업은 [작업 목록](../10-wbs/admin-changelog.md)의 TASK-540\~545예요.
 입력: [기능 명세](../04-functional-spec/admin-changelog.md) SPEC-500\~504의 받아들임 조건과 3.1\~3.6절, 요구사항 REQ-620\~625와 승인된 REQ-581·585, 흐름 FL-215·216, 계약 `api/admin.openapi.yaml` 0.3.0-draft의 API-300, 화면 정의 [SCR-220](../08-screens/admin-changelog.md), [지난 내역 초안](../10-wbs/admin-changelog-backfill.md).
 
 돌리는 법(`Runs as`)은 [관리 페이지 시험 계획](admin.md)과 같아요: `unit`(함수 하나), `api`(HTTP 경로를 부름, 관리자 확인은 시험용 Access JWT와 시험 이메일 해시. 이 기능은 DB를 쓰지 않음), `e2e`(Playwright Chromium, 밤 테마, 가짜 백엔드), `server`(운영 서버 읽기와 반영 도구), `device`(동희님이 직접).

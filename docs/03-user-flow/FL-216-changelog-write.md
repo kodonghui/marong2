@@ -3,7 +3,7 @@
 Serves: REQ-623, REQ-625
 Screens: 없음(저장소 PR과 운영 서버의 반영 절차). 결과는 SCR-220에서 보여요
 Context: 반영 절차(AGENTS.md, 제품 밖), CTX-021(앱 버전 기록은 맞춰 보기만)
-상태: proposed(2026-11-24 KST, Claude, 체크포인트 전). 하는 쪽은 반영하는 쪽(GPT, AGENTS.md D60·D65)이고 리뷰는 Claude예요(AGENTS.md 'PR 리뷰').
+상태: active(2026-11-24 체크포인트 통과, D172, 쓰는 쪽과 때는 D179). 처음 초안은 같은 날 KST, Claude. 하는 쪽은 반영하는 쪽(GPT, AGENTS.md D60·D65)이고 리뷰는 Claude예요(AGENTS.md 'PR 리뷰').
 
 ```mermaid
 flowchart TD

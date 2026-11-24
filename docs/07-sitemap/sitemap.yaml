@@ -401,12 +401,12 @@
       status: active
       flows: [FL-200]
       terms: [CTX-006, CTX-031, TERM-014, TERM-032]
-    # 업데이트 내역(2026-11-24 기능 변경 4, 체크포인트 전 제안, D170·D171): 탭 줄 끝의 일곱째 화면. 화면 정의는 docs/08-screens/admin-changelog.md, API는 api/admin.openapi.yaml의 API-300
+    # 업데이트 내역(2026-11-24 기능 변경 4, D170·D171, 같은 날 체크포인트 통과 D172·D176): 탭 줄 끝의 일곱째 화면. 화면 정의는 docs/08-screens/admin-changelog.md, API는 api/admin.openapi.yaml의 API-300
     - id: SCR-220
       name: 관리자 업데이트 내역
       path: /chat/admin/changes
       access: 동희님(Cloudflare Access)
-      status: proposed
+      status: active
       flows: [FL-215]
       terms: [CTX-026, TERM-176, TERM-270, TERM-271]
 

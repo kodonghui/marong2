@@ -1,4 +1,4 @@
-# 마롱이 관리 페이지 API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/admin.md(SPEC-450~457), 도메인: docs/01-domain/admin.md, 표 설명: docs/05-erd/admin.md(새 표 없음, 통화 함수 call.month_budget 하나). 2026-11-24 기능 변경 3(같은 날 체크포인트 통과, D148·D161): API-280 app.devices·app.behind 설명(SPEC-460). 같은 날 기능 변경 4(체크포인트 전 제안): API-300 업데이트 내역(docs/04-functional-spec/admin-changelog.md, SPEC-500~504)
+# 마롱이 관리 페이지 API 계약(OpenAPI 3.1). 설계: docs/04-functional-spec/admin.md(SPEC-450~457), 도메인: docs/01-domain/admin.md, 표 설명: docs/05-erd/admin.md(새 표 없음, 통화 함수 call.month_budget 하나). 2026-11-24 기능 변경 3(같은 날 체크포인트 통과, D148·D161): API-280 app.devices·app.behind 설명(SPEC-460). 같은 날 기능 변경 4(체크포인트 통과 D172): API-300 업데이트 내역(docs/04-functional-spec/admin-changelog.md, SPEC-500~504)
 openapi: 3.1.0
 info:
   title: 마롱이 관리 페이지 API
@@ -22,7 +22,7 @@ info:
 
     0.2.0(2026-11-24 기능 변경 3, D146. 같은 날 체크포인트 통과: D148 3-9·3-10, D161): 응답 모양은 그대로이고 API-280 `app.devices`의 뜻만 바뀌어요. `devices`는 앱 지워진 폰(API-267 0.3.0의 `removedAt`이 있는 폰)을 뺀 수예요. `behind`는 식이 그대로이고 API-267의 `behind`가 앱 지워진 폰에서 false라 그 폰이 들지 않아요(SPEC-460).
 
-    0.3.0(2026-11-24 기능 변경 4 '업데이트 내역', 체크포인트 전 제안. 0.2.0은 먼저 합쳐진 기능 변경 3(PR #127)이 씀): 읽기 API 하나(API-300 `GET /chat/admin/api/changes`)를 더해요. API-282~299는 위대로 이 part에 남겨 두고, 같은 날 다른 설계와 겹치지 않게 300번을 잡았어요.
+    0.3.0(2026-11-24 기능 변경 4 '업데이트 내역', 같은 날 체크포인트 통과 D172. 0.2.0은 먼저 합쳐진 기능 변경 3(PR #127)이 씀): 읽기 API 하나(API-300 `GET /chat/admin/api/changes`)를 더해요. API-282~299는 위대로 이 part에 남겨 두고, 같은 날 다른 설계와 겹치지 않게 300번을 잡았어요.
     1. 내역은 DB가 아니라 저장소 폴더 `marong/changelog/`의 JSON 파일이에요(반영 단위마다 하나, SPEC-500). 운영에서는 앱 서버 코드 자리의 같은 폴더를 요청마다 읽어요. 캐시·쓰기·쿼리 값이 없어요.
     2. 형식이 틀린 파일은 빼고 그 수를 `skipped`로 줘요. 응답은 200이에요(SPEC-501).
     3. 근거 주소(`url`)는 서버가 만들어요(공개 저장소의 PR·커밋 주소).
@@ -228,12 +228,12 @@ paths:
     get:
       operationId: getAdminChanges
       summary: 업데이트 내역
-      description: 업데이트 내역 화면(SCR-220)이 불러요. 저장소 폴더 `marong/changelog/`(운영은 앱 서버 코드 자리의 같은 폴더)의 반영 단위 파일을 모두 읽어, 형식 검사를 지난 단위를 새것부터 줘요(SPEC-501, 차례는 명세 3.3). 틀린 파일은 빼고 `skipped`에 세요. 폴더가 없으면 빈 목록이에요. 2026-11-24 기능 변경 4, 체크포인트 전 제안.
+      description: 업데이트 내역 화면(SCR-220)이 불러요. 저장소 폴더 `marong/changelog/`(운영은 앱 서버 코드 자리의 같은 폴더)의 반영 단위 파일을 모두 읽어, 형식 검사를 지난 단위를 새것부터 줘요(SPEC-501, 차례는 명세 3.3). 틀린 파일은 빼고 `skipped`에 세요. 폴더가 없으면 빈 목록이에요. 2026-11-24 기능 변경 4, 같은 날 체크포인트 통과(D172).
       security:
       - cfAccess: []
       x-corthex:
         id: API-300
-        status: proposed
+        status: active
         spec:
         - SPEC-500
         - SPEC-501

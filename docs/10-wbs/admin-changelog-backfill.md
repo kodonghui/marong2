@@ -1,6 +1,6 @@
 # 관리 페이지 업데이트 내역: 지난 내역 초안(TASK-543의 입력)
 
-상태: 초안(proposed), 2026-11-24 KST, Claude. 체크포인트 전이에요. 질문 6(지난 내역을 어디서부터 채울지)의 추천 A(처음 PR #1부터)로 썼어요. 다른 안을 고르면 그 날짜 전의 줄을 빼요.
+상태: 2026-11-24 체크포인트 통과(질문 6은 A 처음 PR #1부터, D178, [도메인 0.4절](../01-domain/admin-changelog.md#04-체크포인트-답2026-11-24)). 처음 초안은 같은 날 KST, Claude. TASK-543이 이 표를 그대로 파일로 옮겨요.
 규칙: [기능 명세 3.6](../04-functional-spec/admin-changelog.md#36-지난-내역-규칙)(SPEC-504). 근거가 없는 줄은 만들지 않았고, PR이 적지 않은 '변경 전'은 '기록 없음', 반영 기록이 없는 반영일은 비웠어요. 사람은 '친구'·'관리자'로만 적고, 대화 예시와 이름은 옮기지 않았어요(REQ-625).
 읽은 것(2026-11-24, 모두 읽기만): 저장소의 PR 1\~126 제목과 설명(`gh pr list --state all`), 운영 서버 `~/marong-deploy/`의 폴더 63개 이름과 바뀐 시각(한국 시각), 앱 버전 기록 `/var/lib/marong/app-releases/history.json`의 여덟 줄(버전 이름·코드·게시 시각), `tools/app_release.py`의 `PAST_RELEASES`. Git 태그와 GitHub 릴리스는 없어요.
 옮기는 법(GPT, TASK-543): 1절의 단위마다 `marong/changelog/<id>.json` 하나를 만들고, 2절의 그 `id` 줄을 `items`에 차례대로 넣어요. 모든 단위가 `backfilled: true`예요. 글은 그대로 옮기고 뜻을 바꾸지 않아요. 고쳐야 할 것이 보이면 PR 설명의 '설계 질문'에 적어요.

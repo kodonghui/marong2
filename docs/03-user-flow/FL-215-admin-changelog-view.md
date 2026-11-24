@@ -3,7 +3,7 @@
 Serves: REQ-620, REQ-621, REQ-622
 Screens: SCR-220
 Context: CTX-026(관리자 화면 TERM-176, 읽기만)
-상태: proposed(2026-11-24 KST, Claude, 체크포인트 전). 관리 페이지 기능 변경 '업데이트 내역'([도메인](../01-domain/admin-changelog.md), D170·D171).
+상태: active(2026-11-24 체크포인트 통과, D172). 처음 초안은 같은 날 KST, Claude. 관리 페이지 기능 변경 '업데이트 내역'([도메인](../01-domain/admin-changelog.md), D170·D171).
 
 ```mermaid
 flowchart TD

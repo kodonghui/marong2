@@ -430,7 +430,7 @@ flowchart TD
 
 ## 관리 페이지 업데이트 내역(기능 변경 4, 2026-11-24 제안)
 
-체크포인트 전 제안이에요(D170·D171, [도메인](../01-domain/admin-changelog.md)). 관리 페이지 탭 줄 끝에 일곱째 화면 '업데이트 내역'(SCR-220)이 늘어요. 서비스 전체(앱·웹·통화·대화·관리·카톡·디스코드)에서 바뀐 것을 반영 단위마다 묶어 '변경 전·변경 후'로 보여요. 화면 정의는 [08 admin-changelog.md](../08-screens/admin-changelog.md), API는 `api/admin.openapi.yaml`의 API-300이에요. 다른 화면의 경로와 흐름은 그대로이고, 탭 줄의 글(개요 · 회원 · 초대 링크 · 앱 버전 · 비용 · 아이템 · 업데이트 내역)만 바뀌어요([기능 변경 목록 4](../02-prd/admin-changelog.md#기능-변경-목록-4승인된-항목이-바뀌는-곳)의 4-5·4-7에서 따로 물어요).
+2026-11-24 체크포인트를 통과했어요(D172·D176, 요청은 D170·D171, [도메인](../01-domain/admin-changelog.md)). 관리 페이지 탭 줄 끝에 일곱째 화면 '업데이트 내역'(SCR-220)이 늘어요. 서비스 전체(앱·웹·통화·대화·관리·카톡·디스코드)에서 바뀐 것을 반영 단위마다 묶어 '변경 전·변경 후'로 보여요. 화면 정의는 [08 admin-changelog.md](../08-screens/admin-changelog.md), API는 `api/admin.openapi.yaml`의 API-300이에요. 다른 화면의 경로와 흐름은 그대로이고, 탭 줄의 글(개요 · 회원 · 초대 링크 · 앱 버전 · 비용 · 아이템 · 업데이트 내역)만 바뀌어요([기능 변경 목록 4](../02-prd/admin-changelog.md#기능-변경-목록-4승인된-항목이-바뀌는-곳)의 4-5·4-7, '바꿈' D173).
 
 ```mermaid
 flowchart TD
@@ -450,6 +450,6 @@ flowchart TD
 
 | ID | 이름 | 경로 | 누가 보나 | 흐름 | 용어 |
 | --- | --- | --- | --- | --- | --- |
-| SCR-220 | 관리자 업데이트 내역(proposed) | `/chat/admin/changes` | 동희님(Cloudflare Access) | FL-215 | CTX-026, TERM-176, TERM-270, TERM-271 |
+| SCR-220 | 관리자 업데이트 내역 | `/chat/admin/changes` | 동희님(Cloudflare Access) | FL-215 | CTX-026, TERM-176, TERM-270, TERM-271 |
 
 화면이 없는 흐름: FL-216(반영 때 업데이트 내역 쓰기)은 저장소 PR과 `deploy/ovh.sh changelog`예요.

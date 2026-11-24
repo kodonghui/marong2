@@ -1,6 +1,6 @@
 # 관리 페이지 업데이트 내역: 화면 상태(08, 기능 변경 4)
 
-상태: 초안(proposed), 2026-11-24 KST, Claude. 체크포인트 전이에요. 새 화면 하나(SCR-220)예요. 승인된 [관리 페이지 화면 정의](admin.md)의 1절(탭 목록)과 1.1절(넓은 폭 머리) 글이 바뀌는 곳은 [기능 변경 목록 4](../02-prd/admin-changelog.md#기능-변경-목록-4승인된-항목이-바뀌는-곳)의 4-7·4-8에서 따로 물어요. 답을 받기 전에는 admin.md를 고치지 않았어요.
+상태: 2026-11-24 체크포인트 통과(D172. 표의 칸과 값과 목업 모양은 사용자님 직접 답 '이대로 좋음' D177, [도메인 0.4절](../01-domain/admin-changelog.md#04-체크포인트-답2026-11-24)). 처음 초안은 같은 날 KST, Claude. 새 화면 하나(SCR-220)예요. 승인된 [관리 페이지 화면 정의](admin.md)의 1절(탭 목록)과 1.1절(넓은 폭 머리) 글은 [기능 변경 목록 4](../02-prd/admin-changelog.md#기능-변경-목록-4승인된-항목이-바뀌는-곳)의 4-7·4-8이 '바꿈'(D173)이라 같은 PR에서 고쳤어요.
 입력: [사이트맵](../07-sitemap/sitemap.yaml)의 SCR-220, [기능 명세](../04-functional-spec/admin-changelog.md) SPEC-502와 3.2\~3.4절, API 계약 [`api/admin.openapi.yaml`](../../api/admin.openapi.yaml)의 API-300, 관리 페이지 화면 정의 [admin.md](admin.md)의 1절 공통(머리, 폭, 테마, #forbidden·#error·#stale)과 1.1절 넓은 폭.
 바탕: 공통 상태와 탭 줄, 폭 규칙은 admin.md 1·1.1절을 그대로 따라요. 이 화면의 새 문구는 모두 [새 제안]이에요. 토큰과 부품은 지금 `unified.css`·`chat.css`만 쓰고 새 토큰은 더하지 않아요(D67, 09 단계).
 목업: [`design/admin-changelog-mockup.html`](../../design/admin-changelog-mockup.html)(밤 테마, 폰 360px와 노트북 1280px를 나란히, 상태마다 한 칸). 그림은 [`design/admin-changelog/`](../../design/admin-changelog/)에 있어요. 줄 가운데 몇은 [지난 내역 초안](../10-wbs/admin-changelog-backfill.md)의 실제 줄이고, 나머지는 지어낸 줄이에요.
