@@ -2,6 +2,7 @@
 대화 원문·요약·메모는 쌓기만 하고 지우거나 고치지 않는다. 봇 계정(marong)에는 그 권한 자체가 없다(schema.sql)."""
 import asyncio
 import hashlib
+import json
 import os
 import logging
 import re
@@ -741,14 +742,22 @@ class Store:
                 selected=[];remaining=1200
                 for row in rows:
                     if remaining<40:break
-                    when = relative_time(row.get("started_at"), now) if timed else None
-                    overhead = 30 + (len(when) if when else 0)
-                    if remaining <= overhead:
-                        break
-                    text=row['content'][:min(400,remaining-overhead)];remaining-=len(text)+overhead
-                    item = {'source':row['source'],'id':row['id'],'text':text}
-                    if when:
-                        item["when"] = when
+                    item = {'source':row['source'],'id':row['id'],'text':""}
+                    if timed:
+                        if when := relative_time(row.get("started_at"), now):
+                            item["when"] = when
+                        room = 1200 - len(json.dumps([*selected, item], ensure_ascii=False))
+                        if room <= 0:
+                            break
+                        text = row["content"][:min(400, room)]
+                        # JSON escaping can add characters after the text is clipped.
+                        excess = len(json.dumps(text, ensure_ascii=False)) - 2 - room
+                        item["text"] = text[:max(0, len(text) - max(0, excess))]
+                        if not item["text"]:
+                            continue
+                    else:
+                        item["text"] = row["content"][:min(400, remaining-30)]
+                        remaining -= len(item["text"]) + 30
                     selected.append(item)
                 result = {'friend_id':caller['friend_id'],'items':selected}
                 if recent_call is not None:

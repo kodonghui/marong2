@@ -257,6 +257,24 @@ class ContinuityStoreTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await store.close()
 
+    async def test_text_call_cards_count_time_labels_and_json_escaping_in_cap(self):
+        person = self.fixture()
+        now = datetime.now(timezone.utc)
+        user_message = self.message(now, "합성 글")
+        for day in (1, 2):
+            call_id = self.call(person, now - timedelta(days=day))
+            admin("INSERT INTO call.cards(call_id,summary,model,prompt_version) VALUES(%s,%s,'fixture','fixture')",
+                  (call_id, '"\n' * 200))
+        store = Store(BOT_DSN, call_bridge=True)
+        await store.open(wait=True)
+        try:
+            with patch.object(continuity, "MODE", "on"):
+                found = await store.call_context(self.root, self.user, user_message)
+            self.assertTrue(all(row.get("when") for row in found["items"]))
+            self.assertLessEqual(len(json.dumps(found["items"], ensure_ascii=False)), 1200)
+        finally:
+            await store.close()
+
     async def test_organizer_accepts_only_eligible_turn_ids_for_each_card_field(self):
         person = self.fixture()
         store = MemoryStore(CALL_DSN)
