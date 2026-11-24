@@ -461,7 +461,8 @@
   }
 
   function phoneLine(phone) {
-    return '폰 ' + phone.phone + ' · ' + phone.appVersion + (phone.behind ? ' · 뒤처짐' : '') +
+    const status = phone.removedAt ? ' · 앱 지워짐' : (phone.behind ? ' · 뒤처짐' : '');
+    return '폰 ' + phone.phone + ' · ' + phone.appVersion + status +
       ' · 마지막 보고 ' + shortDate(phone.seenAt);
   }
 
@@ -684,7 +685,11 @@
       counts.set(phone.friendId, (counts.get(phone.friendId) || 0) + 1);
     }
     const fetchedByFriend = new Map(fetches.map(row => [row.friendId, row.items]));
-    const sorted = [...devices].sort((a, b) => Number(b.behind) - Number(a.behind));
+    const phoneOrder = phone => {
+      if (phone.removedAt) return 2;
+      return phone.behind ? 0 : 1;
+    };
+    const sorted = [...devices].sort((a, b) => phoneOrder(a) - phoneOrder(b));
     const openFriends = new Set([...content.querySelectorAll('details[open]')].map(item => item.dataset.phone));
     const hashFriend = /^#friend=([1-9][0-9]*)$/.exec(location.hash)?.[1];
     let highlight;
@@ -695,12 +700,14 @@
       row.open = openFriends.has(row.dataset.phone);
       const summary = node('summary');
       const version = caption(phone.appVersion);
-      if (phone.behind) version.append(node('span', ' · 뒤처짐', 'danger'));
+      if (phone.removedAt) version.append(' · 앱 지워짐');
+      else if (phone.behind) version.append(node('span', ' · 뒤처짐', 'danger'));
       const notifications = phone.notifications === 'denied' ? ' · 알림 꺼짐' : '';
       summary.append(node('span', name + ' · 폰 ' + phone.phone), version,
         caption('마지막 보고 ' + shortDate(phone.seenAt) + notifications));
       row.append(summary);
       const log = node('ul', '', 'stack records');
+      if (phone.removedAt) log.append(node('li', '앱 지워짐 · ' + shortDate(phone.removedAt), 'caption'));
       const events = newest([...phone.events, ...(fetchedByFriend.get(phone.friendId) || []).map(event =>
         ({...event, kind: 'fetched'}))]);
       const lastState = events.find(event => event.kind === 'state');

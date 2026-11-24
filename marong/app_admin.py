@@ -120,20 +120,26 @@ class AppAdmin:
             return releases.manifest(), releases.paused(), releases.history()
 
         latest, paused, history = await asyncio.to_thread(read_releases)
-        devices = await self.chat.store.admin_app_devices(conn=conn)
+        device_rows = await self.chat.store.admin_app_devices(conn=conn)
         fetches = await self.chat.store.admin_app_fetches(conn=conn)
         current = version_parts(latest.name) if latest else None
         ordered = sorted(reversed(history), key=lambda entry: utc_timestamp(entry["at"]), reverse=True)
+        devices = []
+        for row in device_rows:
+            removed_at = row["dropped_at"]
+            devices.append({
+                "friend": row["friend"], "friendId": row["friend_id"], "phone": row["phone"],
+                "appVersion": row["app_version"], "seenAt": row["seen_at"].isoformat(),
+                "notifications": row["notifications"], "events": row["events"],
+                "removedAt": removed_at.astimezone(timezone.utc).isoformat() if removed_at is not None else None,
+                "behind": removed_at is None and current is not None and version_parts(row["app_version"]) < current,
+            })
         return {
             "latest": {"versionCode": latest.code, "versionName": latest.name,
                        "publishedAt": latest.published_at} if latest else None,
             "paused": paused,
             "releases": [{key: value for key, value in entry.items() if key != "file"} for entry in ordered],
-            "devices": [{"friend": row["friend"], "friendId": row["friend_id"], "phone": row["phone"],
-                         "appVersion": row["app_version"], "seenAt": row["seen_at"].isoformat(),
-                         "notifications": row["notifications"], "events": row["events"],
-                         "behind": current is not None and version_parts(row["app_version"]) < current}
-                        for row in devices],
+            "devices": devices,
             "fetches": [{"friend": row["friend"], "friendId": row["friend_id"], "items": row["items"]}
                         for row in fetches],
         }
@@ -168,7 +174,8 @@ class AppAdmin:
         return self.chat._json(200, {
             "members": members, "callMonth": call, "images": images, "usageToday": usage,
             "attention": overview_attention(now, members, call, images, app, expiring),
-            "app": {"latest": app["latest"], "paused": app["paused"], "devices": len(app["devices"]),
+            "app": {"latest": app["latest"], "paused": app["paused"],
+                    "devices": sum(phone["removedAt"] is None for phone in app["devices"]),
                     "behind": sum(phone["behind"] for phone in app["devices"])} if app is not None else None,
         })
 

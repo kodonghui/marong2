@@ -33,6 +33,7 @@ from tools.vertex_live.call_cost import MonthlyCost
 
 NOW = datetime(2026, 11, 24, 19, 10, tzinfo=timezone.utc)
 OVERVIEW = "/chat/admin/api/overview"
+APP_VERSIONS = "/chat/admin/api/app-versions"
 ORIGIN = "https://fixture.invalid"
 ADMIN_HASH = "a" * 64
 SCREENS = (("", "overview"), ("members", "members"), ("members/7", "members"),
@@ -235,8 +236,8 @@ class AdminTest(unittest.IsolatedAsyncioTestCase):
         latest = {"versionName": "0.3.3", "versionCode": 11,
                   "publishedAt": (NOW - timedelta(hours=30)).isoformat()}
         app = {"latest": latest, "paused": False, "devices": [
-            {"behind": True, "events": [], "friend": "시험친구 가", "friendId": friend},
-            {"behind": False, "events": [], "friend": "시험친구 나", "friendId": friend + 1},
+            {"behind": True, "removedAt": None, "events": [], "friend": "시험친구 가", "friendId": friend},
+            {"behind": False, "removedAt": None, "events": [], "friend": "시험친구 나", "friendId": friend + 1},
         ]}
         with patch.object(self.chat.admin, "read_app_versions", return_value=app):
             data = await self.overview()
@@ -253,6 +254,42 @@ class AdminTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("시험친구", str(data))
         self.assertNotIn("friendId", str(data))
         self.assertNotIn("events", str(data))
+
+    async def add_update_phones(self, specs):
+        for friend_id in sorted({owner for owner, _ in specs}):
+            self.db.admin("INSERT INTO marong.friends (id, name) OVERRIDING SYSTEM VALUE VALUES (%s, %s)",
+                          (friend_id, "시험친구 가"))
+        phones = [(str(uuid4()), secrets.token_urlsafe()) for _ in specs]
+        for (install, registration), (owner, version) in zip(phones, specs):
+            await self.store.app_device_put(install, owner, registration, "granted", version, None, None)
+        return phones
+
+    async def test_tc654_overview_excludes_removed_phones(self):
+        active, removed = await self.add_update_phones([(7, "0.3.2"), (7, "0.2.4")])
+        await self.store.drop_fid(*removed)
+        published_at = (NOW - timedelta(hours=30)).isoformat()
+        release = SimpleNamespace(name="0.3.3", code=11, published_at=published_at)
+        latest = {"versionName": release.name, "versionCode": release.code, "publishedAt": published_at}
+        with patch.object(self.chat.releases, "manifest", return_value=release):
+            for count in (1, 0):
+                data = await self.overview()
+                self.assertEqual(data["app"], {"latest": latest, "paused": False, "devices": count, "behind": count})
+                alerts = [row["value"] for row in data["attention"] if row["kind"] == "app_behind"]
+                self.assertEqual(alerts, [1] if count else [])
+                if count:
+                    await self.store.drop_fid(*active)
+
+    async def test_tc659_overview_and_app_versions_share_behind_count(self):
+        phones = await self.add_update_phones([(7, "0.3.2"), (7, "0.2.4"), (7, "0.3.3"), (8, "0.3.1")])
+        await self.store.drop_fid(*phones[1])
+        release = SimpleNamespace(name="0.3.3", code=11, published_at=(NOW - timedelta(hours=30)).isoformat())
+        with patch.object(self.chat.releases, "manifest", return_value=release):
+            versions = await self.response(await self.client.get(APP_VERSIONS, headers=self.headers), 200)
+            overview = await self.overview()
+        self.assertEqual([(row["friendId"], row["phone"]) for row in versions["devices"] if row["behind"]],
+                         [(7, 1), (8, 1)])
+        self.assertEqual((overview["app"]["devices"], overview["app"]["behind"]), (3, 2))
+        self.assertEqual([row["value"] for row in overview["attention"] if row["kind"] == "app_behind"], [2])
 
     async def test_tc623_partial_timeout_and_pool_limit(self):
         self.assertEqual((await self.overview())["attention"], [])
@@ -390,6 +427,18 @@ class AdminTest(unittest.IsolatedAsyncioTestCase):
                 if path == "items":
                     self.assertIn('href="/chat/admin/items" aria-current="page"', html)
                     self.assertIn('id="item-admin"', html)
+
+    async def test_tc658_items_api_distinguishes_catalog_and_admin_access(self):
+        path = "/chat/admin/api/items"
+        item = SimpleNamespace(id="fixture-item", kind="hat", name="시험친구 가", starter=False)
+        self.chat.decor.catalog = SimpleNamespace(set="fixture", items={item.id: item}, check=lambda _: [])
+        listed = await self.response(await self.client.get(path, headers=self.headers), 200)
+        self.assertEqual([row["id"] for row in listed["items"]], [item.id])
+        headers = {"Cf-Access-Jwt-Assertion": secrets.token_urlsafe()}
+        await self.response(await self.client.get(path, headers=headers), 403, "not_allowed")
+
+        self.chat.decor.catalog = None
+        await self.response(await self.client.get(path, headers=self.headers), 404, "not_found")
 
     async def make_invite(self):
         token, expires = await self.sessions.create_invite("join")
