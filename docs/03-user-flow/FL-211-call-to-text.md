@@ -4,7 +4,7 @@ Serves: REQ-601, REQ-602, REQ-605, REQ-607, REQ-610
 Screens: 글 대화 SCR-107(화면은 바뀌지 않음), 카카오·디스코드 1:1 방
 Context: CTX-001, CTX-004
 Follows: FL-007(끊기와 정리), FL-010(카톡 마롱이가 통화를 앎). 두 흐름은 고치지 않아요.
-Status: proposed(2026-11-24, [01 도메인](../01-domain/continuity.md))
+Status: active(2026-11-24 체크포인트 통과, [01 도메인](../01-domain/continuity.md))
 
 ```mermaid
 flowchart TB

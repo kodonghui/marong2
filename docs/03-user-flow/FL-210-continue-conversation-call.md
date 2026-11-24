@@ -4,7 +4,7 @@ Serves: REQ-600, REQ-602, REQ-603, REQ-604, REQ-605, REQ-606, REQ-607, REQ-608, 
 Screens: 통화 홈 SCR-001, 통화 중 SCR-002(화면은 바뀌지 않음)
 Context: CTX-002, CTX-004
 Follows: FL-002(통화하기)의 '통화 연결' 단계 안에서 일어나요. FL-002는 고치지 않아요.
-Status: proposed(2026-11-24, [01 도메인](../01-domain/continuity.md))
+Status: active(2026-11-24 체크포인트 통과, [01 도메인](../01-domain/continuity.md))
 
 ```mermaid
 flowchart TB
