@@ -87,15 +87,20 @@ class AdminTest(unittest.IsolatedAsyncioTestCase):
         self.now = NOW
         self.sessions = AppSessions(self.store.pool, secrets.token_bytes(32), contact_schedule=(3, 8, 22),
                                     now=lambda: self.now)
-        self.chat = AppChat(self.store, SimpleNamespace(friend_cards=None), None, None, None,
-                            origin=ORIGIN, sessions=self.sessions, authentication="session",
-                            admin_email_hash=ADMIN_HASH)
         self.proof = secrets.token_urlsafe()
         self.headers = {"Cf-Access-Jwt-Assertion": self.proof, "Origin": ORIGIN}
-        self.chat.access = SimpleNamespace(check=AsyncMock(side_effect=self.access))
-        self.client = TestClient(TestServer(self.chat.web_app()))
-        await self.client.start_server()
-        self.addAsyncCleanup(self.client.close)
+        self.chat, self.client = await self.start_client()
+
+    async def start_client(self, catalog=None):
+        chat = AppChat(self.store, SimpleNamespace(friend_cards=None), None, None, None,
+                       origin=ORIGIN, sessions=self.sessions, authentication="session",
+                       admin_email_hash=ADMIN_HASH)
+        chat.decor.catalog = catalog
+        chat.access = SimpleNamespace(check=AsyncMock(side_effect=self.access))
+        client = TestClient(TestServer(chat.web_app()))
+        await client.start_server()
+        self.addAsyncCleanup(client.close)
+        return chat, client
 
     async def access(self, proof):
         return "ok", ADMIN_HASH if proof == self.proof else "b" * 64
@@ -431,13 +436,13 @@ class AdminTest(unittest.IsolatedAsyncioTestCase):
     async def test_tc658_items_api_distinguishes_catalog_and_admin_access(self):
         path = "/chat/admin/api/items"
         item = SimpleNamespace(id="fixture-item", kind="hat", name="시험친구 가", starter=False)
-        self.chat.decor.catalog = SimpleNamespace(set="fixture", items={item.id: item}, check=lambda _: [])
-        listed = await self.response(await self.client.get(path, headers=self.headers), 200)
+        catalog = SimpleNamespace(set="fixture", items={item.id: item}, check=lambda _: [])
+        _, enabled = await self.start_client(catalog)
+        listed = await self.response(await enabled.get(path, headers=self.headers), 200)
         self.assertEqual([row["id"] for row in listed["items"]], [item.id])
         headers = {"Cf-Access-Jwt-Assertion": secrets.token_urlsafe()}
-        await self.response(await self.client.get(path, headers=headers), 403, "not_allowed")
+        await self.response(await enabled.get(path, headers=headers), 403, "not_allowed")
 
-        self.chat.decor.catalog = None
         await self.response(await self.client.get(path, headers=self.headers), 404, "not_found")
 
     async def make_invite(self):

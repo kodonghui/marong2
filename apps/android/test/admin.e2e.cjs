@@ -498,6 +498,35 @@ test('TC-658 a non-Problem 404 also shows the decor-off notice', options, async 
   assert.deepEqual(errors, []);
 });
 
+test('TC-656 items keep retry for a failed request and for a request over 10 seconds', options, async t => {
+  const {page, visit, errors} = await open(t, {width: 360, height: 820});
+  const screen = page.locator('#item-admin');
+  const retry = screen.getByRole('button', {name: '다시 보기'});
+  const endpoint = '**/chat/admin/api/items';
+  await page.clock.install({time: new Date(date)});
+  await page.route(endpoint, route => route.abort(), {times: 1});
+  await visit('/items');
+  assert.equal(await screen.locator('#item-error').innerText(), '아이템을 불러오지 못했어요');
+
+  let stalled;
+  const requestStarted = new Promise(resolve => { stalled = resolve; });
+  await page.route(endpoint, stalled, {times: 1});
+  await retry.click();
+  const route = await requestStarted;
+  try {
+    const failed = page.waitForEvent('requestfailed', request => request === route.request());
+    await page.clock.fastForward(10_000);
+    await failed;
+  } finally {
+    await route.abort();
+  }
+  assert.equal(await screen.locator('#item-error').innerText(), '아이템을 불러오지 못했어요');
+  await retry.click();
+  await screen.getByRole('heading', {name}).waitFor();
+  assert.equal(await screen.locator('#item-error').isVisible(), false);
+  assert.deepEqual(errors, []);
+});
+
 test('TC-637, TC-638, TC-640 and TC-641 layouts from 360px through 1440px', options, async t => {
   const {page, state, visit, errors} = await open(t);
   const screenshots = process.env.MARONG_ADMIN_SCREENSHOTS || fs.mkdtempSync(path.join(os.tmpdir(), 'marong-admin-'));
