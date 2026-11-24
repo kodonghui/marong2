@@ -10,6 +10,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from time import monotonic
 
 from psycopg import Error
 from psycopg.rows import dict_row
@@ -18,6 +19,8 @@ from psycopg_pool import AsyncConnectionPool
 from call_usage import Ledger
 from call_cost import MonthlyCost
 from call_tuning import BASE
+from marong.continuity import record_pick
+from marong.continuity_db import read_previous
 from marong.room_scope import writing_room
 from marong.friend_scope import accepted_circle
 from marong.usage import Usage, configured_limit
@@ -218,6 +221,27 @@ class MemoryStore:
         if p.private_rooms is not None:
             params.update(zip(('discord_room', 'kakao_room'), p.private_rooms, strict=True))
         return params
+
+    async def previous_conversation(self, p, call_id, now, segment):
+        started = monotonic()
+        recent, older = [], []
+        try:
+            async with asyncio.timeout(1), self.pool.connection() as conn, conn.transaction():
+                await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                recent, older = await read_previous(
+                    conn, memory_scope(p), {**self.params(p), "name": p.name},
+                    now, call_id, voice=True, marks=self.friend_marks,
+                )
+            result = "ok" if recent or older else "empty"
+        except TimeoutError:
+            result = "timeout"
+            recent, older = [], []
+        except Error:
+            result = "error"
+            recent, older = [], []
+        report = record_pick(segment, turns=len(recent), chars=sum(len(turn.text) for turn in recent),
+                             conversations=len(older), ms=round((monotonic() - started) * 1000), result=result)
+        return recent, older, report
 
     async def seed(self, p, call_id=None, *, memory_limit=30, history_chars=4000):
         params = self.params(p)
