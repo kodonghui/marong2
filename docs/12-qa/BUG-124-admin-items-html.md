@@ -1,7 +1,7 @@
 ---
 id: BUG-124
 title: 꾸미기를 끈 환경에서 관리자 아이템 탭이 404 JSON을 반환함
-status: open
+status: fixed
 severity: S3
 priority: P1
 found_in: production
@@ -31,3 +31,13 @@ TC-620은 카탈로그가 있는 환경을, TC-638 브라우저는 가짜 화면
 `AppAdmin.page`에서 아이템 HTML의 카탈로그 검사를 빼고, 기존 인증과 공통 탭을 사용해요. 카탈로그 없이 API를 호출하면 404가 돌아오고, 아이템 화면에 기존 불러오기 오류와 ‘다시 보기’ 단추가 표시돼요.
 
 수정 전 기준 `437a17a`에서 TC-652를 돌리면 아이템 경로가 404 JSON을 반환해 1개 실패했어요(`FAILED (failures=1)`). 수정 뒤 WSL Python 3.12와 임시 PostgreSQL에서 TC-620·621·652 3개와 꾸미기 회귀 시험 4개가 통과했어요. 시험용 Access JWT로 화면 7개에 200 HTML, 아이템 API 3개에 404, 비인증 아이템 화면에 403을 확인했어요.
+
+## 운영 반영
+
+- [PR #125](https://github.com/kodonghui/marong2/pull/125)의 병합 커밋은 `def10ad8bac0d554f8b2dfa71e804996dd6873d0`이에요. 2026-11-24 14:33:18 KST에 `marong/app_admin.py` 한 파일을 반영하고 `marong-app.service`를 재시작했어요. 교체 전 파일의 SHA256은 병합 전 `main`(`437a17a`)과 일치했어요.
+- 병합 커밋에서 TC-652를 다시 돌렸어요. 임시 PostgreSQL에서 `Ran 1 test`와 `OK`를 확인했어요.
+- 재시작 직전 글 대화 로그와 DB의 최근 3분 글 대화가 각각 0건이었고, 진행 중 통화와 웹 통화 연결은 각각 0건이었어요. 오래된 `resting` 행 1건은 3분 넘게 신호가 없고 열린 구간과 웹 연결이 없음을 확인했어요.
+- 반영 뒤 서비스 `active`, `/chat/healthz` 200, 비인증 로컬 `/chat/admin/items` 403, 5분 로그의 `ERROR` 0건을 확인했어요. 운영 파일의 SHA256 `2cdf44c12bf37b53beeb9610475b8015c7249d219b154c90b4ef6a9072f9ff39`가 병합 커밋과 일치했어요.
+- 파일 백업은 `~/marong-deploy/20261124-bug-124.UCXbGqeu/app_admin.py.before`예요. 되돌리는 명령은 `bash ~/marong-deploy/20261124-bug-124.UCXbGqeu/rollback.sh restart`예요.
+- 사용자님은 아이템 화면에 불러오기 오류가 표시된 것을 확인했어요. 꾸미기가 꺼져 있을 때의 안내는 별도 기능 변경으로 설계 중이에요. 기기 확인 결과는 관리 페이지 QA의 TC-639에 적었어요. [관리 페이지 QA](admin.md)
+- 2026-11-24 KST 기능 변경 3(TASK-505) 운영 반영 뒤, 꾸미기가 꺼진 서버의 아이템 화면은 SCR-186#decor-off 안내를 표시했어요. 사용자 화면 확인은 TC-657에 기록했어요. [관리 페이지 QA](admin.md)
