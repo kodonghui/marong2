@@ -2,7 +2,7 @@
 
 ## GPT 인계
 
-2026-11-24 작성(Claude). **시작 전**: 체크포인트 질문 0\~5와 바뀌는 승인 항목 F-1\~F-7·G-1\~G-5([01 도메인 7·8절](../01-domain/fcm-unregistered.md#7-바뀌는-승인-항목항목마다-따로-여쭤요))의 답을 받고, Claude가 TASK-555로 승인 문서를 고친 뒤에 시작해요. 시작할 수 있게 되면 [README](README.md#작업-패키지)의 이 줄에 '시작 가능'을 적어요.
+2026-11-24 작성(Claude). **시작 전**: 체크포인트 질문 0\~5와 바뀌는 승인 항목 F-1\~F-7·G-1\~G-6([01 도메인 7·8절](../01-domain/fcm-unregistered.md#7-바뀌는-승인-항목항목마다-따로-여쭤요))의 답을 받고, Claude가 TASK-555로 승인 문서를 고친 뒤에 시작해요. 시작할 수 있게 되면 [README](README.md#작업-패키지)의 이 줄에 '시작 가능'을 적어요.
 
 - 목표: FCM이 등록 해제(HTTP 404와 상세 코드 `UNREGISTERED`)라고 확실히 답할 때만 폰의 FID를 지우고, 400과 등록 해제가 확인되지 않은 404는 보내기 실패로 처리해 FID를 지켜요. 실패한 보내기마다 원인(HTTP 상태와 FCM 코드)을 로그 한 줄에 남겨요. 원문은 [02 요구사항 출처 표기](../02-prd/fcm-unregistered.md#출처-표기)의 D180이에요.
 - 시작: 이 설계가 합쳐진 `main` 머리에서 새 브랜치 `codex/fcm-unregistered`.
@@ -48,7 +48,7 @@
 | TASK-552 | 보내는 곳 셋 시험: 진짜 `FCM` 클래스와 가짜 HTTP, `pgserver`의 진짜 `AppStore`로 글 알림(`notify`), 벨(`ring`과 선 전화가 글로 넘어감), 업데이트 보내기(`AppUpdatePush`, 가짜 시계로 차례 넷). 부르는 코드는 바꾸지 않음 | SPEC-512, REQ-630 | `tests/test_app_chat.py`, `tests/test_app_update_push.py` | TASK-550 | GPT | 0.5 | TC-722, TC-723, TC-724 통과, 끝 조건의 지금 시험 통과 |
 | TASK-553 | 서버 반영: 해시 비교, 백업, 되돌리기 스크립트, `fcm.py` 한 파일, 대화·통화가 없을 때 `marong-app.service` 재시작, 로그 5분 | SPEC-510, SPEC-511 | 운영 `/opt/marong-app/marong/fcm.py` | TASK-550, TASK-551, TASK-552, 질문 5의 답 | GPT | 0.25 | TC-725 통과, 백업·스크립트 경로가 PR에 있음 |
 | TASK-554 | 7일 관찰: 반영 뒤 7일의 `fcm_send_status` 줄을 `http`·`code`·`result`별로 세고, 그동안 새로 채워진 `dropped_at` 수를 SELECT로 셈(개수만) | REQ-631, SPEC-511 | 없음(읽기) | TASK-553 | GPT | 0.1 | TC-726 결과가 '11단계 진행'에 있음 |
-| TASK-555 | 설계 쪽 마무리: 체크포인트 답대로 승인 문서 고치기(F-1\~F-7: app-chat.md SPEC-117·126·TC-126, app-ring.md SPEC-131, app-update.md SPEC-430·8.5, FL-193. G-1\~G-5: PR #127이 합쳐진 뒤 admin 01·02·04와 app-update 8.6), 바뀌기 전 글을 각 문서 끝 '바뀐 승인 글'에 남기기, 단계 기록, README '시작 가능' | 01 도메인 7·8절 | `docs/`, `.corthex/stages/fcm-unregistered.json` | 체크포인트 답, PR #127 합쳐짐 | Claude | 0.25 | 바뀐 줄마다 답(D181\~D186) 표시, 용어 검사 통과 |
+| TASK-555 | 설계 쪽 마무리: 체크포인트 답대로 승인 문서 고치기(F-1\~F-7: app-chat.md SPEC-117·126·TC-126, app-ring.md SPEC-131, app-update.md SPEC-430·8.5, FL-193. G-1\~G-6: admin 01·02·04와 app-update SPEC-438·8.6), 바뀌기 전 글을 각 문서 끝 '바뀐 승인 글'에 남기기, 단계 기록, README '시작 가능' | 01 도메인 7·8절 | `docs/`, `.corthex/stages/fcm-unregistered.json` | 체크포인트 답 | Claude | 0.25 | 바뀐 줄마다 답(D181\~D186) 표시, 용어 검사 통과 |
 
 - 모든 SPEC 행에 작업이 있어요: SPEC-510 TASK-550, SPEC-511 TASK-551, SPEC-512 TASK-552. 반영과 관찰은 TASK-553·554예요.
 - 모두 합쳐 약 1.6일이에요.

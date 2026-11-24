@@ -1,6 +1,6 @@
 # FCM 등록 해제 판단: 기능 명세
 
-상태: 2026-11-24 초안(Claude). **체크포인트 전**이고 새 행은 모두 `proposed`예요. 바뀌는 승인 행(SPEC-117·126·131·430, app-update 8.5, PR #127의 SPEC-460·8.6)은 [01 도메인 7절](../01-domain/fcm-unregistered.md#7-바뀌는-승인-항목항목마다-따로-여쭤요)에 승인 원문과 함께 적었고, 답을 받기 전까지 그 행은 승인 글 그대로예요.
+상태: 2026-11-24 초안(Claude). **체크포인트 전**이고 새 행은 모두 `proposed`예요. 바뀌는 승인 행(SPEC-117·126·131·430, app-update 8.5, PR #127로 바뀐 SPEC-460·438·8.6)은 [01 도메인 7절](../01-domain/fcm-unregistered.md#7-바뀌는-승인-항목항목마다-따로-여쭤요)에 승인 원문과 함께 적었고, 답을 받기 전까지 그 행은 승인 글 그대로예요.
 입력: [요구사항](../02-prd/fcm-unregistered.md) REQ-630·631, [도메인](../01-domain/fcm-unregistered.md) TERM-280과 4절(지금 동작), 승인 명세 [app-chat.md](../app-chat.md)(SPEC-117·126), [app-ring.md](../app-ring.md)(SPEC-131), [app-update.md](app-update.md)(SPEC-430·435, 8.5), [call-first.md](call-first.md)(SPEC-266), [unified.md](unified.md)(SPEC-383).
 기준 코드: `main` `1a29477`(운영 `marong-app` 파일과 해시가 같음, 2026-11-24).
 표시: [사실] 코드·공식 문서에서 확인, [새 제안] 이 명세에서 Claude가 정한 것, [추정] 근거 있는 짐작. 예시의 FID·메시지는 모두 지어낸 값이에요.

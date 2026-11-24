@@ -1,7 +1,7 @@
 # FCM 등록 해제 판단: 요구사항
 
 상태: 2026-11-24 초안(Claude). **체크포인트 전**이고 새 요구사항은 모두 `proposed`예요. 요청·기준선·바뀌는 승인 항목·체크포인트 질문은 [01 도메인](../01-domain/fcm-unregistered.md)에 있어요.
-입력: [01 도메인](../01-domain/fcm-unregistered.md)의 5.1 규칙과 TERM-280, 승인 요구사항 REQ-111·112·118([app-chat.md](../app-chat.md)), REQ-124·130([app-ring.md](../app-ring.md)), REQ-282([call-first.md](call-first.md)), REQ-553·556([app-update.md](app-update.md)), PR #127의 REQ-587(admin).
+입력: [01 도메인](../01-domain/fcm-unregistered.md)의 5.1 규칙과 TERM-280, 승인 요구사항 REQ-111·112·118([app-chat.md](../app-chat.md)), REQ-124·130([app-ring.md](../app-ring.md)), REQ-282([call-first.md](call-first.md)), REQ-553·556([app-update.md](app-update.md)), PR #127로 더해진 REQ-587(admin).
 ID 번호: REQ-630·631(이 패키지 범위 630\~639, [10 WBS 안내](../10-wbs/README.md#id-범위)).
 
 ## 출처 표기
