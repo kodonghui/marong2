@@ -257,7 +257,7 @@ paths:
                 $ref: '#/components/schemas/AdminChanges'
               examples:
                 normal:
-                  summary: 서버 단위 하나와 앱 단위 하나(합성 예)
+                  summary: 서버 단위 하나와 앱 단위 하나(지난 내역 초안의 줄)
                   value:
                     units:
                     - id: 20261124-admin
@@ -682,7 +682,7 @@ components:
     AdminChanges:
       type: object
       additionalProperties: false
-      description: 업데이트 내역(API-300, 0.3.0). 단위 차례는 명세 3.3(sortOn 늦은 것부터, 같은 날은 id 거꾸로)
+      description: 업데이트 내역(API-300, 0.3.0). 단위 차례는 명세 3.3(sortOn 늦은 것부터, 같은 날은 근거의 가장 큰 PR 번호가 큰 것부터, 그다음 id 거꾸로)
       required:
       - units
       - skipped

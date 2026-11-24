@@ -1,4 +1,4 @@
-// SCR-220 목업 그리기. 글은 모두 textContent로 넣어요(SPEC-502). 구현은 admin.js에 같은 모양으로 들어가요.
+// SCR-220 목업 그리기(상태: normal filtered filter-empty skipped long empty unreadable loading error). 글은 모두 textContent로 넣어요(SPEC-502). 구현은 admin.js에 같은 모양으로 들어가요.
 (function () {
   const params = new URLSearchParams(location.search);
   const state = params.get("state") || "normal";
@@ -108,13 +108,16 @@
       .map((u) => ({u, items: u.items.filter((i) => area === "all" || i.area === area)}))
       .filter((x) => x.items.length);
     countBox.replaceChildren();
+    if (units.length) {
+      const n = units.reduce((s, x) => s + x.items.length, 0);
+      countBox.append(el("p", {class: "caption"}, "반영 " + units.length + "번 · 항목 " + n + "개"));
+    }
+    // #skipped 줄은 #filter-empty에서도 남겨요(08 화면 정의).
+    if (data.skipped) countBox.append(el("p", {class: "changes-note"}, "읽지 못한 내역 파일 " + data.skipped + "개는 빼고 보여요"));
     if (!units.length) {
       message("이 영역의 내역이 없어요", "전체 보기", () => { area = "all"; drawChips(false); drawList(); });
       return;
     }
-    const n = units.reduce((s, x) => s + x.items.length, 0);
-    countBox.append(el("p", {class: "caption"}, "반영 " + units.length + "번 · 항목 " + n + "개"));
-    if (data.skipped) countBox.append(el("p", {class: "changes-note"}, "읽지 못한 내역 파일 " + data.skipped + "개는 빼고 보여요"));
     groupsBox.replaceChildren(...units.map((x) => unitBlock(x.u, x.items)));
   }
 
@@ -138,7 +141,8 @@
     root.setAttribute("aria-busy", "false");
     if (!data.units.length) {
       drawChips(true);
-      message("아직 적은 업데이트 내역이 없어요");
+      // 파일이 있는데 모두 검사에 걸렸으면 #empty가 아니라 #unreadable이에요.
+      message(data.skipped ? "내역 파일 " + data.skipped + "개를 읽지 못했어요" : "아직 적은 업데이트 내역이 없어요");
     } else {
       drawChips(false);
       drawList();

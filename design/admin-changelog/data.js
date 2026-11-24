@@ -46,6 +46,44 @@ window.MOCK_CHANGES = {
     ]
    },
    {
+    "id": "20261124-bug-124",
+    "kind": "server",
+    "title": "관리 아이템 화면 열기",
+    "deployedOn": "2026-11-24",
+    "sortOn": "2026-11-24",
+    "app": null,
+    "backfilled": true,
+    "evidence": [
+     {
+      "label": "PR #125",
+      "url": "https://github.com/kodonghui/marong2/pull/125"
+     },
+     {
+      "label": "PR #126",
+      "url": "https://github.com/kodonghui/marong2/pull/126"
+     }
+    ],
+    "items": [
+     {
+      "type": "fixed",
+      "area": "admin",
+      "title": "아이템 탭",
+      "before": "관리 페이지의 아이템 탭을 누르면 404였어요",
+      "after": "아이템 탭이 열려요",
+      "evidence": [
+       {
+        "label": "PR #125",
+        "url": "https://github.com/kodonghui/marong2/pull/125"
+       },
+       {
+        "label": "PR #126",
+        "url": "https://github.com/kodonghui/marong2/pull/126"
+       }
+      ]
+     }
+    ]
+   },
+   {
     "id": "20261124-bug123",
     "kind": "server",
     "title": "글 대화 빈 스크롤 고침",
@@ -156,82 +194,6 @@ window.MOCK_CHANGES = {
     ]
    },
    {
-    "id": "20261124-bug114",
-    "kind": "server",
-    "title": "웹 통화 다시 잇기",
-    "deployedOn": "2026-11-24",
-    "sortOn": "2026-11-24",
-    "app": null,
-    "backfilled": true,
-    "evidence": [
-     {
-      "label": "PR #115",
-      "url": "https://github.com/kodonghui/marong2/pull/115"
-     },
-     {
-      "label": "PR #118",
-      "url": "https://github.com/kodonghui/marong2/pull/118"
-     }
-    ],
-    "items": [
-     {
-      "type": "fixed",
-      "area": "call",
-      "title": "같은 웹에서 다시 잇기",
-      "before": "같은 웹 화면에서 통화가 끊긴 뒤 다시 이어지지 않았어요",
-      "after": "같은 웹 화면에서 다시 이어져요",
-      "evidence": [
-       {
-        "label": "PR #115",
-        "url": "https://github.com/kodonghui/marong2/pull/115"
-       },
-       {
-        "label": "PR #118",
-        "url": "https://github.com/kodonghui/marong2/pull/118"
-       }
-      ]
-     }
-    ]
-   },
-   {
-    "id": "20261124-bug-124",
-    "kind": "server",
-    "title": "관리 아이템 화면 열기",
-    "deployedOn": "2026-11-24",
-    "sortOn": "2026-11-24",
-    "app": null,
-    "backfilled": true,
-    "evidence": [
-     {
-      "label": "PR #125",
-      "url": "https://github.com/kodonghui/marong2/pull/125"
-     },
-     {
-      "label": "PR #126",
-      "url": "https://github.com/kodonghui/marong2/pull/126"
-     }
-    ],
-    "items": [
-     {
-      "type": "fixed",
-      "area": "admin",
-      "title": "아이템 탭",
-      "before": "관리 페이지의 아이템 탭을 누르면 404였어요",
-      "after": "아이템 탭이 열려요",
-      "evidence": [
-       {
-        "label": "PR #125",
-        "url": "https://github.com/kodonghui/marong2/pull/125"
-       },
-       {
-        "label": "PR #126",
-        "url": "https://github.com/kodonghui/marong2/pull/126"
-       }
-      ]
-     }
-    ]
-   },
-   {
     "id": "20261124-admin",
     "kind": "server",
     "title": "관리 페이지 다시 만들기",
@@ -304,6 +266,74 @@ window.MOCK_CHANGES = {
     ]
    },
    {
+    "id": "20261124-bug114",
+    "kind": "server",
+    "title": "웹 통화 다시 잇기",
+    "deployedOn": "2026-11-24",
+    "sortOn": "2026-11-24",
+    "app": null,
+    "backfilled": true,
+    "evidence": [
+     {
+      "label": "PR #115",
+      "url": "https://github.com/kodonghui/marong2/pull/115"
+     },
+     {
+      "label": "PR #118",
+      "url": "https://github.com/kodonghui/marong2/pull/118"
+     }
+    ],
+    "items": [
+     {
+      "type": "fixed",
+      "area": "call",
+      "title": "같은 웹에서 다시 잇기",
+      "before": "같은 웹 화면에서 통화가 끊긴 뒤 다시 이어지지 않았어요",
+      "after": "같은 웹 화면에서 다시 이어져요",
+      "evidence": [
+       {
+        "label": "PR #115",
+        "url": "https://github.com/kodonghui/marong2/pull/115"
+       },
+       {
+        "label": "PR #118",
+        "url": "https://github.com/kodonghui/marong2/pull/118"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "20261123-bug113",
+    "kind": "server",
+    "title": "늦게 뜬 화면의 업데이트 배너",
+    "deployedOn": "2026-11-23",
+    "sortOn": "2026-11-23",
+    "app": null,
+    "backfilled": true,
+    "evidence": [
+     {
+      "label": "PR #111",
+      "url": "https://github.com/kodonghui/marong2/pull/111"
+     }
+    ],
+    "items": [
+     {
+      "type": "fixed",
+      "area": "web",
+      "title": "늦게 뜬 화면의 배너",
+      "before": "늦게 로드된 화면에는 업데이트 배너가 보이지 않았어요",
+      "after": "늦게 로드된 화면에도 배너가 보여요",
+      "evidence": [
+       {
+        "label": "PR #111",
+        "url": "https://github.com/kodonghui/marong2/pull/111"
+       }
+      ]
+     }
+    ]
+   },
+   {
     "id": "app-0.3.4",
     "kind": "app",
     "title": "새 버전 바로 받기와 지금 설치",
@@ -339,36 +369,6 @@ window.MOCK_CHANGES = {
        {
         "label": "PR #110",
         "url": "https://github.com/kodonghui/marong2/pull/110"
-       }
-      ]
-     }
-    ]
-   },
-   {
-    "id": "20261123-bug113",
-    "kind": "server",
-    "title": "늦게 뜬 화면의 업데이트 배너",
-    "deployedOn": "2026-11-23",
-    "sortOn": "2026-11-23",
-    "app": null,
-    "backfilled": true,
-    "evidence": [
-     {
-      "label": "PR #111",
-      "url": "https://github.com/kodonghui/marong2/pull/111"
-     }
-    ],
-    "items": [
-     {
-      "type": "fixed",
-      "area": "web",
-      "title": "늦게 뜬 화면의 배너",
-      "before": "늦게 로드된 화면에는 업데이트 배너가 보이지 않았어요",
-      "after": "늦게 로드된 화면에도 배너가 보여요",
-      "evidence": [
-       {
-        "label": "PR #111",
-        "url": "https://github.com/kodonghui/marong2/pull/111"
        }
       ]
      }
@@ -593,6 +593,44 @@ window.MOCK_CHANGES = {
     ]
    },
    {
+    "id": "20261124-bug-124",
+    "kind": "server",
+    "title": "관리 아이템 화면 열기",
+    "deployedOn": "2026-11-24",
+    "sortOn": "2026-11-24",
+    "app": null,
+    "backfilled": true,
+    "evidence": [
+     {
+      "label": "PR #125",
+      "url": "https://github.com/kodonghui/marong2/pull/125"
+     },
+     {
+      "label": "PR #126",
+      "url": "https://github.com/kodonghui/marong2/pull/126"
+     }
+    ],
+    "items": [
+     {
+      "type": "fixed",
+      "area": "admin",
+      "title": "아이템 탭",
+      "before": "관리 페이지의 아이템 탭을 누르면 404였어요",
+      "after": "아이템 탭이 열려요",
+      "evidence": [
+       {
+        "label": "PR #125",
+        "url": "https://github.com/kodonghui/marong2/pull/125"
+       },
+       {
+        "label": "PR #126",
+        "url": "https://github.com/kodonghui/marong2/pull/126"
+       }
+      ]
+     }
+    ]
+   },
+   {
     "id": "20261124-bug123",
     "kind": "server",
     "title": "글 대화 빈 스크롤 고침",
@@ -703,82 +741,6 @@ window.MOCK_CHANGES = {
     ]
    },
    {
-    "id": "20261124-bug114",
-    "kind": "server",
-    "title": "웹 통화 다시 잇기",
-    "deployedOn": "2026-11-24",
-    "sortOn": "2026-11-24",
-    "app": null,
-    "backfilled": true,
-    "evidence": [
-     {
-      "label": "PR #115",
-      "url": "https://github.com/kodonghui/marong2/pull/115"
-     },
-     {
-      "label": "PR #118",
-      "url": "https://github.com/kodonghui/marong2/pull/118"
-     }
-    ],
-    "items": [
-     {
-      "type": "fixed",
-      "area": "call",
-      "title": "같은 웹에서 다시 잇기",
-      "before": "같은 웹 화면에서 통화가 끊긴 뒤 다시 이어지지 않았어요",
-      "after": "같은 웹 화면에서 다시 이어져요",
-      "evidence": [
-       {
-        "label": "PR #115",
-        "url": "https://github.com/kodonghui/marong2/pull/115"
-       },
-       {
-        "label": "PR #118",
-        "url": "https://github.com/kodonghui/marong2/pull/118"
-       }
-      ]
-     }
-    ]
-   },
-   {
-    "id": "20261124-bug-124",
-    "kind": "server",
-    "title": "관리 아이템 화면 열기",
-    "deployedOn": "2026-11-24",
-    "sortOn": "2026-11-24",
-    "app": null,
-    "backfilled": true,
-    "evidence": [
-     {
-      "label": "PR #125",
-      "url": "https://github.com/kodonghui/marong2/pull/125"
-     },
-     {
-      "label": "PR #126",
-      "url": "https://github.com/kodonghui/marong2/pull/126"
-     }
-    ],
-    "items": [
-     {
-      "type": "fixed",
-      "area": "admin",
-      "title": "아이템 탭",
-      "before": "관리 페이지의 아이템 탭을 누르면 404였어요",
-      "after": "아이템 탭이 열려요",
-      "evidence": [
-       {
-        "label": "PR #125",
-        "url": "https://github.com/kodonghui/marong2/pull/125"
-       },
-       {
-        "label": "PR #126",
-        "url": "https://github.com/kodonghui/marong2/pull/126"
-       }
-      ]
-     }
-    ]
-   },
-   {
     "id": "20261124-admin",
     "kind": "server",
     "title": "관리 페이지 다시 만들기",
@@ -851,6 +813,74 @@ window.MOCK_CHANGES = {
     ]
    },
    {
+    "id": "20261124-bug114",
+    "kind": "server",
+    "title": "웹 통화 다시 잇기",
+    "deployedOn": "2026-11-24",
+    "sortOn": "2026-11-24",
+    "app": null,
+    "backfilled": true,
+    "evidence": [
+     {
+      "label": "PR #115",
+      "url": "https://github.com/kodonghui/marong2/pull/115"
+     },
+     {
+      "label": "PR #118",
+      "url": "https://github.com/kodonghui/marong2/pull/118"
+     }
+    ],
+    "items": [
+     {
+      "type": "fixed",
+      "area": "call",
+      "title": "같은 웹에서 다시 잇기",
+      "before": "같은 웹 화면에서 통화가 끊긴 뒤 다시 이어지지 않았어요",
+      "after": "같은 웹 화면에서 다시 이어져요",
+      "evidence": [
+       {
+        "label": "PR #115",
+        "url": "https://github.com/kodonghui/marong2/pull/115"
+       },
+       {
+        "label": "PR #118",
+        "url": "https://github.com/kodonghui/marong2/pull/118"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "20261123-bug113",
+    "kind": "server",
+    "title": "늦게 뜬 화면의 업데이트 배너",
+    "deployedOn": "2026-11-23",
+    "sortOn": "2026-11-23",
+    "app": null,
+    "backfilled": true,
+    "evidence": [
+     {
+      "label": "PR #111",
+      "url": "https://github.com/kodonghui/marong2/pull/111"
+     }
+    ],
+    "items": [
+     {
+      "type": "fixed",
+      "area": "web",
+      "title": "늦게 뜬 화면의 배너",
+      "before": "늦게 로드된 화면에는 업데이트 배너가 보이지 않았어요",
+      "after": "늦게 로드된 화면에도 배너가 보여요",
+      "evidence": [
+       {
+        "label": "PR #111",
+        "url": "https://github.com/kodonghui/marong2/pull/111"
+       }
+      ]
+     }
+    ]
+   },
+   {
     "id": "app-0.3.4",
     "kind": "app",
     "title": "새 버전 바로 받기와 지금 설치",
@@ -886,36 +916,6 @@ window.MOCK_CHANGES = {
        {
         "label": "PR #110",
         "url": "https://github.com/kodonghui/marong2/pull/110"
-       }
-      ]
-     }
-    ]
-   },
-   {
-    "id": "20261123-bug113",
-    "kind": "server",
-    "title": "늦게 뜬 화면의 업데이트 배너",
-    "deployedOn": "2026-11-23",
-    "sortOn": "2026-11-23",
-    "app": null,
-    "backfilled": true,
-    "evidence": [
-     {
-      "label": "PR #111",
-      "url": "https://github.com/kodonghui/marong2/pull/111"
-     }
-    ],
-    "items": [
-     {
-      "type": "fixed",
-      "area": "web",
-      "title": "늦게 뜬 화면의 배너",
-      "before": "늦게 로드된 화면에는 업데이트 배너가 보이지 않았어요",
-      "after": "늦게 로드된 화면에도 배너가 보여요",
-      "evidence": [
-       {
-        "label": "PR #111",
-        "url": "https://github.com/kodonghui/marong2/pull/111"
        }
       ]
      }
@@ -1097,6 +1097,10 @@ window.MOCK_CHANGES = {
  "empty": {
   "units": [],
   "skipped": 0
+ },
+ "unreadable": {
+  "units": [],
+  "skipped": 3
  },
  "long": {
   "units": [
