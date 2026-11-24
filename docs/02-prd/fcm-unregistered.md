@@ -21,7 +21,7 @@ ID 번호: REQ-630·631(이 패키지 범위 630\~639, [10 WBS 안내](../10-wbs
 | ID | Requirement | Type | Priority | Context | Source | Status |
 | --- | --- | --- | --- | --- | --- | --- |
 | REQ-630 | FCM이 보내기에 등록 해제 답(TERM-280: HTTP 404와 FCM 상세 코드 `UNREGISTERED`)을 주면 시스템은 그 폰의 FID를 지워야 하고, 그 밖의 거절(HTTP 400, 등록 해제가 확인되지 않은 404, 401·403, 429·5xx)에는 FID를 지키고 그 보내기를 실패로 처리해야 한다. 글 알림, 벨, 업데이트 메시지 모두 같다. | functional | Must | CTX-020, CTX-021 | D180, 보고서, FCM 문서 | proposed |
-| REQ-631 | FCM이 보내기를 거절하면, 시스템은 그 보내기마다 로그 한 줄에 메시지 종류, HTTP 상태, FCM 상위 상태, FCM 상세 코드, 틀린 칸 이름, 결과를 남겨야 하고, 메시지 글·FID·토큰·FCM 오류 메시지는 남기지 않아야 한다. | non-functional | Should | CTX-020, CTX-021 | 보고서(원인을 알 수 없었음), 기존(REQ-118), 새 제안(칸 이름, 질문 3) | proposed |
+| REQ-631 | FCM이 보내기를 거절해 그 보내기가 등록 해제나 실패로 끝나면, 시스템은 그 보내기마다 로그 한 줄에 메시지 종류, HTTP 상태, FCM 상위 상태, FCM 상세 코드, 틀린 칸 이름, 결과를 남겨야 한다. 키·권한 거절(401·403)은 지금처럼 1시간에 한 번 경고로 남기되 FCM 상세 코드를 더해야 한다. 어느 로그에도 메시지 글·FID·토큰·FCM 오류 메시지는 남기지 않아야 한다. | non-functional | Should | CTX-020, CTX-021 | 보고서(원인을 알 수 없었음), 기존(REQ-118), 새 제안(칸 이름, 질문 3) | proposed |
 
 ## 승인 요구사항과의 관계
 
@@ -45,5 +45,5 @@ ID 번호: REQ-630·631(이 패키지 범위 630\~639, [10 WBS 안내](../10-wbs
 
 비교한 목록: FCM 오류 코드 표(`UNSPECIFIED_ERROR`, `INVALID_ARGUMENT`, `UNREGISTERED`, `SENDER_ID_MISMATCH`, `QUOTA_EXCEEDED`, `UNAVAILABLE`, `INTERNAL`, `THIRD_PARTY_AUTH_ERROR`), FID를 지우는 코드 세 곳(`AppPush._send`, `AppUpdatePush._send`, 진단 도구), 조사 보고서의 선택지 둘.
 
-- 넣음: `UNREGISTERED`(지움), `INVALID_ARGUMENT`(지우지 않음), `SENDER_ID_MISMATCH`·`THIRD_PARTY_AUTH_ERROR`(403, `auth` 그대로), `QUOTA_EXCEEDED`(429)·`UNAVAILABLE`(503)·`INTERNAL`(500)(다시 보내기 그대로), `UNSPECIFIED_ERROR`(상태에 따라 지금 규칙, 지우지 않음).
+- 넣음: `UNREGISTERED`(지움), `INVALID_ARGUMENT`(지우지 않음), `SENDER_ID_MISMATCH`(403)·`THIRD_PARTY_AUTH_ERROR`(401)(둘 다 `auth` 그대로), `QUOTA_EXCEEDED`(429)·`UNAVAILABLE`(503)·`INTERNAL`(500)(다시 보내기 그대로), `UNSPECIFIED_ERROR`(상태에 따라 지금 규칙, 지우지 않음).
 - 넣지 않음: 조사 보고서 선택지 2(근거가 있는 400도 지움). [01 도메인 5.5](../01-domain/fcm-unregistered.md#55-범위-밖)

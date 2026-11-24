@@ -46,7 +46,7 @@
       "checks": [
         {
           "level": "info",
-          "message": "기능 변경(FCM 등록 해제 판단, D180, 마롱이 항목 96 사용자님 답 '바꿔 줘(기능 변경 진행)'). 설계 PR claude/fcm-unregistered-design, 기준 main 1a29477(PR #127 합친 뒤 23549d6 위로 옮김), 체크포인트 전. 바뀜: 새 SPEC-510~512 proposed(docs/04-functional-spec/fcm-unregistered.md). 바뀌는 승인 행 SPEC-117·126·131·430, app-update 8.5(F-1~F-4·F-7), PR #127의 SPEC-460·8.6(G-3·G-5). SPEC-266·383·435·438 그대로",
+          "message": "기능 변경(FCM 등록 해제 판단, D180, 마롱이 항목 96 사용자님 답 '바꿔 줘(기능 변경 진행)'). 설계 PR claude/fcm-unregistered-design, 기준 main 1a29477(PR #127 합친 뒤 23549d6 위로 옮김), 체크포인트 전. 바뀜: 새 SPEC-510~512 proposed(docs/04-functional-spec/fcm-unregistered.md). 바뀌는 승인 행 SPEC-117·126·131·430, app-update 8.5(F-1~F-4·F-7), PR #127로 바뀐 SPEC-460·438·8.6(G-3·G-6·G-5). SPEC-266·383·435 그대로",
           "at": "2026-11-24"
         }
       ]
