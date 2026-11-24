@@ -40,3 +40,4 @@ TC-620은 카탈로그가 있는 환경을, TC-638 브라우저는 가짜 화면
 - 반영 뒤 서비스 `active`, `/chat/healthz` 200, 비인증 로컬 `/chat/admin/items` 403, 5분 로그의 `ERROR` 0건을 확인했어요. 운영 파일의 SHA256 `2cdf44c12bf37b53beeb9610475b8015c7249d219b154c90b4ef6a9072f9ff39`가 병합 커밋과 일치했어요.
 - 파일 백업은 `~/marong-deploy/20261124-bug-124.UCXbGqeu/app_admin.py.before`예요. 되돌리는 명령은 `bash ~/marong-deploy/20261124-bug-124.UCXbGqeu/rollback.sh restart`예요.
 - 사용자님은 아이템 화면에 불러오기 오류가 표시된 것을 확인했어요. 꾸미기가 꺼져 있을 때의 안내는 별도 기능 변경으로 설계 중이에요. 기기 확인 결과는 관리 페이지 QA의 TC-639에 적었어요. [관리 페이지 QA](admin.md)
+- 2026-11-24 KST 기능 변경 3(TASK-505) 운영 반영 뒤, 꾸미기가 꺼진 서버의 아이템 화면은 SCR-186#decor-off 안내를 표시했어요. 사용자 화면 확인은 TC-657에 기록했어요. [관리 페이지 QA](admin.md)

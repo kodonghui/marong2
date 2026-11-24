@@ -54,7 +54,7 @@
 | TASK-502 | 구현·재검증 완료 | `708f201`, `8ade8fa` | TC-652·656·658 통과. 카탈로그가 있는 서버와 없는 서버의 응답, 두 형태의 404 안내, 네트워크 실패와 10초 제한 시간 뒤 재시도를 확인했어요. |
 | TASK-503 | 구현·재검증 완료 | `708f201`, `8ade8fa` | TC-613·622\~625·653·654·659의 API 시험 통과. 기기 재보고, 응답의 필수 필드 9개, 개요 집계를 확인했어요. |
 | TASK-504 | 구현·재검증 완료 | `708f201`, `8ade8fa` | TC-626·628·630·655·659의 Chromium 시험 통과. 360·430·1280px 낮·밤에서 확인했어요. |
-| TASK-505 | 운영 반영 완료 | `125ac443664bbf2ae65e777c18ff4ba70b4f7453` | 2026-11-24 18:24:22 KST. TC-657 운영 로컬 점검 통과. 관리자 인증 확인과 실제 화면 확인 대기. |
+| TASK-505 | 운영 반영 완료 | `125ac443664bbf2ae65e777c18ff4ba70b4f7453` | 2026-11-24 18:24:22 KST. TC-657 운영 로컬 점검·사용자 화면 확인. 관리자 인증 GET과 개요 집계 확인 대기. [TC-657](../12-qa/admin.md). |
 
 ## 운영 반영 기록
 
@@ -62,5 +62,5 @@
 - 반영 전 `main` `5434669`와 운영 파일 4개의 SHA256이 일치했어요. 반영 파일은 `marong/app_admin.py`, `marong/app_store.py`, `marong/app_chat_static/admin.js`, `marong/app_chat_static/admin-items.js`예요.
 - 재시작 직전 3분간 앱 글 대화 로그와 DB 메시지는 각각 0건, 진행 중 통화와 웹 통화 연결도 각각 0건이었어요. `marong-app.service`는 18:24:22 KST에 재시작했어요.
 - 반영 뒤 서비스 `active`, `/chat/healthz` 200, 300초간 오류 0건을 확인했어요. 운영 파일 SHA256은 4/4, 앱 서버가 제공한 `/chat/admin.js`와 `/chat/admin-items.js` 본문 SHA256은 2/2가 병합 커밋과 일치했어요.
-- TC-657 운영 로컬 점검에서 비인증 `/chat/admin/items` 403과 `/chat/admin/api/items` 404(`application/problem+json`, `not_found`)가 반영 전후에 동일했어요. 읽기 전용 DB 조회에서 최근 90일간 보고한 폰 중 `dropped_at`이 있는 폰은 1대였어요. 관리자 인증이 필요한 화면과 API-267·280 및 실제 기기 화면 확인은 대기 중이에요.
+- TC-657 운영 로컬 점검에서 비인증 `/chat/admin/items` 403과 `/chat/admin/api/items` 404(`application/problem+json`, `not_found`)가 반영 전후에 동일했어요. 읽기 전용 DB 조회에서 최근 90일간 보고한 폰 중 `dropped_at`이 있는 폰은 1대였어요. 같은 날 사용자 화면 확인은 [TC-657](../12-qa/admin.md)에 기록했어요. 관리자 인증 GET과 개요 집계 확인은 대기 중이에요.
 - 백업은 `~/marong-deploy/20261124-admin-removed/backup/`에 있어요. 롤백 명령은 `bash ~/marong-deploy/20261124-admin-removed/rollback.sh`예요.
