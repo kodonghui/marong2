@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from aiohttp import ClientSession,ClientTimeout,WSMsgType
+from marong import continuity
+from marong.continuity import BUDGET_GOODBYE, RING_ANSWERED_TEXT
 from memory_tools import CALL_GREETING_TEXT,TranscriptRecorder,execute_tool
 from hangup import Consent
 from call_search import queries as search_queries
@@ -42,8 +44,6 @@ SEARCH_CUT_SLACK_S=2.0
 OUTPUT_RATE=24000
 # A call Marong placed at a time the friend set (docs/app-ring.md): the friend's answer opens it with this text,
 # once, on the connection that answered the ring. It is not a turn of the friend's and is never recorded.
-RING_ANSWERED_TEXT='(전화 연결됨)'
-BUDGET_GOODBYE='(이번 달 통화를 더 할 수 없어서 곧 끊어야 해. 금액은 말하지 말고, 다음에 또 얘기하자고 한 문장으로 인사해.)'
 RING_CLAIM_S=1
 # The picture a hello call carries (docs/04-functional-spec/call-first.md SPEC-268): served by the bot under /chat/.
 TOPIC_KEY=re.compile(r'v[0-9]{1,3}/[a-z0-9-]{1,40}')
@@ -279,7 +279,7 @@ class LiveSession:
                     now=time.monotonic();allowance=min(96000.,allowance+(now-last)*32000);last=now
                     if len(msg.data)>32000 or len(msg.data)%2 or len(msg.data)>allowance:continue
                     allowance-=len(msg.data)
-                    if not self.ready:continue
+                    if not self.ready and not self.hold_continuity_audio():continue
                     if self.tuning and self.tuning['text_handoff']:
                         self.input_history.append((now,msg.data))
                         while self.input_history and now-self.input_history[0][0]>1:
@@ -472,7 +472,39 @@ class LiveSession:
             and not self.in_turn and self.controls.empty() and not (self.rtc and self.rtc.queued_ms()>0)
             and all(task.done() for task in tool_tasks.values()))
 
-    async def open_provider(self,stack,handle,seed,memory,tuning,mode,*,ring=None,timeout=20,handoff=False):
+    def hold_continuity_audio(self):
+        return continuity.MODE == "on" and self.p is not None and not self.handle
+
+    async def pick_previous(self, segment, now):
+        if continuity.MODE == "off" or not self.store or not self.p:
+            return [], []
+        recent, older, report = await self.store.previous_conversation(self.p, self.call_id, now, segment)
+        self.d["continuity"] = report
+        return (recent, older) if continuity.MODE == "on" else ([], [])
+
+    async def open_with_previous(self, stack, seed, tuning, mode, previous, now, segment, *, ring=None, handoff=False):
+        if not previous:
+            return await self.open_provider(stack, self.handle if not handoff else None, seed,
+                                            bool(self.p and self.segment), tuning, mode, ring=ring,
+                                            timeout=10 if handoff else 20, handoff=handoff)
+        history = continuity.history_message(previous, self.p.name, now, segment)
+        async with AsyncExitStack() as attempt:
+            try:
+                upstream = await self.open_provider(attempt, None, seed, True, tuning, mode, ring=ring,
+                                                    timeout=10, handoff=handoff, history=history)
+            except ConnectionError as error:
+                if str(error) != "setup_rejected":
+                    raise
+            else:
+                await stack.enter_async_context(attempt.pop_all())
+                return upstream
+        self.d["continuity"]["result"] = "fallback"
+        print("continuity_fallback", flush=True)
+        fallback = continuity.fallback_seed(seed, previous, self.p.name, now, segment)
+        return await self.open_provider(stack, None, fallback, True, tuning, mode, ring=ring,
+                                        timeout=10, handoff=handoff)
+
+    async def open_provider(self,stack,handle,seed,memory,tuning,mode,*,ring=None,timeout=20,handoff=False,history=None):
         url=f'wss://{self.location}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent'
         http=await stack.enter_async_context(ClientSession(timeout=ClientTimeout(total=None,connect=15)))
         upstream=await stack.enter_async_context(http.ws_connect(
@@ -482,6 +514,7 @@ class LiveSession:
         if ring:options['ring']=ring
         if tuning:options['tuning']=tuning
         if handoff:options['handoff']=True
+        if history:options["initial_history"]=True
         if self.store and hasattr(self.store, "friend_memory_enabled"):
             options["friend_memory"] = self.store.friend_memory_enabled()
         if self.p and hasattr(self.store,'friend_instruction'):
@@ -496,6 +529,10 @@ class LiveSession:
             first=await upstream.receive(timeout=timeout)
             if first.type not in (WSMsgType.TEXT,WSMsgType.BINARY) or 'setupComplete' not in json.loads(first.data):
                 raise ConnectionError('setup_rejected')
+            if history:
+                if self.reset.is_set():
+                    raise ConnectionError("continuity_context_reset")
+                await upstream.send_json(history)
             if trace:
                 trace.record(result='ok')
         return upstream
@@ -583,7 +620,7 @@ class LiveSession:
                         lead_in=warmed.lead_in
                         usage_mode=warmed.usage_mode
                     else:
-                        self.audio.clear()
+                        if not self.hold_continuity_audio():self.audio.clear()
                         seed='';self.segment=None;tuning=None
                         if self.store and self.p:
                             tuning = await self.load_tuning()
@@ -598,9 +635,14 @@ class LiveSession:
                                 self.d['memoryConnected']=True
                             except Exception:self.d['memoryConnected']=False
                         mode=self.search_mode()
+                        segment_kind = "reconnect" if self.logical_resumed and not self.ring_greet else "start"
+                        opened_at = datetime.now(timezone.utc)
+                        previous = []
+                        if not self.handle and self.segment:
+                            previous, _ = await self.pick_previous(segment_kind, opened_at)
                         try:
-                            upstream=await self.open_provider(stack,self.handle,seed,bool(self.p and self.segment),
-                                                              tuning,mode,ring=self.ring_info)
+                            upstream=await self.open_with_previous(stack,seed,tuning,mode,previous,opened_at,
+                                                                   segment_kind,ring=self.ring_info)
                         except Exception as error:
                             if isinstance(error, ConnectionError) and str(error)=='setup_rejected' and self.handle:
                                 self.handle=None;self.pending.clear()
@@ -614,6 +656,11 @@ class LiveSession:
                             except Exception:print('segment_ready_write_error',flush=True)
                             self.timing_segment=self.timing_segment or self.segment
                         if self.entry_transport!='discord':self.mark('providerReady')
+                        if self.hold_continuity_audio() and previous:
+                            ready_at = time.monotonic()
+                            self.audio = deque((ready_at, frame) for _, frame in self.audio)
+                        elif self.hold_continuity_audio():
+                            self.audio.clear()
                     self.search_live=mode=='on'
                     self.configure_mic(tuning)
                     await self.ready_message();delay=1
@@ -643,7 +690,12 @@ class LiveSession:
                 memory_limit=tuning['seed_call_memories'],history_chars=tuning['handoff_chars']),1)
             mode=self.search_mode()
             if not quiet():return False
-            upstream=await asyncio.wait_for(self.open_provider(stack,None,seed,True,tuning,mode,timeout=10,handoff=True),10)
+            opened_at = datetime.now(timezone.utc)
+            previous, _ = await self.pick_previous("handoff", opened_at)
+            if not quiet():return False
+            upstream=await asyncio.wait_for(self.open_with_previous(
+                stack, seed, tuning, mode, previous, opened_at, "handoff", handoff=True,
+            ), 21 if previous else 10)
             if not quiet():return False
             replacement=await asyncio.wait_for(self.store.start_segment(self.p,self.call_id,self.client_id,self.model,
                 tuning=tuning['name'],handoff_from=self.segment),1)

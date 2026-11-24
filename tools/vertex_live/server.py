@@ -288,7 +288,8 @@ def ring_part(ring):
     return (HELLO_GUIDE if hello else RING_GUIDE)+json.dumps(data,ensure_ascii=False)
 
 def setup(handle=None,seed='',memory=False,hangup=False,search=None,ring=None,tuning=None,handoff=False,
-          friend_instruction='',*,voice=None,bot_name=None,friend_memory=None,character=None,call_started_at=None):
+          friend_instruction='',*,voice=None,bot_name=None,friend_memory=None,character=None,call_started_at=None,
+          initial_history=False):
     # search: 'on' adds Google Search and its guide, 'spent'/'off' only a guide that she cannot search now,
     # None (callers without a search budget) neither. ring: the promise of a call Marong placed, or None.
     resume={'transparent':True}
@@ -305,6 +306,8 @@ def setup(handle=None,seed='',memory=False,hangup=False,search=None,ring=None,tu
       'realtimeInputConfig':{'automaticActivityDetection':{'silenceDurationMs':700,'prefixPaddingMs':100}},
       'contextWindowCompression':{'triggerTokens':8192,'slidingWindow':{'targetTokens':4096}},
       'sessionResumption':resume,'inputAudioTranscription':{},'outputAudioTranscription':{},'explicitVadSignal':True}}
+    if initial_history:
+        result["setup"]["historyConfig"] = {"initialHistoryInClientContent": True}
     if character is not None:
         result["setup"]["systemInstruction"]["parts"].append(
             {"text": character_section(character, pet_voice=PET_VOICE)})
