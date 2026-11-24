@@ -4,6 +4,7 @@ import asyncio
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 from io import StringIO
+import json
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -29,6 +30,9 @@ class HistoryStore(Store):
 
     async def claim_ring(self, *args):
         return None
+
+    async def seed(self, *args, **kwargs):
+        return ""
 
     async def previous_conversation(self, person, call_id, now, segment):
         self.picks.append((call_id, segment))
@@ -156,6 +160,19 @@ class ContinuityLiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics["continuity"]["result"], "fallback")
         self.assertEqual(len(picks), 1)
         self.assertEqual(log.count("continuity_fallback"), 1)
+
+    async def test_timed_seed_guide_and_instruction_limit(self):
+        server = await check_setup()
+        seed = json.dumps({
+            "as_of": "2026-11-24 화 14:05",
+            "call_memories": [{"text": "가" * 1000} for _ in range(20)],
+            "current_call": [{"text": "합성 현재 통화"}],
+        }, ensure_ascii=False)
+        with patch.object(continuity, "MODE", "on"):
+            parts = server.setup(seed=seed, call_started_at=STARTED)["setup"]["systemInstruction"]["parts"]
+        self.assertLessEqual(sum(len(part["text"]) for part in parts), 14000)
+        self.assertTrue(any("'when'은 'as_of' 기준" in part["text"] for part in parts))
+        self.assertTrue(any("합성 현재 통화" in part["text"] for part in parts))
 
 
 if __name__ == "__main__":

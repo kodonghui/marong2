@@ -622,6 +622,9 @@ class LiveSession:
                     else:
                         if not self.hold_continuity_audio():self.audio.clear()
                         seed='';self.segment=None;tuning=None
+                        segment_kind = "reconnect" if self.logical_resumed and not self.ring_greet else "start"
+                        opened_at = datetime.now(timezone.utc)
+                        previous, older = [], []
                         if self.store and self.p:
                             tuning = await self.load_tuning()
                             try:
@@ -630,16 +633,14 @@ class LiveSession:
                                     segment_options['await_provider']=True
                                 self.segment=await asyncio.wait_for(self.store.start_segment(
                                     self.p,self.call_id,self.client_id,self.model,**segment_options),3)
+                                if not self.handle:
+                                    previous, older = await self.pick_previous(segment_kind, opened_at)
+                                date_options = {"as_of": opened_at, "older": older} if continuity.MODE == "on" else {}
                                 seed=await asyncio.wait_for(self.store.seed(
-                                    self.p,self.call_id,memory_limit=tuning['seed_call_memories']),1)
+                                    self.p,self.call_id,memory_limit=tuning['seed_call_memories'],**date_options),1)
                                 self.d['memoryConnected']=True
                             except Exception:self.d['memoryConnected']=False
                         mode=self.search_mode()
-                        segment_kind = "reconnect" if self.logical_resumed and not self.ring_greet else "start"
-                        opened_at = datetime.now(timezone.utc)
-                        previous = []
-                        if not self.handle and self.segment:
-                            previous, _ = await self.pick_previous(segment_kind, opened_at)
                         try:
                             upstream=await self.open_with_previous(stack,seed,tuning,mode,previous,opened_at,
                                                                    segment_kind,ring=self.ring_info)
@@ -686,12 +687,12 @@ class LiveSession:
         async with AsyncExitStack() as stack:
             tuning=await asyncio.wait_for(self.store.tuning(),.4)
             if not tuning:return False
-            seed=await asyncio.wait_for(self.store.seed(self.p,self.call_id,
-                memory_limit=tuning['seed_call_memories'],history_chars=tuning['handoff_chars']),1)
-            mode=self.search_mode()
-            if not quiet():return False
             opened_at = datetime.now(timezone.utc)
-            previous, _ = await self.pick_previous("handoff", opened_at)
+            previous, older = await self.pick_previous("handoff", opened_at)
+            date_options = {"as_of": opened_at, "older": older} if continuity.MODE == "on" else {}
+            seed=await asyncio.wait_for(self.store.seed(self.p,self.call_id,
+                memory_limit=tuning['seed_call_memories'],history_chars=tuning['handoff_chars'],**date_options),1)
+            mode=self.search_mode()
             if not quiet():return False
             upstream=await asyncio.wait_for(self.open_with_previous(
                 stack, seed, tuning, mode, previous, opened_at, "handoff", handoff=True,

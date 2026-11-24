@@ -4,8 +4,10 @@ import asyncio
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 from io import StringIO
+import json
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from psycopg import AsyncConnection, connect
@@ -13,8 +15,13 @@ from psycopg.rows import dict_row
 
 from call_memory import MemoryStore, Principal, memory_scope
 from fixture_database import BOT_DSN, CALL_DSN, database
+from fakes import ScriptedLLM, message, text
+from marong import continuity
+from marong.agent import Agent, Incoming
+from marong.config import load_settings
 from marong.continuity import SIGNAL_TEXTS
 from marong.continuity_db import read_previous
+from marong.store import Store
 
 
 NOW = datetime(2026, 11, 24, 5, 5, tzinfo=timezone.utc)
@@ -144,6 +151,81 @@ class ContinuityStoreTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(recent or older)
             self.assertEqual(report["result"], "timeout")
             self.assertEqual(len(output.getvalue().splitlines()), 1)
+        finally:
+            await store.close()
+
+    async def test_timed_seed_uses_call_start_and_names_turn_speakers(self):
+        person = self.fixture()
+        now = NOW.replace(hour=7, minute=0)
+        yesterday = datetime(2026, 11, 23, 12, 5, tzinfo=timezone.utc)
+        self.message(now - timedelta(minutes=2), "합성 최근 글")
+        current = self.call(person, now - timedelta(minutes=3), count=2, last_after=1)
+        older = self.call(person, yesterday, last_after=6)
+        admin("INSERT INTO call.cards(call_id,summary,model,prompt_version) VALUES(%s,'합성 요약','fixture','fixture')",
+              (older,))
+        store = MemoryStore(CALL_DSN)
+        await store.open()
+        try:
+            original = json.loads(await store.seed(person, current))
+            self.assertIn("kakao_recent", original)
+            self.assertNotIn("as_of", original)
+            self.assertIn("created_at", original["call_cards"][0])
+            seeded = json.loads(await store.seed(person, current, as_of=now, older=[]))
+            self.assertEqual(next(iter(seeded)), "as_of")
+            self.assertEqual(seeded["as_of"], "2026-11-24 화 16:00")
+            self.assertNotIn("kakao_recent", seeded)
+            self.assertEqual(seeded["recent_conversations"], [])
+            card = seeded["call_cards"][0]
+            self.assertEqual(card["when"], "어제 오후 9시 5분(11/23 월)")
+            self.assertEqual(card["length"], "6분")
+            self.assertEqual([item["who"] for item in seeded["current_call"]], ["시험친구 가", "마롱이"])
+            self.assertFalse(any("created_at" in item for item in seeded["current_call"]))
+        finally:
+            await store.close()
+
+    async def test_text_reply_reads_only_the_recent_private_call(self):
+        person = self.fixture()
+        now = datetime.now(timezone.utc)
+        for room in (self.root, self.group, self.bound):
+            self.message(now - timedelta(minutes=2), "합성 글", room=room)
+        call_id = self.call(person, now - timedelta(minutes=14, seconds=3))
+        admin("INSERT INTO call.cards(call_id,summary,model,prompt_version) VALUES(%s,'합성 요약','fixture','fixture')",
+              (call_id,))
+        store = Store(BOT_DSN, call_bridge=True)
+        await store.open(wait=True)
+        llm = ScriptedLLM(lambda body: message([text("시험용 답변")]))
+        agent = Agent(load_settings(), store, SimpleNamespace(ready=False), llm)
+
+        async def prompt(room, private=True):
+            reply = await agent.handle(Incoming(room, self.user, "마롱아 다시 얘기해", is_channel=private),
+                                       AsyncMock(return_value=True))
+            self.assertTrue(reply)
+            return "\n".join(item["text"] for item in llm.bodies[-1]["system"])
+
+        try:
+            with patch.object(continuity, "MODE", "on"):
+                body = await prompt(self.root)
+                self.assertIn("# 방금 통화 (마지막 말 10분 전, 4분 통화.", body)
+                self.assertEqual(sum(line.startswith(("- 시험친구 가:", "- 마롱이:")) for line in body.splitlines()), 8)
+                self.assertLess(body.index("# 방금 통화"), body.index("# 최근 통화"))
+                self.assertNotIn("# 방금 통화", await prompt(self.group, private=False))
+                self.assertNotIn("# 방금 통화", await prompt(self.bound))
+                with patch("marong.store.read_recent_call", AsyncMock(side_effect=TimeoutError)):
+                    self.assertNotIn("# 방금 통화", await prompt(self.root))
+                admin("UPDATE call.calls SET status='live',ended_at=NULL,end_reason=NULL,organize_status='none' WHERE id=%s",
+                      (call_id,))
+                self.assertNotIn("# 방금 통화", await prompt(self.root))
+                admin("UPDATE call.calls SET status='resting' WHERE id=%s", (call_id,))
+                self.assertIn("# 방금 통화", await prompt(self.root))
+                admin("UPDATE call.turns SET ended_at=ended_at - interval '1 hour',started_at=started_at - interval '1 hour' "
+                      "WHERE call_id=%s", (call_id,))
+                older = await prompt(self.root)
+                self.assertNotIn("# 방금 통화", older)
+                self.assertIn('"when"', older)
+            with patch.object(continuity, "MODE", "off"):
+                baseline = await prompt(self.root)
+                self.assertNotIn("# 방금 통화", baseline)
+                self.assertNotIn('"when"', baseline)
         finally:
             await store.close()
 

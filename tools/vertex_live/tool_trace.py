@@ -387,6 +387,11 @@ def app_note(**facts):
         parent.record(**facts)
 
 
+def mask_private_reply():
+    if parent := app_parent():
+        parent.root._owner_app_io = False
+
+
 async def app_read(stage, read, *args, **kwargs):
     with app_step(stage, storage=True) as span:
         if span:

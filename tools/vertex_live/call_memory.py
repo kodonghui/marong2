@@ -19,10 +19,11 @@ from psycopg_pool import AsyncConnectionPool
 from call_usage import Ledger
 from call_cost import MonthlyCost
 from call_tuning import BASE
-from marong.continuity import record_pick
+from marong.continuity import as_of_label, length_label, record_pick
 from marong.continuity_db import read_previous
 from marong.room_scope import writing_room
 from marong.friend_scope import accepted_circle
+from marong.relative_time import relative_time
 from marong.usage import Usage, configured_limit
 
 
@@ -113,6 +114,39 @@ def pack(items, budget):
         result.append(data)
         budget -= len(json.dumps(data, ensure_ascii=False, default=str))
     return result
+
+
+def seed_json(friend, sources, history_chars=4000, *, as_of=None, older=()):
+    budgets = {"kakao_notes": 1000, "kakao_summaries": 1500, "kakao_recent": 1500,
+               "shared_friends": 1500, "call_memories": 1500, "call_cards": 1500, "current_call": history_chars}
+    payload = {"as_of": as_of_label(as_of), "friend": friend} if as_of is not None else {"friend": friend}
+    for key, budget in budgets.items():
+        if as_of is not None and key == "kakao_recent":
+            payload["recent_conversations"] = list(older)
+            continue
+        rows = sources.get(key, [])
+        if as_of is not None:
+            timed = []
+            for row in rows:
+                item = dict(row)
+                recorded = item.pop("created_at", None)
+                started = item.pop("call_started_at", None)
+                ended = item.pop("ended_at", None)
+                if when := relative_time(started or recorded, as_of):
+                    item["when"] = when
+                if key == "call_cards":
+                    item["source"] = "통화 뒤 정리한 글"
+                    if started is not None and ended is not None:
+                        item["length"] = length_label(started, ended)
+                elif key == "call_memories":
+                    item["source"] = "친구가 한 말 그대로"
+                elif key == "current_call":
+                    item["who"] = "마롱이" if item["role"] == "assistant" else friend
+                timed.append(item)
+            rows = timed
+        selected = pack(rows, budget)
+        payload[key] = selected[::-1] if key in {"kakao_recent", "current_call"} else selected
+    return json.dumps(payload, ensure_ascii=False, default=str)
 
 
 class MemoryStore:
@@ -243,7 +277,7 @@ class MemoryStore:
                              conversations=len(older), ms=round((monotonic() - started) * 1000), result=result)
         return recent, older, report
 
-    async def seed(self, p, call_id=None, *, memory_limit=30, history_chars=4000):
+    async def seed(self, p, call_id=None, *, memory_limit=30, history_chars=4000, as_of=None, older=()):
         params = self.params(p)
         scope = memory_scope(p)
         notes = await self.all(scope + f"""SELECT * FROM (
@@ -263,12 +297,14 @@ class MemoryStore:
           AND NOT EXISTS(SELECT 1 FROM call.source_exclusions x WHERE x.caller_id=%(caller)s AND x.source_type='kakao_summary' AND x.source_id=s.id::text)
         """ + self.keep_source("summary", "s.id") + """
           ORDER BY last_id DESC LIMIT 3""", params)
-        recent = await self.all(scope + """SELECT m.id,m.role,m.content,m.created_at,'kakao_message' AS source
-          FROM marong.messages m WHERE room_key IN (SELECT room_key FROM rooms)
-          AND m.meta->>'delivered' IS DISTINCT FROM 'false' AND NOT call.kakao_hidden('message',id,room_key)
-          AND NOT EXISTS(SELECT 1 FROM call.source_exclusions x WHERE x.caller_id=%(caller)s AND x.source_type='kakao_message' AND x.source_id=m.id::text)
-        """ + self.keep_source("message", "m.id") + self.keep_source("message", "m.reply_to") + """
-          ORDER BY id DESC LIMIT 10""", params)
+        recent = []
+        if as_of is None:
+            recent = await self.all(scope + """SELECT m.id,m.role,m.content,m.created_at,'kakao_message' AS source
+              FROM marong.messages m WHERE room_key IN (SELECT room_key FROM rooms)
+              AND m.meta->>'delivered' IS DISTINCT FROM 'false' AND NOT call.kakao_hidden('message',id,room_key)
+              AND NOT EXISTS(SELECT 1 FROM call.source_exclusions x WHERE x.caller_id=%(caller)s AND x.source_type='kakao_message' AND x.source_id=m.id::text)
+            """ + self.keep_source("message", "m.id") + self.keep_source("message", "m.reply_to") + """
+              ORDER BY id DESC LIMIT 10""", params)
         # Other people contribute only the existing, explicitly shared notes.
         friends = [] if p.unified or p.private_rooms is not None else await self.all("""SELECT f.name,fs.label,s.content,
           CASE WHEN fs.close THEN s.close_content ELSE '' END AS close_content
@@ -287,10 +323,12 @@ class MemoryStore:
                 circle = []
             friends = [{"name": row["name"], "label": row["label"], "close": row["close"],
                         "content": "\n".join(filter(None, (row["shared"], row["shared_close"])))} for row in circle]
-        memories = await self.all("""SELECT m.id,m.content,m.created_at,'call_memory' AS source FROM call.memories m
+        dates = ",c.started_at AS call_started_at" if as_of is not None else ""
+        memories = await self.all(f"""SELECT m.id,m.content,m.created_at,'call_memory' AS source{dates} FROM call.memories m
           JOIN call.calls c ON c.id=m.call_id WHERE m.caller_id=%s AND m.status='active' AND c.deleted_at IS NULL
           """ + self.keep_call_copy("m.call_id", "m.turn_id") + " ORDER BY m.created_at DESC LIMIT %s", (p.caller_id,memory_limit))
-        cards = await self.all("""SELECT c.id,k.summary AS content,k.created_at,'call_card' AS source
+        dates = ",c.started_at AS call_started_at,c.ended_at" if as_of is not None else ""
+        cards = await self.all(f"""SELECT c.id,k.summary AS content,k.created_at,'call_card' AS source{dates}
           FROM call.cards k JOIN call.calls c ON c.id=k.call_id WHERE c.caller_id=%s AND c.deleted_at IS NULL
           AND k.forgotten_at IS NULL""" + self.keep_call_copy("c.id") +
           " ORDER BY c.started_at DESC LIMIT 3", (p.caller_id,))
@@ -301,11 +339,9 @@ class MemoryStore:
               WHERE c.caller_id=%s AND c.id=%s AND c.deleted_at IS NULL
               AND t.forgotten_at IS NULL AND t.finalized AND NOT t.interrupted"""
               + self.keep_source("call_turn", "t.id") + " ORDER BY t.seq DESC LIMIT 40", (p.caller_id,call_id))
-        payload = {'friend': p.name, 'kakao_notes': pack(notes,1000), 'kakao_summaries': pack(summaries,1500),
-            'kakao_recent': list(reversed(pack(recent,1500))), 'shared_friends': pack(friends,1500),
-            'call_memories': pack(memories,1500), 'call_cards': pack(cards,1500),
-            'current_call': list(reversed(pack(history,history_chars)))}
-        return json.dumps(payload,ensure_ascii=False,default=str)
+        sources = {"kakao_notes": notes, "kakao_summaries": summaries, "kakao_recent": recent,
+                   "shared_friends": friends, "call_memories": memories, "call_cards": cards, "current_call": history}
+        return seed_json(p.name, sources, history_chars, as_of=as_of, older=older)
 
     async def recall(self,p,query):
         query=normalized(query)[:100]

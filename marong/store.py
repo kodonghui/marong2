@@ -1,16 +1,22 @@
 """Postgres 저장소(psycopg 3 비동기).
 대화 원문·요약·메모는 쌓기만 하고 지우거나 고치지 않는다. 봇 계정(marong)에는 그 권한 자체가 없다(schema.sql)."""
+import asyncio
 import hashlib
 import os
 import logging
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+from time import monotonic
 
+from psycopg import Error
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
+from . import continuity
+from .continuity_db import read_recent_call
 from .graphs.memory import lock_message_writer, schedule_text
+from .relative_time import relative_time
 
 log = logging.getLogger("store")
 
@@ -697,22 +703,32 @@ class Store:
                 caller = await cur.fetchone()
                 if not caller:
                     return {}
+                timed = continuity.MODE == "on"
+                now = datetime.now(timezone.utc) if timed else None
+                recent_call = None
+                if continuity.MODE != "off":
+                    recent_call, received = await self._recent_call_context(c, caller, room_key, user_id)
+                    if received is not None:
+                        now = received
+                    if not timed:
+                        recent_call = None
                 marked_call_copy = """ AND NOT EXISTS (
                     SELECT 1 FROM call.transcript_report t JOIN marong.forget_marks f
                       ON f.target_type='call_turn' AND f.target_id=t.id
                     WHERE t.call_id=c.id"""
                 keep_card = marked_call_copy + ")" if self._has_forget_marks else ""
                 keep_memory = marked_call_copy + " AND (m.turn_id IS NULL OR m.turn_id=t.id))" if self._has_forget_marks else ""
-                cur = await c.execute("""SELECT 'card' AS source,c.id::text AS id,k.summary AS content FROM call.cards k
+                date_field = ",c.started_at" if timed else ""
+                cur = await c.execute(f"""SELECT 'card' AS source,c.id::text AS id,k.summary AS content{date_field} FROM call.cards k
                     JOIN call.calls c ON c.id=k.call_id WHERE c.caller_id=%s AND c.deleted_at IS NULL
                     AND k.forgotten_at IS NULL""" + keep_card + " ORDER BY c.started_at DESC LIMIT 2", (caller['id'],))
                 cards = await cur.fetchall()
-                cur = await c.execute("""SELECT 'memory' AS source,m.id::text AS id,m.content FROM call.memories m
+                cur = await c.execute(f"""SELECT 'memory' AS source,m.id::text AS id,m.content{date_field} FROM call.memories m
                     JOIN call.calls c ON c.id=m.call_id WHERE m.caller_id=%s AND m.status='active'
                     AND c.deleted_at IS NULL""" + keep_memory + " ORDER BY m.created_at DESC LIMIT 10", (caller['id'],))
                 memories = await cur.fetchall()
                 rows = memories + cards
-                if not rows:
+                if not rows and recent_call is None:
                     return {}
                 await c.execute("""INSERT INTO call.kakao_guards(room_key,friend_id,message_floor,note_floor,summary_floor)
                     SELECT r.room_key,%(friend)s,
@@ -725,9 +741,58 @@ class Store:
                 selected=[];remaining=1200
                 for row in rows:
                     if remaining<40:break
-                    text=row['content'][:min(400,remaining-30)];remaining-=len(text)+30
-                    selected.append({'source':row['source'],'id':row['id'],'text':text})
-                return {'friend_id':caller['friend_id'],'items':selected}
+                    when = relative_time(row.get("started_at"), now) if timed else None
+                    overhead = 30 + (len(when) if when else 0)
+                    if remaining <= overhead:
+                        break
+                    text=row['content'][:min(400,remaining-overhead)];remaining-=len(text)+overhead
+                    item = {'source':row['source'],'id':row['id'],'text':text}
+                    if when:
+                        item["when"] = when
+                    selected.append(item)
+                result = {'friend_id':caller['friend_id'],'items':selected}
+                if recent_call is not None:
+                    result["recent_call"] = recent_call
+                return result
+
+    async def _recent_call_context(self, conn, caller, room_key, user_id):
+        started = monotonic()
+        received = None
+        recent = None
+        turns = []
+        result = "empty"
+        try:
+            # Keep the original transaction and privacy guard even if this optional read fails.
+            async with asyncio.timeout(1), conn.transaction():
+                cur = await conn.execute("""SELECT f.name,m.created_at
+                    FROM marong.rooms r JOIN marong.friends f ON f.id=%(friend)s
+                    LEFT JOIN marong.messages m ON m.id=%(message)s AND m.room_key=r.room_key
+                    WHERE r.room_key=%(room)s AND r.is_channel AND r.memory_room IS NULL
+                    AND NOT EXISTS(
+                        SELECT 1 FROM marong.messages other LEFT JOIN marong.people p USING(user_key)
+                        WHERE other.room_key=r.room_key AND other.role='user'
+                        AND p.friend_id IS DISTINCT FROM f.id)
+                    AND NOT EXISTS(SELECT 1 FROM call.kakao_guards g
+                        WHERE g.room_key=r.room_key AND g.friend_id<>f.id)""",
+                    {"friend": caller["friend_id"], "room": room_key, "message": user_id},
+                )
+                owner = await cur.fetchone()
+                if owner:
+                    received = owner["created_at"] or datetime.now(timezone.utc)
+                    call = await read_recent_call(conn, caller["id"], received, marks=self._has_forget_marks)
+                    if call:
+                        turns, first, last = call
+                        display = continuity.display_turns(turns, owner["name"], limit=300)
+                        lines = tuple(f"- {row['who']}: {' '.join(row['text'].splitlines())}" for row in display)
+                        recent = continuity.RecentCall(relative_time(last, received), continuity.length_label(first, last), lines)
+                        result = "ok"
+        except TimeoutError:
+            result = "timeout"
+        except Error:
+            result = "error"
+        continuity.record_pick("text", turns=len(turns), chars=sum(len(turn.text) for turn in turns),
+                               conversations=0, ms=round((monotonic() - started) * 1000), result=result)
+        return recent, received
 
     async def discord_context(self, room_key: str, user_key: str, user_id: int | None) -> list[dict]:
         """Only the same friend's Discord DM enters this exact Kakao 1:1 room."""
