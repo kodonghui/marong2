@@ -1,0 +1,139 @@
+{
+  "format": 1,
+  "project": "marong",
+  "part": "fcm-unregistered",
+  "stages": {
+    "01-domain": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 질문 0~5와 바뀌는 승인 항목 F-1~F-7·G-1~G-5의 답을 받아요(docs/01-domain/fcm-unregistered.md 7·8절, 답은 D181~D186). PR #127이 먼저 합쳐지면 이 브랜치를 그 위로 옮겨요. 답을 받으면 Claude가 TASK-555로 승인 문서를 고치고 README에 '시작 가능'을 적어요",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(FCM 등록 해제 판단, D180, 마롱이 항목 96 사용자님 답 '바꿔 줘(기능 변경 진행)'). 설계 PR claude/fcm-unregistered-design, 기준 main 1a29477, 체크포인트 전. 바뀜: 앱 기기·글 대화 앱 알림·CTX-021 업데이트 보내기·관리 읽기 모델의 FID 지우기 규칙(5.1), 새 용어 TERM-280(등록 해제 답). 새 맥락 없음. TERM-242(PR #127)는 G-1, admin 01 핫스팟은 G-2로 여쭘",
+          "at": "2026-11-24"
+        }
+      ]
+    },
+    "02-prd": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 질문 0~5와 바뀌는 승인 항목 F-1~F-7·G-1~G-5의 답을 받아요(docs/01-domain/fcm-unregistered.md 7·8절, 답은 D181~D186). PR #127이 먼저 합쳐지면 이 브랜치를 그 위로 옮겨요. 답을 받으면 Claude가 TASK-555로 승인 문서를 고치고 README에 '시작 가능'을 적어요",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(FCM 등록 해제 판단, D180, 마롱이 항목 96 사용자님 답 '바꿔 줘(기능 변경 진행)'). 설계 PR claude/fcm-unregistered-design, 기준 main 1a29477, 체크포인트 전. 바뀜: 새 REQ-630(Must)·631(Should) proposed. REQ-111·112·118·124·130·282·553·556·587 글 그대로(어느 것도 FID 지우는 때를 정하지 않음). admin 02 시작 값 한 줄은 G-4",
+          "at": "2026-11-24"
+        }
+      ]
+    },
+    "03-user-flow": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 질문 0~5와 바뀌는 승인 항목 F-1~F-7·G-1~G-5의 답을 받아요(docs/01-domain/fcm-unregistered.md 7·8절, 답은 D181~D186). PR #127이 먼저 합쳐지면 이 브랜치를 그 위로 옮겨요. 답을 받으면 Claude가 TASK-555로 승인 문서를 고치고 README에 '시작 가능'을 적어요",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(FCM 등록 해제 판단, D180, 마롱이 항목 96 사용자님 답 '바꿔 줘(기능 변경 진행)'). 설계 PR claude/fcm-unregistered-design, 기준 main 1a29477, 체크포인트 전. 바뀜 제안: FL-193 선 이름 둘(F-5). FL-105·110~112·142 그대로(등록 해제 답이 '앱을 지움'의 경우와 같고, 벨 흐름은 FID 지우기를 그리지 않음). 새 흐름 없음",
+          "at": "2026-11-24"
+        }
+      ]
+    },
+    "04-functional-spec": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 질문 0~5와 바뀌는 승인 항목 F-1~F-7·G-1~G-5의 답을 받아요(docs/01-domain/fcm-unregistered.md 7·8절, 답은 D181~D186). PR #127이 먼저 합쳐지면 이 브랜치를 그 위로 옮겨요. 답을 받으면 Claude가 TASK-555로 승인 문서를 고치고 README에 '시작 가능'을 적어요",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(FCM 등록 해제 판단, D180, 마롱이 항목 96 사용자님 답 '바꿔 줘(기능 변경 진행)'). 설계 PR claude/fcm-unregistered-design, 기준 main 1a29477, 체크포인트 전. 바뀜: 새 SPEC-510~512 proposed(docs/04-functional-spec/fcm-unregistered.md). 바뀌는 승인 행 SPEC-117·126·131·430, app-update 8.5(F-1~F-4·F-7), PR #127의 SPEC-460·8.6(G-3·G-5). SPEC-266·383·435·438 그대로",
+          "at": "2026-11-24"
+        }
+      ]
+    },
+    "05-erd": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 질문 0~5와 바뀌는 승인 항목 F-1~F-7·G-1~G-5의 답을 받아요(docs/01-domain/fcm-unregistered.md 7·8절, 답은 D181~D186). PR #127이 먼저 합쳐지면 이 브랜치를 그 위로 옮겨요. 답을 받으면 Claude가 TASK-555로 승인 문서를 고치고 README에 '시작 가능'을 적어요",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(FCM 등록 해제 판단, D180, 마롱이 항목 96 사용자님 답 '바꿔 줘(기능 변경 진행)'). 설계 PR claude/fcm-unregistered-design, 기준 main 1a29477, 체크포인트 전. 바뀜 없음(제안). 이유: 표·칸·제약·마이그레이션 그대로. TBL-101 dropped_at 주석 '없는 기기'는 새 뜻과 맞고, TBL-182 push_failed 상태 제약(401·410·500) 안에서 400을 500으로 적음. 질문 2의 B를 고르면 마이그레이션이 생김",
+          "at": "2026-11-24"
+        }
+      ]
+    },
+    "06-api": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 질문 0~5와 바뀌는 승인 항목 F-1~F-7·G-1~G-5의 답을 받아요(docs/01-domain/fcm-unregistered.md 7·8절, 답은 D181~D186). PR #127이 먼저 합쳐지면 이 브랜치를 그 위로 옮겨요. 답을 받으면 Claude가 TASK-555로 승인 문서를 고치고 README에 '시작 가능'을 적어요",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(FCM 등록 해제 판단, D180, 마롱이 항목 96 사용자님 답 '바꿔 줘(기능 변경 진행)'). 설계 PR claude/fcm-unregistered-design, 기준 main 1a29477, 체크포인트 전. 바뀜 없음(제안). 이유: API-105·API-267(status 1~999, removedAt) 모양 그대로, removedAt 설명 '더는 모른다고 답해(gone)'는 좁아진 gone과 맞음. FCM 메시지는 우리 API가 아님(SPEC-431)",
+          "at": "2026-11-24"
+        }
+      ]
+    },
+    "07-sitemap": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 질문 0~5와 바뀌는 승인 항목 F-1~F-7·G-1~G-5의 답을 받아요(docs/01-domain/fcm-unregistered.md 7·8절, 답은 D181~D186). PR #127이 먼저 합쳐지면 이 브랜치를 그 위로 옮겨요. 답을 받으면 Claude가 TASK-555로 승인 문서를 고치고 README에 '시작 가능'을 적어요",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(FCM 등록 해제 판단, D180, 마롱이 항목 96 사용자님 답 '바꿔 줘(기능 변경 진행)'). 설계 PR claude/fcm-unregistered-design, 기준 main 1a29477, 체크포인트 전. 바뀜 없음(제안). 이유: 새 화면·경로 없음",
+          "at": "2026-11-24"
+        }
+      ]
+    },
+    "08-screen-states": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 질문 0~5와 바뀌는 승인 항목 F-1~F-7·G-1~G-5의 답을 받아요(docs/01-domain/fcm-unregistered.md 7·8절, 답은 D181~D186). PR #127이 먼저 합쳐지면 이 브랜치를 그 위로 옮겨요. 답을 받으면 Claude가 TASK-555로 승인 문서를 고치고 README에 '시작 가능'을 적어요",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(FCM 등록 해제 판단, D180, 마롱이 항목 96 사용자님 답 '바꿔 줘(기능 변경 진행)'). 설계 PR claude/fcm-unregistered-design, 기준 main 1a29477, 체크포인트 전. 바뀜 없음(제안). 이유: SCR-203·201의 '보내기 실패(410)'·'앱 지워짐' 상태 그대로, 400은 '보내기 실패(500)'로 보일 뿐 새 상태가 아님. 질문 4에서 문구를 바꾸면 바뀜",
+          "at": "2026-11-24"
+        }
+      ]
+    },
+    "09-mockup": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 질문 0~5와 바뀌는 승인 항목 F-1~F-7·G-1~G-5의 답을 받아요(docs/01-domain/fcm-unregistered.md 7·8절, 답은 D181~D186). PR #127이 먼저 합쳐지면 이 브랜치를 그 위로 옮겨요. 답을 받으면 Claude가 TASK-555로 승인 문서를 고치고 README에 '시작 가능'을 적어요",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(FCM 등록 해제 판단, D180, 마롱이 항목 96 사용자님 답 '바꿔 줘(기능 변경 진행)'). 설계 PR claude/fcm-unregistered-design, 기준 main 1a29477, 체크포인트 전. 바뀜 없음(제안). 이유: 화면이 없어 토큰 그대로",
+          "at": "2026-11-24"
+        }
+      ]
+    },
+    "10-wbs": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 질문 0~5와 바뀌는 승인 항목 F-1~F-7·G-1~G-5의 답을 받아요(docs/01-domain/fcm-unregistered.md 7·8절, 답은 D181~D186). PR #127이 먼저 합쳐지면 이 브랜치를 그 위로 옮겨요. 답을 받으면 Claude가 TASK-555로 승인 문서를 고치고 README에 '시작 가능'을 적어요",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(FCM 등록 해제 판단, D180, 마롱이 항목 96 사용자님 답 '바꿔 줘(기능 변경 진행)'). 설계 PR claude/fcm-unregistered-design, 기준 main 1a29477, 체크포인트 전. 바뀜: 새 패키지 docs/10-wbs/fcm-unregistered.md(TASK-550~555, 약 1.6일), README 결정 D180·작업 패키지·ID 범위(TASK 550~559, TC 720~739, D180~189, TERM-280~289, REQ-630~639, SPEC-510~519)·겹치는 파일·추천 순서. PR #129가 잡은 540~549·700~719·D170~179·TERM-270~279·REQ-620~629·SPEC-500~509를 피함",
+          "at": "2026-11-24"
+        }
+      ]
+    },
+    "12-qa": {
+      "state": "in_progress",
+      "checkpoints": [],
+      "next": "체크포인트 질문 0~5와 바뀌는 승인 항목 F-1~F-7·G-1~G-5의 답을 받아요(docs/01-domain/fcm-unregistered.md 7·8절, 답은 D181~D186). PR #127이 먼저 합쳐지면 이 브랜치를 그 위로 옮겨요. 답을 받으면 Claude가 TASK-555로 승인 문서를 고치고 README에 '시작 가능'을 적어요",
+      "checks": [
+        {
+          "level": "info",
+          "message": "기능 변경(FCM 등록 해제 판단, D180, 마롱이 항목 96 사용자님 답 '바꿔 줘(기능 변경 진행)'). 설계 PR claude/fcm-unregistered-design, 기준 main 1a29477, 체크포인트 전. 바뀜: 새 TC-720~726(docs/12-qa/fcm-unregistered.md), 승인 TC-126 나누기(F-6). app-update TC-599·600, admin TC-653은 그대로",
+          "at": "2026-11-24"
+        }
+      ]
+    }
+  }
+}
