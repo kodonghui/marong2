@@ -1,6 +1,7 @@
 # 반려동물 캐릭터(통합 앱 안) 화면(08 화면 상태)
 
 상태: 초안(2026-11-21 16시대 KST, Claude, corthex 한 번에 초안). 아직 만들지 않았어요. 2026-11-21 16:47 KST 동희님 "야 넥서스 하지 말고 걍 작업해"로 체크포인트 없이 설계 PR을 합친 뒤 구현해요.
+관리 페이지 기능 변경 3(2026-11-24, D145): SCR-186 상태 표에 #decor-off를 더하고 #error에서 API-263의 404를 뺐어요(D148 3-1). 같은 날 관리 페이지 체크포인트에서 승인됐어요(승인한 사람 사용자님, [관리 페이지 도메인 9.4절](../01-domain/admin.md#94-기능-변경-3-꾸미기-꺼짐-안내와-앱-지워진-폰)). 바뀌기 전 글은 [관리 페이지 기능 변경 목록 3](../02-prd/admin.md#꾸미기-꺼짐-안내와-앱-지워진-폰-기능-변경-목록-3)의 3-1에 남아 있어요.
 입력: [사이트맵](../07-sitemap/sitemap.yaml) SCR-180\~186, [기능 명세](../04-functional-spec/pet-app.md) SPEC-406\~427, [흐름](../03-user-flow/) FL-185\~192, API 계약 [`api/pet-app.openapi.yaml`](../../api/pet-app.openapi.yaml) API-250\~266, 도메인 CTX-030·031과 용어 TERM-210\~218.
 기준: [통합 앱 화면](unified.md) 1절 공통 규칙을 그대로 따라요(로그인, 글 말투, 마롱이 이름 `{이름}`, 얼굴, 폭, 머리, 토큰, 오류, 반복, 지금 값, 사람이 쓴 글, 움직임 줄이기). 이 문서에는 그 규칙과 다른 것만 적어요. 얼려 둔 토큰 103개(`design/base.tokens.json`, D67)만 쓰고 새 토큰은 더하지 않아요.
 목업: 09 단계 기록은 [`design/pet-app-mockup.md`](../../design/pet-app-mockup.md)예요.
@@ -214,7 +215,8 @@ Purpose: 동희님이 저장소에 들어온 아이템을 상점에 올리고 �
 | SCR-186#empty | '아이템 목록 폴더가 비어 있어요(marong/decor/v1/items.json)' | API-263#200(빈 목록) |
 | SCR-186#invalid | 그 줄 아래 빠진 것 목록(`layer:dog_long`, `license` 등) | API-264#409(`item_invalid`) |
 | SCR-186#forbidden | 관리자 공통(공통#forbidden, D136 1-10. 전에는 SCR-169#forbidden) | API-263#403(`not_allowed`) |
-| SCR-186#error | 공통 규칙 | API-263#default, API-264#default, API-265#default |
+| SCR-186#decor-off | '꾸미기가 꺼져 있어요' 한 줄. 오류 줄('아이템을 불러오지 못했어요'와 추적 id), '다시 보기', 아이템 줄과 단추가 없어요. 꾸미기를 켜는 단추도 없어요(서버 설정). 관리 페이지 D148 3-1(D145, admin SPEC-459, [관리 페이지 기능 변경 목록 3](../02-prd/admin.md#꾸미기-꺼짐-안내와-앱-지워진-폰-기능-변경-목록-3)) | API-263#404(`not_found`, 꾸미기가 꺼진 서버) |
+| SCR-186#error | 공통 규칙 | API-263#default(D148 3-1: 404는 빼고 #decor-off), API-264#default, API-265#default |
 
 ## 9. 다른 화면에서 바뀌는 곳
 
