@@ -47,7 +47,7 @@ class FcmTestSendTest(unittest.TestCase):
     def tearDownClass(cls):
         cls.dir.cleanup()
 
-    def run_tool(self, *args, stdin=FID + "\n", status=200):
+    def run_tool(self, *args, stdin=FID + "\n", status=200, details=None):
         sent = []
 
         def handler(request):
@@ -55,7 +55,8 @@ class FcmTestSendTest(unittest.TestCase):
                 return httpx.Response(200, json={"access_token": "oauth-fixture", "expires_in": 3600})
             self.assertEqual(str(request.url), fcm.SEND_URL.format(project="fixture-project"))
             sent.append(json.loads(request.content)["message"])
-            return httpx.Response(status, json={"name": "projects/fixture-project/messages/1"})
+            body = {"error": {"details": details}} if details else {"name": "projects/fixture-project/messages/1"}
+            return httpx.Response(status, json=body)
 
         real = fcm.FCM
         fake = lambda account: real(account, http=httpx.AsyncClient(transport=httpx.MockTransport(handler)))  # noqa: E731
@@ -100,8 +101,12 @@ class FcmTestSendTest(unittest.TestCase):
         self.assertEqual((code, sent[0]["data"]["reason"], "line" in sent[0]["data"]), (0, "hello", False))
 
     def test_failures_and_wrong_input(self):
-        code, out, _, _ = self.run_tool("proactive", "x", status=404)
+        unregistered_details = [{"@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError",
+                                 "errorCode": "UNREGISTERED"}]
+        code, out, _, _ = self.run_tool("proactive", "x", status=404, details=unregistered_details)
         self.assertEqual((code, out), (1, "proactive gone\n"))
+        code, out, _, _ = self.run_tool("proactive", "x", status=404)
+        self.assertEqual((code, out), (1, "proactive failed\n"))
         code, _, err, sent = self.run_tool("proactive", "x", stdin="\n")
         self.assertEqual((code, sent), (2, []))
         self.assertIn("no FID", err)

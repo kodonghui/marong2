@@ -45,7 +45,8 @@ from marong.discord_dm import DiscordAgent, DiscordProactive, DiscordReminders  
 from marong.discord_store import DiscordStore  # noqa: E402
 from pg import TestDB  # noqa: E402
 from test_app_chat import AUD, HK_EMAIL, DH_EMAIL, ORIGIN, TEAM, Certs, FakeFCM, auth  # noqa: E402
-from test_app_ring import INSTALL, prepare  # noqa: E402
+from test_app_chat import fcm_bad_request, fcm_unregistered, mock_fcm  # noqa: E402
+from test_app_ring import FID, INSTALL, prepare  # noqa: E402
 from test_discord_dm import DM_HK, HK, Channel, Client, event  # noqa: E402
 
 TZ = ZoneInfo("Asia/Seoul")
@@ -559,15 +560,39 @@ async def proactive_checks(db, store, settings, folder, logs):
        and channel.files[sent:] == [f"marong-{ring[0][1].split('/')[1]}.webp"], channel.files[sent:])
     clear(db)
 
-    # FCM refuses the ring: the ring failed, the picture topic message in the same turn
-    sender.answers.append("failed")
-    before = len(sender.sent)
-    result = await turn(now)
-    rows = topic_rows(db)
-    ok(result["ok"] and result["via"] == "app" and rows[0][2:5] == ("text", "sent", "app")
-       and db.admin("SELECT status FROM marong.app_rings WHERE reason = 'hello'")[0][0] == "failed"
-       and [m["data"]["kind"] for m in sender.sent[before:]] == ["ring", "proactive"], rows)
-    clear(db)
+    # TC-723: both bell failures fall back to the picture topic; only unregistration drops the FID.
+    def phone_state():
+        return db.admin("SELECT fid IS NOT DISTINCT FROM %s, fid IS NULL, dropped_at IS NOT NULL "
+                        "FROM marong.app_devices WHERE install_id = %s", (FID, INSTALL))[0]
+
+    kinds = []
+    for response, via, expected_state, expected_kinds in (
+        (fcm_bad_request(), "app", (True, False, False), ["ring", "proactive"]),
+        (fcm_unregistered(), "discord", (False, True, True), ["ring"]),
+    ):
+        def answer(msg):
+            kind = msg["data"]["kind"]
+            kinds.append(kind)
+            return response if kind == "ring" else httpx.Response(200)
+
+        push.fcm = mock_fcm(answer)
+        try:
+            if response.status_code == 400:
+                ok(await push.ring(await push.ring_devices(2), str(uuid.uuid4())) == 0
+                   and phone_state() == expected_state, "TC-723 promise ring 400 preserves its FID")
+            kinds.clear()
+            result = await turn(now)
+            rows = topic_rows(db)
+            ok(result["ok"] and result["via"] == via and rows[0][2:5] == ("text", "sent", via)
+               and db.admin("SELECT status FROM marong.app_rings WHERE reason = 'hello'") == [("failed",)]
+               and kinds == expected_kinds and phone_state() == expected_state,
+               f"TC-723 hello ring HTTP {response.status_code} falls back to a picture topic")
+        finally:
+            await push.fcm.close()
+            push.fcm = sender
+        clear(db)
+    db.admin("UPDATE marong.app_devices SET fid = %s, dropped_at = NULL WHERE install_id = %s", (FID, INSTALL))
+    print("PASS TC-723 3 bell and hello-call failure scenarios against PostgreSQL")
 
     # FCM refuses and pictures are off: an ordinary proactive message, the topic failed
     db.admin("INSERT INTO marong.topic_prefs(friend_id, pictures) VALUES (2, false)")

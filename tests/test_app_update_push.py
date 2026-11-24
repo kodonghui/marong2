@@ -19,6 +19,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from pg import TestDB
 from test_app_update import ROOT, apk, fixture
 from test_app_chat import AUD, HK_EMAIL, ORIGIN, STRANGER, TEAM, Certs, auth, prepare, problem
+from test_app_chat import fcm_bad_request, fcm_unregistered, mock_fcm
 from marong import fcm
 from marong.access import AccessConfig, AccessVerifier, email_hash
 from marong.app_chat import AppChat
@@ -222,6 +223,44 @@ class PushWatcherTests(unittest.IsolatedAsyncioTestCase):
         failures = [n for kind, n, status in self.events() if kind == "push_failed" and status == 500]
         self.assertEqual(failures, [1, 2, 3])
         self.assertEqual(len(sender.messages), 4)
+
+    async def test_tc724_real_sender_retains_fid_and_retries_only_the_400(self):
+        self.add_phone(1)
+        self.add_phone(2)
+        fixture(self.folder, code=13)
+        requests = []
+
+        def answer(message):
+            phone_one = message["fid"] == fid(1)
+            requests.append(1 if phone_one else 2)
+            return fcm_bad_request() if phone_one else fcm_unregistered()
+
+        sender = mock_fcm(answer)
+        self.addAsyncCleanup(sender.close)
+        watcher = self.watcher(sender)
+        with self.assertLogs("marong.fcm", level="INFO") as logs:
+            await watcher.poll()
+            self.assertCountEqual(requests, [1, 2])
+            for round_number, timepoint in enumerate((660, 1320, 1980), 2):
+                self.time = timepoint
+                self.db.admin("UPDATE marong.app_update_events SET at = now() - interval '11 minutes' "
+                              "WHERE kind = 'push_failed'")
+                await watcher.poll()
+                self.assertCountEqual(requests, [1] * min(round_number, 3) + [2])
+
+        def failures(ident):
+            return self.db.admin("SELECT attempt, status FROM marong.app_update_events "
+                                 "WHERE install_id=%s AND kind='push_failed' ORDER BY attempt", (phone(ident),))
+
+        def state(ident):
+            return self.db.admin("SELECT fid IS NOT DISTINCT FROM %s, fid IS NULL, dropped_at IS NOT NULL "
+                                 "FROM marong.app_devices WHERE install_id=%s", (fid(ident), phone(ident)))
+
+        self.assertEqual(failures(1), [(1, 500), (2, 500), (3, 500)])
+        self.assertEqual(failures(2), [(1, 410)])
+        self.assertEqual(state(1), [(True, False, False)])
+        self.assertEqual(state(2), [(False, True, True)])
+        self.assertEqual(sum("fcm_send_status kind=app_update http=400 " in line for line in logs.output), 3)
 
     async def test_switch_defaults_on_and_only_zero_disables_it(self):
         sender = FakeFCM()

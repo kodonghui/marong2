@@ -3,6 +3,7 @@
 The target is the app's Firebase installation ID (`fid`): FCM deprecated the `token` field. Authentication is a
 one-hour OAuth token obtained with a JWT signed by the service account key (scope firebase.messaging), refreshed five
 minutes before it ends and kept in memory only. The key file is read once from the systemd credential directory.
+Only HTTP 404 with a typed FcmError of UNREGISTERED confirms that a device's FID should be dropped (SPEC-510).
 Nothing here logs a message text, an FID, the key or a token.
 """
 import asyncio
@@ -11,6 +12,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import time
 
 import httpx
@@ -29,6 +31,9 @@ PREVIEW_MAX = 120
 TITLE = "마롱이"
 RING_TTL_S = 45
 RING_LINE_MAX = 30
+LOG_KIND = re.compile(r"[a-z_]{1,20}")
+LOG_STATUS_OR_CODE = re.compile(r"[A-Z_]{1,40}")
+LOG_FIELD = re.compile(r"[A-Za-z0-9_.\[\]]{1,80}")
 
 
 @dataclass(frozen=True)
@@ -84,13 +89,41 @@ def app_update(fid: str, version_code: int) -> dict:
             "android": {"priority": "HIGH", "ttl": "86400s", "collapse_key": "app_update"}}
 
 
-def _error(r: httpx.Response) -> tuple[str, set]:
+def _error(response: httpx.Response) -> tuple[object, object, object]:
     try:
-        err = r.json().get("error") or {}
-        codes = {d.get("errorCode") for d in err.get("details") or [] if isinstance(d, dict)}
-        return str(err.get("status") or ""), codes
-    except (ValueError, AttributeError):
-        return "", set()
+        body = response.json()
+    except ValueError:
+        return None, None, None
+    error = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(error, dict):
+        return None, None, None
+    status = error.get("status")
+    details = error.get("details")
+    if not isinstance(details, list):
+        return status, None, None
+
+    code = None
+    bad_request = None
+    for detail in details:
+        if not isinstance(detail, dict):
+            continue
+        detail_type = detail.get("@type")
+        if detail_type == "type.googleapis.com/google.firebase.fcm.v1.FcmError":
+            candidate = detail.get("errorCode")
+            if code is None or (response.status_code == 404 and candidate == "UNREGISTERED"):
+                code = candidate
+        elif detail_type == "type.googleapis.com/google.rpc.BadRequest" and bad_request is None:
+            bad_request = detail
+    violations = bad_request.get("fieldViolations") if bad_request is not None else None
+    first = violations[0] if isinstance(violations, list) and violations else None
+    field = first.get("field") if isinstance(first, dict) else None
+    return status, code, field
+
+
+def _log_value(value: object, pattern: re.Pattern[str]) -> str:
+    if value is None:
+        return "-"
+    return value if isinstance(value, str) and pattern.fullmatch(value) else "other"
 
 
 class FCM:
@@ -142,15 +175,20 @@ class FCM:
             log.warning("fcm_auth_failed %s", what)
 
     async def send(self, message: dict) -> str:
-        """ok | gone (FCM no longer knows this device: drop its FID) | auth (key or permission) | failed."""
+        """ok | gone (HTTP 404 with FcmError UNREGISTERED) | auth (key or permission) | failed."""
         end = self.monotonic() + SEND_BUDGET_S
         url = SEND_URL.format(project=self.project)
+        data = message.get("data")
+        kind = data.get("kind") if isinstance(data, dict) else None
         # App updates persist and schedule their own numbered attempts (SPEC-430).
-        retries = () if message.get("data", {}).get("kind") == "app_update" else RETRY_GAPS_S
+        retries = () if kind == "app_update" else RETRY_GAPS_S
+        last_http = None
+        status = code = field = None
+        result = "failed"
         for attempt in range(len(retries) + 1):
             left = end - self.monotonic()
             if left <= 0:
-                return "failed"
+                break
             try:
                 token = await asyncio.wait_for(self._token(), left)
                 r = await asyncio.wait_for(self.http.post(url, json={"message": message},
@@ -162,28 +200,33 @@ class FCM:
             except (httpx.HTTPError, OSError, asyncio.TimeoutError, ValueError, KeyError) as e:
                 log.info("fcm_send_error %s", type(e).__name__)
                 if attempt == len(retries) or self.monotonic() + retries[attempt] >= end:
-                    return "failed"
+                    break
                 await self.sleep(retries[attempt])
                 continue
             if r.status_code == 200:
                 return "ok"
-            status, codes = _error(r)
-            if r.status_code == 404 or "UNREGISTERED" in codes or (r.status_code == 400 and (
-                    status == "INVALID_ARGUMENT" or "INVALID_ARGUMENT" in codes)):
-                return "gone"
+            last_http = r.status_code
+            status, code, field = _error(r)
+            if last_http == 404 and code == "UNREGISTERED":
+                result = "gone"
+                break
             if r.status_code in (401, 403):
                 if r.status_code == 401:
                     self.token = None  # refresh before the next send
-                self._warn(f"status={r.status_code}")
+                self._warn(f"status={r.status_code} code={_log_value(code, LOG_STATUS_OR_CODE)}")
                 return "auth"
             if r.status_code not in (429, 500, 502, 503, 504) or attempt == len(retries):
-                log.info("fcm_send_status %s", r.status_code)
-                return "failed"
+                break
             try:
                 wait = min(RETRY_AFTER_MAX_S, max(0, int(r.headers.get("Retry-After", ""))))
             except ValueError:
                 wait = retries[attempt]
             if self.monotonic() + wait >= end:
-                return "failed"
+                break
             await self.sleep(wait)
-        return "failed"
+        if last_http is not None:
+            log.info("fcm_send_status kind=%s http=%s status=%s code=%s field=%s result=%s",
+                     _log_value(kind, LOG_KIND), last_http if 100 <= last_http <= 599 else "other",
+                     _log_value(status, LOG_STATUS_OR_CODE), _log_value(code, LOG_STATUS_OR_CODE),
+                     _log_value(field, LOG_FIELD), result)
+        return result
