@@ -130,10 +130,11 @@ def seed_json(friend, sources, history_chars=4000, *, as_of=None, older=(), name
             continue
         if as_of is not None:
             timed = []
+            start_field = "started_at" if key == "current_call" else "call_started_at"
             for row in rows:
                 item = dict(row)
                 recorded = item.pop("created_at", None)
-                started = item.pop("call_started_at", None)
+                started = item.pop(start_field, None)
                 ended = item.pop("ended_at", None)
                 if when := relative_time(started or recorded, as_of):
                     item["when"] = when

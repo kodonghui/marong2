@@ -109,7 +109,7 @@ def fixture_context(script, phase, mode, turn_limit, char_limit, *, stress=False
         texts += ["책을 도서관에서 빌렸어.", "읽고 나면 어땠는지 말해 줘."]
     else:
         texts += ["나 다음 주 토요일에 부산에 가. 아직 기차표는 안 샀어.", "부산 여행 기차표 말이지."]
-    origin = "text" if phase == "text" else "call"
+    origin = "text" if phase == "text" or script == "date" else "call"
     turns = [Turn(i, origin, now - timedelta(seconds=60 + (19-i)*2),
                   "user" if i % 2 == 0 else "assistant", text) for i, text in enumerate(texts)]
     timed = mode == "on"

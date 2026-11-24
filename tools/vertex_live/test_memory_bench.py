@@ -58,6 +58,9 @@ async def main():
         self_test = fixture.history["clientContent"]["turns"]
         assert sum(not part["parts"][0]["text"].startswith("[알림]") for part in self_test) == 20
         assert json.loads(fixture.seed).get("as_of") == "2026-11-24 화 16:00"
+        if script == "date":
+            assert "처음 부분은 글 대화(" in self_test[0]["parts"][0]["text"]
+            assert json.loads(fixture.seed)["call_cards"][0]["when"].startswith("어제 ")
         off = fixture_context(script, phase, "off", 20, 2000)
         assert off.history is None and "'when'" not in off.seed and '"as_of"' not in off.seed
 

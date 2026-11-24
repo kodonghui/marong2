@@ -190,6 +190,7 @@ class ContinuityStoreTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("kakao_recent", original)
             self.assertNotIn("as_of", original)
             self.assertIn("created_at", original["call_cards"][0])
+            self.assertTrue(all("started_at" in item for item in original["current_call"]))
             seeded = json.loads(await store.seed(person, current, as_of=now, older=[]))
             self.assertEqual(next(iter(seeded)), "as_of")
             self.assertEqual(seeded["as_of"], "2026-11-24 화 16:00")
@@ -199,7 +200,8 @@ class ContinuityStoreTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(card["when"], "어제 오후 9시 5분(11/23 월)")
             self.assertEqual(card["length"], "6분")
             self.assertEqual([item["who"] for item in seeded["current_call"]], ["시험친구 가", "마롱이"])
-            self.assertFalse(any("created_at" in item for item in seeded["current_call"]))
+            self.assertEqual([item.get("when") for item in seeded["current_call"]], ["3분 전", "2분 전"])
+            self.assertFalse(any({"created_at", "started_at"} & item.keys() for item in seeded["current_call"]))
         finally:
             await store.close()
 
