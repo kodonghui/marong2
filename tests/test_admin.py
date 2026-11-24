@@ -5,6 +5,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
+import os
 from pathlib import Path
 import re
 import secrets
@@ -166,6 +167,30 @@ class AdminChangesTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(logs.output[0].endswith("admin_changes result=missing_dir"))
         with patch.object(Path, "iterdir", side_effect=PermissionError):
             await self.changes(500, "internal")
+
+    async def test_tc705_reads_only_regular_files(self):
+        entries = self.folder / "entries"
+        entries.mkdir()
+        outside = self.folder / "outside"
+        outside.mkdir()
+        source = write_unit(outside, server_unit("20261124-sihum-link"))
+        (entries / source.name).symlink_to(source)
+        directory = entries / "20261124-sihum-dir.json"
+        directory.mkdir()
+        rejected = [source.name, directory.name]
+        if hasattr(os, "mkfifo"):
+            fifo = entries / "20261124-sihum-fifo.json"
+            os.mkfifo(fifo)
+            rejected.append(fifo.name)
+        normal = server_unit()
+        write_unit(entries, normal)
+
+        with patch("marong.app_admin.CHANGELOG_DIR", entries), self.assertLogs("marong.admin_changes", "WARNING") as logs:
+            data = await self.changes()
+        self.assertEqual([unit["id"] for unit in data["units"]], [normal["id"]])
+        self.assertEqual(data["skipped"], len(rejected))
+        self.assertCountEqual([line.split("admin_changes ", 1)[1] for line in logs.output],
+                              [f"file={name} result=invalid reason=json" for name in rejected])
 
     async def test_tc706_access_no_cache_privacy_and_latency(self):
         with patch.object(Path, "iterdir", side_effect=AssertionError("must authenticate first")):

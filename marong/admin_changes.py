@@ -9,6 +9,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import stat
 import sys
 from tempfile import mkstemp
 import unicodedata
@@ -161,7 +162,16 @@ class ChangelogOperationError(ValueError):
 
 
 def _read_unit(path):
-    with path.open("rb") as file:
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode):
+        raise OSError("changelog entry is not a regular file")
+
+    # On the server, guard against a link or FIFO replacing the file after lstat.
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    with os.fdopen(os.open(path, flags), "rb") as file:
+        opened = os.fstat(file.fileno())
+        if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(before, opened):
+            raise OSError("changelog entry changed before it was read")
         return file.read(MAX_BYTES + 1)
 
 
