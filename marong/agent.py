@@ -840,8 +840,7 @@ class Agent:
                 log.warning("discord_memory_unavailable %s", type(e).__name__)
         if msg.is_channel and getattr(self.store, 'call_bridge', False):
             try:
-                call_context = await asyncio.wait_for(
-                    app_read("call_context", self.store.call_context, msg.room_key, msg.user_key, user_id), 1)
+                call_context = await app_read("call_context", self.store.call_context, msg.room_key, msg.user_key, user_id)
                 if call_context:
                     if recent := call_context.get("recent_call"):
                         mask_private_reply()

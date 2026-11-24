@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from psycopg import AsyncConnection, connect
+from psycopg.errors import QueryCanceled
 from psycopg.rows import dict_row
 
 from call_memory import MemoryStore, Principal, memory_scope
@@ -23,6 +24,7 @@ from marong.agent import Agent, Incoming
 from marong.config import load_settings
 from marong.continuity import SIGNAL_TEXTS
 from marong.continuity_db import read_previous
+from marong.relative_time import relative_time
 from marong.store import Store
 
 
@@ -143,6 +145,18 @@ class ContinuityStoreTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await store.close()
 
+    async def test_previous_conversation_excludes_interrupted_turns(self):
+        person = self.fixture()
+        call_id = self.call(person, NOW - timedelta(minutes=5), count=3)
+        admin("UPDATE call.turns SET interrupted=true WHERE call_id=%s AND seq=2", (call_id,))
+        identity = {**MemoryStore.params(person), "name": person.name}
+        for dsn, voice in ((CALL_DSN, True), (BOT_DSN, False)):
+            with self.subTest(voice=voice):
+                async with await AsyncConnection.connect(dsn, row_factory=dict_row) as conn:
+                    recent, _ = await read_previous(conn, memory_scope(person), identity,
+                                                    NOW, None, voice=voice, marks=True)
+                self.assertEqual([row.text for row in recent], ["합성 통화 1", "합성 통화 3"])
+
     async def test_timeout_keeps_output_empty(self):
         person = self.fixture()
 
@@ -235,6 +249,44 @@ class ContinuityStoreTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await store.close()
 
+    async def test_recent_call_read_failure_preserves_legacy_card_and_memory(self):
+        person = self.fixture()
+        now = datetime.now(timezone.utc)
+        call_id = self.call(person, now - timedelta(minutes=10))
+        admin("INSERT INTO call.cards(call_id,summary,model,prompt_version) VALUES(%s,'합성 카드','fixture','fixture')",
+              (call_id,))
+        admin("INSERT INTO call.memories(caller_id,call_id,source,content,idem_key) "
+              "VALUES(%s,%s,'organize','합성 기억',repeat('a',64))", (person.caller_id, call_id))
+        store = Store(BOT_DSN, call_bridge=True)
+        await store.open(wait=True)
+        llm = ScriptedLLM(lambda body: message([text("시험용 답변")]))
+        agent = Agent(load_settings(), store, SimpleNamespace(ready=False), llm)
+
+        async def slow_read(*args, **kwargs):
+            await asyncio.sleep(1.2)
+
+        try:
+            for mode in ("off", "shadow", "on"):
+                for outcome, read in (("timeout", AsyncMock(side_effect=slow_read)),
+                                      ("error", AsyncMock(side_effect=QueryCanceled))):
+                    with self.subTest(mode=mode, outcome=outcome):
+                        with patch.object(continuity, "MODE", mode), patch(
+                            "marong.store.read_recent_call", read,
+                        ), redirect_stdout(StringIO()) as output:
+                            reply = await agent.handle(Incoming(self.root, self.user, "합성 질문", is_channel=True),
+                                                       AsyncMock(return_value=True))
+                        self.assertTrue(reply)
+                        system = "\n".join(item["text"] for item in llm.bodies[-1]["system"])
+                        self.assertTrue("# 최근 통화" in system, "recent-call cards and memories are missing")
+                        self.assertTrue("합성 카드" in system)
+                        self.assertTrue("합성 기억" in system)
+                        self.assertFalse("# 방금 통화" in system)
+                        self.assertEqual(read.await_count, int(mode != "off"))
+                        if mode != "off":
+                            self.assertIn(f"result={outcome}", output.getvalue())
+        finally:
+            await store.close()
+
     async def test_voice_friendships_use_only_name_and_relationship(self):
         person = self.fixture()
         [(other,)] = admin("SELECT friend_id FROM marong.people WHERE user_key=%s", (self.other,))
@@ -272,6 +324,35 @@ class ContinuityStoreTests(unittest.IsolatedAsyncioTestCase):
                 found = await store.call_context(self.root, self.user, user_message)
             self.assertTrue(all(row.get("when") for row in found["items"]))
             self.assertLessEqual(len(json.dumps(found["items"], ensure_ascii=False)), 1200)
+        finally:
+            await store.close()
+
+    async def test_timed_call_context_stops_before_a_fragment(self):
+        person = self.fixture()
+        user_message = self.message(NOW, "합성 글")
+        newer, older = NOW - timedelta(days=1), NOW - timedelta(days=2)
+        first, second = self.call(person, newer), self.call(person, older)
+        memory_text = "가" * 200
+        [(memory_id,)] = admin(
+            "INSERT INTO call.memories(caller_id,call_id,source,content,idem_key) "
+            "VALUES(%s,%s,'organize',%s,repeat('a',64)) RETURNING id", (person.caller_id, first, memory_text),
+        )
+        items = [
+            {"source": "memory", "id": str(memory_id), "text": memory_text, "when": relative_time(newer, NOW)},
+            {"source": "card", "id": str(first), "text": "가" * 400, "when": relative_time(newer, NOW)},
+            {"source": "card", "id": str(second), "text": "", "when": relative_time(older, NOW)},
+        ]
+        escapes = 1180 - len(json.dumps(items, ensure_ascii=False))
+        self.assertTrue(0 < escapes < 400)
+        admin("INSERT INTO call.cards(call_id,summary,model,prompt_version) "
+              "VALUES(%s,%s,'fixture','fixture'),(%s,'합성 두 번째 카드','fixture','fixture')",
+              (first, '"' * escapes + "가" * (400 - escapes), second))
+        store = Store(BOT_DSN, call_bridge=True)
+        await store.open(wait=True)
+        try:
+            with patch.object(continuity, "MODE", "on"):
+                found = await store.call_context(self.root, self.user, user_message)
+            self.assertEqual([item["id"] for item in found["items"]], [str(memory_id), str(first)])
         finally:
             await store.close()
 

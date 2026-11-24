@@ -58,7 +58,7 @@ def _call_cte(voice, marks):
     ), call_turns AS (
         SELECT t.id, t.call_id, t.started_at, t.ended_at AS at, t.role, left(t.content,301) AS text
         FROM eligible_calls c JOIN {source} t ON t.call_id=c.id
-        WHERE t.finalized AND t.content ~ '[^[:space:]]'
+        WHERE t.finalized AND NOT t.interrupted AND t.content ~ '[^[:space:]]'
           AND t.content <> ALL(%(signals)s) AND t.content NOT LIKE '[알림]%%'
         {private}{_source_guard("call_turn", "t.id")}{_forget_guard(marks, "call_turn", "t.id")}
     )"""

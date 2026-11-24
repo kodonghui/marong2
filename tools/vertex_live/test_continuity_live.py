@@ -74,13 +74,13 @@ class Screen(Browser):
 
 
 class ContinuityLiveTests(unittest.IsolatedAsyncioTestCase):
-    async def open(self, mode, *, resumed=False, handle=False, reject=False, early_input=False):
+    async def open(self, mode, *, resumed=False, handle=False, reject=False, early_input=False, store=None):
         server = await check_setup()
         timeline = []
         failed = Provider(timeline, reject=True) if reject else None
         provider = Provider(timeline, blocked=early_input)
         screen = Screen(timeline)
-        store = HistoryStore(resumed)
+        store = store if store is not None else HistoryStore(resumed)
         from time import time
         resume = {"owner": "fixture", "call_id": "call-1", "revision": 0, "updated": time(),
                   "handle": "fixture-handle"} if handle else {}
@@ -162,6 +162,20 @@ class ContinuityLiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(picks), 1)
         self.assertEqual(log.count("continuity_fallback"), 1)
 
+    async def test_previous_conversation_error_does_not_skip_seed(self):
+        for mode in ("shadow", "on"):
+            with self.subTest(mode=mode):
+                store = HistoryStore()
+                store.previous_conversation = AsyncMock(side_effect=RuntimeError)
+                store.seed = AsyncMock(return_value="합성 시드")
+                provider, _, timeline, diagnostics, _, output = await self.open(mode, store=store)
+                store.seed.assert_awaited_once()
+                self.assertTrue(diagnostics["memoryConnected"])
+                self.assertEqual(diagnostics["continuity"]["result"], "error")
+                self.assertEqual(output.count("result=error"), 1)
+                self.assertIn("합성 시드", json.dumps(provider.sent[0][1], ensure_ascii=False))
+                self.assertEqual(timeline[:2], ["setup", "ready"])
+
     async def test_reset_reselects_history_and_preserves_same_call(self):
         server = await check_setup()
         timeline = []
@@ -229,6 +243,30 @@ class ContinuityLiveTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 screen.say({"type": "stop"})
                 await asyncio.wait_for(task, 3)
+
+    async def test_off_handoff_keeps_memory_tools_without_existing_segment(self):
+        server = await check_setup()
+        provider = Provider([])
+        store = HistoryStore()
+        store.tuning = AsyncMock(return_value=parse_tuning("base-20261116", ["text_handoff=on"]))
+        session = live_session.LiveSession(
+            Screen([]), "fixture", store, SimpleNamespace(revision=0, name="시험친구 가"),
+            server.setup, AsyncMock(return_value={}), {}, {},
+            "fixture", "fixture", "fixture", "fixture-client",
+        )
+        session.call_id = "call-1"
+        self.assertIsNone(session.segment)
+        with patch.object(continuity, "MODE", "off"), patch.object(
+            live_session, "ClientSession", lambda **_: HTTP(provider),
+        ):
+            self.assertTrue(await session.prepare_handoff(lambda: True, "turn"))
+            try:
+                setup = provider.sent[0][1]["setup"]
+                names = {item["name"] for tool in setup.get("tools", []) for item in tool.get("functionDeclarations", [])}
+                self.assertIn("recall", names)
+                self.assertIn("current_time", names)
+            finally:
+                await session.prepared.stack.aclose()
 
     async def test_timed_seed_guide_and_instruction_limit(self):
         server = await check_setup()

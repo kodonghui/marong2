@@ -478,14 +478,20 @@ class LiveSession:
     async def pick_previous(self, segment, now):
         if continuity.MODE == "off" or not self.store or not self.p:
             return [], []
-        recent, older, report = await self.store.previous_conversation(self.p, self.call_id, now, segment)
+        started = time.monotonic()
+        try:
+            recent, older, report = await self.store.previous_conversation(self.p, self.call_id, now, segment)
+        except Exception:
+            recent, older = [], []
+            report = continuity.record_pick(segment, turns=0, chars=0, conversations=0,
+                                            ms=round((time.monotonic() - started) * 1000), result="error")
         self.d["continuity"] = report
         return (recent, older) if continuity.MODE == "on" else ([], [])
 
     async def open_with_previous(self, stack, seed, tuning, mode, previous, now, segment, *, ring=None, handoff=False):
         if not previous:
             return await self.open_provider(stack, self.handle if not handoff else None, seed,
-                                            bool(self.p and self.segment), tuning, mode, ring=ring,
+                                            handoff or bool(self.p and self.segment), tuning, mode, ring=ring,
                                             timeout=10 if handoff else 20, handoff=handoff)
         history = continuity.history_message(previous, self.p.name, now, segment)
         async with AsyncExitStack() as attempt:
@@ -633,13 +639,18 @@ class LiveSession:
                                     segment_options['await_provider']=True
                                 self.segment=await asyncio.wait_for(self.store.start_segment(
                                     self.p,self.call_id,self.client_id,self.model,**segment_options),3)
+                            except Exception:
+                                self.d['memoryConnected']=False
+                            else:
                                 if not self.handle:
                                     previous, older = await self.pick_previous(segment_kind, opened_at)
                                 date_options = {"as_of": opened_at, "older": older} if continuity.MODE == "on" else {}
-                                seed=await asyncio.wait_for(self.store.seed(
-                                    self.p,self.call_id,memory_limit=tuning['seed_call_memories'],**date_options),1)
-                                self.d['memoryConnected']=True
-                            except Exception:self.d['memoryConnected']=False
+                                try:
+                                    seed=await asyncio.wait_for(self.store.seed(
+                                        self.p,self.call_id,memory_limit=tuning['seed_call_memories'],**date_options),1)
+                                    self.d['memoryConnected']=True
+                                except Exception:
+                                    self.d['memoryConnected']=False
                         mode=self.search_mode()
                         try:
                             upstream=await self.open_with_previous(stack,seed,tuning,mode,previous,opened_at,
