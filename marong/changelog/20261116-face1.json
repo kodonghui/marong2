@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "20261116-face1",
+  "kind": "server",
+  "title": "통화 얼굴 고침",
+  "deployedOn": "2026-11-16",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #27",
+    "c3b9ede"
+  ],
+  "items": [
+    {
+      "type": "fixed",
+      "area": "call",
+      "title": "삐뚤어진 얼굴",
+      "before": "통화 화면의 '듣는 얼굴'이 삐뚤어져 보였어요",
+      "after": "그 얼굴을 빼고 기본 얼굴만 써요",
+      "evidence": []
+    }
+  ]
+}

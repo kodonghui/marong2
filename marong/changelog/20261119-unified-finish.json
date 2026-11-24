@@ -1,0 +1,78 @@
+{
+  "format": 1,
+  "id": "20261119-unified-finish",
+  "kind": "server",
+  "title": "통합 앱 마무리 고침",
+  "deployedOn": "2026-11-20",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #67",
+    "PR #70",
+    "PR #71",
+    "PR #75",
+    "PR #76"
+  ],
+  "items": [
+    {
+      "type": "improved",
+      "area": "admin",
+      "title": "기존 프로필 잇기 링크",
+      "before": "프로필이 있는 기존 계정은 잇기 링크를 만들 수 없었어요",
+      "after": "프로필이 있어도 잇기 링크를 만들고 쓸 수 있어요",
+      "evidence": [
+        "PR #67"
+      ]
+    },
+    {
+      "type": "fixed",
+      "area": "chat",
+      "title": "다시 요청한 선톡 시간표",
+      "before": "기록 없음",
+      "after": "친구가 다시 요청한 선톡 시간표(하루 횟수·시간대)를 그 계정에 적용해요",
+      "evidence": [
+        "PR #70"
+      ]
+    },
+    {
+      "type": "improved",
+      "area": "web",
+      "title": "안 읽은 선톡 표시",
+      "before": "기록 없음",
+      "after": "글 대화를 열면 안 읽은 선톡 위에 구분선과 맨 아래로 가는 단추가 보여요",
+      "evidence": [
+        "PR #71"
+      ]
+    },
+    {
+      "type": "fixed",
+      "area": "web",
+      "title": "티켓을 받은 뒤 보내기",
+      "before": "하루 한도에 닿았던 화면은 티켓이 생겨도 보내기 단추가 꺼져 있었어요",
+      "after": "티켓이 생기면 쓰던 글을 둔 채 보내기 단추가 다시 켜져요",
+      "evidence": [
+        "PR #71"
+      ]
+    },
+    {
+      "type": "fixed",
+      "area": "app",
+      "title": "선 전화 알림 제목",
+      "before": "기록 없음",
+      "after": "선 전화 알림 제목에도 바꾼 마롱이 이름이 나와요",
+      "evidence": [
+        "PR #75"
+      ]
+    },
+    {
+      "type": "fixed",
+      "area": "web",
+      "title": "이름 뒤 조사",
+      "before": "기록 없음",
+      "after": "이름 받침에 맞춰 '이라고'·'라고'를 붙여요",
+      "evidence": [
+        "PR #76"
+      ]
+    }
+  ]
+}

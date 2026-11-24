@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "id": "app-0.2.4",
+  "kind": "app",
+  "title": "설치 다시 시도를 빠르게",
+  "deployedOn": "2026-11-18",
+  "app": {
+    "versionName": "0.2.4",
+    "versionCode": 7
+  },
+  "backfilled": true,
+  "evidence": [
+    "PR #35"
+  ],
+  "items": [
+    {
+      "type": "improved",
+      "area": "app",
+      "title": "설치 다시 시도",
+      "before": "기록 없음",
+      "after": "설치를 미뤄 둔 조건이 끝나면 빨리 다시 설치해요",
+      "evidence": []
+    }
+  ]
+}

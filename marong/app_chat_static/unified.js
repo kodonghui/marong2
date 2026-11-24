@@ -2,6 +2,7 @@
 
 const Unified = (() => {
   function theme() {
+    if (location.pathname === '/chat/admin/changes') return;
     const hour = Math.floor((Date.now() / 3_600_000 + 9) % 24);
     const cream = hour >= 8 && hour < 20;
     document.documentElement.dataset.theme = cream ? 'chestnut' : 'night';
@@ -83,5 +84,22 @@ const Unified = (() => {
     return prefix + month + '월 ' + day + '일 ' + dayPeriod + ' ' + time;
   }
 
-  return {node, button, link, request, signal, date, shortDate, endLetter};
+  function fitAdminTabs(tabs) {
+    if (!tabs) return;
+    const current = tabs.querySelector('[aria-current="page"]');
+    if (current) {
+      const row = tabs.getBoundingClientRect();
+      const active = current.getBoundingClientRect();
+      if (active.right > row.right) tabs.scrollLeft += active.right - row.right;
+      else if (active.left < row.left) tabs.scrollLeft += active.left - row.left;
+    }
+    const markOverflow = () => {
+      tabs.parentElement.dataset.overflow = String(tabs.scrollLeft + tabs.clientWidth < tabs.scrollWidth - 1);
+    };
+    markOverflow();
+    new ResizeObserver(markOverflow).observe(tabs);
+    tabs.addEventListener('scroll', markOverflow, {passive: true});
+  }
+
+  return {node, button, link, request, signal, date, shortDate, endLetter, fitAdminTabs};
 })();

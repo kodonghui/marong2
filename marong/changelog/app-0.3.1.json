@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "id": "app-0.3.1",
+  "kind": "app",
+  "title": "스피커와 통화 볼륨",
+  "deployedOn": "2026-11-21",
+  "app": {
+    "versionName": "0.3.1",
+    "versionCode": 9
+  },
+  "backfilled": true,
+  "evidence": [
+    "PR #86",
+    "PR #82"
+  ],
+  "items": [
+    {
+      "type": "improved",
+      "area": "app",
+      "title": "통화 소리",
+      "before": "통화 소리가 너무 작았어요",
+      "after": "통화 중 스피커로 바꾸고 볼륨을 조절해요",
+      "evidence": []
+    }
+  ]
+}

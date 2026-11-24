@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "id": "app-0.3.0",
+  "kind": "app",
+  "title": "앱 로그인과 글 대화 통합",
+  "deployedOn": "2026-11-19",
+  "app": {
+    "versionName": "0.3.0",
+    "versionCode": 8
+  },
+  "backfilled": true,
+  "evidence": [
+    "PR #63",
+    "PR #64"
+  ],
+  "items": [
+    {
+      "type": "improved",
+      "area": "app",
+      "title": "앱 로그인과 글 대화",
+      "before": "기록 없음",
+      "after": "앱이 통합 앱의 로그인을 쓰고, 글 대화와 통화 알림에 내가 정한 마롱이 이름이 나와요",
+      "evidence": []
+    }
+  ]
+}

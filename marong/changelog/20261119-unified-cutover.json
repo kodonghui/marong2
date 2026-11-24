@@ -1,0 +1,47 @@
+{
+  "format": 1,
+  "id": "20261119-unified-cutover",
+  "kind": "server",
+  "title": "통합 앱으로 전환",
+  "deployedOn": "2026-11-19",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #54",
+    "PR #64"
+  ],
+  "items": [
+    {
+      "type": "added",
+      "area": "web",
+      "title": "초대 링크 가입과 내 마롱이",
+      "before": "없음",
+      "after": "초대 링크로 가입하고, 사람마다 자기 마롱이(이름·목소리)를 가져요. 전에는 모두 같은 마롱이였어요",
+      "evidence": []
+    },
+    {
+      "type": "added",
+      "area": "call",
+      "title": "목소리 고르기와 동시 통화",
+      "before": "없음",
+      "after": "통화 목소리를 고르고, 세 사람까지 동시에 통화해요",
+      "evidence": []
+    },
+    {
+      "type": "removed",
+      "area": "legacy",
+      "title": "디스코드 봇",
+      "before": "디스코드 DM·서버 채널·음성 방에서 마롱이와 대화하고 통화했어요",
+      "after": "없음",
+      "evidence": []
+    },
+    {
+      "type": "improved",
+      "area": "admin",
+      "title": "관리자 화면 잠금",
+      "before": "기록 없음",
+      "after": "Cloudflare Access 로그인은 관리자 화면(/chat/admin)에만 걸려요",
+      "evidence": []
+    }
+  ]
+}

@@ -11,6 +11,7 @@ import re
 from aiohttp import web
 from psycopg.errors import QueryCanceled
 
+from .admin_changes import CHANGELOG_DIR, load_units, sort_day
 from .app_chat import Problem
 from .app_release import utc_timestamp, version_parts
 from .app_session import one
@@ -23,6 +24,7 @@ from .usage import effective_limits, month_bounds, usage_day
 HASH = re.compile(r"[a-f0-9]{64}")
 FRIEND_ID = re.compile(r"[0-9]{1,19}")
 ADMIN_PATH = "/chat/admin"
+CHANGE_REPO = "https://github.com/kodonghui/marong2"
 TABS = {
     "overview": (f"{ADMIN_PATH}/", "개요"),
     "members": (f"{ADMIN_PATH}/members", "회원"),
@@ -30,6 +32,7 @@ TABS = {
     "app": (f"{ADMIN_PATH}/app", "앱 버전"),
     "costs": (f"{ADMIN_PATH}/costs", "비용"),
     "items": (f"{ADMIN_PATH}/items", "아이템"),
+    "changes": (f"{ADMIN_PATH}/changes", "업데이트 내역"),
 }
 USD = re.compile(r"[0-9]{1,4}(?:\.[0-9]{1,2})?")
 log = logging.getLogger(__name__)
@@ -45,6 +48,26 @@ def limit_amounts(daily, monthly):
 
 def positive_id(raw):
     return int(raw) if FRIEND_ID.fullmatch(raw) and 0 < int(raw) <= 2**63 - 1 else None
+
+
+def change_sort_key(unit):
+    pr = max((int(label[4:]) for label in unit["evidence"] if label.startswith("PR #")), default=0)
+    return sort_day(unit), pr, unit["id"]
+
+
+def change_evidence(labels):
+    return [{"label": label, "url": f"{CHANGE_REPO}/pull/{label[4:]}" if label.startswith("PR #")
+             else f"{CHANGE_REPO}/commit/{label}"} for label in labels]
+
+
+def change_public(unit):
+    evidence = change_evidence(unit["evidence"])
+    result = {field: value for field, value in unit.items() if field != "format"}
+    result.update(sortOn=sort_day(unit), evidence=evidence, items=[
+        item | {"evidence": change_evidence(item["evidence"]) if item["evidence"] else evidence}
+        for item in unit["items"]
+    ])
+    return result
 
 
 def admin_invite(row):
@@ -112,6 +135,16 @@ class AppAdmin:
         """API-267: read the release history and the current owners' device records."""
         await self.require_admin(req)
         return self.chat._json(200, await self.read_app_versions())
+
+    async def changes(self, req):
+        """API-300: read change records without querying account data."""
+        await self.require_admin(req)
+        try:
+            units, skipped = await asyncio.to_thread(load_units, CHANGELOG_DIR)
+        except OSError:
+            raise Problem("internal") from None
+        units.sort(key=change_sort_key, reverse=True)
+        return self.chat._json(200, {"units": [change_public(unit) for unit in units], "skipped": skipped})
 
     async def read_app_versions(self, conn=None):
         releases = self.chat.releases
@@ -542,6 +575,7 @@ class AppAdmin:
         router.add_get(ADMIN_PATH, self.page)
         router.add_get(ADMIN_PATH + "/{path:(?!api(?:/|$)).*}", self.page)
         router.add_get(ADMIN_PATH + "/api/overview", self.overview)
+        router.add_get(ADMIN_PATH + "/api/changes", self.changes)
         router.add_get(ADMIN_PATH + "/api/image-costs", self.image_costs)
         router.add_get(ADMIN_PATH + "/api/items", self.decor_items)
         router.add_post(ADMIN_PATH + "/api/items/{itemId}/{action:list|unlist}", self.set_decor_listing)

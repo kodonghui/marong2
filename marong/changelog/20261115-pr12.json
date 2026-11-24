@@ -1,0 +1,30 @@
+{
+  "format": 1,
+  "id": "20261115-pr12",
+  "kind": "server",
+  "title": "고민 얘기는 친구처럼",
+  "deployedOn": "2026-11-15",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #12"
+  ],
+  "items": [
+    {
+      "type": "improved",
+      "area": "chat",
+      "title": "고민 들어 주기",
+      "before": "고민을 들으면 상담사처럼 답하고 상담·병원 안내로 넘겼어요",
+      "after": "친구로서 먼저 반응하고 편이 되어 같이 얘기하고, 조언은 짧게 해요",
+      "evidence": []
+    },
+    {
+      "type": "improved",
+      "area": "chat",
+      "title": "위기 상담 전화 안내",
+      "before": "기록 없음",
+      "after": "위기 상담 전화(109) 안내는 지금 위험한 때에만 해요",
+      "evidence": []
+    }
+  ]
+}

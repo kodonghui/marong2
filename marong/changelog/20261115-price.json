@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "id": "20261115-price",
+  "kind": "server",
+  "title": "쇼핑 가격 말하기",
+  "deployedOn": "2026-11-15",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #17"
+  ],
+  "items": [
+    {
+      "type": "fixed",
+      "area": "legacy",
+      "title": "쿠폰가와 판매가",
+      "before": "첫 구매 쿠폰가를 판매가처럼 말한 답이 있었어요",
+      "after": "적힌 가격 그대로 말하고, 쿠폰·할인가는 조건을 붙여 판매가와 나눠 말해요",
+      "evidence": []
+    }
+  ]
+}

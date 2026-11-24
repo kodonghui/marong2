@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "20261115-google",
+  "kind": "server",
+  "title": "구글 캘린더 연결",
+  "deployedOn": "2026-11-15",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #14",
+    "PR #23"
+  ],
+  "items": [
+    {
+      "type": "added",
+      "area": "legacy",
+      "title": "구글 캘린더",
+      "before": "없음",
+      "after": "친구가 자기 구글 캘린더를 이으면 일정을 읽고, '마롱이' 캘린더에 일정을 써요",
+      "evidence": []
+    }
+  ]
+}

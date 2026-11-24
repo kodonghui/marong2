@@ -1,0 +1,39 @@
+{
+  "format": 1,
+  "id": "20261115-pr22",
+  "kind": "server",
+  "title": "마롱이와 통화(웹·디스코드)",
+  "deployedOn": null,
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #11",
+    "PR #22"
+  ],
+  "items": [
+    {
+      "type": "added",
+      "area": "call",
+      "title": "웹 통화",
+      "before": "없음",
+      "after": "웹 페이지에서 마롱이와 목소리로 통화해요",
+      "evidence": []
+    },
+    {
+      "type": "added",
+      "area": "legacy",
+      "title": "디스코드 음성 통화",
+      "before": "없음",
+      "after": "디스코드 음성 방에서도 마롱이와 통화해요",
+      "evidence": []
+    },
+    {
+      "type": "added",
+      "area": "chat",
+      "title": "통화 기억",
+      "before": "없음",
+      "after": "통화가 끝나면 내용을 정리해 기억으로 남겨요",
+      "evidence": []
+    }
+  ]
+}

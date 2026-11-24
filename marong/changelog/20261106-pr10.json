@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "id": "20261106-pr10",
+  "kind": "server",
+  "title": "카톡: 단체방과 1:1 방의 기억 같이 쓰기",
+  "deployedOn": null,
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #10"
+  ],
+  "items": [
+    {
+      "type": "improved",
+      "area": "legacy",
+      "title": "단체방을 1:1 방에 묶기",
+      "before": "단체방과 그 친구의 1:1 방은 기억이 따로였어요",
+      "after": "관리자가 묶은 단체방은 그 친구의 1:1 방과 대화·요약·메모를 같이 읽어요",
+      "evidence": []
+    }
+  ]
+}

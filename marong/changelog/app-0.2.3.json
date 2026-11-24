@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "id": "app-0.2.3",
+  "kind": "app",
+  "title": "기존 앱의 자동 업데이트 확인",
+  "deployedOn": "2026-11-17",
+  "app": {
+    "versionName": "0.2.3",
+    "versionCode": 6
+  },
+  "backfilled": true,
+  "evidence": [
+    "PR #35"
+  ],
+  "items": [
+    {
+      "type": "fixed",
+      "area": "app",
+      "title": "기존 앱의 업데이트 확인",
+      "before": "기록 없음",
+      "after": "이미 깔린 앱도 자동 업데이트를 확인해요",
+      "evidence": []
+    }
+  ]
+}

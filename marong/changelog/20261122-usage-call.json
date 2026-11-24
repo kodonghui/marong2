@@ -1,0 +1,46 @@
+{
+  "format": 1,
+  "id": "20261122-usage-call",
+  "kind": "server",
+  "title": "사람별 사용 한도와 통화 연결",
+  "deployedOn": "2026-11-22",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #87",
+    "PR #88",
+    "PR #95"
+  ],
+  "items": [
+    {
+      "type": "added",
+      "area": "web",
+      "title": "내 사용량",
+      "before": "없음",
+      "after": "내 사용량에서 오늘 쓴 양과 한도를 봐요",
+      "evidence": [
+        "PR #87"
+      ]
+    },
+    {
+      "type": "added",
+      "area": "admin",
+      "title": "사람별 하루 한도",
+      "before": "없음",
+      "after": "관리자가 사람마다 하루 한도를 무제한·기본·직접으로 정해요",
+      "evidence": [
+        "PR #87"
+      ]
+    },
+    {
+      "type": "fixed",
+      "area": "call",
+      "title": "통화 연결 속도와 무음",
+      "before": "벨을 받은 뒤 마롱이가 준비될 때까지 오래 걸리고, 목소리가 안 들린 적이 있었어요",
+      "after": "더 빨리 연결하고, 소리 재생 문제를 진단 기록으로 남겨요",
+      "evidence": [
+        "PR #88"
+      ]
+    }
+  ]
+}
