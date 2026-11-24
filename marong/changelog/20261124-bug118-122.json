@@ -1,0 +1,39 @@
+{
+  "format": 1,
+  "id": "20261124-bug118-122",
+  "kind": "server",
+  "title": "통화 기록 고침",
+  "deployedOn": "2026-11-24",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #119",
+    "PR #122"
+  ],
+  "items": [
+    {
+      "type": "fixed",
+      "area": "call",
+      "title": "다시 이은 통화의 시작 시각",
+      "before": "통화를 다시 이으면 시작 시각이 바뀌었어요",
+      "after": "다시 이어도 처음 시작 시각(한국 시각)을 지켜요",
+      "evidence": []
+    },
+    {
+      "type": "fixed",
+      "area": "call",
+      "title": "통화 인사 자막",
+      "before": "앱의 인사 지시가 자막 기록에 남았어요",
+      "after": "인사 지시는 한 번만 보내고 자막에 남기지 않아요",
+      "evidence": []
+    },
+    {
+      "type": "improved",
+      "area": "call",
+      "title": "짧은 통화의 기억",
+      "before": "기록 없음",
+      "after": "친구 말이 20자보다 짧은 통화는 기억 카드를 만들지 않아요",
+      "evidence": []
+    }
+  ]
+}

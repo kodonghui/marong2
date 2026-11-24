@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "20261115-pr14",
+  "kind": "server",
+  "title": "디스코드 DM 일정·알림",
+  "deployedOn": "2026-11-15",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #14",
+    "PR #23"
+  ],
+  "items": [
+    {
+      "type": "added",
+      "area": "legacy",
+      "title": "일정과 알림",
+      "before": "없음",
+      "after": "'내일 3시에 알려 줘'처럼 말하면 일정으로 저장하고, 그때 DM으로 먼저 말해요",
+      "evidence": []
+    }
+  ]
+}

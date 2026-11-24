@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "id": "20261122-pet-safety-66",
+  "kind": "server",
+  "title": "캐릭터 특징표와 통화 반영",
+  "deployedOn": "2026-11-22",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #66"
+  ],
+  "items": [
+    {
+      "type": "improved",
+      "area": "web",
+      "title": "캐릭터 특징표",
+      "before": "사진의 특징표가 검사를 통과하지 못해 캐릭터 메뉴가 꺼져 있었어요",
+      "after": "캐릭터 특징표 만들기와 통화 반영을 보강했어요(메뉴를 켠 때는 기록 없음)",
+      "evidence": []
+    }
+  ]
+}

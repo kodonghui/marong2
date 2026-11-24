@@ -16,7 +16,8 @@
     "call-connect",
     "pet-app",
     "admin",
-    "continuity"
+    "continuity",
+    "fcm-unregistered"
   ],
   "records": {
     "kind": "notion",

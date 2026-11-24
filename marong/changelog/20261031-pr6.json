@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "id": "20261031-pr6",
+  "kind": "server",
+  "title": "카톡: 어른끼리의 농담 받아 주기",
+  "deployedOn": null,
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #6"
+  ],
+  "items": [
+    {
+      "type": "improved",
+      "area": "chat",
+      "title": "어른끼리의 농담",
+      "before": "그런 얘기가 나오면 '민망하다'며 다른 화제로 넘어갔어요",
+      "after": "피하지 않고 같이 받아 줘요",
+      "evidence": []
+    }
+  ]
+}

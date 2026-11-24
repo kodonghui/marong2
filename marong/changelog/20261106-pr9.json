@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "id": "20261106-pr9",
+  "kind": "server",
+  "title": "카톡: 1:1 선톡이 막힌 뒤 단체방으로",
+  "deployedOn": null,
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #9"
+  ],
+  "items": [
+    {
+      "type": "fixed",
+      "area": "legacy",
+      "title": "선톡 실패",
+      "before": "2026-11-05 오후부터 카카오 쪽 변경으로 선톡이 모두 실패했어요",
+      "after": "관리자가 켠 단체방으로 선톡을 보내요",
+      "evidence": []
+    }
+  ]
+}

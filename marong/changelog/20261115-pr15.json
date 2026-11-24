@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "id": "20261115-pr15",
+  "kind": "server",
+  "title": "통화: 끊어 달라면 인사하고 끊기",
+  "deployedOn": "2026-11-15",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #15"
+  ],
+  "items": [
+    {
+      "type": "improved",
+      "area": "call",
+      "title": "통화 끊기",
+      "before": "친구가 꺼 달라고 해도 마롱이는 대답만 하고 끊지 못했어요",
+      "after": "끊어 달라고 하면 인사하고 끊고, 스스로 먼저 끊지는 않아요",
+      "evidence": []
+    }
+  ]
+}

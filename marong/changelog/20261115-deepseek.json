@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "20261115-deepseek",
+  "kind": "server",
+  "title": "디스코드 글 대화를 DeepSeek로",
+  "deployedOn": "2026-11-15",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #24",
+    "PR #23"
+  ],
+  "items": [
+    {
+      "type": "improved",
+      "area": "legacy",
+      "title": "글 대화 모델",
+      "before": "디스코드 글 대화는 Claude Haiku가 답했어요",
+      "after": "디스코드 글 대화는 DeepSeek가 답하고, 검색·쇼핑 페이지 읽기만 Claude가 해요",
+      "evidence": []
+    }
+  ]
+}

@@ -1,8 +1,12 @@
-param([Parameter(Mandatory = $true)][string]$Output)
+param(
+    [Parameter(Mandatory = $true)][string]$Output,
+    [ValidateSet('compression', 'previous', 'date')][string]$ScriptName = 'compression'
+)
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Speech
-$lines = Get-Content -Raw -Encoding utf8 (Join-Path $PSScriptRoot 'lines.json') | ConvertFrom-Json
+$PlanFile = if ($ScriptName -eq 'compression') { 'lines.json' } else { "$ScriptName.json" }
+$lines = Get-Content -Raw -Encoding utf8 (Join-Path $PSScriptRoot $PlanFile) | ConvertFrom-Json
 $directory = New-Item -Type Directory -Path $Output -Force
 $reader = New-Object System.Speech.Synthesis.SpeechSynthesizer
 try {

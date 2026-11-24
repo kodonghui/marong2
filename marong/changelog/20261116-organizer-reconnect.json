@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "id": "20261116-organizer-reconnect",
+  "kind": "server",
+  "title": "통화 기억 정리기 다시 잇기",
+  "deployedOn": "2026-11-16",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #13"
+  ],
+  "items": [
+    {
+      "type": "fixed",
+      "area": "call",
+      "title": "DB 재시작 뒤 통화 기억",
+      "before": "DB가 다시 시작되면 그 뒤 끝난 통화의 기억이 생기지 않았어요",
+      "after": "DB가 다시 시작돼도 연결을 새로 잡아 통화 기억을 만들어요",
+      "evidence": []
+    }
+  ]
+}

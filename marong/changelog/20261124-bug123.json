@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "20261124-bug123",
+  "kind": "server",
+  "title": "글 대화 빈 스크롤 고침",
+  "deployedOn": "2026-11-24",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #123",
+    "PR #124"
+  ],
+  "items": [
+    {
+      "type": "fixed",
+      "area": "web",
+      "title": "대답 중 빈 스크롤",
+      "before": "대답하는 동안 글 대화 아래에 빈 스크롤이 생겼어요",
+      "after": "빈 스크롤 없이 대답이 이어져요",
+      "evidence": []
+    }
+  ]
+}

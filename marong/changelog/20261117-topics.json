@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "20261117-topics",
+  "kind": "server",
+  "title": "선 전화·그림 화두",
+  "deployedOn": "2026-11-17",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #27",
+    "fc8d1bd"
+  ],
+  "items": [
+    {
+      "type": "added",
+      "area": "chat",
+      "title": "선 전화·그림 화두",
+      "before": "없음",
+      "after": "마롱이가 먼저 전화하거나 그림과 함께 먼저 말을 걸어요",
+      "evidence": []
+    }
+  ]
+}

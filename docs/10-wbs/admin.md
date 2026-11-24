@@ -73,4 +73,4 @@ for f in tools/vertex_live/test_*.py; do .venv/bin/python "$f" || exit 1; done  
 | TASK-497 | 구현·검토 대기 | `d6912a7` | TC-633. 비용의 세 그룹과 순차 조회, 부분 실패, 사람마다 통화 비용 순서 확인 |
 | TASK-498 | 구현·검토 대기 | `d6912a7` | TC-635·636. 거두기 응답 200·403·404·409·500·503, 재요청·가입과 동시 요청, 확인·취소·띠 |
 | TASK-499 | 확인·검토 대기 | `d6912a7` | `git grep -n "SCR-169"`로 D136과 대조하고 옛 화면 번호·설명이 남은 줄을 고침 |
-| TASK-500 | 운영 반영 승인 대기 | | TC-639 대기 |
+| TASK-500 | 운영 반영 완료 · TC-639 부분 확인 | `46b4835501330f291362bf9ddbc1a1b366cc4944` · `ad7226b2c0d91a9e2561b77e97c1df6f66b46a5d` | 2026-11-24 03:32:36 KST. DB·앱 파일 8개 백업 뒤 통화 DB 011 적용. [TC-639](../12-qa/admin.md)의 서버·기기 결과, [백업과 롤백 원본](https://github.com/kodonghui/marong2/blob/c7ddca7cc35f8ab4b74c53a41041708eb4571324/docs/10-wbs/admin.md#11단계-진행). |

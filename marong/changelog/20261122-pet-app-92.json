@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "id": "20261122-pet-app-92",
+  "kind": "server",
+  "title": "월 그림 비용 화면",
+  "deployedOn": "2026-11-22",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #92"
+  ],
+  "items": [
+    {
+      "type": "added",
+      "area": "admin",
+      "title": "월 그림 비용",
+      "before": "없음",
+      "after": "관리자 화면에서 이달의 그림 비용을 종류별로 봐요",
+      "evidence": []
+    }
+  ]
+}

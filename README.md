@@ -237,6 +237,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements.txt
 .venv/Scripts/python tests/test_web_search.py # 디스코드 DM 인터넷 검색(가짜 Claude): 도구 하나·답마다·하루 상한·이어 받기(pause_turn)·출처는 보내는 글에만·꺼졌을 때 다시 답하기
 .venv/Scripts/python tests/test_cache.py     # 프롬프트 캐시: 성격 앞부분 1시간 캐시·1시간 쓰기 기록·조용할 때 max_tokens 0 으로 캐시 유지(가짜 Claude, DB 없음)
 .venv/Scripts/python tests/test_counsel_prompts.py  # 고민·위기 규칙: 글 대화 지시문(디스코드 DM)과 통화 지시문이 같은 원칙(DB 없이 글자만)
+.venv/Scripts/python tests/test_changelog.py  # 업데이트 내역 파일 검증·지난 내역 대조·반영 명령 시험(DB 없음)
 ```
 
 (맥·리눅스는 `.venv/bin/python`.) 노트북에서 `python run.py`(봇 모드)는 켜지 마세요. 서버의 봇과 같은 토큰이라 서로 끊어 내요.

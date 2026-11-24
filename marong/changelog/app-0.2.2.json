@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "id": "app-0.2.2",
+  "kind": "app",
+  "title": "앱 자동 업데이트",
+  "deployedOn": "2026-11-17",
+  "app": {
+    "versionName": "0.2.2",
+    "versionCode": 5
+  },
+  "backfilled": true,
+  "evidence": [
+    "PR #35"
+  ],
+  "items": [
+    {
+      "type": "added",
+      "area": "app",
+      "title": "앱 자동 업데이트",
+      "before": "없음",
+      "after": "새 버전이 나오면 앱이 스스로 받아 설치해요",
+      "evidence": []
+    }
+  ]
+}

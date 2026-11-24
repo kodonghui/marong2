@@ -51,9 +51,16 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         with patch.object(Path, 'home', return_value=Path(tmp)):
             import server
-        text = (HERE / 'call_instruction.md').read_text(encoding='utf-8').strip()
-        parts = server.setup()['setup']['systemInstruction']['parts']
-        assert len(parts) == 1 and parts[0]['text'].startswith(text+'\n'), 'setup sends the file as the instruction'
+        raw = (HERE / 'call_instruction.md').read_text(encoding='utf-8').strip()
+        text, marker, privacy = raw.partition('\n\n<!-- MARONG_CONTINUITY=on -->\n')
+        assert marker and privacy, 'the conditional rule is present in the file'
+        with patch.object(server.continuity, 'MODE', 'off'):
+            parts = server.setup()['setup']['systemInstruction']['parts']
+            assert len(parts) == 1 and parts[0]['text'].startswith(text+'\n'), 'setup sends the base file exactly'
+            assert privacy not in parts[0]['text']
+        with patch.object(server.continuity, 'MODE', 'on'):
+            parts = server.setup()['setup']['systemInstruction']['parts']
+            assert parts[0]['text'].startswith(text+'\n\n'+privacy+'\n')
         assert len(server.setup(seed='{"friend":"테스트"}')['setup']['systemInstruction']['parts']) == 2, 'memory seed stays a second part'
         with patch.dict('os.environ', {'MARONG_FRIEND_CARD': 'on'}):
             active = server.setup(memory=True, hangup=True, search='on')['setup']

@@ -1,0 +1,30 @@
+{
+  "format": 1,
+  "id": "20261030-pr5",
+  "kind": "server",
+  "title": "카톡: 요청 시트가 멈추지 않게",
+  "deployedOn": null,
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #5"
+  ],
+  "items": [
+    {
+      "type": "fixed",
+      "area": "admin",
+      "title": "요청 시트 멈춤",
+      "before": "친구의 키를 다른 친구로 옮기면 그 뒤 엑셀과 30분마다 하는 시트 갱신이 계속 실패했어요",
+      "after": "키를 옮겨도 시트가 계속 갱신돼요",
+      "evidence": []
+    },
+    {
+      "type": "improved",
+      "area": "admin",
+      "title": "관계를 바꿔 달라는 요청",
+      "before": "이미 정한 사이면 다른 관계를 말해도 '아는 사이로 정해져 있음'으로만 보였어요",
+      "after": "관계를 바꿔 달라는 요청과 할 명령이 시트에 보여요",
+      "evidence": []
+    }
+  ]
+}

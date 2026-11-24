@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "20261115-app",
+  "kind": "server",
+  "title": "안드로이드 앱 글 대화와 알림",
+  "deployedOn": "2026-11-16",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #16",
+    "64b3e99"
+  ],
+  "items": [
+    {
+      "type": "added",
+      "area": "app",
+      "title": "앱 안 글 대화와 알림",
+      "before": "없음",
+      "after": "안드로이드 앱 안에서 글로 대화하고 앱 알림을 받아요",
+      "evidence": []
+    },
+    {
+      "type": "added",
+      "area": "app",
+      "title": "안드로이드 앱(0.2.0까지)",
+      "before": "없음",
+      "after": "웹 통화를 여는 안드로이드 앱이 생겼어요. 0.2.0에 알림 받기와 벨 화면이 들어갔어요",
+      "evidence": []
+    }
+  ]
+}

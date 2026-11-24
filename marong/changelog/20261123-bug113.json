@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "id": "20261123-bug113",
+  "kind": "server",
+  "title": "늦게 뜬 화면의 업데이트 배너",
+  "deployedOn": "2026-11-23",
+  "app": null,
+  "backfilled": true,
+  "evidence": [
+    "PR #111"
+  ],
+  "items": [
+    {
+      "type": "fixed",
+      "area": "web",
+      "title": "늦게 뜬 화면의 배너",
+      "before": "늦게 로드된 화면에는 업데이트 배너가 보이지 않았어요",
+      "after": "늦게 로드된 화면에도 배너가 보여요",
+      "evidence": []
+    }
+  ]
+}
