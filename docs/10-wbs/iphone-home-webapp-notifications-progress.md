@@ -195,6 +195,56 @@ Windows의 PostgreSQL 시험은 Python 3.12 Selector 이벤트 루프에서 `run
 
 독립 리뷰의 Android Gradle과 매니페스트 결과는 `2552053`의 검증입니다. 위 Gradle 결과는 수정 커밋 `8f2957e`의 별도 재실행입니다. 단말 오디오와 실제 알림, 운영 반영과 구현 PR 병합은 후속 승인 범위입니다.
 
+## 종료된 약속 전화 알림의 다시 걸기
+
+Orca 항목 143의 지적 3은 초안 #139의 `aedde75a948a468cc1f0062933b67d0746c57c53`에서 이어갔습니다. 대상은 API-314·315·317, SCR-001·002, SPEC-548·550~553, TASK-572·573·575~577입니다. [독립 재검토](https://github.com/kodonghui/marong2/pull/139#issuecomment-7160528408)
+
+| 승인 근거 | 확인한 SHA-256 |
+| --- | --- |
+| e2751의 06·08 `iphone-webapp-reopen-ended-call-version-candidate.md`, e2752 고정, 승인 `msg_afe11e299ee4`, 요청 `msg_cc6093148161` | `2add86c28fc116ad8a41bd81a279bd2f1482adbddba4f811e377238497ab711b` |
+| e2755의 05 `iphone-webapp-notice-receipt-expiry-storage-review.md`, e2756 고정, 승인 `msg_1f16f7d39bc2`, 요청 `msg_8a661391ba2b` | `bede9431ae154fcc3c760eb3ee2c692a2ddf7e85a005ca387fdb3bdcab684517` |
+| e2755의 통화 013 초안 및 적용 SQL | `1118a541057b0b33758e38b4019f05b0ea9c3498b5d613ae1b476025ddad838a` |
+
+통화 013은 당시 세션 만료, 대상 참조 만료와 최초 수락 뒤 24시간 중 가장 이른 시각을 최초 수락 트랜잭션에서 저장합니다. 실제 세션 갱신 뒤에는 당시 만료가 달랐던 두 합성 세션의 현행 기록이 같아져 기존 열로 원래 만료를 복원할 수 없었습니다. 기존 통화 역할을 사용하고 앱 역할의 권한을 추가하지 않았습니다. 원격 `main`은 통화 011까지였고, 초안 브랜치는 012 다음 013을 적용합니다. 두 012 파일의 승인 해시 및 고정 06·08 파일을 보존했습니다. [013 승인 SQL](../05-erd/013_notice_receipt_expiry.draft.sql) · [013 적용 SQL](../../marong/call/migrations/013_notice_receipt_expiry.sql)
+
+API-314는 유효한 조회 확인 정보가 있을 때만 별도 읽기 권한의 루프백에서 원래 통화의 종료를 확인합니다. 앱은 루프백 전에 DB 트랜잭션을 마치고, 응답 뒤 동의를 다시 확인합니다. API-314의 `ring_answered` 본문과 API-315의 기존 수락 본문은 그대로 사용합니다. 종료가 확인되면 최대 5분인 발신 선택을 제공하고, 다시 걸기 전용 문서와 API-317은 유효한 세션·설치·동의·대상과 서버가 확정한 종료를 각각 검사합니다. `다시 걸기`와 `통화 시작`은 별도 조작입니다. 기존 09 화면의 종료 안내와 SCR-001의 제목 초점을 사용합니다. [SCR-001 종료](../08-screens/iphone-home-webapp-notifications/SCR-001.md#notice-call-ended) · [SCR-002 복구](../08-screens/iphone-home-webapp-notifications/SCR-002.md)
+
+### e2751 시험 기준 대조
+
+| 기준 | 자동 확인 |
+| --- | --- |
+| 1. 예약·경계·종료 확정 | 최초 수락 직후, 120초 직전·정확한 경계·직후, 연결 중에는 선택이 없고 종료 기록 확정 뒤 제공됩니다. 조회 전후 원래 통화와 약속 전화 수락·구독 행을 비교했습니다. |
+| 2. 새 창·같은 동의 갱신·결과 확인 | 같은 설치 저장소를 유지한 새 창에서 조회했습니다. 동일 동의의 구독 갱신 뒤에도 조회했고 같은 수락 결과의 만료가 일치했습니다. |
+| 3. 응답 유실·저장소 유실 | 첫 브라우저 응답을 끊고 같은 문서에서 결과를 재확인했습니다. 저장 전에는 확인 정보가 없고 성공 뒤에는 해시로 찾은 확인 정보와 만료만 남았습니다. 저장소 삭제 뒤에는 선행 수락 안내로 복귀했습니다. |
+| 4. 수명·현행 인증 | 고정 세션 만료·대상 만료·24시간 각각을 검증했습니다. DB 잠금으로 세션 갱신 경합을 확인했고 재발급은 저장 시각을 재사용했습니다. 선택 만료, 조회 도중 동의 철회, 철회 후 재동의, 이전 행의 NULL을 대조했습니다. |
+| 5. 다른 설치·계정·Android | 소유 설치의 조회 확인 정보는 다른 설치에서 선택을 얻지 못합니다. 기존 다른 계정 조회, Android 선행 수락과 일반 Safari 발신 회귀를 실행했습니다. |
+| 6. 확인 정보와 발신 권한 분리 | 조회 확인 정보로 전용 문서를 얻지 못하고 직접 접근은 마이크를 차단합니다. 다시 걸기 문서로 API-315를 실행할 수 없습니다. 만료되거나 동의 철회된 선택은 문서 또는 API-317에서 거절됩니다. |
+| 7. 별도 발신·마이크 거절 | 두 엔진에서 시작을 누르기 전 요청이 없고 마이크 거절 때 API-317 시작 0건입니다. 루프백 서버에서 정상 발신은 `ring: false`와 새로운 일반 통화 ID를 반환했습니다. |
+| 8. 중복과 지연 도착 | 다른 선택의 동시 소켓은 `call_busy`입니다. 첫 발신을 정상 종료한 뒤 같은 선택으로 새 문서를 다시 열 수 있는 시점에 별도 Python 릴레이 프로세스를 띄워 시작을 재시도했습니다. 통화는 종료된 원래 약속 통화 1건과 일반 통화 1건으로 유지됐고 원래 수락 시각과 ID가 일치했습니다. |
+| 9. 루프백·DB 권한과 캐시 | 수락·조회 루프백 업무 권한을 분리했고 기존 역할로 좁은 종료 조회만 수행했습니다. 마이그레이션 재적용 전후 권한과 기존 행을 비교했습니다. 공개 응답과 문서는 `no-store`이며 보호값이 문서나 주소에 포함되지 않음을 시험했습니다. |
+| 10. 실제 iPhone | 후속 확인입니다. 같은 알림을 다시 여는 앱 창, 잠금·망 전환, 실제 VoiceOver 초점, 실제 알림과 양방향 오디오를 확인해야 합니다. |
+
+### 실행 기록
+
+구현 커밋 `0ca512b0724db21b45e4b6df86e9cde3cf1ee37e`와 루프백 중 동의 철회 보완 커밋 `a9c451a70e98a292f23ae342d4ba19f335b2dff4`를 시험했습니다. 기존 미수락 만료의 일반 발신이 종료된 뒤 중복 시작을 막는 회귀는 `41b8a451740ba742986352fb5d8c75cdf7ab1ec2`에 먼저 기록했고, `0ca512b`에서 실제 앱 문서 진입을 추가했습니다.
+
+게시 전에 커밋 작성자 주소를 GitHub 비공개 주소로 바꿨습니다. 시험한 세 커밋의 파일 트리가 공개 브랜치의 `d6d1982af1e1c64ed3b5e75f57e46bee34683828`, `83034c7cda8756b07c4a9ba003e3420debad3c70`, `88d070d74f78eb23d8dba9cec34e6086114c3f27`과 각각 동일함을 확인했습니다.
+
+Windows PostgreSQL 시험은 Python 3.12에서 `asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())`와 `runpy.run_path(파일, run_name='__main__')`로 실행했습니다. Windows 콘솔의 기본 인코딩으로 약속 전화 시험 출력이 중단돼 `PYTHONUTF8=1`과 `PYTHONIOENCODING=utf-8`을 적용해 재실행했습니다. 모든 통화·푸시 시험은 격리 DB, 합성 계정, 루프백 또는 모의 전송을 사용했습니다.
+
+| 실행 명령 또는 파일 | 실행 커밋과 결과 |
+| --- | --- |
+| `tests/test_web_push_schema.py` | `0ca512b`에서 4개 통과. 012 다음 013을 빈 DB와 012 시각이 기록된 기존 행 2건의 DB에 각각 두 번 적용했습니다. 기존 열·행과 ACL, 새 열의 NULL·기본값 없음, 통화 역할만의 열 읽기·쓰기 권한을 확인했습니다. |
+| `tests/test_web_push_subscriptions.py` | `0ca512b`와 `a9c451a`에서 각각 36개 통과. 실제 갱신 함수의 잠금 대기, 응답 유실 뒤 저장 기한 재사용, 경계 롤백, 조회 중 철회, 별도 프로세스의 정상 종료 뒤 중복 시작 차단을 포함합니다. |
+| `tests/test_unified_auth.py`, `tests/test_app_ring.py`, `tests/test_app_chat.py` | 통합 인증 11개, 약속 전화 75개, 글 대화·모의 FCM 454개 확인 통과. 약속 전화 및 글 대화는 `a9c451a`에서 재실행했습니다. |
+| `tests/test_notice_call_browser.py`, `tests/test_web_push_browser.py` | `0ca512b`에서 통화 문서 7개와 기존 알림 4개 통과. `a9c451a`에서 새 창의 다시 걸기 시험을 두 번 더 실행해 Chromium·Playwright WebKit에서 각각 두 번 통과했습니다. 두 엔진은 모의 환경입니다. |
+| `tools/vertex_live/test_connect_server.py`, `tools/vertex_live/test_call_memory_regressions.py`, `test_relay.py`, `test_rtc_api.py`, `test_midcall.py`, `test_web_reconnect.py`, `test_hangup.py`, `test_ring.py` | 연결 API 5개, 통화 기록 4개, 릴레이·RTC·PCM·재연결·종료·약속 전화의 모의 서버 파일 6개 통과. `test_hangup.py`와 `test_ring.py`는 `a9c451a`에서 실행했습니다. |
+| `node --test tools/vertex_live/test_transport.cjs tools/vertex_live/test_fallback.cjs tools/vertex_live/test_rtc_watchdog.cjs tools/vertex_live/test_hangup_client.cjs` | 전송 회귀 4개 통과. |
+| Ubuntu WSL Python 3.12.16의 `tests/test_app_update_push.py` | `0ca512b`에서 모의 FCM 23개 통과. |
+| `gradlew.bat --offline --no-daemon --rerun-tasks :app:processDebugManifest :app:processReleaseManifest :app:testDebugUnitTest :app:lintDebug` 및 `npm test --prefix apps/android` | `0ca512b`에서 Java 21과 SDK 36으로 Gradle 118개 작업 실행, 디버그 단위 45개 통과, Lint 오류 0건·경고 7건. 디버그·릴리스 병합 매니페스트의 권한 13개 일치, Node 단위 35개 통과. |
+| `node --test --test-concurrency=1 apps/android/test/app-update-banners.e2e.cjs apps/android/test/call-page.e2e.cjs apps/android/test/call-ring.e2e.cjs apps/android/test/chat-page.e2e.cjs apps/android/test/chat-scroll.e2e.cjs` | `a9c451a`에서 Playwright 모의 브라우저 63개 통과. 초기 두 파일 실행은 Node의 Playwright 탐색 경로가 비어 건너뛰었습니다. 설치된 모듈의 경로를 `NODE_PATH`로 지정해 다시 실행했습니다. |
+| `git diff --check`, Python `py_compile`, JavaScript `node --check`, CORTHEX `term-check.py` | 통과. 승인 SQL과 적용 SQL의 Git 개체 SHA-256을 비교했습니다. |
+
 ## 승인본과 운영 경계
 
 고정 WBS의 SHA-256은 `64653d0df932e8c6a14d1cb20d0cbcf2ebcf8388a2b551118d28ececf66e552e`, 10단계 검토 메모는 `9b5df39b9c6cb3b526e7db9865e5a1945e840deb140b45874d5e873649f67606`입니다. 08 화면 인덱스는 승인 원본과 LF 한 바이트 차이인 병합된 사본을 보존했습니다. 구독 409는 승인된 SCR-165와 OpenAPI의 재조회 상태를 사용합니다.
