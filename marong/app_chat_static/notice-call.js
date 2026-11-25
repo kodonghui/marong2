@@ -37,6 +37,8 @@
   const status = document.getElementById('status');
   const reference = web?.takeCall(page.dataset.navigation);
   delete page.dataset.navigation;
+  const client = page.dataset.clientId;
+  delete page.dataset.clientId;
   const installation = web?.proof();
   const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
   const token = /^[A-Za-z0-9_-]{48,768}$/;
@@ -97,11 +99,24 @@
   }
 
   function current() {
-    return Boolean(reference && installation && web.proof() === installation);
+    return Boolean(reference && uuid.test(client) && installation && web.proof() === installation);
   }
 
   function resolve() {
-    return web.request('/target/resolve', 'POST', {targetRef: reference});
+    return web.request('/target/resolve', 'POST', {targetRef: reference}, undefined, client);
+  }
+
+  function returnToLookup() {
+    version++;
+    frame = expected = pending = null;
+    connected = false;
+    if (reference) web?.preserveReference(reference, '/chat/');
+    location.replace('/chat/');
+  }
+
+  function lookupRejected(result, otherwise) {
+    if (result.status === 403 && result.data?.code === 'not_allowed') returnToLookup();
+    else failed(result, otherwise);
   }
 
   async function inspect() {
@@ -110,12 +125,12 @@
     const subscribed = await web.request('/subscription');
     if (run !== version) return;
     if (subscribed.status !== 200) { failed(subscribed, 'offline'); return; }
-    if (subscribed.data?.state !== 'active') { show('denied'); return; }
+    if (subscribed.data?.state !== 'active') { returnToLookup(); return; }
     const result = await resolve();
     if (run !== version) return;
     if (result.status === 200 && ['ring_ready', 'ring_expired', 'ring_answered', 'ring_unavailable'].includes(result.data?.state)) {
       show(result.data.state);
-    } else failed(result.status === 200 ? {status: 404} : result, 'offline');
+    } else lookupRejected(result.status === 200 ? {status: 404} : result, 'offline');
   }
 
   function accept(clientId) {
@@ -134,7 +149,10 @@
 
   async function authorize(mode, clientId) {
     const run = version;
-    if (!current()) { show('denied'); return false; }
+    if (!current() || clientId !== client) { returnToLookup(); return false; }
+    const verified = await resolve();
+    if (run !== version) return false;
+    if (verified.status !== 200) { lookupRejected(verified, 'offline'); return false; }
     if (mode === 'ordinary') {
       frame = {type: 'start_ordinary', clientId, installationProof: installation, targetRef: reference};
     } else {
@@ -145,7 +163,7 @@
         if (result.status === 200 && ['ring_answered', 'ring_expired', 'ring_unavailable'].includes(result.data?.state)) {
           pending = null;
           show(result.data.state);
-        } else failed(result, 'result');
+        } else lookupRejected(result, 'result');
         return false;
       }
       pending = null;
@@ -160,14 +178,14 @@
     const run = version;
     const result = await resolve();
     if (run !== version) return false;
-    if (result.status !== 200) { failed(result, 'checking'); return false; }
+    if (result.status !== 200) { lookupRejected(result, 'checking'); return false; }
     if (result.data?.state !== 'ring_answered') { show('ended'); return false; }
     // Replay only the exact request for a known, already-answered call.
     const previous = await accept(frame.clientId);
     if (run !== version) return false;
     if (accepted(previous, frame.clientId)) return true;
     if (previous.status === 200) show('ended');
-    else failed(previous, 'checking');
+    else lookupRejected(previous, 'checking');
     return false;
   }
 
@@ -189,7 +207,7 @@
     if (!current()) { show('denied'); return; }
     const result = await resolve();
     if (run !== version) return;
-    if (result.status !== 200) { failed(result, 'checking'); return; }
+    if (result.status !== 200) { lookupRejected(result, 'checking'); return; }
     if (frame && ((frame.type === 'start_notified' && result.data?.state === 'ring_answered')
         || (frame.type === 'start_ordinary' && expected && result.data?.state === 'ring_expired'))) {
       start('resume');
@@ -221,6 +239,7 @@
   window.addEventListener('pageshow', event => { if (event.persisted) void inspect(); });
 
   window.MarongNoticeCall = {
+    clientId: client,
     attach(value) { engine = value; },
     authorize, resume,
     handshake() { return {frame, expected, ring: frame?.type === 'start_notified'}; },
@@ -239,6 +258,10 @@
     microphoneFailed() { show(micMode === 'accept' ? 'mic' : 'micResume'); },
     ended() { frame = pending = expected = null; show('ended'); },
     failure(type) {
+      if (type === 'not_allowed' && frame?.type === 'start_ordinary') {
+        returnToLookup();
+        return true;
+      }
       if (type === 'ring_expired') {
         frame = pending = expected = null;
         void inspect();

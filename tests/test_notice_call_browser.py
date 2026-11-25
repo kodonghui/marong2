@@ -20,6 +20,8 @@ REF = 'N' * 64
 PROOF = 'A' * 43
 TOKEN = 'C' * 64
 CALL_ID = '11111111-2222-4333-8444-555555555555'
+DOCUMENT_CLIENT = '11111111-2222-8333-8444-555555555555'
+NEXT_CLIENT = '22222222-2222-8333-8444-555555555555'
 
 MEDIA = """
     Object.defineProperty(navigator, 'standalone', {value: true, configurable: true});
@@ -43,7 +45,10 @@ MEDIA = """
         document.documentElement.dataset.testMic = 'waiting';
       });
       if (f.permission === 'deny') throw new DOMException('Fixture refusal', 'NotAllowedError');
-      const track = {enabled: true, stop() { document.documentElement.dataset.testStopped = ++f.stopped; }};
+      const track = {enabled: true, stop() {
+        document.documentElement.dataset.testStopped = ++f.stopped;
+        sessionStorage.setItem('fixture.stopped', String(f.stopped));
+      }};
       return {getTracks: () => [track], getAudioTracks: () => [track]};
     }}});
 """
@@ -56,6 +61,9 @@ class CallFixture:
         self.resolve_login = False
         self.lose_response = False
         self.break_nonce = False
+        self.subscription = 'active'
+        self.document_client = DOCUMENT_CLIENT
+        self.expire_on_login = False
         self.right_call = True
         self.accepts = []
         self.connections = []
@@ -86,7 +94,8 @@ class CallFixture:
         app.router.add_get('/live/web-notification', self.socket)
         app.router.add_get('/chat/login', lambda _: web.FileResponse(CHAT / 'account.html'))
         app.router.add_post('/chat/api/login/code', self.login)
-        app.router.add_get('/chat/api/web-notifications/subscription', lambda _: web.json_response({'state': 'active'}))
+        app.router.add_get('/chat/api/web-notifications/subscription',
+                           lambda _: web.json_response({'state': self.subscription}))
         app.router.add_get('/chat/api/me', lambda _: web.json_response({'name': 'Fixture', 'textMax': 1000,
                           'delivery': {'to': 'discord'}, 'ring': {'to': 'discord'}}))
         app.router.add_get('/chat/api/messages', lambda _: web.json_response({'messages': [], 'hasMore': False}))
@@ -121,12 +130,15 @@ class CallFixture:
             self.post_login = False
             return AppChat._notice_call_failure('login', 401)
         navigation = form['navigation'] if not self.break_nonce else 'f' * 32
-        body = (CHAT / 'notice-call.html').read_text(encoding='utf-8').replace('@NAVIGATION@', navigation)
+        body = (CHAT / 'notice-call.html').read_text(encoding='utf-8').replace('@NAVIGATION@', navigation).replace(
+            '@CALL_CLIENT@', self.document_client)
         headers = HEADERS | {'Permissions-Policy': 'camera=(), microphone=(self), geolocation=()'}
         return web.Response(text=body, content_type='text/html', headers=headers)
 
     async def login(self, _):
         self.resolve_login = False
+        if self.expire_on_login:
+            self.subscription, self.ring = 'not_registered', 'ring_expired'
         return web.json_response({'status': 'ok'})
 
     async def resolve(self, req):
@@ -135,6 +147,9 @@ class CallFixture:
         self.resolved += 1
         if self.resolve_login:
             return web.json_response({'code': 'login_required'}, status=401)
+        document = req.headers.get('X-Marong-Notice-Document')
+        if document and (document != self.document_client or self.subscription != 'active'):
+            return web.json_response({'code': 'not_allowed'}, status=403)
         return web.json_response({'state': self.ring})
 
     async def accept(self, req):
@@ -289,6 +304,54 @@ class NoticeCallBrowserTests(unittest.TestCase):
                 self.heading(page, '통화가 끝났어')
                 self.assertTrue(fixture.call_stopped.wait(3))
                 self.assertEqual(sum(frame['type'] == 'stop' for frame in fixture.frames), 1)
+
+    def test_review_relogin_shows_confirmed_expiry_without_microphone(self):
+        for engine in (self.playwright.chromium, self.playwright.webkit):
+            with self.subTest(engine=engine.name):
+                fixture = CallFixture()
+                self.addCleanup(fixture.close)
+                fixture.post_login = fixture.expire_on_login = True
+                page = self.page(engine, fixture)
+                self.heading(page, '로그인한 뒤 알림을 확인할게')
+                page.get_by_role('link', name='들어가기').click()
+                page.get_by_role('textbox', name='기기 추가 코드').fill('555555')
+                page.get_by_role('button', name='들어가기').click()
+                expect(self.heading(page, '약속 전화 시간이 지났어')).to_be_focused()
+                self.assertEqual(page.url, fixture.origin + '/chat/')
+                self.assertEqual(len(fixture.posts), 1)
+                self.assertEqual(fixture.accepts, [])
+                self.assertEqual(fixture.frames, [])
+                self.assertEqual(page.evaluate('fixture.prompts'), 0)
+
+    def test_review_waiting_microphone_is_discarded_when_session_or_consent_changes(self):
+        for engine in (self.playwright.chromium, self.playwright.webkit):
+            for change in ('session', 'revoked'):
+                with self.subTest(engine=engine.name, change=change):
+                    fixture = CallFixture()
+                    self.addCleanup(fixture.close)
+                    page = self.page(engine, fixture)
+                    self.heading(page, '약속 전화가 와 있어')
+                    page.evaluate('() => { fixture.lag = true; }')
+                    page.get_by_role('button', name='받기', exact=True).click()
+                    expect(page.locator('html')).to_have_attribute('data-test-mic', 'waiting')
+                    checked = fixture.resolved
+                    if change == 'session':
+                        fixture.document_client = NEXT_CLIENT
+                    else:
+                        fixture.subscription = 'revoked'
+                    with page.expect_navigation():
+                        page.evaluate('() => fixture.releaseMic()')
+                    if change == 'session':
+                        expect(page.get_by_role('button', name='받기', exact=True)).to_be_visible()
+                        self.assertEqual(len(fixture.posts), 2)
+                    else:
+                        expect(self.heading(page, '약속 전화가 와 있어')).to_be_focused()
+                        self.assertEqual(page.url, fixture.origin + '/chat/')
+                        self.assertEqual(len(fixture.posts), 1)
+                    self.assertGreater(fixture.resolved, checked)
+                    self.assertEqual(page.evaluate("sessionStorage.getItem('fixture.stopped')"), '1')
+                    self.assertEqual(fixture.accepts, [])
+                    self.assertEqual(fixture.frames, [])
 
     def test_reauthentication_mismatched_navigation_and_regular_safari(self):
         for engine in (self.playwright.chromium, self.playwright.webkit):

@@ -1067,7 +1067,16 @@ async function openNotice(reference) {
       return;
     }
     if (response.status === 200 && ['ring_ready', 'ring_expired'].includes(response.data?.state)
-        && webNotifications.openCall(reference, previousFocus)) { submitted = true; return; }
+        && document.body.dataset.noticeCallEnabled === 'true') {
+      const subscription = await webNotifications.request('/subscription');
+      if (inactive) return;
+      if (subscription.status === 401 && webNotifications.preserve('/chat/')) {
+        location.replace('/chat/login?expired=1');
+        return;
+      }
+      if (subscription.status === 200 && subscription.data?.state === 'active'
+          && webNotifications.openCall(reference, previousFocus)) { submitted = true; return; }
+    }
     const ringState = {
       ring_ready: ['약속 전화가 와 있어', '화면을 열기만 해서는 수락하지 않아.'],
       ring_expired: ['약속 전화 시간이 지났어', '더 이상 이 약속 전화를 받을 수 없어.'],

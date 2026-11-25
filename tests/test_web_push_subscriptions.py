@@ -30,7 +30,7 @@ from marong.web_push_subscriptions import (
     installation_id,
 )
 from marong.web_push_targets import NoticeReferences
-from marong.web_notice_call_protocol import SUBPROTOCOL, NoticeCallProtocol, client_uuid
+from marong.web_notice_call_protocol import INSTALLATION_CHECK_PATH, SUBPROTOCOL, NoticeCallProtocol, client_uuid
 
 
 ORIGIN = "https://fixture.invalid"
@@ -605,6 +605,7 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         call_app.router.add_post("/api/rtc", server.rtc_config)
         call_app.router.add_get("/status", server.status)
         call_app.router.add_get("/api/me", server.status)
+        call_app.router.add_post("/api/calls/{id}/end", server.end_call)
         call_site = TestServer(call_app)
         await call_site.start_server()
         self.addAsyncCleanup(call_site.close)
@@ -625,6 +626,9 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         public = TestClient(TestServer(self.chat.web_app()))
         await public.start_server()
         self.addAsyncCleanup(public.close)
+        check_bridge = patch.object(server, 'NOTICE_CHECK', str(public.make_url(INSTALLATION_CHECK_PATH)))
+        check_bridge.start()
+        self.addCleanup(check_bridge.stop)
         self.client = public
         self.call_site = call_site
         await self.sessions.ensure_profile((await self.sessions.find_session(self.token))["friend_id"])
@@ -644,6 +648,7 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_574_web_first_replay_and_android_first_share_atomic_ring(self):
         server, store, protocol, who = await self.call_fixture()
+        await self.register_fixture()
         from call_memory import CallBusy, Principal
 
         p = Principal(who["caller_id"], who["friend_id"], "Fixture", unified=True)
@@ -731,6 +736,184 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
             self.service.limit(self.sid, installation_id(self.proof))
         await self.problem(await self.request("POST", ACCEPT, body=answer), 429, "request_limit")
 
+    async def test_review_reserved_owner_is_protected_without_socket(self):
+        server, store, _, who = await self.call_fixture()
+        from call_memory import CallBusy, Principal
+
+        await self.register_fixture()
+        principal = Principal(who['caller_id'], who['friend_id'], 'Fixture', unified=True)
+        ring = self.ring(who)
+        ref = self.references.seal('call', who['friend_id'], ring, self.now)
+        body = {'targetRef': ref, 'clientId': str(uuid4())}
+        accepted = await self.request('POST', ACCEPT, body=body)
+        self.assertEqual(accepted.status, 200)
+        call = (await accepted.json())['callId']
+        end = self.call_site.make_url(f'/api/calls/{call}/end')
+        headers = {'Cookie': f'{COOKIE}={self.token}', 'Origin': str(end.origin())}
+        for state in ('live', 'resting'):
+            self.db.admin('UPDATE call.calls SET status=%s WHERE id=%s', (state, call))
+            with self.subTest(state=state), self.assertRaises(CallBusy):
+                await store.start_call(principal, str(uuid4()), 'Fixture', 'fixture')
+            with patch.object(server, 'LiveSession', side_effect=AssertionError) as relay:
+                ordinary = self.call_site.make_url('/live').with_query(client=str(uuid4()))
+                async with self.client.session.ws_connect(ordinary, headers=headers) as refused:
+                    self.assertEqual(await refused.receive_json(timeout=3), {'type': 'call_busy'})
+                relay.assert_not_called()
+            async with self.client.session.post(end, headers=headers, json={}) as refused:
+                self.assertEqual(refused.status, 404)
+            self.assertEqual(self.db.admin('SELECT status FROM call.calls WHERE id=%s', (call,)), [(state,)])
+        again = await self.request('POST', ACCEPT, body=body)
+        self.assertEqual((await again.json())['callId'], call)
+
+    async def test_review_accept_and_result_require_an_active_current_installation(self):
+        _, _, _, who = await self.call_fixture()
+        ring = self.ring(who)
+        ref = self.references.seal('call', who['friend_id'], ring, self.now)
+        body = {'targetRef': ref, 'clientId': str(uuid4())}
+        await self.problem(await self.request('POST', ACCEPT, body=body), 403, 'not_allowed')
+        self.assertEqual(self.db.admin('SELECT status,call_id FROM marong.app_rings WHERE id=%s', (ring,)), [('ringing', None)])
+        await self.register_fixture()
+        self.db.admin("UPDATE marong.web_push_subscriptions SET subscription_expires_at='10001-01-01' WHERE installation_id=%s",
+                      (installation_id(self.proof),))
+        accepted = await self.request('POST', ACCEPT, body=body)
+        self.assertEqual((await accepted.json())['state'], 'accepted')
+        choice = await self.select('revoke')
+        await self.state(await self.request('DELETE', SUB, choice=choice), 'revoked')
+        await self.problem(await self.request('POST', ACCEPT, body=body), 403, 'not_allowed')
+
+    async def test_review_document_binding_survives_refresh_and_rejects_same_account_relogin(self):
+        _, _, _, who = await self.call_fixture()
+        await self.register_fixture()
+        ring = self.ring(who)
+        ref = self.references.seal('call', who['friend_id'], ring, self.now)
+        ident = installation_id(self.proof)
+        async with self.service.pool.connection() as conn:
+            consent, _ = await self.service.active_consent(conn, ident, self.sid, self.now)
+        document = str(self.chat.web_push_call.document_client(self.sid, ident, ref, consent))
+        read = {'targetRef': ref}
+        header = {'X-Marong-Notice-Document': document}
+        self.assertEqual((await self.request('POST', RESOLVE, body=read, headers=header)).status, 200)
+        refresh = await self.select('refresh')
+        await self.state(await self.request('PUT', SUB, choice=refresh, body=self.subscription()), 'active')
+        self.assertEqual((await self.request('POST', RESOLVE, body=read, headers=header)).status, 200)
+        code, _ = await self.sessions.create_device_code(who['friend_id'])
+        logged = await self.request('POST', '/chat/api/login/code', body={'code': code})
+        self.assertEqual(logged.status, 200)
+        changed = logged.cookies[COOKIE].value
+        self.db.admin("UPDATE marong.app_rings SET answer_until=now()-interval '2 seconds' WHERE id=%s", (ring,))
+        expired = await self.request('POST', RESOLVE, body=read, token=changed)
+        self.assertEqual(await expired.json(), {'state': 'ring_expired'})
+        async with self.client.post('/chat/notice-call',
+                                    data=read | {'installationProof': self.proof, 'navigation': uuid4().hex},
+                                    headers={'Cookie': f'{COOKIE}={changed}', 'Origin': ORIGIN}) as denied:
+            self.assertEqual(denied.status, 403)
+            self.assertIn('microphone=()', denied.headers['Permissions-Policy'])
+            self.assertIn('약속 전화 시간이 지났어', await denied.text())
+        self.db.admin("UPDATE marong.app_rings SET answer_until=now()+interval '30 seconds' WHERE id=%s", (ring,))
+        enable = await self.select('enable', token=changed)
+        await self.state(await self.request('PUT', SUB, choice=enable, token=changed, body=self.subscription()), 'active')
+        await self.problem(await self.request('POST', RESOLVE, body=read, headers=header, token=changed), 403, 'not_allowed')
+        await self.problem(await self.request('POST', ACCEPT, body=read | {'clientId': document}, token=changed),
+                           403, 'not_allowed')
+        self.assertEqual((await self.request('POST', RESOLVE, body=read, token=changed)).status, 200)
+        self.assertEqual(self.db.admin('SELECT status,call_id FROM marong.app_rings WHERE id=%s', (ring,)), [('ringing', None)])
+
+    async def test_review_revocation_before_reservation_and_reservation_before_revocation(self):
+        server, store, _, who = await self.call_fixture()
+        await self.register_fixture()
+        ring = self.ring(who)
+        ref = self.references.seal('call', who['friend_id'], ring, self.now)
+        body = {'targetRef': ref, 'clientId': str(uuid4())}
+        ready, proceed = asyncio.Event(), asyncio.Event()
+        reserve = store.reserve_notice_ring
+
+        async def delayed_reserve(*args, **kwargs):
+            ready.set()
+            await proceed.wait()
+            return await reserve(*args, **kwargs)
+
+        choice = await self.select('revoke')
+        with patch.object(store, 'reserve_notice_ring', side_effect=delayed_reserve):
+            request = asyncio.create_task(self.request('POST', ACCEPT, body=body))
+            try:
+                await asyncio.wait_for(ready.wait(), 2)
+                await self.state(await self.request('DELETE', SUB, choice=choice), 'revoked')
+            finally:
+                proceed.set()
+            await self.problem(await request, 403, 'not_allowed')
+        self.assertEqual(self.db.admin('SELECT status,call_id FROM marong.app_rings WHERE id=%s', (ring,)), [('ringing', None)])
+        await self.register_fixture()
+        choice = await self.select('revoke')
+        ready.clear()
+        proceed.clear()
+        validation = server.validate_notice_installation
+
+        async def allowed_before_revocation(*args):
+            deadline = await validation(*args)
+            ready.set()
+            await proceed.wait()
+            return deadline
+
+        with patch.object(server, 'validate_notice_installation', side_effect=allowed_before_revocation):
+            request = asyncio.create_task(self.request('POST', ACCEPT, body=body))
+            try:
+                await asyncio.wait_for(ready.wait(), 2)
+                revoke = asyncio.create_task(self.request('DELETE', SUB, choice=choice))
+                await asyncio.sleep(0.05)
+                self.assertFalse(revoke.done())
+            finally:
+                proceed.set()
+            self.assertEqual((await (await request).json())['state'], 'accepted')
+            await self.state(await revoke, 'revoked')
+        await self.problem(await self.request('POST', ACCEPT, body=body), 403, 'not_allowed')
+
+    async def test_review_expired_subscription_sweep_is_separate_from_read_and_event_ttl(self):
+        await self.register_fixture()
+        await self.register_fixture(proof=self.other_proof)
+        ident = installation_id(self.proof)
+        self.db.admin('UPDATE marong.web_push_subscriptions SET subscription_expires_at=%s WHERE installation_id=%s',
+                      (self.now, ident))
+        old = self.row()[0]
+        await self.state(await self.request('GET', SUB), 'expired')
+        self.assertEqual(self.row()[0], old)
+        self.assertGreaterEqual(await self.service.sweep_expired(), 1)
+        state, revision, fingerprint, material, expires = self.row()[0]
+        self.assertEqual((state, fingerprint, material, expires), ('expired', None, None, None))
+        self.assertNotEqual(revision, old[1])
+        self.assertEqual(self.row(self.other_proof)[0][0], 'active')
+        self.assertEqual(await self.service.sweep_expired(), 0)
+
+    async def test_review_expiry_sweep_does_not_clear_newer_registration(self):
+        await self.register_fixture()
+        ident = installation_id(self.proof)
+        self.db.admin('UPDATE marong.web_push_subscriptions SET subscription_expires_at=%s WHERE installation_id=%s',
+                      (self.now, ident))
+        old_revision = self.row()[0][1]
+        choice = await self.select('enable')
+        locked, proceed = asyncio.Event(), asyncio.Event()
+
+        async def resolve(_):
+            locked.set()
+            await proceed.wait()
+            return ('1.1.1.1',)
+
+        with patch.object(self.service, 'resolve', side_effect=resolve):
+            renewed = asyncio.create_task(self.request('PUT', SUB, choice=choice, body=self.subscription()))
+            try:
+                await asyncio.wait_for(locked.wait(), 2)
+                sweep = asyncio.create_task(self.service.sweep_expired())
+                await asyncio.sleep(0.05)
+                self.assertFalse(sweep.done())
+            finally:
+                proceed.set()
+            await self.state(await renewed, 'active')
+            self.assertEqual(await sweep, 0)
+        state, revision, fingerprint, material, _ = self.row()[0]
+        self.assertEqual(state, 'active')
+        self.assertNotEqual(revision, old_revision)
+        self.assertIsNotNone(fingerprint)
+        self.assertIsNotNone(material)
+
     async def test_574_session_expires_while_waiting_for_caller_lock(self):
         _, store, _, who = await self.call_fixture()
         from call_memory import NoticeRingState, Principal
@@ -816,6 +999,7 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_575_socket_protocol_first_frame_and_preaccepted_call(self):
         server, store, protocol, who = await self.call_fixture()
+        await self.register_fixture()
         origin = str(self.call_site.make_url("/")).rstrip("/")
         ring = self.ring(who)
         reference = self.references.seal("call", who["friend_id"], ring, self.now)
@@ -889,7 +1073,11 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
                          WHERE id=%s""", (accepted["callId"],))
         expired = self.ring(who, until=-5)
         reference = self.references.seal("call", who["friend_id"], expired, self.now)
-        ordinary = {"type": "start_ordinary", "clientId": client, "installationProof": self.proof,
+        ident = installation_id(self.proof)
+        async with self.service.pool.connection() as conn:
+            consent, _ = await self.service.active_consent(conn, ident, self.sid, self.now)
+        ordinary_client = str(protocol.document_client(self.sid, ident, reference, consent))
+        ordinary = {"type": "start_ordinary", "clientId": ordinary_client, "installationProof": self.proof,
                     "targetRef": reference}
         with patch.object(server, "LiveSession", CallDouble):
             async with self.client.session.ws_connect(endpoint, protocols=[SUBPROTOCOL], headers=headers) as ws:
@@ -910,6 +1098,7 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_575_relay_webrtc_pcm_reconnect_and_rejected_stop(self):
         server, _, _, who = await self.call_fixture()
+        await self.register_fixture()
         import live_session
         from rtc_transport import Bridge
         from test_relay import HTTP, Upstream, event, turn
@@ -988,6 +1177,9 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
                     await rejected.send_json({"type": "stop"})
                     self.assertEqual(await rejected.receive_json(timeout=3), {"type": "not_allowed"})
                 current = server.active_calls[who["friend_id"]].session
+                end = self.call_site.make_url(f'/api/calls/{call_id}/end')
+                async with self.client.session.post(end, headers=headers, json={}) as refused:
+                    self.assertEqual(refused.status, 404)
                 self.assertFalse(current.stop.is_set())
                 self.assertEqual(self.db.admin("SELECT status FROM call.calls WHERE id=%s", (call_id,)), [("live",)])
 
@@ -1106,7 +1298,12 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
                         competing = endpoint.with_query({**query, "client": str(uuid4())})
                         async with self.client.session.ws_connect(competing, headers=headers) as second:
                             self.assertEqual(await second.receive_json(timeout=3), {"type": "call_busy"})
-                        await ws.send_json({"type": "stop"})
+                        if android:
+                            await ws.send_json({"type": "stop"})
+                        else:
+                            end = self.call_site.make_url(f'/api/calls/{ready["callId"]}/end')
+                            async with self.client.session.post(end, headers=headers, json={}) as stopped:
+                                self.assertEqual((stopped.status, await stopped.json()), (200, {'ok': True}))
                         await ws.receive(timeout=3)
                 flags.append((delivery, await me.json(), await messages.json(), await refused.json(), call_status, frames))
         self.assertEqual(flags[0], flags[1])
@@ -1140,8 +1337,9 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(form['navigation'] in body, microphone)
                 if heading:
                     self.assertIn(heading, body)
+                return body
 
-        await visit(200, microphone=True)
+        entry = await visit(200, microphone=True)
         async with self.client.get('/chat/', headers=cookie) as chat:
             self.assertIn('microphone=()', chat.headers['Permissions-Policy'])
             self.assertEqual(chat.headers['Referrer-Policy'], 'same-origin')
@@ -1176,7 +1374,8 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.admin('SELECT status,call_id FROM marong.app_rings WHERE id=%s', (ring,)), [('ringing', None)])
         self.assertEqual(self.db.admin('SELECT count(*) FROM call.calls WHERE caller_id=%s', (who['caller_id'],)), [(0,)])
         self.db.admin('UPDATE marong.app_rings SET answer_until=now()+interval \'30 seconds\' WHERE id=%s', (ring,))
-        accepted = await self.request('POST', ACCEPT, body={'targetRef': reference, 'clientId': str(uuid4())})
+        client = entry.split('data-client-id="', 1)[1].split('"', 1)[0]
+        accepted = await self.request('POST', ACCEPT, body={'targetRef': reference, 'clientId': client})
         self.assertEqual((await accepted.json())['state'], 'accepted')
         await visit(200, heading='이미 받은 전화야')
         self.db.admin('UPDATE marong.app_sessions SET revoked_at=now() WHERE id=%s', (self.sid,))

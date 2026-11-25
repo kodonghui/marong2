@@ -47,7 +47,7 @@ const CLIENT_VERSION='20261119-call-wait1';
 let assetVersions={};
 try{assetVersions=JSON.parse(document.documentElement.dataset.assets||'{}');}catch{}
 const assetUrl=name=>'/'+name+(assetVersions[name]?'?v='+assetVersions[name]:'');
-const clientId=crypto.randomUUID();
+const clientId=noticeCall?.clientId||crypto.randomUUID();
 const faceNames={1:'01-neutral',4:'04-thinking',15:'15-mouth-slightly-open',16:'16-mouth-wide-open',18:'18-eyes-half-closed',19:'19-eyes-closed',20:'20-mouth-slightly-open-eyes-half-closed',21:'21-mouth-slightly-open-eyes-closed',22:'22-mouth-wide-open-eyes-half-closed',23:'23-mouth-wide-open-eyes-closed',6:'06-sad'};
 const faceURL=n=>`/face/v1/${faceNames[n]}.webp`;
 for(const n of Object.keys(faceNames)){const image=new Image();image.src=faceURL(n);}

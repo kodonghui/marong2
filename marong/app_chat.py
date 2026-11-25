@@ -10,6 +10,7 @@ import asyncio
 import os
 from collections import OrderedDict, defaultdict, deque
 from contextlib import AsyncExitStack
+import hmac
 import json
 import logging
 import math
@@ -34,7 +35,7 @@ from .google_calendar import LINK_MARK, command as google_command
 from .topics import KEY as TOPIC_KEY, NAME as PICTURE_NAME, SET_NAME, phrase as topic_phrase, picture_set
 from .web_push_subscriptions import CHOICE_HEADER, INSTALLATION_HEADER, PATH as WEB_NOTICE_PATH, installation_id, lock_installation
 from .web_push_targets import resolve_target, visible_message
-from .web_notice_call_protocol import BRIDGE_HEADER, CALL_BRIDGE, client_uuid
+from .web_notice_call_protocol import BRIDGE_HEADER, CALL_BRIDGE, INSTALLATION_CHECK_PATH, client_uuid, notice_client
 
 log = logging.getLogger("marong.app")
 DEFAULT_PORT = 8796
@@ -54,6 +55,7 @@ NOTICE_CALL_PAGE = "/chat/notice-call"
 NOTICE_CALL_FAILURES = {
     "denied": ("이 알림을 열 수 없어", "글 대화로 돌아가 다시 확인할 수 있어."),
     "answered": ("이미 받은 전화야", "이 약속 전화는 이미 처리됐어. 글 대화로 돌아갈 수 있어."),
+    "expired": ("약속 전화 시간이 지났어", "더 이상 이 약속 전화를 받을 수 없어."),
     "unavailable": ("지금은 이 전화를 받을 수 없어", "현재 확인한 상태로는 이 약속 전화를 연결할 수 없어."),
     "login": ("로그인한 뒤 알림을 확인할게", "기존 기기 코드로 로그인해 줘. 여기에서는 알림 내용을 먼저 보여 주지 않아."),
     "offline": ("지금 전화 상태를 확인할 수 없어", "연결을 확인한 뒤 이 전화의 상태를 다시 확인해 줘."),
@@ -369,11 +371,22 @@ class AppChat:
                 now = subscriptions.now()
                 if session["expires_at"] <= now:
                     raise SessionError("login_required")
-                row = await subscriptions._row(conn, ident)
                 sid = session["id"]
-                if row is None or row["session_id"] != sid or subscriptions._state(row, ident, sid, now) != "active":
-                    raise SessionError("not_allowed")
+                try:
+                    consent, _ = await subscriptions.active_consent(conn, ident, sid, now)
+                except SessionError as error:
+                    if error.code != "not_allowed":
+                        raise
+                    try:
+                        result = await resolve_target(conn, self.store, self.web_push_references, session,
+                                                      form["targetRef"], now)
+                    except SessionError:
+                        raise error from None
+                    if result["state"] == "ring_expired":
+                        return self._notice_call_failure("expired", 403)
+                    raise
                 result = await resolve_target(conn, self.store, self.web_push_references, session, form["targetRef"], now)
+                call_client = self.web_push_call.document_client(sid, ident, form["targetRef"], consent)
         except SessionError as error:
             state, status = {
                 "login_required": ("login", 401), "not_allowed": ("denied", 403),
@@ -393,8 +406,9 @@ class AppChat:
             return self._notice_call_failure("unavailable", 200)
         if state not in {"ring_ready", "ring_expired"}:
             return self._notice_call_failure("denied", 404)
-        # Only the random navigation correlation value goes into the document.
+        # Opaque document identifiers only. Do not echo the reference or installation proof.
         data = self.files["notice-call.html"][0].replace(b"@NAVIGATION@", form["navigation"].encode("ascii"))
+        data = data.replace(b"@CALL_CLIENT@", str(call_client).encode("ascii"))
         req["notice_call_document"] = True
         return web.Response(body=data, content_type="text/html", charset="utf-8")
 
@@ -450,7 +464,42 @@ class AppChat:
             raise SessionError("invalid_input")
         async with self.web_push_subscriptions.authenticated(token, ident) as (conn, session, now):
             result = await resolve_target(conn, self.store, self.web_push_references, session, body["targetRef"], now)
+            document = req.headers.get("X-Marong-Notice-Document")
+            if document is not None:
+                if self.web_push_call is None:
+                    raise SessionError("not_allowed")
+                client = client_uuid(document)
+                if not notice_client(client):
+                    raise SessionError("not_allowed")
+                await self._check_notice_consent(conn, ident, session["id"], now, client, body["targetRef"])
         return self._json(200, result)
+
+    async def _check_notice_consent(self, conn, ident, sid, now, client, reference):
+        consent, expires = await self.web_push_subscriptions.active_consent(conn, ident, sid, now)
+        if notice_client(client):
+            expected = self.web_push_call.document_client(sid, ident, reference, consent, client=client)
+            if not hmac.compare_digest(client.bytes, expected.bytes):
+                raise SessionError("not_allowed")
+        return expires
+
+    async def notice_installation_check(self, req):
+        # Only the loopback call server asks while it holds the session and installation locks.
+        if (not self.notice_call_enabled or req.remote not in {"127.0.0.1", "::1"}
+                or not hmac.compare_digest(req.headers.get(BRIDGE_HEADER, ""), self.web_push_call.bridge_secret)):
+            raise web.HTTPNotFound()
+        body = await self._web_notice_body(req, 2048)
+        if (set(body) != {"session", "targetRef", "clientId"} or type(body["session"]) is not int
+                or not 0 < body["session"] < 2**63
+                or not isinstance(body["targetRef"], str) or not re.fullmatch(r"[A-Za-z0-9_-]{48,768}", body["targetRef"])):
+            raise SessionError("invalid_input")
+        ident = installation_id(req.headers.get(INSTALLATION_HEADER))
+        client = client_uuid(body["clientId"])
+        subscriptions = self.web_push_subscriptions
+        async with asyncio.timeout(2), subscriptions.pool.connection() as conn:
+            expires = await self._check_notice_consent(conn, ident, body["session"], subscriptions.now(), client,
+                                                       body["targetRef"])
+        headers = {"X-Marong-Subscription-Expires": str(expires)} if expires is not None else None
+        return web.Response(status=204, headers=headers)
 
     async def web_notice_reply_view(self, req):
         token, ident = self._web_notice_request(req)
@@ -479,11 +528,12 @@ class AppChat:
         body = await self._web_notice_body(req, 2048)
         if set(body) != {"targetRef", "clientId"}:
             raise SessionError("invalid_input")
-        client_uuid(body["clientId"])
-        async with self.web_push_subscriptions.authenticated(token, ident) as (_, session, now):
+        client = client_uuid(body["clientId"])
+        async with self.web_push_subscriptions.authenticated(token, ident) as (conn, session, now):
             kind, _ = self.web_push_references.open(body["targetRef"], session["friend_id"], now)
             if kind != "call":
                 raise SessionError("not_found")
+            await self._check_notice_consent(conn, ident, session["id"], now, client, body["targetRef"])
         headers = {BRIDGE_HEADER: self.web_push_call.bridge_secret, INSTALLATION_HEADER: req.headers[INSTALLATION_HEADER]}
         try:
             async with ClientSession(timeout=ClientTimeout(total=5)) as bridge:
@@ -1038,6 +1088,8 @@ class AppChat:
         AppListen(self).register(app)
         app.router.add_get("/chat/healthz", self.health)
         app.router.add_route("*", NOTICE_CALL_PAGE, self.notice_call_page)
+        if self.notice_call_enabled:
+            app.router.add_post(INSTALLATION_CHECK_PATH, self.notice_installation_check)
         app.router.add_get(r"/chat/{asset:notice-call\.(?:js|css)}", self.web_notice_asset)
         app.router.add_get("/chat/admin/api/app-versions", self.admin.app_versions)
         if self.internal_shop is not None:
@@ -1103,7 +1155,17 @@ class AppChat:
         if switch_on and fcm_on:
             from .app_update_push import AppUpdatePush
             self._spawn(AppUpdatePush(self.store, self.releases, self.push.fcm, clock=self.clock).run())
+        if self.web_push_subscriptions is not None:
+            self._spawn(self._sweep_expired_subscriptions())
         return self.runner
+
+    async def _sweep_expired_subscriptions(self):
+        while True:
+            try:
+                await self.web_push_subscriptions.sweep_expired()
+            except (psycopg.Error, TimeoutError) as error:
+                log.warning("web_push_expiry_error %s", type(error).__name__)
+            await asyncio.sleep(60)
 
     async def close(self) -> None:
         for task in list(self.tasks):

@@ -15,6 +15,7 @@ from .web_push_targets import NoticeReferences
 
 
 CALL_BRIDGE = "http://127.0.0.1:8792/internal/web-notification/accept"
+INSTALLATION_CHECK_PATH = "/internal/web-notification/installation"
 BRIDGE_HEADER = "X-Marong-Call-Bridge"
 SUBPROTOCOL = "marong-notified-v1"
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
@@ -26,10 +27,23 @@ def client_uuid(value):
     return UUID(value)
 
 
+def notice_client(value):
+    """Version 8 is reserved for this feature's internal client identities."""
+    return (value if isinstance(value, UUID) else UUID(value)).version == 8
+
+
+def _notice_uuid(data):
+    raw = bytearray(data[:16])
+    raw[6] = raw[6] & 0x0F | 0x80
+    raw[8] = raw[8] & 0x3F | 0x80
+    return UUID(bytes=bytes(raw))
+
+
 class NoticeCallProtocol:
     def __init__(self, challenge_key, references):
         self.bridge_secret = encode(hmac.digest(challenge_key, b"marong:notice-call:bridge:v1", "sha256"))
         self._client_key = hmac.digest(challenge_key, b"marong:notice-call:client:v1", "sha256")
+        self._document_key = hmac.digest(challenge_key, b"marong:notice-call:document:v1", "sha256")
         self._secret = AESGCM(hmac.digest(challenge_key, b"marong:notice-call:token:v1", "sha256"))
         self.references = references
 
@@ -45,9 +59,16 @@ class NoticeCallProtocol:
         except (ValueError, KeyError, OverflowError):
             return None
 
-    def bound_client(self, friend, ident, client):
-        domain = friend.to_bytes(8, "big") + ident.bytes + client.bytes
-        return str(UUID(bytes=hmac.digest(self._client_key, domain, "sha256")[:16], version=4))
+    def bound_client(self, friend, sid, ident, client):
+        domain = friend.to_bytes(8, "big") + self._aad(sid, ident, client)
+        return str(_notice_uuid(hmac.digest(self._client_key, domain, "sha256")))
+
+    def document_client(self, sid, ident, reference, consent, *, client=None):
+        # Keep a random 56-bit nonce and a 66-bit MAC in the existing UUID field.
+        nonce = secrets.token_bytes(7) if client is None else client.bytes[:6] + client.bytes[7:8]
+        domain = sid.to_bytes(8, "big") + ident.bytes + nonce + consent.encode("ascii") + reference.encode("ascii")
+        tag = hmac.digest(self._document_key, domain, "sha256")
+        return _notice_uuid(nonce[:6] + tag[:1] + nonce[6:] + tag[1:9])
 
     @staticmethod
     def _aad(sid, ident, client):

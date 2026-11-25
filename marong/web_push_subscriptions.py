@@ -254,6 +254,13 @@ class WebPushSubscriptions:
             FROM {_TABLE} WHERE installation_id=%s
         """, (ident,))
 
+    async def active_consent(self, conn, ident, sid, now):
+        row = await self._row(conn, ident)
+        if row is None or row["session_id"] != sid or self._state(row, ident, sid, now) != "active":
+            raise SessionError("not_allowed")
+        consent = self.material.consent_check(ident, sid, row, encode(b"marong:notice-document:v1"))
+        return consent, row["expires_ms"]
+
     @asynccontextmanager
     async def _operation(self, token, ident, *, write=False):
         async with self.authenticated(token, ident, write=write) as (conn, session, now):
@@ -507,6 +514,29 @@ class WebPushSubscriptions:
                 return False
             await deactivate(conn, target.installation_id, uuid4(), "invalid")
             return True
+
+    async def sweep_expired(self, limit=64):
+        async with asyncio.timeout(3), self.pool.connection() as conn:
+            candidates = await (await conn.execute(f"""
+                SELECT installation_id, session_id, revision FROM {_TABLE}
+                WHERE state='active' AND subscription_expires_at<=%s
+                ORDER BY subscription_expires_at, installation_id LIMIT %s
+            """, (self.now(), limit))).fetchall()
+        completed = 0
+        for candidate in candidates:
+            ident, sid = candidate["installation_id"], candidate["session_id"]
+            async with asyncio.timeout(3), self.pool.connection() as conn, conn.transaction():
+                session = await one(conn, "SELECT id FROM marong.app_sessions WHERE id=%s FOR UPDATE", (sid,))
+                if session is None:
+                    continue
+                await lock_installation(conn, ident)
+                row = await self._row(conn, ident)
+                if (row is None or row["session_id"] != sid or row["revision"] != candidate["revision"]
+                        or row["state"] != "active" or self._state(row, ident, sid, self.now()) != "expired"):
+                    continue
+                await deactivate(conn, ident, uuid4(), "expired")
+                completed += 1
+        return completed
 
 
 class _InstallationMoved(Exception):

@@ -25,6 +25,8 @@ from marong.room_scope import writing_room
 from marong.friend_scope import RELATIONSHIP, accepted_circle
 from marong.relative_time import relative_time
 from marong.usage import Usage, configured_limit
+from marong.web_notice_call_protocol import notice_client
+from marong.web_push_subscriptions import lock_installation
 
 
 @dataclass(frozen=True)
@@ -430,6 +432,8 @@ class MemoryStore:
             WHERE caller_id=%s AND status<>'ended' AND deleted_at IS NULL FOR UPDATE""", (p.caller_id,))
         row = await cur.fetchone()
         if row:
+            if notice_client(row['client_id']) and (not strict_client or str(row['client_id']) != client_id):
+                raise CallBusy()
             same_call = row['entrypoint'] == entrypoint and (
                 (entrypoint == 'web' and not strict_client) or str(row['client_id']) == client_id)
             if same_call:
@@ -448,11 +452,14 @@ class MemoryStore:
         row = await cur.fetchone()
         return str(row['id']), False, row['started_at']
 
-    async def reserve_notice_ring(self, p, client_id, voice, version, ring_id, *, legacy=False, session=None):
+    async def reserve_notice_ring(self, p, client_id, voice, version, ring_id, *, legacy=False, session=None,
+                                  installation=None, validate_installation=None):
         """Reserve the existing call and promise atomically under caller then ring locks."""
         scene = ",scene_picture_id" if self.scene_rings else ""
         async with asyncio.timeout(3), self.pool.connection() as c, c.transaction():
             session_until = await self._notice_session(c, p, session) if session is not None else None
+            if installation is not None:
+                await lock_installation(c, installation)
             caller = await (await c.execute('SELECT id,enabled FROM call.callers WHERE id=%s FOR UPDATE',
                                             (p.caller_id,))).fetchone()
             if not caller or not caller["enabled"]:
@@ -467,9 +474,12 @@ class MemoryStore:
                 if legacy:
                     return None
                 raise NoticeRingState("not_found")
+            subscription_until = await validate_installation() if validate_installation is not None else None
             clock = await (await c.execute("SELECT clock_timestamp() AS now")).fetchone()
             if session_until is not None and session_until <= clock["now"]:
                 raise NoticeRingState("login_required")
+            if subscription_until is not None and subscription_until <= clock["now"].timestamp() * 1000:
+                raise NoticeRingState("not_allowed")
             if ring["status"] == "answered":
                 match = await (await c.execute("""SELECT id,started_at FROM call.calls
                     WHERE id=%s AND caller_id=%s AND client_id=%s AND entrypoint='web'
@@ -497,10 +507,17 @@ class MemoryStore:
                 WITH actual AS (SELECT clock_timestamp() AS now)
                 UPDATE marong.app_rings SET status='answered',answered_at=actual.now,call_id=%s
                 FROM actual WHERE id=%s AND status='ringing' AND answer_until>actual.now
+                  AND (%s::bigint IS NULL OR %s>extract(epoch FROM actual.now)*1000)
+                  AND (%s::timestamptz IS NULL OR %s>actual.now)
                 RETURNING actual.now AS at
-            """, (call_id, ring_id))).fetchone()
+            """, (call_id, ring_id, subscription_until, subscription_until, session_until, session_until))).fetchone()
             if saved is None:
                 # Raising undoes the call reservation if the deadline passed while reserving it.
+                now = datetime.now(timezone.utc)
+                if session_until is not None and session_until <= now:
+                    raise NoticeRingState("login_required")
+                if subscription_until is not None and subscription_until <= now.timestamp() * 1000:
+                    raise NoticeRingState("not_allowed")
                 raise NoticeRingState("ring_expired")
             return call_id, resumed, started_at, {**ring, "fresh": True, "waited": saved["at"] - ring["created_at"]}
 
@@ -514,9 +531,12 @@ class MemoryStore:
             raise NoticeRingState("login_required")
         return row["expires_at"]
 
-    async def start_notice_ordinary(self, p, client_id, voice, version, ring_id, session):
+    async def start_notice_ordinary(self, p, client_id, voice, version, ring_id, session, *, installation=None,
+                                    validate_installation=None):
         async with asyncio.timeout(3), self.pool.connection() as c, c.transaction():
             session_until = await self._notice_session(c, p, session)
+            if installation is not None:
+                await lock_installation(c, installation)
             caller = await (await c.execute("SELECT id FROM call.callers WHERE id=%s AND enabled FOR UPDATE",
                                             (p.caller_id,))).fetchone()
             if caller is None:
@@ -527,6 +547,7 @@ class MemoryStore:
             """, (ring_id, p.caller_id))).fetchone()
             if not ring:
                 raise NoticeRingState("ring_unavailable")
+            subscription_until = await validate_installation() if validate_installation is not None else None
             now = datetime.now(timezone.utc)
             if session_until <= now:
                 raise NoticeRingState("login_required")
@@ -543,6 +564,11 @@ class MemoryStore:
             if previous and (previous["status"] == "ended" or previous["deleted_at"] is not None):
                 raise NoticeRingState("ring_unavailable")
             started = await self._start_locked(c, p, client_id, voice, version, "web", strict_client=True)
+            now = datetime.now(timezone.utc)
+            if session_until <= now:
+                raise NoticeRingState("login_required")
+            if subscription_until is not None and subscription_until <= now.timestamp() * 1000:
+                raise NoticeRingState("not_allowed")
             return (*started, None)
 
     async def attach_notice_call(self, p, client_id, call_id, ring_id, session):
@@ -583,10 +609,15 @@ class MemoryStore:
             return str(call_id), bool(history), row["started_at"], {**ring, "fresh": not history}, row["voice"]
 
     async def can_resume_call(self, p, entrypoint, client_id):
-        row = await self.one("""SELECT 1 FROM call.calls WHERE caller_id=%s AND entrypoint=%s
-            AND (%s='web' OR client_id=%s) AND status<>'ended' AND deleted_at IS NULL""",
-            (p.caller_id, entrypoint, entrypoint, client_id))
-        return row is not None
+        row = await self.one("""SELECT client_id FROM call.calls WHERE caller_id=%s AND entrypoint=%s
+            AND status<>'ended' AND deleted_at IS NULL""", (p.caller_id, entrypoint))
+        return row is not None and (str(row['client_id']) == client_id
+                                    or (entrypoint == 'web' and not notice_client(row['client_id'])))
+
+    async def notice_call_reserved(self, p):
+        row = await self.one("""SELECT client_id FROM call.calls WHERE caller_id=%s AND entrypoint='web'
+            AND status<>'ended' AND deleted_at IS NULL""", (p.caller_id,))
+        return row is not None and notice_client(row['client_id'])
 
     async def resume_voice(self, p, client_id):
         row = await self.one("""
@@ -720,6 +751,8 @@ class MemoryStore:
         async with self.pool.connection() as c,c.transaction():
             row=await self._owned(c,p,call_id)
             if entrypoint is not None and row['entrypoint'] != entrypoint:
+                raise PermissionError('call_not_found')
+            if notice_client(row['client_id']) and client_id is None:
                 raise PermissionError('call_not_found')
             if client_id is not None and str(row['client_id']) != client_id:
                 return

@@ -131,11 +131,12 @@
     } catch { /* storage can be unavailable */ }
   }
 
-  async function request(path, method = 'GET', body, choice) {
+  async function request(path, method = 'GET', body, choice, documentClient) {
     const device = proof(true);
     if (!device) return {status: 0};
     const headers = {'X-Marong-Installation': device, Accept: 'application/json'};
     if (choice) headers['X-Marong-Choice'] = choice;
+    if (documentClient) headers['X-Marong-Notice-Document'] = documentClient;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
