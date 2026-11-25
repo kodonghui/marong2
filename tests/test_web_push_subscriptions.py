@@ -949,9 +949,21 @@ asyncio.run(main(), loop_factory=asyncio.SelectorEventLoop)
         self.assertEqual(self.notice_call_state(call), original)
 
         revoke = await self.select('revoke')
-        await self.state(await self.request('DELETE', SUB, choice=revoke), 'revoked')
+        original_ended = self.chat._notice_ended
+
+        async def revoke_during_lookup(*args, **kwargs):
+            ended = await original_ended(*args, **kwargs)
+            await self.state(await self.request('DELETE', SUB, choice=revoke), 'revoked')
+            return ended
+
+        with patch.object(self.chat, '_notice_ended', side_effect=revoke_during_lookup):
+            self.assertIsNone(await lookup())
         self.assertIsNone(await lookup())
         self.assertEqual((await open_document(choice)).status, 403)
+        async with await sockets(endpoint) as ws:
+            await ws.send_json(frame | {'clientId': str(protocol.redial_document(another_choice)),
+                                        'redialChoice': another_choice})
+            self.assertEqual(await ws.receive_json(timeout=3), {'type': 'not_allowed'})
         await self.register_fixture()
         self.assertIsNone(await lookup())
         self.assertEqual((await open_document(choice)).status, 403)

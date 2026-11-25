@@ -378,19 +378,19 @@ class AppChat:
             token = req.cookies.get(COOKIE)
             if redial:
                 async with subscriptions.authenticated(token, ident) as (conn, session, now):
-                    scope, consent, _ = await self._redial_scope(conn, session, ident, reference, now)
+                    scope, consent = await self._redial_scope(conn, session, ident, reference, now)
                     protocol.check_redial(scope, redial, now, choice=True)
                 if not await self._notice_ended(form["installationProof"], session, reference, consent, redial,
                                                 choice=True):
                     raise SessionError("not_allowed")
-            async with subscriptions.authenticated(token, ident, write=True) as (conn, session, _):
+            async with subscriptions.authenticated(token, ident, write=True, count_request=not redial) as (conn, session, _):
                 await lock_installation(conn, ident)
                 now = subscriptions.now()
                 if session["expires_at"] <= now:
                     raise SessionError("login_required")
                 sid = session["id"]
                 if redial:
-                    scope, _, _ = await self._redial_scope(conn, session, ident, reference, now)
+                    scope, _ = await self._redial_scope(conn, session, ident, reference, now)
                     protocol.check_redial(scope, redial, now, choice=True)
                 elif choice:
                     if not hmac.compare_digest(choice, protocol.ordinary_choice(sid, ident, reference)):
@@ -519,13 +519,13 @@ class AppChat:
                 if (document is None or not re.fullmatch(r"[A-Za-z0-9_-]{102}", redial)
                         or client != protocol.redial_document(redial) or result["state"] != "ring_answered"):
                     raise SessionError("not_allowed")
-                scope, consent, _ = await self._redial_scope(conn, session, ident, reference, now)
+                scope, consent = await self._redial_scope(conn, session, ident, reference, now)
                 protocol.check_redial(scope, redial, now, choice=True)
             elif document is not None and not ordinary:
                 await self._check_notice_consent(conn, ident, sid, now, client, reference)
             if protocol is not None and document is None and receipt and result["state"] == "ring_answered":
                 try:
-                    scope, consent, consent_until = await self._redial_scope(conn, session, ident, reference, now)
+                    scope, consent = await self._redial_scope(conn, session, ident, reference, now)
                     claim = protocol.check_redial(scope, receipt, now)
                 except SessionError:
                     pass  # The original read response remains available without a receipt.
@@ -538,16 +538,21 @@ class AppChat:
                 raise SessionError("not_allowed")
         elif claim is not None and await self._notice_ended(req.headers[INSTALLATION_HEADER], session, reference,
                                                            consent, receipt):
-            now = self.web_push_subscriptions.now()
-            if (now < min(claim.expires, session["expires_at"])
-                    and (consent_until is None or now.timestamp() * 1000 < consent_until)):
-                response.headers[REDIAL_HEADER] = protocol.redial_choice(scope, claim, now)
+            # Recheck consent after loopback without counting a second request or holding an app lock over the read.
+            try:
+                async with self.web_push_subscriptions.authenticated(token, ident, count_request=False) as (
+                        conn, current_session, now):
+                    scope, _ = await self._redial_scope(conn, current_session, ident, reference, now)
+                    claim = protocol.check_redial(scope, receipt, now)
+                    response.headers[REDIAL_HEADER] = protocol.redial_choice(scope, claim, now)
+            except (SessionError, psycopg.OperationalError, TimeoutError):
+                pass
         return response
 
     async def _redial_scope(self, conn, session, ident, reference, now):
-        consent, expires = await self.web_push_subscriptions.active_consent(conn, ident, session["id"], now)
+        consent, _ = await self.web_push_subscriptions.active_consent(conn, ident, session["id"], now)
         scope = self.web_push_call.receipt_scope(session["friend_id"], session["id"], ident, reference, consent)
-        return scope, consent, expires
+        return scope, consent
 
     async def _notice_ended(self, proof, session, reference, consent, receipt, *, choice=False):
         # No app transaction is held across this read-only call.

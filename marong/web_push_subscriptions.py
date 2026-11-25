@@ -275,7 +275,7 @@ class WebPushSubscriptions:
             yield conn, session, row, own, now
 
     @asynccontextmanager
-    async def authenticated(self, token, ident, *, write=False, limit=60):
+    async def authenticated(self, token, ident, *, write=False, limit=60, count_request=True):
         if not isinstance(token, str) or not TOKEN.fullmatch(token):
             raise SessionError("login_required")
         async with asyncio.timeout(3), self.pool.connection() as conn, conn.transaction():
@@ -285,7 +285,8 @@ class WebPushSubscriptions:
             now = self.now()
             if session is None or session["revoked_at"] is not None or session["expires_at"] <= now:
                 raise SessionError("login_required")
-            self.limit(session["id"], ident, limit=limit)
+            if count_request:
+                self.limit(session["id"], ident, limit=limit)
             yield conn, session, now
 
     def _state_claims(self, ident, sid, row):
