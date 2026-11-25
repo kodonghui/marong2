@@ -28,7 +28,7 @@ from marong.web_push_subscriptions import (
     installation_id,
 )
 from marong.web_push_targets import NoticeReferences
-from marong.web_notice_call_protocol import SUBPROTOCOL, NoticeCallProtocol
+from marong.web_notice_call_protocol import SUBPROTOCOL, NoticeCallProtocol, client_uuid
 
 
 ORIGIN = "https://fixture.invalid"
@@ -646,6 +646,8 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         answer = {"targetRef": reference, "clientId": str(web_client)}
         with patch.object(server, "CALL_MAX", 0):
             await self.problem(await self.request("POST", ACCEPT, body=answer), 409, "calls_full")
+        with patch.object(server, "active_calls", {who["friend_id"]: server.CallSlot(str(uuid4()))}):
+            await self.problem(await self.request("POST", ACCEPT, body=answer), 409, "call_busy")
         with patch.object(server, "person_budget_blocked", AsyncMock(return_value=True)):
             await self.problem(await self.request("POST", ACCEPT, body=answer), 409, "budget_exhausted")
         with patch.object(store.daily_usage, "blocked", AsyncMock(return_value=True)):
@@ -654,6 +656,9 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
             await self.problem(await self.request("POST", ACCEPT, body=answer), 503, "db_unavailable")
         with patch.object(store, "one", AsyncMock(side_effect=RuntimeError)):
             await self.problem(await self.request("POST", ACCEPT, body=answer), 500, "internal")
+        self.db.admin("UPDATE call.callers SET enabled=false WHERE id=%s", (p.caller_id,))
+        self.assertEqual(await (await self.request("POST", ACCEPT, body=answer)).json(), {"state": "ring_unavailable"})
+        self.db.admin("UPDATE call.callers SET enabled=true WHERE id=%s", (p.caller_id,))
         self.assertEqual(self.db.admin("SELECT count(*) FROM call.calls WHERE caller_id=%s", (p.caller_id,)), [(0,)])
         first = await self.request("POST", ACCEPT, body=answer)
         self.assertEqual(first.status, 200)
@@ -698,6 +703,26 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(sorted([(await item.json())["state"] for item in submitted]), ["accepted", "ring_answered"])
         self.assertEqual(self.db.admin("SELECT count(*) FROM call.calls WHERE caller_id=%s", (p.caller_id,)), [(3,)])
+        self.db.admin("""UPDATE call.calls SET status='ended',ended_at=now(),end_reason='hangup',organize_status='pending'
+                         WHERE caller_id=%s AND status='live'""", (p.caller_id,))
+        contested = self.ring(who)
+        contested_ref = self.references.seal("call", who["friend_id"], contested, self.now)
+        web_request, android = await asyncio.gather(
+            self.request("POST", ACCEPT, body={**answer, "targetRef": contested_ref}),
+            store.reserve_notice_ring(p, str(uuid4()), "Fixture", "fixture", contested, legacy=True),
+            return_exceptions=True,
+        )
+        web_result = await web_request.json()
+        if web_result["state"] == "accepted":
+            self.assertIsInstance(android, CallBusy)
+        else:
+            self.assertEqual(web_result, {"state": "ring_answered"})
+            self.assertIsInstance(android, tuple)
+        self.assertEqual(self.db.admin("SELECT count(*) FROM call.calls WHERE caller_id=%s", (p.caller_id,)), [(4,)])
+        self.monotonic += 61
+        for _ in range(60):
+            self.service.limit(self.sid, installation_id(self.proof))
+        await self.problem(await self.request("POST", ACCEPT, body=answer), 429, "request_limit")
 
     async def test_575_socket_protocol_first_frame_and_preaccepted_call(self):
         server, store, protocol, who = await self.call_fixture()
@@ -732,10 +757,24 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(WSServerHandshakeError) as caught:
                     await self.client.session.ws_connect(endpoint, protocols=offers, headers=incoming)
                 self.assertEqual(caught.exception.status, status)
+            pending = server.CallSlot(client, reconnecting=True)
+            previews = (
+                (patch.object(server, "active_calls", {who["friend_id"]: pending}), 409),
+                (patch.object(server, "notice_identity", side_effect=OperationalError), 503),
+                (patch.object(server, "notice_identity", side_effect=RuntimeError), 500),
+            )
+            for condition, status in previews:
+                with condition, self.assertRaises(WSServerHandshakeError) as caught:
+                    await self.client.session.ws_connect(endpoint, protocols=[SUBPROTOCOL], headers=headers)
+                self.assertEqual(caught.exception.status, status)
             valid = {"type": "start_notified", "clientId": client, "installationProof": self.proof,
                      "connectToken": accepted["connectToken"]}
+            expired_token = protocol.issue(
+                self.sid, installation_id(self.proof), client_uuid(client), accepted["callId"], ring,
+                self.now - timedelta(seconds=120))
             for body, failure in (({**valid, "extra": "x" * 2048}, "invalid_input"),
-                                  ({**valid, "installationProof": self.other_proof}, "not_allowed")):
+                                  ({**valid, "installationProof": self.other_proof}, "not_allowed"),
+                                  ({**valid, "connectToken": expired_token}, "not_allowed")):
                 async with self.client.session.ws_connect(endpoint, protocols=[SUBPROTOCOL], headers=headers) as ws:
                     self.assertEqual(ws.protocol, SUBPROTOCOL)
                     await ws.send_json(body)
