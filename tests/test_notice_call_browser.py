@@ -2,6 +2,7 @@
 
 import asyncio
 from concurrent.futures import Future
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Thread
 import unittest
@@ -54,6 +55,12 @@ MEDIA = """
 """
 
 
+@dataclass(frozen=True)
+class PendingReconnect:
+    first_frame: Future
+    release_ready: asyncio.Future
+
+
 class CallFixture:
     def __init__(self):
         self.ring = 'ring_ready'
@@ -67,6 +74,7 @@ class CallFixture:
         self.right_call = True
         self.accepts = []
         self.connections = []
+        self.reconnects = {}
         self.posts = []
         self.resolved = 0
         self.frames = []
@@ -80,8 +88,23 @@ class CallFixture:
         self.loop.call_soon_threadsafe(self.stop.set)
         self.thread.join(timeout=12)
 
-    def drop_socket(self):
-        asyncio.run_coroutine_threadsafe(self.connections[-1].close(), self.loop).result(timeout=5)
+    def drop_socket(self, number):
+        async def disconnect():
+            if len(self.connections) != number:
+                raise AssertionError(f'Expected connection {number}, found {len(self.connections)}')
+            ws, transport = self.connections[number - 1]
+            if transport is None or ws.closed or transport.is_closing():
+                raise AssertionError(f'Connection {number} already closed')
+            pending = PendingReconnect(Future(), self.loop.create_future())
+            self.reconnects[number + 1] = pending
+            # Simulate network loss without waiting for a peer close handshake.
+            transport.abort()
+            return pending
+
+        return asyncio.run_coroutine_threadsafe(disconnect(), self.loop).result(timeout=5)
+
+    def release_ready(self, pending, *, matching=True):
+        self.loop.call_soon_threadsafe(pending.release_ready.set_result, matching)
 
     async def run(self):
         self.loop = asyncio.get_running_loop()
@@ -108,7 +131,9 @@ class CallFixture:
         await site.start()
         self.origin_ready.set_result('http://127.0.0.1:' + str(runner.addresses[0][1]))
         await self.stop.wait()
-        await asyncio.gather(*(ws.close() for ws in self.connections))
+        for pending in self.reconnects.values():
+            pending.release_ready.cancel()
+        await asyncio.gather(*(ws.close() for ws, _ in self.connections))
         await runner.cleanup()
 
     async def chat(self, _):
@@ -174,14 +199,19 @@ class CallFixture:
     async def socket(self, req):
         ws = web.WebSocketResponse(protocols=(SUBPROTOCOL,))
         await ws.prepare(req)
-        self.connections.append(ws)
+        self.connections.append((ws, req.transport))
+        pending = self.reconnects.get(len(self.connections))
         frame = await ws.receive_json(timeout=4)
         self.frames.append(frame)
         if ws.ws_protocol != SUBPROTOCOL or req.query_string:
             await ws.send_json({'type': 'invalid_input'})
             return ws
+        matching = self.right_call
+        if pending:
+            pending.first_frame.set_result(frame)
+            matching = await pending.release_ready
         await ws.send_json({'type': 'ready', 'ring': frame['type'] == 'start_notified', 'memoryConnected': True,
-                            'callId': CALL_ID if self.right_call else '22222222-2222-4333-8444-555555555555'})
+                            'callId': CALL_ID if matching else '22222222-2222-4333-8444-555555555555'})
         async for message in ws:
             if message.type == WSMsgType.TEXT:
                 self.frames.append(message.json())
@@ -281,29 +311,37 @@ class NoticeCallBrowserTests(unittest.TestCase):
                 page.get_by_role('button', name='결과 확인', exact=True).click()
                 self.heading(page, '통화 중이야')
                 self.assertEqual(fixture.accepts[0], fixture.accepts[1])
-                self.assertEqual(fixture.frames[0]['clientId'], fixture.accepts[0]['clientId'])
+                start = fixture.frames[0]
+                self.assertEqual(start['clientId'], fixture.accepts[0]['clientId'])
                 stop = page.get_by_role('button', name='끊기')
                 stop.focus()
-                fixture.drop_socket()
+                pending = fixture.drop_socket(1)
                 self.heading(page, '같은 통화에 다시 연결 중이야')
                 expect(stop).to_be_focused()
+                self.assertEqual(pending.first_frame.result(timeout=4), start)
+                fixture.release_ready(pending)
                 self.heading(page, '통화 중이야')
                 starts = [frame for frame in fixture.frames if frame['type'] == 'start_notified']
-                self.assertEqual(starts, [starts[0], starts[0]])
+                self.assertEqual(starts, [start, start])
                 self.assertEqual(len(fixture.accepts), 2)
-                fixture.right_call = False
-                fixture.drop_socket()
+                pending = fixture.drop_socket(2)
+                self.assertEqual(pending.first_frame.result(timeout=4), start)
+                self.heading(page, '같은 통화에 다시 연결 중이야')
+                fixture.release_ready(pending, matching=False)
                 self.heading(page, '지금 통화 연결을 확인할 수 없어')
                 self.assertFalse(any(frame['type'] == 'stop' for frame in fixture.frames))
-                fixture.right_call = True
                 page.get_by_role('button', name='연결 확인').click()
                 self.heading(page, '통화 중이야')
-                fixture.drop_socket()
+                pending = fixture.drop_socket(4)
                 self.heading(page, '같은 통화에 다시 연결 중이야')
                 page.get_by_role('button', name='끊기').click()
+                self.assertEqual(pending.first_frame.result(timeout=4), start)
+                fixture.release_ready(pending)
                 self.heading(page, '통화가 끝났어')
                 self.assertTrue(fixture.call_stopped.wait(3))
                 self.assertEqual(sum(frame['type'] == 'stop' for frame in fixture.frames), 1)
+                self.assertEqual([frame for frame in fixture.frames if frame['type'] == 'start_notified'], [start] * 5)
+                self.assertEqual(len(fixture.accepts), 2)
 
     def test_review_relogin_shows_confirmed_expiry_without_microphone(self):
         for engine in (self.playwright.chromium, self.playwright.webkit):

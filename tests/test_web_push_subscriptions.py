@@ -785,6 +785,9 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         _, _, _, who = await self.call_fixture()
         await self.register_fixture()
         ring = self.ring(who)
+        set_deadline = 'UPDATE marong.app_rings SET answer_until=%s WHERE id=%s'
+        before_deadline = self.now + timedelta(microseconds=1)
+        self.db.admin(set_deadline, (before_deadline, ring))
         ref = self.references.seal('call', who['friend_id'], ring, self.now)
         ident = installation_id(self.proof)
         async with self.service.pool.connection() as conn:
@@ -800,16 +803,20 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         logged = await self.request('POST', '/chat/api/login/code', body={'code': code})
         self.assertEqual(logged.status, 200)
         changed = logged.cookies[COOKIE].value
-        self.db.admin("UPDATE marong.app_rings SET answer_until=now()-interval '2 seconds' WHERE id=%s", (ring,))
+        ready = await self.request('POST', RESOLVE, body=read, token=changed)
+        self.assertEqual((ready.status, await ready.json()),
+                         (200, {'state': 'ring_ready', 'answerUntil': before_deadline.isoformat()}))
+        self.db.admin(set_deadline, (self.now, ring))
         expired = await self.request('POST', RESOLVE, body=read, token=changed)
-        self.assertEqual(await expired.json(), {'state': 'ring_expired'})
+        self.assertEqual((expired.status, await expired.json()), (200, {'state': 'ring_expired'}))
         async with self.client.post('/chat/notice-call',
                                     data=read | {'installationProof': self.proof, 'navigation': uuid4().hex},
                                     headers={'Cookie': f'{COOKIE}={changed}', 'Origin': ORIGIN}) as denied:
             self.assertEqual(denied.status, 403)
             self.assertIn('microphone=()', denied.headers['Permissions-Policy'])
+            self.assertEqual(denied.headers['Cache-Control'], 'no-store')
             self.assertIn('약속 전화 시간이 지났어', await denied.text())
-        self.db.admin("UPDATE marong.app_rings SET answer_until=now()+interval '30 seconds' WHERE id=%s", (ring,))
+        self.db.admin(set_deadline, (before_deadline, ring))
         enable = await self.select('enable', token=changed)
         await self.state(await self.request('PUT', SUB, choice=enable, token=changed, body=self.subscription()), 'active')
         await self.problem(await self.request('POST', RESOLVE, body=read, headers=header, token=changed), 403, 'not_allowed')
