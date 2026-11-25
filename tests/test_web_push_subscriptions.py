@@ -875,11 +875,19 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         start = {'type': 'start_notified', 'clientId': body['clientId'], 'installationProof': self.proof,
                  'connectToken': result['connectToken']}
         upstreams = []
+        recovery_setup, allow_recovery = asyncio.Event(), asyncio.Event()
+
+        async def recover_provider(**kwargs):
+            recovery_setup.set()
+            await allow_recovery.wait()
+            return await Upstream.receive(upstreams[2], **kwargs)
 
         def upstream(**_):
             model = Upstream()
             if not upstreams:
                 model.receive = AsyncMock(side_effect=ConnectionError('fixture setup failed'))
+            elif len(upstreams) == 2:
+                model.receive = recover_provider
             upstreams.append(model)
             return HTTP(model)
 
@@ -904,12 +912,33 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
                 first_connected = now
                 now += timedelta(seconds=10)
             await asyncio.wait_for(slot.released.wait(), 5)
+            recovery_deadline = now + timedelta(seconds=120)
+            now = recovery_deadline - timedelta(microseconds=1)
+            async with await open_notice() as recovered:
+                await recovered.send_json(start)
+                await asyncio.wait_for(recovery_setup.wait(), 4)
+                try:
+                    now = recovery_deadline
+                    async with await open_notice() as duplicate:
+                        await duplicate.send_json(start)
+                        self.assertEqual(await duplicate.receive_json(timeout=3), {'type': 'call_busy'})
+                    replay = await self.request('POST', ACCEPT, body=body)
+                    self.assertEqual((await replay.json())['callId'], call)
+                    self.assertEqual(self.notice_call_state(call)[1:3], (first_connected, recovery_deadline))
+                finally:
+                    allow_recovery.set()
+                ready = await event(recovered, 'ready')
+                self.assertEqual((ready['callId'], ready['resumed']), (call, True))
+                self.assertEqual(self.notice_call_state(call), ('live', first_connected, None, None, None))
+                slot = server.active_calls[who['friend_id']]
+                now += timedelta(seconds=10)
+            await asyncio.wait_for(slot.released.wait(), 5)
             now += timedelta(seconds=120)
             async with await open_notice() as late:
                 await late.send_json(start)
                 self.assertEqual(await late.receive_json(timeout=3), {'type': 'ring_answered'})
             self.assertEqual(self.notice_call_state(call), ('ended', first_connected, None, now, 'reconnect_limit'))
-            self.assertEqual(len(upstreams), 2)
+            self.assertEqual(len(upstreams), 3)
             self.assertEqual(await (await self.request('POST', ACCEPT, body=body)).json(), {'state': 'ring_answered'})
 
             ordinary = self.call_site.make_url('/live').with_query(client=str(uuid4()), hangup='1')

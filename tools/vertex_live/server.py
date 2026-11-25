@@ -118,6 +118,7 @@ class CallSlot:
     reconnecting: bool = False
     rtc_client_id: str | None = None
     rtc_session_id: int | None = None
+    notified: bool = False
 
     def permits_rtc(self, client, session_id):
         if self.rtc_client_id is not None:
@@ -694,7 +695,9 @@ async def live(req, *, notice_auth=None):
                 close_reason='call_busy'
                 await ws.send_json({'type':'call_busy'})
                 return ws
-            if previous.reconnecting:
+            preparing_notice = previous.notified and (previous.session is None or (
+                previous.session.notice_connection is not None and not previous.session.notice_connection_confirmed))
+            if previous.reconnecting or preparing_notice:
                 close_reason='reconnect_pending'
                 if notice_auth:await ws.send_json({'type':'call_busy'})
                 return ws
@@ -721,7 +724,7 @@ async def live(req, *, notice_auth=None):
             await ws.send_json({'type':'calls_full'})
             return ws
         slot=CallSlot(client_id, rtc_client_id=rtc_client_id if notice_auth else None,
-                      rtc_session_id=notice_auth['session'] if notice_auth else None)
+                      rtc_session_id=notice_auth['session'] if notice_auth else None, notified=notice_call is not None)
         active_calls[owner]=slot
         resumed_voice=resume.get('voice')
         if not resumed_voice and person and hasattr(memory_store,'resume_voice'):
