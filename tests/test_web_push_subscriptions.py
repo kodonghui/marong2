@@ -900,6 +900,13 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(await ws.receive_bytes(timeout=3), b"synthetic-audio")
         self.assertEqual(self.db.admin("SELECT status,call_id FROM marong.app_rings WHERE id=%s", (expired,)),
                          [("ringing", None)])
+        count = self.db.admin("SELECT count(*) FROM call.calls WHERE caller_id=%s", (who["caller_id"],))
+        self.db.admin("""UPDATE call.calls SET status='ended',ended_at=now(),end_reason='hangup',organize_status='pending'
+                         WHERE caller_id=%s AND status<>'ended'""", (who["caller_id"],))
+        async with self.client.session.ws_connect(endpoint, protocols=[SUBPROTOCOL], headers=headers) as ws:
+            await ws.send_json(ordinary)
+            self.assertEqual(await ws.receive_json(timeout=3), {"type": "ring_unavailable"})
+        self.assertEqual(self.db.admin("SELECT count(*) FROM call.calls WHERE caller_id=%s", (who["caller_id"],)), count)
 
     async def test_575_relay_webrtc_pcm_reconnect_and_rejected_stop(self):
         server, _, _, who = await self.call_fixture()
@@ -1103,6 +1110,77 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
                         await ws.receive(timeout=3)
                 flags.append((delivery, await me.json(), await messages.json(), await refused.json(), call_status, frames))
         self.assertEqual(flags[0], flags[1])
+
+    async def test_573_notice_document_requires_current_active_installation_and_owned_ring(self):
+        server, _, _, who = await self.call_fixture()
+        await self.register_fixture()
+        path = '/chat/notice-call'
+        ring = self.ring(who)
+        reference = self.references.seal('call', who['friend_id'], ring, self.now)
+        form = {'targetRef': reference, 'installationProof': self.proof, 'navigation': uuid4().hex}
+        cookie = {'Cookie': f'{COOKIE}={self.token}'}
+        headers = cookie | {'Origin': ORIGIN, 'Sec-Fetch-Site': 'same-origin',
+                            'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document'}
+
+        async def visit(status, *, method='POST', data=form, incoming=headers, url=path, microphone=False,
+                        heading=None):
+            async with self.client.request(method, url, data=data if method == 'POST' else None,
+                                           headers=incoming, allow_redirects=False) as reply:
+                self.assertEqual(reply.status, status)
+                self.assertEqual(reply.content_type, 'text/html')
+                self.assertEqual(reply.headers['Cache-Control'], 'no-store')
+                self.assertEqual(reply.headers['Referrer-Policy'], 'no-referrer')
+                self.assertEqual(reply.headers['X-Frame-Options'], 'DENY')
+                self.assertIn("form-action 'none'", reply.headers['Content-Security-Policy'])
+                self.assertEqual(reply.headers['Permissions-Policy'], 'camera=(), microphone=' +
+                                 ('(self)' if microphone else '()') + ', geolocation=()')
+                body = await reply.text()
+                for private in (reference, self.proof, self.token):
+                    self.assertNotIn(private, body)
+                self.assertEqual(form['navigation'] in body, microphone)
+                if heading:
+                    self.assertIn(heading, body)
+
+        await visit(200, microphone=True)
+        async with self.client.get('/chat/', headers=cookie) as chat:
+            self.assertIn('microphone=()', chat.headers['Permissions-Policy'])
+            self.assertEqual(chat.headers['Referrer-Policy'], 'same-origin')
+            self.assertTrue(chat.headers['Content-Security-Policy'].endswith(f'form-action {ORIGIN}{path}'))
+        await visit(404, method='GET')
+        await visit(404, url=path + '?extra=1')
+        for wrong in (cookie, headers | {'Origin': 'null'}, headers | {'Origin': 'https://off.invalid'},
+                      headers | {'Sec-Fetch-Dest': 'iframe'}, headers | {'Sec-Fetch-Mode': 'cors'}):
+            await visit(403, incoming=wrong)
+        await visit(400, data=[*form.items(), ('targetRef', reference)])
+        await visit(400, data=form | {'navigation': 'x' * 2050})
+        await visit(400, data=form | {'targetRef': 'bad'})
+        await visit(401, incoming=headers | {'Cookie': 'other=fixture'}, heading='로그인한 뒤 알림을 확인할게')
+        await visit(403, data=form | {'installationProof': 'not-valid'})
+        await visit(403, data=form | {'installationProof': self.other_proof})
+        await visit(403, incoming=headers | {'Cookie': f'{COOKIE}={self.alt}'})
+        await visit(404, data=form | {'targetRef': self.references.seal('call', who['friend_id'], uuid4(), self.now)})
+        await visit(404, data=form | {'targetRef': self.references.seal('call', who['friend_id'] + 1, ring, self.now)})
+        with patch.object(self.service, 'limit', side_effect=server.SessionError('request_limit', retry_after=3)):
+            await visit(429, heading='잠시 뒤 다시 확인해 줘')
+        with patch.object(self.service, '_row', side_effect=OperationalError):
+            await visit(503, heading='지금 전화 상태를 확인할 수 없어')
+        with patch.object(self.service, '_row', side_effect=RuntimeError):
+            await visit(500, heading='지금 전화 상태를 확인할 수 없어')
+        with patch.object(self.chat, 'web_push_call', None):
+            await visit(404)
+            async with self.client.get('/chat/', headers=cookie) as chat:
+                self.assertEqual(chat.headers['Referrer-Policy'], 'no-referrer')
+                self.assertTrue(chat.headers['Content-Security-Policy'].endswith("form-action 'none'"))
+        self.db.admin('UPDATE marong.app_rings SET answer_until=now()-interval \'2 seconds\' WHERE id=%s', (ring,))
+        await visit(200, microphone=True)
+        self.assertEqual(self.db.admin('SELECT status,call_id FROM marong.app_rings WHERE id=%s', (ring,)), [('ringing', None)])
+        self.assertEqual(self.db.admin('SELECT count(*) FROM call.calls WHERE caller_id=%s', (who['caller_id'],)), [(0,)])
+        self.db.admin('UPDATE marong.app_rings SET answer_until=now()+interval \'30 seconds\' WHERE id=%s', (ring,))
+        accepted = await self.request('POST', ACCEPT, body={'targetRef': reference, 'clientId': str(uuid4())})
+        self.assertEqual((await accepted.json())['state'], 'accepted')
+        await visit(200, heading='이미 받은 전화야')
+        self.db.admin('UPDATE marong.app_sessions SET revoked_at=now() WHERE id=%s', (self.sid,))
+        await visit(401, heading='로그인한 뒤 알림을 확인할게')
 
 
 if __name__ == "__main__":

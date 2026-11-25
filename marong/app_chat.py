@@ -14,6 +14,7 @@ import json
 import logging
 import math
 from pathlib import Path
+from urllib.parse import parse_qsl
 import re
 import secrets
 import time
@@ -31,7 +32,7 @@ from .app_store import APP_KEY, AppDeviceLimit
 from .discord_dm import DEFAULT_ORIGIN, DiscordIncoming, proactive_preference
 from .google_calendar import LINK_MARK, command as google_command
 from .topics import KEY as TOPIC_KEY, NAME as PICTURE_NAME, SET_NAME, phrase as topic_phrase, picture_set
-from .web_push_subscriptions import CHOICE_HEADER, INSTALLATION_HEADER, PATH as WEB_NOTICE_PATH, installation_id
+from .web_push_subscriptions import CHOICE_HEADER, INSTALLATION_HEADER, PATH as WEB_NOTICE_PATH, installation_id, lock_installation
 from .web_push_targets import resolve_target, visible_message
 from .web_notice_call_protocol import BRIDGE_HEADER, CALL_BRIDGE, client_uuid
 
@@ -49,6 +50,15 @@ REPLY_TTL_S = 3600
 READ_ROOMS_MAX = 256     # rooms whose '읽음' this process keeps (one per call friend)
 STATIC = Path(__file__).with_name("app_chat_static")
 WEB_NOTICE_SCRIPT = b'<script defer src="/chat/web-notifications.js"></script>\n'
+NOTICE_CALL_PAGE = "/chat/notice-call"
+NOTICE_CALL_FAILURES = {
+    "denied": ("이 알림을 열 수 없어", "글 대화로 돌아가 다시 확인할 수 있어."),
+    "answered": ("이미 받은 전화야", "이 약속 전화는 이미 처리됐어. 글 대화로 돌아갈 수 있어."),
+    "unavailable": ("지금은 이 전화를 받을 수 없어", "현재 확인한 상태로는 이 약속 전화를 연결할 수 없어."),
+    "login": ("로그인한 뒤 알림을 확인할게", "기존 기기 코드로 로그인해 줘. 여기에서는 알림 내용을 먼저 보여 주지 않아."),
+    "offline": ("지금 전화 상태를 확인할 수 없어", "연결을 확인한 뒤 이 전화의 상태를 다시 확인해 줘."),
+    "limited": ("잠시 뒤 다시 확인해 줘", "안내된 시간이 지나면 전화 상태를 다시 확인할 수 있어."),
+}
 FILES = {"": ("index.html", "text/html"), "chat.js": ("chat.js", "text/javascript"),
          "chat.css": ("chat.css", "text/css"), "update-banner.js": ("update-banner.js", "text/javascript")}
 UNIFIED_FILES = {"account.html": "text/html", "admin.html": "text/html", "unified.css": "text/css",
@@ -58,7 +68,8 @@ UNIFIED_FILES = {"account.html": "text/html", "admin.html": "text/html", "unifie
                  "friends.js": "text/javascript",
                  "character.html": "text/html", "character.js": "text/javascript",
                  "decor.html": "text/html", "decor.js": "text/javascript",
-                 "admin-items.html": "text/html", "admin-items.js": "text/javascript"}
+                 "admin-items.html": "text/html", "admin-items.js": "text/javascript",
+                 "notice-call.html": "text/html"}
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 FID = re.compile(r"[A-Za-z0-9_-]{16,200}\Z")
 VERSION = re.compile(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\Z")
@@ -284,6 +295,12 @@ class AppChat:
         if req.get("session_refresh") and res.status < 400:
             self._set_session_cookie(res, req["session_refresh"])
         res.headers.update(HEADERS)
+        if req.get("notice_call_document") and res.status == 200:
+            res.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=()"
+        if req.path == "/chat/" and res.status == 200 and self.notice_call_enabled:
+            res.headers["Referrer-Policy"] = "same-origin"
+            res.headers["Content-Security-Policy"] = HEADERS["Content-Security-Policy"].replace(
+                "form-action 'none'", f"form-action {self.origin}{NOTICE_CALL_PAGE}")
         if req.get("cache") and res.status == 200:  # a picture of a picture set never changes (API-140)
             res.headers["Cache-Control"] = req["cache"]
         return res
@@ -291,6 +308,95 @@ class AppChat:
     def _require_app_origin(self, req):
         if req.headers.get("Origin") != self.origin:
             raise Problem("cross_site")
+
+    @property
+    def notice_call_enabled(self):
+        return all(item is not None for item in (self.web_push_subscriptions, self.web_push_references,
+                                                self.web_push_call))
+
+    @staticmethod
+    async def _notice_call_form(req):
+        limit = 2048
+        if (req.content_type != "application/x-www-form-urlencoded"
+                or req.content_length is None or not 0 < req.content_length <= limit):
+            raise SessionError("invalid_input")
+        try:
+            pairs = parse_qsl((await req.read()).decode("ascii"), strict_parsing=True, errors="strict",
+                              max_num_fields=3)
+        except ValueError:
+            raise SessionError("invalid_input") from None
+        values = dict(pairs)
+        if (len(pairs) != 3 or set(values) != {"targetRef", "installationProof", "navigation"}
+                or not re.fullmatch(r"[A-Za-z0-9_-]{48,768}", values["targetRef"])
+                or not re.fullmatch(r"[0-9a-f]{32}", values["navigation"])):
+            raise SessionError("invalid_input")
+        return values
+
+    @staticmethod
+    def _notice_call_failure(state, status, *, retry=None):
+        title, detail = NOTICE_CALL_FAILURES[state]
+        action = '<a id="notice-login" href="/chat/login?expired=1">들어가기</a>' if state == "login" else ""
+        if state in {"unavailable", "offline", "limited"}:
+            action = '<button type="button" id="notice-retry">상태 다시 확인</button>'
+        delay = str(retry or 0)
+        body = f'''<!doctype html><html lang="ko"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title>
+<link rel="stylesheet" href="/chat/notice-call.css">
+<script defer src="/chat/web-notifications.js"></script><script defer src="/chat/notice-call.js"></script>
+<main class="notice-phone" data-failure="{state}" data-wait="{delay}"><section class="notice-card">
+<h1 id="notice-title" tabindex="-1">{title}</h1><p>{detail}</p><div class="notice-actions">
+{action}<a id="notice-back" href="/chat/">글 대화로</a></div></section></main></html>'''
+        headers = {"Retry-After": delay} if retry else None
+        return web.Response(status=status, text=body, content_type="text/html", headers=headers)
+
+    async def notice_call_page(self, req):
+        if not self.notice_call_enabled or req.method != "POST" or req.query_string:
+            return self._notice_call_failure("denied", 404)
+        if (req.headers.getall("Origin", []) != [self.origin]
+                or req.headers.get("Sec-Fetch-Site") not in (None, "same-origin")
+                or req.headers.get("Sec-Fetch-Mode") not in (None, "navigate")
+                or req.headers.get("Sec-Fetch-Dest") not in (None, "document")):
+            return self._notice_call_failure("denied", 403)
+        try:
+            form = await self._notice_call_form(req)
+            try:
+                ident = installation_id(form["installationProof"])
+            except SessionError:
+                raise SessionError("not_allowed") from None
+            subscriptions = self.web_push_subscriptions
+            async with subscriptions.authenticated(req.cookies.get(COOKIE), ident, write=True) as (conn, session, _):
+                await lock_installation(conn, ident)
+                now = subscriptions.now()
+                if session["expires_at"] <= now:
+                    raise SessionError("login_required")
+                row = await subscriptions._row(conn, ident)
+                sid = session["id"]
+                if row is None or row["session_id"] != sid or subscriptions._state(row, ident, sid, now) != "active":
+                    raise SessionError("not_allowed")
+                result = await resolve_target(conn, self.store, self.web_push_references, session, form["targetRef"], now)
+        except SessionError as error:
+            state, status = {
+                "login_required": ("login", 401), "not_allowed": ("denied", 403),
+                "not_found": ("denied", 404), "invalid_input": ("denied", 400),
+                "request_limit": ("limited", 429),
+            }.get(error.code, ("offline", 503))
+            return self._notice_call_failure(state, status, retry=error.retry_after)
+        except (psycopg.OperationalError, TimeoutError):
+            return self._notice_call_failure("offline", 503)
+        except Exception as error:
+            log.error("notice_call_page_error %s trace=%s", type(error).__name__, req["trace_id"])
+            return self._notice_call_failure("offline", 500)
+        state = result["state"]
+        if state == "ring_answered":
+            return self._notice_call_failure("answered", 200)
+        if state == "ring_unavailable":
+            return self._notice_call_failure("unavailable", 200)
+        if state not in {"ring_ready", "ring_expired"}:
+            return self._notice_call_failure("denied", 404)
+        # Only the random navigation correlation value goes into the document.
+        data = self.files["notice-call.html"][0].replace(b"@NAVIGATION@", form["navigation"].encode("ascii"))
+        req["notice_call_document"] = True
+        return web.Response(body=data, content_type="text/html", charset="utf-8")
 
     def _web_notice_request(self, req):
         origin = req.headers.get("Origin")
@@ -660,10 +766,13 @@ class AppChat:
         data, kind = found
         if self.web_push_subscriptions is not None and kind == "text/html":
             data = data.replace(b'<script ', WEB_NOTICE_SCRIPT + b'<script ', 1)
+        if req.path == "/chat/" and self.notice_call_enabled:
+            data = data.replace(b'<body', b'<body data-notice-call-enabled="true"', 1)
         return web.Response(body=data, content_type=kind, charset="utf-8")
 
     async def web_notice_asset(self, req):
-        return web.FileResponse(STATIC / req.match_info["asset"], headers={"Content-Type": "text/javascript"})
+        asset = req.match_info["asset"]
+        return web.FileResponse(STATIC / asset, headers={"Content-Type": "text/css" if asset.endswith(".css") else "text/javascript"})
 
     # ── API ────────────────────────────────────────────────────
 
@@ -928,6 +1037,8 @@ class AppChat:
         diary.register(app)
         AppListen(self).register(app)
         app.router.add_get("/chat/healthz", self.health)
+        app.router.add_route("*", NOTICE_CALL_PAGE, self.notice_call_page)
+        app.router.add_get(r"/chat/{asset:notice-call\.(?:js|css)}", self.web_notice_asset)
         app.router.add_get("/chat/admin/api/app-versions", self.admin.app_versions)
         if self.internal_shop is not None:
             from .internal_shop import LOOKUP_PATH

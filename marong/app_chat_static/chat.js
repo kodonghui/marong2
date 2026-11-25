@@ -1006,6 +1006,7 @@ async function start() {
   add(page.body.messages);
   refreshDays();
   toBottom();
+  webNotifications?.restoreChatFocus();
   app.ready = true;
   syncSend();
   void showDiary();
@@ -1018,6 +1019,7 @@ async function start() {
 }
 
 async function openNotice(reference) {
+  const previousFocus = document.activeElement?.id || 'chat-heading';
   const dialog = document.createElement('section');
   dialog.className = 'state';
   dialog.setAttribute('aria-live', 'polite');
@@ -1037,6 +1039,7 @@ async function openNotice(reference) {
   const hidden = [ui.log, ui.form, ui.menuButton];
   for (const element of hidden) element.hidden = true;
   let inactive = false;
+  let submitted = false;
   chat.onclick = () => {
     inactive = true;
     webNotifications.clear();
@@ -1044,6 +1047,9 @@ async function openNotice(reference) {
     for (const element of hidden) element.hidden = false;
     void start();
   };
+  window.addEventListener('pageshow', event => {
+    if (event.persisted && submitted && !inactive) chat.click();
+  });
   function show(head, line, allowRetry = false) {
     title.textContent = head;
     message.textContent = line;
@@ -1060,6 +1066,8 @@ async function openNotice(reference) {
       location.replace('/chat/login?expired=1');
       return;
     }
+    if (response.status === 200 && ['ring_ready', 'ring_expired'].includes(response.data?.state)
+        && webNotifications.openCall(reference, previousFocus)) { submitted = true; return; }
     const ringState = {
       ring_ready: ['약속 전화가 와 있어', '화면을 열기만 해서는 수락하지 않아.'],
       ring_expired: ['약속 전화 시간이 지났어', '더 이상 이 약속 전화를 받을 수 없어.'],

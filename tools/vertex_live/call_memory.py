@@ -534,6 +534,14 @@ class MemoryStore:
                 raise NoticeRingState("ring_answered")
             if ring["status"] not in {"ringing", "missed"} or ring["answer_until"] > now:
                 raise NoticeRingState("ring_unavailable")
+            previous = await (await c.execute("""
+                SELECT c.status,c.deleted_at FROM call.calls c
+                WHERE c.caller_id=%s AND c.client_id=%s AND c.entrypoint='web'
+                  AND NOT EXISTS (SELECT 1 FROM marong.app_rings r WHERE r.call_id=c.id AND r.caller_id=c.caller_id)
+                ORDER BY c.started_at DESC LIMIT 1 FOR UPDATE OF c
+            """, (p.caller_id, client_id))).fetchone()
+            if previous and (previous["status"] == "ended" or previous["deleted_at"] is not None):
+                raise NoticeRingState("ring_unavailable")
             started = await self._start_locked(c, p, client_id, voice, version, "web", strict_client=True)
             return (*started, None)
 

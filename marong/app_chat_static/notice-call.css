@@ -1,0 +1,88 @@
+:root {
+  color-scheme: dark;
+  --page: #121729;
+  --surface: #1c2340;
+  --text: #f4f1ea;
+  --muted: #b4b2c6;
+  --accent: #e8a35c;
+  --on-accent: #121729;
+  --focus: #f6d57a;
+  --edge: #b4b2c6;
+  --danger: #ff8a8d;
+  --face: #2c3456;
+}
+:root[data-theme="chestnut"] {
+  color-scheme: light;
+  --page: #fbf6ee;
+  --surface: #fff;
+  --text: #2b211a;
+  --muted: #6b5b4f;
+  --accent: #8a4b24;
+  --on-accent: #fff;
+  --focus: #8a4b24;
+  --edge: #e2d3bf;
+  --danger: #b3261e;
+  --face: #f3dcc4;
+}
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--text);
+  font: 16px/1.5 "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+.notice-phone { max-width: 460px; margin: auto; padding: 16px; }
+.notice-phone header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  border-bottom: 1px solid var(--edge);
+  margin-bottom: 16px;
+  font-weight: 700;
+}
+.notice-phone header img, .notice-portrait img { border-radius: 50%; background: var(--face); }
+.notice-card {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--edge);
+  border-radius: 16px;
+  background: var(--surface);
+  text-align: center;
+}
+.notice-card h1 { margin: 0; font-size: 22px; line-height: 1.3; }
+.notice-card p { margin: 0; color: var(--muted); }
+#notice-detail { min-height: 4.5em; }
+.notice-portrait { position: relative; width: 152px; height: 152px; margin: auto; }
+.notice-portrait img { display: block; }
+.notice-portrait #topic-picture { position: absolute; inset: 0; }
+.notice-actions, .notice-call-controls { display: grid; gap: 8px; }
+.notice-actions { min-height: 108px; align-content: start; }
+.notice-call-controls { grid-template-columns: 1fr 1fr; }
+.notice-card button, .notice-card a {
+  display: grid;
+  place-items: center;
+  min-height: 48px;
+  padding: 8px 16px;
+  border: 2px solid var(--accent);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+.notice-card .notice-primary { min-height: 52px; background: var(--accent); color: var(--on-accent); }
+.notice-card .notice-hangup { border-color: var(--danger); }
+.notice-card button[aria-disabled="true"], .notice-card button:disabled {
+  border-color: var(--muted);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: default;
+}
+.notice-card :focus-visible, #notice-title:focus { outline: 3px solid var(--focus); outline-offset: 3px; }

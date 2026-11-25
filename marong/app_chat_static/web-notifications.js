@@ -8,6 +8,9 @@
   const installed = apple && (navigator.standalone === true || matchMedia('(display-mode: standalone)').matches);
   const supported = installed && 'serviceWorker' in navigator && 'Notification' in window && 'PushManager' in window;
   const handoffKey = 'marong.web-notifications.navigation';
+  const callHandoffKey = 'marong.web-notifications.call-navigation';
+  const chatFocusKey = 'marong.web-notifications.chat-focus';
+  const referencePattern = /^[A-Za-z0-9_-]{48,768}$/;
   let reference = null;
   let refreshSettings;
 
@@ -21,16 +24,22 @@
   }
 
   function capture() {
-    if (!installed || !location.hash.startsWith('#notice=')) return false;
-    reference = location.hash.slice(8, 777);
+    if (!location.hash.startsWith('#notice=')) return false;
+    const captured = location.hash.slice(8, 777);
     history.replaceState(history.state, '', location.pathname + location.search);
+    if (!installed) return false;
+    reference = captured;
     return true;
   }
 
   function preserve(destination) {
-    if (!reference) return false;
+    return preserveReference(reference, destination);
+  }
+
+  function preserveReference(value, destination) {
+    if (!value) return false;
     try {
-      sessionStorage.setItem(handoffKey, JSON.stringify({reference, destination, until: Date.now() + 300000}));
+      sessionStorage.setItem(handoffKey, JSON.stringify({reference: value, destination, until: Date.now() + 300000}));
       return true;
     } catch {
       return false;
@@ -74,6 +83,52 @@
     } catch {
       return null;
     }
+  }
+
+  function openCall(reference, focus) {
+    const device = proof();
+    if (!device || document.body.dataset.noticeCallEnabled !== 'true' || !referencePattern.test(reference)) return false;
+    try {
+      const navigation = crypto.randomUUID().replaceAll('-', '');
+      sessionStorage.setItem(callHandoffKey, JSON.stringify({reference, navigation, until: Date.now() + 60000}));
+      if (focus) sessionStorage.setItem(chatFocusKey, focus);
+      const form = document.createElement('form');
+      form.hidden = true;
+      form.action = '/chat/notice-call';
+      form.method = 'post';
+      for (const [name, value] of Object.entries({targetRef: reference, installationProof: device, navigation})) {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = value;
+        form.append(input);
+      }
+      document.body.append(form);
+      try { form.submit(); } finally { form.remove(); }
+      return true;
+    } catch {
+      takeCall();
+      return false;
+    }
+  }
+
+  function takeCall(navigation) {
+    try {
+      const raw = sessionStorage.getItem(callHandoffKey);
+      sessionStorage.removeItem(callHandoffKey);
+      const saved = JSON.parse(raw);
+      if (installed && saved && saved.until > Date.now() && referencePattern.test(saved.reference)
+          && (navigation === undefined || saved.navigation === navigation)) return saved.reference;
+    } catch { /* storage can be unavailable */ }
+    return null;
+  }
+
+  function restoreChatFocus() {
+    try {
+      const target = sessionStorage.getItem(chatFocusKey);
+      sessionStorage.removeItem(chatFocusKey);
+      if (target) (document.getElementById(target) || document.getElementById('chat-heading'))?.focus();
+    } catch { /* storage can be unavailable */ }
   }
 
   async function request(path, method = 'GET', body, choice) {
@@ -251,5 +306,5 @@
   }
 
   window.MarongWebNotifications = {apple, installed, supported, proof, request, settings, capture,
-    preserve, pending, restore, clear};
+    preserve, preserveReference, pending, restore, clear, openCall, takeCall, restoreChatFocus};
 })();

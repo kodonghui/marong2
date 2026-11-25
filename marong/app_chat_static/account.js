@@ -172,8 +172,10 @@
   }
 
   function showLogin(fromExpired) {
-    setPage('다시 만나서 반가워! 기기 추가 코드를 넣어 줘');
-    if (fromExpired) signal(hint, '로그인이 풀렸어. 다시 들어와 줘');
+    const notice = window.MarongWebNotifications?.pending('/chat/');
+    setPage(notice ? '로그인한 뒤 알림을 확인할게' : '다시 만나서 반가워! 기기 추가 코드를 넣어 줘');
+    if (notice) signal(hint, '기존 기기 코드로 로그인해 줘. 여기에서는 알림 내용을 먼저 보여 주지 않아.');
+    else if (fromExpired) signal(hint, '로그인이 풀렸어. 다시 들어와 줘');
     const form = node('form', '', 'stack');
     const label = node('label', '', 'code-field');
     const input = node('input');
