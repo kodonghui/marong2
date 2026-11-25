@@ -429,7 +429,7 @@ async def notice_identity(req):
     if memory_store is None:
         raise SessionError('db_unavailable')
     token = req.cookies.get(SESSION_COOKIE)
-    row = await find_session(memory_store.pool, token)
+    row = await find_session(memory_store.pool, token, age=SESSION_AGE)
     if row is None:
         raise SessionError('login_required')
     person = Principal(row['caller_id'], row['friend_id'], row['name'], row['context_revision'], unified=True,

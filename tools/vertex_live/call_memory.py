@@ -452,8 +452,7 @@ class MemoryStore:
         """Reserve the existing call and promise atomically under caller then ring locks."""
         scene = ",scene_picture_id" if self.scene_rings else ""
         async with asyncio.timeout(3), self.pool.connection() as c, c.transaction():
-            if session is not None:
-                await self._notice_session(c, p, session)
+            session_until = await self._notice_session(c, p, session) if session is not None else None
             caller = await (await c.execute('SELECT id,enabled FROM call.callers WHERE id=%s FOR UPDATE',
                                             (p.caller_id,))).fetchone()
             if not caller or not caller["enabled"]:
@@ -468,6 +467,9 @@ class MemoryStore:
                 if legacy:
                     return None
                 raise NoticeRingState("not_found")
+            clock = await (await c.execute("SELECT clock_timestamp() AS now")).fetchone()
+            if session_until is not None and session_until <= clock["now"]:
+                raise NoticeRingState("login_required")
             if ring["status"] == "answered":
                 match = await (await c.execute("""SELECT id,started_at FROM call.calls
                     WHERE id=%s AND caller_id=%s AND client_id=%s AND entrypoint='web'
@@ -481,7 +483,6 @@ class MemoryStore:
                     await c.execute("UPDATE call.calls SET status='live',last_beat_at=now() WHERE id=%s",
                                     (match["id"],))
                 return str(match["id"]), True, match["started_at"], {**ring, "fresh": False}
-            clock = await (await c.execute("SELECT clock_timestamp() AS now")).fetchone()
             if ring["answer_until"] <= clock["now"] and ring["status"] in {"ringing", "missed"}:
                 if legacy:
                     return None
@@ -511,10 +512,11 @@ class MemoryStore:
         if (row is None or row["friend_id"] != p.friend_id or row["revoked_at"] is not None
                 or row["expires_at"] <= datetime.now(timezone.utc)):
             raise NoticeRingState("login_required")
+        return row["expires_at"]
 
     async def start_notice_ordinary(self, p, client_id, voice, version, ring_id, session):
         async with asyncio.timeout(3), self.pool.connection() as c, c.transaction():
-            await self._notice_session(c, p, session)
+            session_until = await self._notice_session(c, p, session)
             caller = await (await c.execute("SELECT id FROM call.callers WHERE id=%s AND enabled FOR UPDATE",
                                             (p.caller_id,))).fetchone()
             if caller is None:
@@ -525,9 +527,12 @@ class MemoryStore:
             """, (ring_id, p.caller_id))).fetchone()
             if not ring:
                 raise NoticeRingState("ring_unavailable")
+            now = datetime.now(timezone.utc)
+            if session_until <= now:
+                raise NoticeRingState("login_required")
             if ring["status"] == "answered":
                 raise NoticeRingState("ring_answered")
-            if ring["status"] not in {"ringing", "missed"} or ring["answer_until"] > datetime.now(timezone.utc):
+            if ring["status"] not in {"ringing", "missed"} or ring["answer_until"] > now:
                 raise NoticeRingState("ring_unavailable")
             started = await self._start_locked(c, p, client_id, voice, version, "web", strict_client=True)
             return (*started, None)
@@ -535,7 +540,7 @@ class MemoryStore:
     async def attach_notice_call(self, p, client_id, call_id, ring_id, session):
         scene = ",scene_picture_id" if self.scene_rings else ""
         async with asyncio.timeout(3), self.pool.connection() as c, c.transaction():
-            await self._notice_session(c, p, session)
+            session_until = await self._notice_session(c, p, session)
             caller = await (await c.execute("SELECT id FROM call.callers WHERE id=%s AND enabled FOR UPDATE",
                                             (p.caller_id,))).fetchone()
             if caller is None:
@@ -552,6 +557,8 @@ class MemoryStore:
             """, (p.caller_id, ring_id, call_id))).fetchone()
             if ring is None:
                 raise NoticeRingState("ring_unavailable")
+            if session_until <= datetime.now(timezone.utc):
+                raise NoticeRingState("login_required")
             history = await (await c.execute("SELECT 1 FROM call.segments WHERE call_id=%s LIMIT 1",
                                               (call_id,))).fetchone()
             await c.execute("UPDATE call.calls SET status='live',last_beat_at=now() WHERE id=%s", (call_id,))

@@ -724,6 +724,25 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
             self.service.limit(self.sid, installation_id(self.proof))
         await self.problem(await self.request("POST", ACCEPT, body=answer), 429, "request_limit")
 
+    async def test_574_session_expires_while_waiting_for_caller_lock(self):
+        _, store, _, who = await self.call_fixture()
+        from call_memory import NoticeRingState, Principal
+
+        p = Principal(who["caller_id"], who["friend_id"], "Fixture")
+        ring = self.ring(who)
+        async with store.pool.connection() as conn, conn.transaction():
+            await conn.execute("SELECT id FROM call.callers WHERE id=%s FOR UPDATE", (p.caller_id,))
+            self.db.admin("UPDATE marong.app_sessions SET expires_at=now()+interval '1 second' WHERE id=%s", (self.sid,))
+            request = asyncio.create_task(store.reserve_notice_ring(
+                p, str(uuid4()), "Fixture", "fixture", ring, session=self.sid))
+            await asyncio.sleep(1.25)
+        with self.assertRaises(NoticeRingState) as caught:
+            await request
+        self.assertEqual(caught.exception.state, "login_required")
+        self.assertEqual(self.db.admin("SELECT status,call_id FROM marong.app_rings WHERE id=%s", (ring,)),
+                         [("ringing", None)])
+        self.assertEqual(self.db.admin("SELECT count(*) FROM call.calls WHERE caller_id=%s", (p.caller_id,)), [(0,)])
+
     async def test_575_socket_protocol_first_frame_and_preaccepted_call(self):
         server, store, protocol, who = await self.call_fixture()
         origin = str(self.call_site.make_url("/")).rstrip("/")
