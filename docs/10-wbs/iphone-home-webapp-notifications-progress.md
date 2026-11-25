@@ -25,9 +25,28 @@ SCR-001은 홈 화면 웹앱의 같은 문서에서 전화 상태를 전환하�
 | TASK-572 | 구현·검증 | `e6cb25a` | API-314의 다섯 결과, 변조·계정 불일치·삭제·형식·출처·오류 응답, 조회 시 전화 변경 없음 |
 | TASK-573 | 일부 구현 | `e6cb25a` | 참조 제거, 조회·재인증 진입, 접근 불가와 기존 글 대화 연결. 전화 조작과 재인증 전 상태의 전체 브라우저 회귀 대기 |
 | TASK-574 | 구현·자동 시험 | `e6cb25a` | API-315와 기존 역할의 원자적 예약·수락, 웹 선행·Android 선행·동시 수락, 기한과 잠금 대기 중 세션 만료, 같은 통화 ID 재확인 |
-| TASK-575 | 일부 검증 | `e6cb25a` | API-317 핸드셰이크, 엄격한 첫 프레임과 연결 토큰, `ring:true/false`, 합성 오디오. 전체 실패 프레임과 WebRTC 연결 검증 대기 |
+| TASK-575 | 구현·서버 통합 시험 | `e6cb25a`, `45a13f1` | API-317 업그레이드와 실패 응답, 첫 프레임 검증, 실패 프레임 11종, `ring:true/false`, 같은 통화 ID 재연결과 모의 WebRTC·PCM 전환 |
 | TASK-576 | 설계 결정 대기 | — | 같은 웹앱 문서의 마이크 권한과 전화 진입 계약 결정 대기 |
-| TASK-577 | 일부 회귀 검증 | `e6cb25a` | 기존 글 대화·약속 전화·통합 인증·웹 재연결, Android Node 및 전화·업데이트 배너 브라우저 시험, Ubuntu WSL 앱 업데이트 푸시 시험. 전화 UI가 포함된 최종 회귀 대기 |
+| TASK-577 | 독립 회귀 시험 | `e6cb25a`, `45a13f1` | 웹 푸시 설정 켜짐·꺼짐의 일반 Safari·Android·FCM, 기존 글 대화·약속 전화·재연결·앱 업데이트 회귀. 전화 화면을 연결한 뒤 최종 브라우저 회귀 대기 |
+
+## TASK-575·577 독립 시험
+
+합성 계정·격리 PostgreSQL을 사용한 변경과 실행 커밋은 `45a13f1f0ebfecce73cc48184788c4040fbffeaa`입니다. Windows의 비동기 DB 시험에는 Python 3.12 Selector 이벤트 루프를 사용했습니다.
+
+| 명령 또는 시험 파일 | 결과 |
+| --- | --- |
+| `tests/test_web_push_subscriptions.py` | 20개 통과. API-317 업그레이드 101 및 실패 응답 6종, 첫 프레임 5초·2048바이트 경계와 중복 키, 실패 프레임 11종. 실패 연결의 통화 할당 방지, 같은 세션·클라이언트의 통화 ID 유지와 다른 연결의 종료 요청 차단. 웹 푸시 활성·비활성에서 기존 Safari·Android·FCM 응답과 경로 비교 |
+| `tools/vertex_live/test_relay.py`, `test_rtc_api.py`, `test_midcall.py`, `test_web_reconnect.py` | 4개 파일 통과. 연속 100회 오디오 처리, WebRTC 접근 권한, PCM 전환과 재연결 |
+| `node --test tools/vertex_live/test_transport.cjs tools/vertex_live/test_fallback.cjs tools/vertex_live/test_rtc_watchdog.cjs tools/vertex_live/test_hangup_client.cjs` | 4개 파일 통과. 전송 선택, 전환, 연결 감시와 종료 |
+| `tests/test_app_ring.py`, `tests/test_app_chat.py` | 기존 약속 전화 75개, 글 대화 454개 확인 항목 통과. FCM 응답·재시도는 모의 전송 |
+| `.venv/Scripts/python tests/test_web_push_browser.py` | 4개 통과. Chromium·Playwright WebKit의 일반 브라우저 진입과 알림 설정 |
+| `apps/android`에서 `npm test` | 34개 통과. Gradle 빌드 산출물이 필요한 병합 manifest 검사 1개 건너뜀 |
+| `node --test apps/android/test/call-ring.e2e.cjs apps/android/test/app-update-banners.e2e.cjs` | 30개 통과. Playwright의 Android 브리지 모의 환경 |
+| Ubuntu WSL Python 3.12의 `tests/test_app_update_push.py` | 23개 통과. 시험에 필요한 `fcntl`을 사용할 수 있는 환경에서 모의 FCM 전송 |
+
+WebRTC 시험은 루프백 HTTP·웹소켓, 서버의 실제 `LiveSession`과 `Bridge` 오디오 큐, 모의 캡처·중계·모델을 연결했습니다. 합성 PCM의 양방향 전달과 같은 통화의 복귀를 확인했습니다. 실제 ICE·Opus 전송과 기기 오디오는 후속 확인 범위입니다.
+
+기존 API-107의 `/live`는 두 설정 모두에서 다른 클라이언트의 동시 연결에 101 뒤 `call_busy` 프레임을 보냈습니다. 기존 OpenAPI에는 409도 기재돼 있으며 통합 인증 계약은 101 뒤 실패 프레임을 명시합니다. 이번 시험은 기존 동작을 확인했고 API-317의 업그레이드 전 409도 별도로 확인했습니다.
 
 ## 승인본과 운영 경계
 
