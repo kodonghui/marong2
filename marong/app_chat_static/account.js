@@ -13,6 +13,11 @@
   const token = join ? location.pathname.split('/').pop() : null;
   let stateTimer;
 
+  function installationHeaders() {
+    const proof = window.MarongWebNotifications?.proof();
+    return proof ? {'X-Marong-Installation': proof} : undefined;
+  }
+
   function setPage(title, worried = false) {
     clearInterval(stateTimer);
     headline.textContent = title;
@@ -37,7 +42,7 @@
     let target = '/chat/';
     try {
       const saved = sessionStorage.getItem('marong.session.return');
-      if (saved) {
+      if (saved && !window.MarongWebNotifications?.pending('/chat/')) {
         const url = new URL(saved, location.origin);
         if (url.origin === location.origin && (url.pathname === '/' || url.pathname.startsWith('/chat/')) &&
             !/^\/chat\/(login|join|admin)(?:\/|$)/.test(url.pathname)) target = url.pathname + url.search + url.hash;
@@ -97,10 +102,14 @@
       signal(error);
       submit.disabled = name.disabled = true;
       submit.textContent = '준비하는 중이야…';
-      const reply = await request(api + '/join', kind === 'join' ? {token, name: name.value.trim()} : {token});
+      const reply = await request(api + '/join', kind === 'join' ? {token, name: name.value.trim()} : {token},
+        'POST', installationHeaders());
       submit.textContent = buttonText;
       submit.disabled = name.disabled = false;
-      if (reply.status === 201) showDone(reply.body);
+      if (reply.status === 201) {
+        window.MarongWebNotifications?.cleanReceipts(true);
+        showDone(reply.body);
+      }
       else if (reply.body?.code === 'invalid_input') signal(error, '이름은 1~12자로 적어 줘');
       else inviteError(reply, () => form.requestSubmit());
     });
@@ -156,7 +165,7 @@
       card.append(download);
       loadRelease();
     }
-    if (/iPhone/.test(navigator.userAgent)) {
+    if (/iPhone/.test(navigator.userAgent) && !window.MarongWebNotifications) {
       const installed = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
       const instructions = installed ? '' : '아이폰에서는 공유 버튼을 누르고 홈 화면에 추가를 고르면 앱처럼 열 수 있어. ';
       card.append(node('p', instructions + '알림과 전화 벨은 안드로이드 앱에서만 와', 'caption'));
@@ -166,8 +175,10 @@
   }
 
   function showLogin(fromExpired) {
-    setPage('다시 만나서 반가워! 기기 추가 코드를 넣어 줘');
-    if (fromExpired) signal(hint, '로그인이 풀렸어. 다시 들어와 줘');
+    const notice = window.MarongWebNotifications?.pending('/chat/');
+    setPage(notice ? '로그인한 뒤 알림을 확인할게' : '다시 만나서 반가워! 기기 추가 코드를 넣어 줘');
+    if (notice) signal(hint, '기존 기기 코드로 로그인해 줘. 여기에서는 알림 내용을 먼저 보여 주지 않아.');
+    else if (fromExpired) signal(hint, '로그인이 풀렸어. 다시 들어와 줘');
     const form = node('form', '', 'stack');
     const label = node('label', '', 'code-field');
     const input = node('input');
@@ -195,8 +206,12 @@
       signal(error);
       submit.disabled = input.disabled = true;
       submit.textContent = '확인하는 중이야…';
-      const reply = await request(api + '/login/code', {code: input.value});
-      if (reply.status === 200) { continueToChat(); return; }
+      const reply = await request(api + '/login/code', {code: input.value}, 'POST', installationHeaders());
+      if (reply.status === 200) {
+        window.MarongWebNotifications?.cleanReceipts(true);
+        continueToChat();
+        return;
+      }
       submit.textContent = '들어가기';
       input.disabled = false;
       if (reply.body?.code === 'code_wrong') {

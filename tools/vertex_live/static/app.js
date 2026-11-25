@@ -33,6 +33,7 @@ const appStartedAt=performance.timeOrigin+performance.now();
 })();
 
 const $=id=>document.getElementById(id);
+const noticeCall=window.MarongNoticeCall;
 const updateBannerReady=(()=>{
   if(!(window.__marongApp?.version>=3)||!$('update-banner'))return Promise.resolve();
   const deadline=performance.now()+500;
@@ -46,7 +47,7 @@ const CLIENT_VERSION='20261119-call-wait1';
 let assetVersions={};
 try{assetVersions=JSON.parse(document.documentElement.dataset.assets||'{}');}catch{}
 const assetUrl=name=>'/'+name+(assetVersions[name]?'?v='+assetVersions[name]:'');
-const clientId=crypto.randomUUID();
+const clientId=noticeCall?.clientId||crypto.randomUUID();
 const faceNames={1:'01-neutral',4:'04-thinking',15:'15-mouth-slightly-open',16:'16-mouth-wide-open',18:'18-eyes-half-closed',19:'19-eyes-closed',20:'20-mouth-slightly-open-eyes-half-closed',21:'21-mouth-slightly-open-eyes-closed',22:'22-mouth-wide-open-eyes-half-closed',23:'23-mouth-wide-open-eyes-closed',6:'06-sad'};
 const faceURL=n=>`/face/v1/${faceNames[n]}.webp`;
 for(const n of Object.keys(faceNames)){const image=new Image();image.src=faceURL(n);}
@@ -64,6 +65,7 @@ let currentAudioPath='pcm',lastPlaybackMessage='',lastPlaybackReport=-Infinity,r
 let fallbackNoticeTimer=null;
 let callTiming=null,timingTimer=null,statusReadyAt=null,callAttempts=0;
 let nativeAnswerAt=null,coldNativeAnswer=false,nativeRoute={device:'unknown',ringer:'unknown'},preparedCall=false;
+let noticeReadyTimer=null,noticeResumePending=false,noticeReconnects=0,noticeStopPending=false;
 
 function startTiming(){
   clearTimeout(timingTimer);
@@ -264,7 +266,7 @@ async function refreshProfile(){
       $('topic-picture').before(layer);
     }
     const pending=profile.pendingRing;
-    if(!ringId&&pending&&UUID_RE.test(pending.ringId)&&Date.parse(pending.until)>Date.now())ringId=pending.ringId;
+    if(!noticeCall&&!ringId&&pending&&UUID_RE.test(pending.ringId)&&Date.parse(pending.until)>Date.now())ringId=pending.ringId;
   }catch{/* older chat servers may not have a profile API */}
 }
 async function refresh(){
@@ -357,7 +359,7 @@ function hangUpAfterPlayback(pendingMs=0){
 async function end(message='또 이야기하자. 여기 있을게.',{hangup=false}={}){
   stopWaiting();waitBuffer=null;
   sendPlaybackStats();flushTiming();clearTimeout(timingTimer);ringId=null;if(ringShown)ringOffer(false);closeTopic();
-  if(hangup&&memoryConnected&&callId)fetch(`/api/calls/${encodeURIComponent(callId)}/end`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',keepalive:true}).catch(()=>{});
+  if(!noticeCall&&hangup&&memoryConnected&&callId)fetch(`/api/calls/${encodeURIComponent(callId)}/end`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',keepalive:true}).catch(()=>{});
   generation++;
   intended=false;ready=false;starting=false;clearTimeout(retryTimer);retryTimer=null;
   hangingUp=false;clearTimeout(hangupTimer);hangupTimer=null;
@@ -365,7 +367,9 @@ async function end(message='또 이야기하자. 여기 있을게.',{hangup=fals
   clearTimeout(fallbackNoticeTimer);fallbackNoticeTimer=null;
   const resolve=firstReady;firstReady=null;if(resolve)resolve(false);
   const old=socket;socket=null;
-  if(old){old.onclose=null;try{if(hangup&&old.readyState===WebSocket.OPEN)old.send(JSON.stringify({type:'stop'}));old.close();}catch{}}
+  clearTimeout(noticeReadyTimer);
+  noticeStopPending=false;
+  if(old){old.onclose=null;try{if(hangup&&old.readyState===WebSocket.OPEN&&(!noticeCall||old.noticeVerified))old.send(JSON.stringify({type:'stop'}));old.close();}catch{}}
   if(worklet){worklet.port.onmessage=null;worklet.disconnect();worklet=null;}
   if(micSource){micSource.disconnect();micSource=null;}
   if(stream){stream.getTracks().forEach(track=>track.stop());stream=null;}
@@ -377,15 +381,27 @@ async function end(message='또 이야기하자. 여기 있을게.',{hangup=fals
   if(wakeLock){await wakeLock.release().catch(()=>{});wakeLock=null;}
   muted=false;$('mute').setAttribute('aria-pressed','false');$('mute').setAttribute('aria-label','마이크 끄기');
   document.body.classList.remove('speaking','reconnecting');callView(false);
-  await refresh();status(message);
+  if(noticeCall){
+    noticeCall.setMuted(false);
+    if(hangup)noticeCall.ended();
+  }else{await refresh();status(message);}
 }
 function connect(){
   if(!intended||socket?.readyState===WebSocket.CONNECTING||socket?.readyState===WebSocket.OPEN)return;
   ready=false;
   const previous=socket;
-  const current=new WorkerSocket(`${location.protocol==='https:'?'wss:':'ws:'}//${location.host}/live?client=${encodeURIComponent(clientId)}&hangup=1&hold=1${(rtcPreparing||rtcClient)&&!pcmFallback?'&rtc=1':''}${ringId?'&ring='+ringId:''}`,player,worklet,assetUrl('transport.js'));
+  const base=`${location.protocol==='https:'?'wss:':'ws:'}//${location.host}`;
+  const handshake=noticeCall?.handshake();
+  if(noticeCall&&!handshake.frame)return;
+  const url=noticeCall?`${base}/live/web-notification`:
+    `${base}/live?client=${encodeURIComponent(clientId)}&hangup=1&hold=1${(rtcPreparing||rtcClient)&&!pcmFallback?'&rtc=1':''}${ringId?'&ring='+ringId:''}`;
+  const current=new WorkerSocket(url,noticeStopPending?null:player,noticeStopPending?null:worklet,
+    assetUrl('transport.js'),handshake);
   current.onstats=data=>{maxArrivalGapMs=data.maxArrivalGapMs;};
   socket=current;current.binaryType='arraybuffer';
+  if(noticeCall)noticeReadyTimer=setTimeout(()=>{
+    if(socket===current&&!ready){noticeCall.failure('transport');void end();}
+  },15000);
   current.onopen=()=>{if(socket===current){markTiming('liveOpen');sendAudioReady();if(callTiming?.expired)flushTiming();}};
   current.onfirstpcm=()=>{if(socket===current){currentAudioPath='pcm';markTiming('firstAudioIn');}};
   if(previous){previous.onclose=null;previous.close();}
@@ -394,6 +410,14 @@ function connect(){
     if(event.data instanceof ArrayBuffer){audioOut(event.data);return;}
     let message;try{message=JSON.parse(event.data);}catch{return;}
     if(message.type==='ready'){
+      if(noticeCall){
+        if(!noticeCall.ready(message,noticeStopPending)){void end();return;}
+        clearTimeout(noticeReadyTimer);
+        current.noticeVerified=true;
+        if(noticeStopPending){void end(undefined,{hangup:true});return;}
+        noticeReconnects=0;
+        if(rtcPreparing&&!rtcClient&&!rtcCandidate)void prepareRTC(audioContext,generation);
+      }
       markTiming('ready');
       callId=message.callId;memoryConnected=Boolean(message.memoryConnected);
       ready=true;starting=false;retryDelay=1000;document.body.classList.remove('reconnecting');$('send').disabled=false;
@@ -405,7 +429,8 @@ function connect(){
       if(!hasConnected&&!message.resumed&&!message.ring&&micMode)current.send(JSON.stringify({type:'text',id:crypto.randomUUID(),text:'통화를 막 시작했어. 한국어로 짧고 편안하게 인사해 줘.'}));
       hasConnected=true;const resolve=firstReady;firstReady=null;if(resolve)resolve(true);
       if(fallbackPending)requestPCM();
-    }else if(message.type==='budget_exhausted'){budgetBlocked=true;void end(BUDGET_MESSAGE);}
+    }else if(noticeCall&&noticeCall.failure(message.type)){void end();}
+    else if(message.type==='budget_exhausted'){budgetBlocked=true;void end(BUDGET_MESSAGE);}
     else if(message.type==='daily_limit'){dailyBlocked=true;void end(DAILY_MESSAGE);}
     else if(message.type==='call_busy'){void end('다른 기기에서 '+botParticle('이랑','랑')+' 통화 중이야. 그 통화를 끝내고 다시 걸어 줘');}
     else if(message.type==='calls_full'){void end('지금은 전화가 꽉 찼어. 조금 있다가 다시 걸어 줘');}
@@ -421,22 +446,55 @@ function connect(){
     else if(message.type==='audio_reset'||message.type==='interrupted'){stopWaiting();rtcClient?.nextTurn();epoch=message.epoch;speaking=false;lastSpeaker=null;}
     else if(message.type==='audio_end'){outputTurnOpen=false;}
     else if(message.type==='turn'){rtcClient?.nextTurn();lastSpeaker=null;}
-    else if(message.type==='reconnecting'&&!hangingUp){stopWaiting();ready=false;$('send').disabled=true;document.body.classList.add('reconnecting');connection('다시 잇는 중');status('연결을 다시 잇고 있어. 잠깐만 기다려 줘.');}
+    else if(message.type==='reconnecting'&&!hangingUp){noticeCall?.reconnecting();stopWaiting();ready=false;$('send').disabled=true;document.body.classList.add('reconnecting');connection('다시 잇는 중');status('연결을 다시 잇고 있어. 잠깐만 기다려 줘.');}
   };
   current.onerror=()=>{if(intended&&current===socket)status('연결을 다시 잇고 있어. 곁에 있을게.');};
   current.onclose=()=>{
     if(!intended||current!==socket)return;
+    clearTimeout(noticeReadyTimer);
     flushTiming();
     stopWaiting();
     if(hangingUp){void end(HANGUP_MESSAGE,{hangup:true});return;}
+    if(noticeCall){
+      if(!hasConnected||noticeReconnects>=3){noticeCall.failure('transport');void end();return;}
+      noticeCall.reconnecting();
+    }
     if(rtcClient)fallbackToPCM('control_reconnect');
     ready=false;$('send').disabled=true;document.body.classList.add('reconnecting');connection('다시 잇는 중');status('연결을 다시 잇고 있어. 통화는 계속 유지할게.');
-    clearTimeout(retryTimer);retryTimer=setTimeout(connect,retryDelay);retryDelay=Math.min(10000,retryDelay*2);
+    clearTimeout(retryTimer);retryTimer=setTimeout(noticeCall?reconnectNotice:connect,retryDelay);retryDelay=Math.min(10000,retryDelay*2);
   };
 }
 
+async function reconnectNotice(){
+  if(!intended||noticeResumePending||socket?.readyState===WebSocket.OPEN||socket?.readyState===WebSocket.CONNECTING)return;
+  const run=generation;
+  noticeResumePending=true;
+  try{
+    const resumed=await noticeCall.resume();
+    if(run!==generation)return;
+    if(resumed){noticeReconnects++;connect();}
+    else await end();
+  }finally{noticeResumePending=false;}
+}
+
+function stopCall(){
+  if(noticeCall&&hasConnected&&(!socket?.noticeVerified||socket.readyState!==WebSocket.OPEN)){
+    // Restore the verified control channel before ending a known call, without sending more audio.
+    noticeStopPending=true;
+    stream?.getTracks().forEach(track=>track.stop());
+    stream=null;
+    micSource?.disconnect();
+    worklet?.disconnect();
+    player?.disconnect();
+    clearTimeout(retryTimer);
+    void reconnectNotice();
+    return;
+  }
+  void end(undefined,{hangup:true});
+}
+
 function sendAudioReady(){
-  if(!intended||!socket||socket===audioReadySocket||socket.readyState!==WebSocket.OPEN)return;
+  if(!intended||noticeStopPending||!socket||socket===audioReadySocket||socket.readyState!==WebSocket.OPEN)return;
   const path=rtcPlaybackReady&&!pcmFallback?'webrtc':!rtcPreparing&&player?'pcm':null;
   if(!path)return;
   audioReadySocket=socket;
@@ -515,10 +573,11 @@ async function prepareMicrophone(context,run){
   socket?.bind(null,worklet);
   markTiming('micReady');
 }
-async function begin(microphone){
-  if(budgetBlocked||dailyBlocked)return false;
+async function begin(microphone,noticeMode){
+  if(!noticeCall&&(budgetBlocked||dailyBlocked))return false;
   if(intended){if(ready)return true;return false;}
   const run=++generation;
+  noticeReconnects=0;
   startTiming();
   intended=true;starting=true;micMode=microphone;retryDelay=1000;hasConnected=false;
   pcmFallback=false;fallbackPending=false;fallbackReason=null;clearTimeout(fallbackTimer);
@@ -540,14 +599,20 @@ async function begin(microphone){
     rtcPreparing=rtcEnabled;
     rtcPlaybackReady=false;
     const waiting=new Promise(resolve=>{firstReady=resolve;});
-    connect();
-    void prepareRTC(context,run);
+    if(!noticeCall){connect();void prepareRTC(context,run);}
     await Promise.all([preparePlayer(context,run),microphone?prepareMicrophone(context,run):Promise.resolve()]);
     if(run!==generation)return false;
+    if(noticeCall){
+      const approved=await (noticeMode==='resume'?noticeCall.resume():noticeCall.authorize(noticeMode,clientId));
+      if(run!==generation)return false;
+      if(!approved){await end();return false;}
+      connect();
+    }
     keepAwake();
     return await waiting;
   }catch(error){
     if(run!==generation)return false;
+    noticeCall?.microphoneFailed();
     await end(error.name==='NotAllowedError'?'마이크 사용을 허용해 줘. 준비되면 다시 전화해.':error.name==='NotFoundError'?'연결된 마이크가 없어. 글로도 이야기할 수 있어.':error.message);
     return false;
   }
@@ -570,7 +635,7 @@ function answerRing(state){
     void begin(true);
   }else{ringOffer(true);status(botParticle('이가','가')+' 전화를 걸었어. 받기를 누르면 바로 이어져.');}
 }
-if(!window.__marongCall){
+if(!noticeCall&&!window.__marongCall){
   window.__marongCall=Object.freeze({
     version:1,
     answerRing(id,answeredAt){
@@ -606,30 +671,32 @@ if(!window.__marongCall){
     },
   });
 }
-$('start').onclick=()=>begin(true);
-$('stop').onclick=()=>end(undefined,{hangup:true});
+if(noticeCall)noticeCall.attach({begin:mode=>begin(true,mode),end});
+else $('start').onclick=()=>begin(true);
+$('stop').onclick=noticeCall?stopCall:()=>end(undefined,{hangup:true});
 for(const id of ['topic-close','topic-picture','topic-title'])$(id).onclick=closeTopic;
 $('login').onclick=()=>location.assign('/');
 $('mute').onclick=()=>{
   muted=!muted;if(stream)stream.getAudioTracks().forEach(track=>{track.enabled=!muted;});
+  noticeCall?.setMuted(muted);
   $('mute').setAttribute('aria-pressed',String(muted));$('mute').setAttribute('aria-label',muted?'마이크 켜기':'마이크 끄기');
   $('control-caption').textContent=muted?'마이크 켜기 · 통화 끝내기':'마이크 끄기 · 통화 끝내기';
   status(muted?'마이크를 껐어. 다시 켤 때까지 기다릴게.':'듣고 있어. 편하게 말해 줘.');
   audioContext?.resume().catch(()=>{});
 };
 $('text-form').onsubmit=async event=>{
-  event.preventDefault();const text=$('message').value.trim();if(!text)return;
+  event.preventDefault();const text=$('message').value.trim();if(!text||noticeCall)return;
   if(await begin(false)){
     await audioContext.resume();transcript('user',text);lastSpeaker=null;
     socket.send(JSON.stringify({type:'text',id:crypto.randomUUID(),text}));$('message').value='';
   }
 };
 // Never end a call because of silence, elapsed time or tab visibility.
-window.addEventListener('online',()=>{if(intended){if(rtcClient)fallbackToPCM('network_change');if(socket?.readyState!==WebSocket.OPEN){clearTimeout(retryTimer);connect();}}});
+window.addEventListener('online',()=>{if(intended){if(rtcClient)fallbackToPCM('network_change');if(socket?.readyState!==WebSocket.OPEN){clearTimeout(retryTimer);if(noticeCall)void reconnectNotice();else connect();}}});
 navigator.connection?.addEventListener('change',()=>{if(intended&&rtcClient)fallbackToPCM('network_change');});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&intended){audioContext?.resume().catch(()=>{});keepAwake();}});
 document.addEventListener('pointerdown',()=>{if(intended&&audioContext?.state!=='running')audioContext?.resume().catch(()=>{});},{passive:true});
-window.addEventListener('pagehide',()=>{stopWaiting();flushTiming();intended=false;clearTimeout(retryTimer);if(socket)socket.close();if(stream)stream.getTracks().forEach(track=>track.stop());});
+window.addEventListener('pagehide',()=>{if(noticeCall){void end();return;}stopWaiting();flushTiming();intended=false;clearTimeout(retryTimer);if(socket)socket.close();if(stream)stream.getTracks().forEach(track=>track.stop());});
 setInterval(()=>{
   const now=performance.now();
   document.body.classList.toggle('speaking',intended&&speaking);
@@ -660,6 +727,7 @@ setInterval(()=>{
 setInterval(()=>{if(!intended)refresh();},15000);
 setInterval(sendPlaybackStats,2000);
 (async()=>{
+  if(noticeCall){await refresh();return;}
   const token=location.hash.slice(1);
   if(token){
     try{const response=await fetch('/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});if(response.ok)history.replaceState(null,'',location.pathname);}catch{}
@@ -670,6 +738,7 @@ setInterval(sendPlaybackStats,2000);
 // The in-app chat link (docs/app-chat.md SPEC-124): only when the chat answers 200 for this sign-in.
 // An Access sign-in redirect comes back opaque (status 0) and keeps the link hidden.
 (async()=>{
+  if(noticeCall)return;
   try{
     const response=await fetch('/chat/api/me',{credentials:'same-origin',redirect:'manual',cache:'no-store'});
     if(response.status===200)$('chat-link').hidden=false;

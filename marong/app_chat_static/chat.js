@@ -69,6 +69,25 @@ const app = {
   profileActive: false, seenKey: null,
   face: FACE,
 };
+const webNotifications = window.MarongWebNotifications;
+let visibleReplyQueue = Promise.resolve();
+const onScreenReplies = new Set();
+
+function reportReply(id, view) {
+  visibleReplyQueue = visibleReplyQueue.catch(() => {}).then(() => (view === 'hidden' || onScreenReplies.has(id))
+    ? webNotifications.request('/reply-view', 'POST', {messageId: id, view}) : undefined);
+}
+
+const visibleReplies = webNotifications?.supported && 'IntersectionObserver' in window
+  ? new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      const id = entry.target.dataset.id;
+      if (entry.isIntersecting && document.visibilityState === 'visible') {
+        if (!onScreenReplies.has(id)) { onScreenReplies.add(id); reportReply(id, 'visible'); }
+      } else if (onScreenReplies.delete(id)) reportReply(id, 'hidden');
+    }
+  }, {root: ui.log, threshold: 0.5})
+  : null;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const inApp = () => Boolean(window.__marongApp);
@@ -547,6 +566,9 @@ function add(messages) {
     const li = item(message);
     app.shown.set(message.id, li);
     place(li, message.id);
+    if (app.ready && message.from === 'marong' && message.kind === 'chat' && Number.isSafeInteger(message.id)) {
+      visibleReplies?.observe(li);
+    }
     app.last = Math.max(app.last, message.id);
     app.first = app.first === null ? message.id : Math.min(app.first, message.id);
     if (message.from === 'marong') setTyping(false);
@@ -870,6 +892,9 @@ function showMenu() {
   if (!me) return;
   const why = me.delivery.reason;
   $('menu-delivery').textContent = (DELIVERY[why] || DELIVERY.fcm_off)();
+  if (webNotifications?.apple && !inApp()) {
+    $('menu-delivery').textContent = '아이폰에서는 홈 화면에 추가한 뒤 내 마롱이에서 이 기기의 알림을 확인할 수 있어.';
+  }
   const settings = $('menu-settings');
   settings.hidden = !(why === 'notifications_off' && bridgeCan('openNotificationSettings'));
   const ring = $('menu-ring');
@@ -981,6 +1006,7 @@ async function start() {
   add(page.body.messages);
   refreshDays();
   toBottom();
+  webNotifications?.restoreChatFocus();
   app.ready = true;
   syncSend();
   void showDiary();
@@ -992,8 +1018,116 @@ async function start() {
   waitLoop();
 }
 
-start();
+async function openNotice(reference) {
+  const previousFocus = document.activeElement?.id || 'chat-heading';
+  const dialog = document.createElement('section');
+  dialog.className = 'state';
+  dialog.setAttribute('aria-live', 'polite');
+  const title = document.createElement('h1');
+  const message = document.createElement('p');
+  const retry = document.createElement('button');
+  const ordinary = document.createElement('button');
+  const chat = document.createElement('button');
+  title.className = 'state-title';
+  message.className = 'state-text';
+  title.tabIndex = -1;
+  retry.type = ordinary.type = chat.type = 'button';
+  retry.className = ordinary.className = chat.className = 'state-action';
+  retry.textContent = '다시 확인';
+  ordinary.textContent = '일반 통화';
+  chat.textContent = '글 대화로';
+  dialog.append(title, message, retry, ordinary, chat);
+  ui.log.before(dialog);
+  const hidden = [ui.log, ui.form, ui.menuButton];
+  for (const element of hidden) element.hidden = true;
+  let inactive = false;
+  let submitted = false;
+  chat.onclick = () => {
+    inactive = true;
+    webNotifications.clear();
+    dialog.remove();
+    for (const element of hidden) element.hidden = false;
+    void start();
+  };
+  window.addEventListener('pageshow', event => {
+    if (event.persisted && submitted && !inactive) chat.click();
+  });
+  function show(head, line, allowRetry = false) {
+    title.textContent = head;
+    message.textContent = line;
+    retry.hidden = !allowRetry;
+    ordinary.hidden = true;
+    chat.hidden = head === '알림을 확인하고 있어';
+  }
+  async function verify(first = false) {
+    show('알림을 확인하고 있어', '지금 로그인과 알림을 열 수 있는지 확인 중이야.');
+    if (first) title.focus();
+    const response = await webNotifications.request('/target/resolve', 'POST', {targetRef: reference});
+    if (inactive) return;
+    if (response.status === 200 && response.data.state === 'chat') { chat.click(); return; }
+    if (response.status === 401 && webNotifications.preserve('/chat/')) {
+      location.replace('/chat/login?expired=1');
+      return;
+    }
+    if (response.status === 200 && response.data?.state === 'ring_ready'
+        && document.body.dataset.noticeCallEnabled === 'true') {
+      const subscription = await webNotifications.request('/subscription');
+      if (inactive) return;
+      if (subscription.status === 401 && webNotifications.preserve('/chat/')) {
+        location.replace('/chat/login?expired=1');
+        return;
+      }
+      if (subscription.status === 200 && subscription.data?.state === 'active'
+          && webNotifications.openCall(reference, previousFocus)) { submitted = true; return; }
+    }
+    const redial = response.status === 200 && response.data?.state === 'ring_answered'
+      && document.body.dataset.noticeCallEnabled === 'true' && response.redialChoice;
+    const ringState = {
+      ring_ready: ['약속 전화가 와 있어', '화면을 열기만 해서는 수락하지 않아.'],
+      ring_expired: ['약속 전화 시간이 지났어', '더 이상 이 약속 전화를 받을 수 없어.'],
+      ring_answered: ['이미 받은 전화야', '이 약속 전화는 이미 처리됐어. 글 대화로 돌아갈 수 있어.'],
+      ring_unavailable: ['지금은 이 전화를 받을 수 없어', '현재 확인한 상태로는 이 약속 전화를 연결할 수 없어.'],
+    }[response.status === 200 ? response.data?.state : ''];
+    if (ringState) {
+      if (redial) show('통화가 끝났어', '기존 통화에 다시 연결할 수 없어. 원하면 새로 전화를 걸 수 있어.');
+      else show(...ringState, response.data.state === 'ring_unavailable');
+      if (redial || (response.data.state === 'ring_expired' && response.ordinaryChoice
+          && document.body.dataset.noticeCallEnabled === 'true')) {
+        ordinary.hidden = false;
+        ordinary.textContent = redial ? '다시 걸기' : '일반 통화';
+        ordinary.onclick = () => {
+          if (submitted) return;
+          submitted = webNotifications.openCall(reference, previousFocus, response.ordinaryChoice, redial || undefined);
+          if (!submitted) void verify();
+        };
+      }
+    } else if ([400, 403, 404].includes(response.status)) {
+      webNotifications.clear();
+      show('이 알림을 열 수 없어', '글 대화로 돌아가 다시 확인할 수 있어.');
+    } else if (response.status === 429) {
+      show('잠시 뒤 알림을 확인해 줘', '안내된 대기 시간이 지나면 알림을 다시 확인할 수 있어.', true);
+      retry.disabled = true;
+      setTimeout(() => { retry.disabled = false; }, Math.max(response.wait, 1) * 1000);
+    } else {
+      show('아직 알림을 확인할 수 없어', '연결을 확인한 뒤 다시 시도해 줘. 확인 전에는 알림 내용을 열 수 없어.', true);
+    }
+    if (first) title.focus();
+  }
+  retry.onclick = () => verify();
+  await verify(true);
+}
+
+const noticeReference = webNotifications?.restore('/chat/');
+if (noticeReference) void openNotice(noticeReference);
+else start();
+window.addEventListener('hashchange', () => {
+  if (webNotifications?.capture() && webNotifications.preserve('/chat/')) location.reload();
+});
 document.addEventListener('visibilitychange', () => {
   if (app.profileActive && document.visibilityState === 'visible') refreshProfile();
+  if (document.visibilityState !== 'visible' && visibleReplies) {
+    for (const id of onScreenReplies) reportReply(id, 'hidden');
+    onScreenReplies.clear();
+  }
 });
 void discoverPersona();

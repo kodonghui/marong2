@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ko" data-theme="night">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#121729">
+  <meta name="color-scheme" content="dark">
+  <title>마롱이 · 통화</title>
+  <link rel="stylesheet" href="/chat/notice-call.css">
+  <script src="/chat/web-notifications.js" defer></script>
+  <script src="/chat/notice-call.js" defer></script>
+  <script src="/livekit-client.js" async></script>
+  <script src="/worker-socket.js" defer></script>
+  <script src="/rtc-client.js" defer></script>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main class="notice-phone" data-navigation="@NAVIGATION@" data-client-id="@CALL_CLIENT@" data-purpose="@PURPOSE@">
+    <header><img src="/face/v1/01-neutral.webp" width="24" height="24" alt="">마롱이</header>
+    <section class="notice-card" aria-labelledby="notice-title">
+      <div class="notice-portrait">
+        <img id="face" src="/face/v1/01-neutral.webp" width="152" height="152" alt="">
+        <img id="topic-picture" width="152" height="152" alt="" hidden>
+        <p id="topic-title" hidden></p>
+        <button id="topic-close" type="button" hidden>그림 닫기</button>
+      </div>
+      <h1 id="notice-title" tabindex="-1">알림을 확인하고 있어</h1>
+      <p id="notice-detail" aria-live="polite">지금 로그인과 알림을 열 수 있는지 확인 중이야.</p>
+      <div class="notice-actions">
+        <button id="notice-action" class="notice-primary" type="button" hidden></button>
+        <a id="notice-back" href="/chat/">글 대화로</a>
+      </div>
+      <div id="notice-controls" class="notice-call-controls" hidden>
+        <button id="mute" type="button" aria-pressed="false">음소거</button>
+        <button id="stop" class="notice-hangup" type="button">끊기</button>
+      </div>
+      <p id="status" role="status" hidden></p>
+      <div hidden>
+        <span id="eyebrow"></span><span id="headline"></span><span id="intro"></span>
+        <span id="connection"></span><span id="control-caption"></span>
+        <button id="start" type="button" disabled></button><button id="login" type="button"></button>
+        <a id="chat-link" href="/chat/">글 대화</a>
+        <div id="transcript"></div>
+        <form id="text-form"><input id="message"><button id="send" type="submit">보내기</button></form>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

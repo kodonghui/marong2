@@ -24,12 +24,18 @@ function bind(data){
 self.onmessage=({data})=>{
   if(data.type==='connect'){
     bind(data);
-    ws=new WebSocket(data.url);ws.binaryType='arraybuffer';
-    ws.onopen=()=>self.postMessage({type:'open'});
+    const notice=data.notice;
+    ws=notice?new WebSocket(data.url,'marong-notified-v1'):new WebSocket(data.url);ws.binaryType='arraybuffer';
+    ws.onopen=()=>{
+      if(notice&&ws.protocol!=='marong-notified-v1'){ws.close();return;}
+      if(notice)ws.send(JSON.stringify(notice.frame));
+      self.postMessage({type:'open'});
+    };
     ws.onerror=()=>self.postMessage({type:'error'});
     ws.onclose=()=>{ready=false;self.postMessage({type:'close'});self.close();};
     ws.onmessage=({data:payload})=>{
       if(payload instanceof ArrayBuffer){
+        if(notice&&!ready)return;
         if(payload.byteLength<24)return;
         const h=new DataView(payload),count=h.getUint32(20),packetEpoch=h.getUint32(4);
         if(h.getUint32(0)!==0x4d524732||payload.byteLength!==24+count*2||packetEpoch<epoch)return;
@@ -41,7 +47,9 @@ self.onmessage=({data})=>{
         return;
       }
       let msg;try{msg=JSON.parse(payload);}catch{return;}
-      if(msg.type==='ready')ready=true;
+      if(msg.type==='ready')ready=!notice||(msg.memoryConnected===true&&msg.ring===notice.ring
+        &&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(msg.callId)
+        &&(!notice.expected||notice.expected===msg.callId));
       else if(msg.type==='reconnecting')ready=false;
       else if(msg.type==='audio_reset'||msg.type==='interrupted'||(msg.type==='audio_transport'&&msg.switched)){
         epoch=msg.epoch;openTurn=false;media({type:'clear',epoch});

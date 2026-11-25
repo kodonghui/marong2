@@ -245,10 +245,10 @@ class AppStore:
         return await self._one("SELECT " + MESSAGE_COLUMNS + " FROM marong.messages m "
                                "WHERE m.room_key = %s AND m.kakao_id = %s", (room_key, kakao_id))
 
-    def _shown(self) -> str:
+    def _shown(self, requested="%(room)s") -> str:
         # Marong's words that never reached the friend and memory deleted in a call (SPEC-113).
         return ("AND NOT (m.role = 'assistant' AND m.meta->>'delivered' = 'false') "
-                + self._call_guard('message', 'm.id', 'm.room_key'))
+                + self._call_guard('message', 'm.id', 'm.room_key', requested))
 
     async def app_messages(self, room_key: str, before: int | None, limit: int) -> list[dict]:
         """Up to limit+1 messages of the DM room before `before`, newest first (the extra one says there is more)."""

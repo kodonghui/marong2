@@ -1,6 +1,6 @@
 'use strict';
 class WorkerSocket {
-  constructor(url,player,capture,transportUrl){
+  constructor(url,player,capture,transportUrl,notice){
     this.readyState=WebSocket.CONNECTING;this.bufferedAmount=0;
     this.worker=new Worker(transportUrl);
     this.worker.onmessage=({data})=>{
@@ -12,7 +12,7 @@ class WorkerSocket {
       else if(data.type==='transport_stats'){this.bufferedAmount=data.bufferedAmount;this.onstats?.(data);}
     };
     this.worker.onerror=()=>{this.readyState=WebSocket.CLOSED;this.onerror?.();this.onclose?.();this.worker.terminate();};
-    this.worker.postMessage({type:'connect',url});
+    this.worker.postMessage(notice?{type:'connect',url,notice}:{type:'connect',url});
     this.bind(player,capture);
   }
   bind(player,capture){

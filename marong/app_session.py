@@ -129,6 +129,7 @@ class AppSessions:
         self.session_age = timedelta(days=session_days)
         self.attempts: dict[str, CodeAttempts] = {}
         self.next_prune = 0.0
+        self.web_push_subscriptions = None
 
     def _check_invite(self, row, now):
         if row is None:
@@ -175,7 +176,7 @@ class AppSessions:
             """, (token_hash(token),))
         return self._check_invite(row, self.now())["kind"]
 
-    async def join(self, token, name, label):
+    async def join(self, token, name, label, *, installation=None):
         if not isinstance(token, str) or not TOKEN.fullmatch(token):
             raise SessionError("invite_not_found")
         async with self.pool.connection() as conn, conn.transaction():
@@ -195,7 +196,7 @@ class AppSessions:
                 await self.provision(conn, friend_id, now)
             await conn.execute("UPDATE marong.invites SET used_at=%s, used_by=%s WHERE id=%s",
                                (now, friend_id, invite["id"]))
-            return await self._sign_in(conn, friend_id, "invite", label, now)
+            return await self._sign_in(conn, friend_id, "invite", label, now, installation)
 
     async def provision(self, conn, friend_id, now):
         """Create the missing linked-account rows inside the caller's transaction."""
@@ -239,16 +240,18 @@ class AppSessions:
                 VALUES (%s,%s,0,0,0)
             """, (room_key, friend_id))
 
-    async def _sign_in(self, conn, friend_id, method, label, now):
+    async def _sign_in(self, conn, friend_id, method, label, now, installation=None):
         names = await one(conn, """
             SELECT f.name, COALESCE(p.bot_name,'마롱이') AS bot_name FROM marong.friends f
             LEFT JOIN marong.friend_profiles p ON p.friend_id=f.id WHERE f.id=%s
         """, (friend_id,))
         token = secrets.token_urlsafe(32)
-        await conn.execute("""
+        session = await one(conn, """
             INSERT INTO marong.app_sessions(friend_id,token_hash,method,label,created_at,last_seen_at,expires_at)
-            VALUES (%s,%s,%s,%s,%s,%s,%s)
+            VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id
         """, (friend_id, token_hash(token), method, label, now, now, now + self.session_age))
+        if installation is not None and self.web_push_subscriptions is not None:
+            await self.web_push_subscriptions.switch_installation(conn, installation, session["id"])
         return SignedIn(token, names["name"], names["bot_name"])
 
     async def find_session(self, token):
@@ -296,7 +299,7 @@ class AppSessions:
                     return code, expiry
             raise SessionError("internal")
 
-    async def redeem_device_code(self, code, address, label):
+    async def redeem_device_code(self, code, address, label, *, installation=None):
         if not isinstance(code, str) or not CODE.fullmatch(code):
             raise SessionError("invalid_input")
         now = self.now().timestamp()
@@ -319,7 +322,7 @@ class AppSessions:
                     WHERE code_hash=%s AND used_at IS NULL AND expires_at>%s RETURNING friend_id
                 """, (now, self._device_hash(code), now))
                 if row is not None:
-                    return await self._sign_in(conn, row["friend_id"], "code", label, now)
+                    return await self._sign_in(conn, row["friend_id"], "code", label, now, installation)
             while state.failed and state.failed[0] <= instant - 600:
                 state.failed.popleft()
             state.failed.append(instant)
@@ -330,7 +333,24 @@ class AppSessions:
     async def logout(self, token):
         if not isinstance(token, str) or not TOKEN.fullmatch(token):
             return
-        async with self.pool.connection() as conn:
-            await conn.execute("""
+        async with self.pool.connection() as conn, conn.transaction():
+            ended = await one(conn, """
                 UPDATE marong.app_sessions SET revoked_at=%s WHERE token_hash=%s AND revoked_at IS NULL
+                RETURNING id
             """, (self.now(), token_hash(token)))
+            if ended is not None and self.web_push_subscriptions is not None:
+                await self.web_push_subscriptions.revoke_sessions(conn, [ended["id"]])
+
+    async def revoke_friend_sessions(self, conn, friend_id, now):
+        if self.web_push_subscriptions is None:
+            await conn.execute("""
+                UPDATE marong.app_sessions SET revoked_at=%s WHERE friend_id=%s AND revoked_at IS NULL AND expires_at>%s
+            """, (now, friend_id, now))
+            return
+        rows = await (await conn.execute("""
+            SELECT id FROM marong.app_sessions
+            WHERE friend_id=%s AND revoked_at IS NULL AND expires_at>%s ORDER BY id FOR UPDATE
+        """, (friend_id, now))).fetchall()
+        ids = [row["id"] for row in rows]
+        await conn.execute("UPDATE marong.app_sessions SET revoked_at=%s WHERE id=ANY(%s)", (now, ids))
+        await self.web_push_subscriptions.revoke_sessions(conn, ids)

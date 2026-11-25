@@ -19,12 +19,18 @@ log = logging.getLogger(__name__)
 
 
 class UnifiedDelivery:
-    def __init__(self, store, push, authentication, on_saved, *, origin=None):
+    def __init__(self, store, push, authentication, on_saved, *, origin=None, web_push=None, spawn=None):
         self.store = store
         self.push = push
         self.authentication = authentication
         self.on_saved = on_saved
         self.origin = origin
+        self.web_push = web_push
+        self.spawn = spawn
+
+    def web_event(self, friend, kind, event, ttl):
+        if self.web_push is not None:
+            self.spawn(self.web_push.publish(friend, kind, event, ttl))
 
     async def notifications_allowed(self, friend_id):
         if self.authentication != "session":
@@ -44,6 +50,8 @@ class UnifiedDelivery:
         if saved is None:
             return "later"
         self.on_saved()
+        if notify and kind in {"proactive", "reminder"}:
+            self.web_event(friend_id, kind, saved, ttl_s)
         if notify and self.push.enabled and (self.authentication != "session" or target["has_session"]):
             return await self._notify(friend_id, kind, app_text or text, app_channel, ttl_s, open_path)
         return "later"
@@ -310,6 +318,7 @@ class AppReminders(PrivateReminders):
             await self.delivery.say(row["friend_id"], text, kind="call", meta={**base, "ring": ring["id"]},
                                     key=f"app-ring:{ring['id']}", notify=False)
         await self.store.finish_reminder(row, "sent", following)
+        self.delivery.web_event(row["friend_id"], "call", ring["id"], int(ANSWER_DISCORD.total_seconds()))
         return 1
 
     async def sweep_rings(self):

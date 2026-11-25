@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from aiohttp import ClientSession,ClientTimeout,WSMsgType
 from marong import continuity
 from marong.continuity import BUDGET_GOODBYE, RING_ANSWERED_TEXT
+from call_memory import NoticeRingState
 from memory_tools import CALL_GREETING_TEXT,TranscriptRecorder,execute_tool
 from hangup import Consent
 from call_search import queries as search_queries
@@ -93,6 +94,11 @@ class LiveSession:
         # ring: the ring id the page was opened with (/?ring=), or None. ring_info: the promise this call answers.
         # ring_topic: the picture card of a hello call, sent once with the first 'ready' (SPEC-268, SPEC-269).
         self.ring_id=ring;self.ring_info=None;self.ring_greet=False;self.ring_topic=None
+        self.notified_start=None
+        self.notice_connection=None
+        self.notice_connection_confirmed=False
+        self.atomic_legacy_ring=False
+        self.skip_legacy_ring=False
         self.call_safety=None
         self.safety_queue=asyncio.Queue(maxsize=32)
         self.ws_opened=time.monotonic()
@@ -294,7 +300,7 @@ class LiveSession:
                     if not isinstance(item,dict):continue
                     if item.get('type')=='stop':
                         self.d.setdefault('browserEnd','client_stop')
-                        self.explicit=True
+                        self.explicit=self.notice_connection is None or self.notice_connection_confirmed
                         return
                     if self.entry_transport=='discord':continue
                     if item.get('type')=='timing':
@@ -361,13 +367,27 @@ class LiveSession:
 
     async def run(self):
         if self.store and self.p:
-            self.call_id,self.logical_resumed,self.call_started_at=await self.store.start_call(
-                self.p,self.client_id,self.voice,BUILD,
-                entrypoint='discord' if self.entry_transport=='discord' else 'web')
+            initial = self.notified_start
+            if initial is None and self.atomic_legacy_ring:
+                try:
+                    initial = await self.store.reserve_notice_ring(
+                        self.p, self.client_id, self.voice, BUILD, self.ring_id, legacy=True)
+                except NoticeRingState as error:
+                    if error.state != "ring_expired":
+                        raise
+            if initial is None:
+                self.call_id,self.logical_resumed,self.call_started_at=await self.store.start_call(
+                    self.p,self.client_id,self.voice,BUILD,
+                    entrypoint='discord' if self.entry_transport=='discord' else 'web')
+            else:
+                self.call_id, self.logical_resumed, self.call_started_at, ring, *_ = initial
             self.mark('callRow')
             if getattr(self.store, "friend_marks", False):
                 self.revision = await self.store.revision(self.p)
-            await self.claim_ring()
+            if initial is not None and ring is not None:
+                self.apply_claimed_ring(ring)
+            elif not self.skip_legacy_ring:
+                await self.claim_ring()
             if os.getenv('MARONG_SAFETY')=='on':
                 from call_safety import CallSafety
                 from server import PROJECT
@@ -402,8 +422,9 @@ class LiveSession:
                 if self.timing_segment or self.playback_reports:
                     try:await asyncio.wait_for(self.flush_connection_reports(),1)
                     except Exception:print('call_connect_report_write_error',flush=True)
-                try:await asyncio.wait_for(self.store.finish(self.p,self.call_id,self.explicit,client_id=self.client_id,reason=self.close_reason),4)
-                except Exception:self.d['memoryCloseFailed']=True
+                if self.notice_connection is None:
+                    try:await asyncio.wait_for(self.store.finish(self.p,self.call_id,self.explicit,client_id=self.client_id,reason=self.close_reason),4)
+                    except Exception:self.d['memoryCloseFailed']=True
             if self.explicit:self.resume.clear()
             if self.rtc:
                 self.rtc.session=None;self.rtc.idle_at=time.monotonic()
@@ -422,6 +443,9 @@ class LiveSession:
         if not got:
             if self.ring_id:self.d['ring']='none';print('ring_not_answered',flush=True)
             return
+        self.apply_claimed_ring(got)
+
+    def apply_claimed_ring(self, got):
         at=got['created_at'];reason='hello' if got.get('reason')=='hello' else 'promise'
         self.ring_info={'title':got['title'],'say':got['say'],'at':at,'reason':reason}
         self.d['ring']='answered' if got['fresh'] else 'again'
@@ -553,6 +577,13 @@ class LiveSession:
         else:self.quiet_mic=None
 
     async def ready_message(self):
+        if self.notice_connection is not None and not self.notice_connection_confirmed:
+            if self.stop.is_set() or self.ws.closed:
+                raise ConnectionError('notice_disconnected')
+            if not self.segment:
+                raise NoticeRingState('db_unavailable')
+            await self.store.confirm_notice_connection(self.p, self.notice_connection)
+            self.notice_connection_confirmed=True
         self.ready=True
         ready={'type':'ready','resumed':bool(self.handle) or self.logical_resumed,'callId':self.call_id,
             'build':BUILD,'audioFormat':2,'epoch':self.epoch,'audioTransport':self.entry_transport or ('webrtc' if self.rtc else 'pcm'),
@@ -600,6 +631,7 @@ class LiveSession:
     async def google_loop(self):
         delay=1
         while not self.stop.is_set():
+            preparing_notice = self.notice_connection is not None and not self.notice_connection_confirmed
             if not self.prepared:self.ready=False
             self.epoch+=1;self.in_turn=False;self.offset=0;self.sequence=0
             await self.emit({'type':'audio_reset','epoch':self.epoch})
@@ -641,6 +673,8 @@ class LiveSession:
                                     self.p,self.call_id,self.client_id,self.model,**segment_options),3)
                             except Exception:
                                 self.d['memoryConnected']=False
+                                if preparing_notice:
+                                    raise
                             else:
                                 if not self.handle:
                                     previous, older = await self.pick_previous(segment_kind, opened_at)
@@ -664,8 +698,15 @@ class LiveSession:
                             raise
                         if self.segment and self.entry_transport!='discord':
                             self.mark('providerReady')
-                            try:await asyncio.wait_for(self.store.segment_ready(self.segment), .4)
-                            except Exception:print('segment_ready_write_error',flush=True)
+                            try:
+                                opened = await asyncio.wait_for(self.store.segment_ready(self.segment), .4)
+                            except Exception:
+                                if preparing_notice:
+                                    raise
+                                print('segment_ready_write_error',flush=True)
+                            else:
+                                if preparing_notice and not opened:
+                                    raise NoticeRingState('db_unavailable')
                             self.timing_segment=self.timing_segment or self.segment
                         if self.entry_transport!='discord':self.mark('providerReady')
                         if self.hold_continuity_audio() and previous:
@@ -677,8 +718,10 @@ class LiveSession:
                     self.configure_mic(tuning)
                     await self.ready_message();delay=1
                     await self.run_provider(upstream,ledger,usage_mode,tuning,lead_in)
-            except asyncio.CancelledError:raise
+            except (asyncio.CancelledError, NoticeRingState):raise
             except Exception as error:
+                if self.notice_connection is not None and not self.notice_connection_confirmed:
+                    raise
                 print(f'connection_retry client={self.client_id[:8]} error={type(error).__name__}',flush=True)
             if not self.prepared:self.ready=False
             if self.close_reason=='budget_hard_stop':
