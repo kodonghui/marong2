@@ -32,11 +32,11 @@ Orca 항목 143의 e2698을 고정한 위임 답변 `msg_e6b8cd77a95b`(요청 `m
 | TASK-570 | 구현·브라우저 모의 시험 | `e6cb25a` | 기존 manifest·아이콘 보존, 승인 페이로드 처리와 중복 표시 제어, 같은 출처 클릭, 요청 캐시 처리 없음 |
 | TASK-571 | 구현·브라우저 모의 시험 | `e6cb25a` | Chromium·WebKit의 360·430px와 두 테마, 일반 Safari 안내, 권한과 구독 상태, 명시 선택, 등록 충돌 후 재조회, 철회 |
 | TASK-572 | 구현·검증 | `e6cb25a` | API-314의 다섯 결과, 변조·계정 불일치·삭제·형식·출처·오류 응답, 조회 시 전화 변경 없음 |
-| TASK-573 | 구현·자동 시험 | `e6cb25a`, `f75f5a0` | SCR-107에서 대상 확인 후 같은 앱 창에 통화 문서를 엽니다. HTTP 마이크 적용 조건, 경로·참조 정책, 재로그인 재조회와 복귀 초점을 확인했습니다. |
-| TASK-574 | 구현·자동 시험 | `e6cb25a` | API-315와 기존 역할의 원자적 예약·수락, 웹 선행·Android 선행·동시 수락, 기한과 잠금 대기 중 세션 만료, 같은 통화 ID 재확인 |
-| TASK-575 | 구현·서버와 브라우저 모의 시험 | `45a13f1`, `f75f5a0` | API-317 실패 프레임 11종과 현재 문서의 첫 프레임, 같은 통화 ID 재연결, 모의 WebRTC·PCM 전환을 확인했습니다. 종료한 일반 통화의 재연결에서 새 통화 생성을 차단합니다. |
-| TASK-576 | 구현·브라우저 모의 시험 | `f75f5a0` | 별도 받기, 권한 거절 시 수락 0건, 마이크 지연 중 만료·선행 수락, 별도 일반 통화, 응답 유실 뒤 같은 결과, 재연결·종료·초점을 확인했습니다. |
-| TASK-577 | 자동 회귀 시험 | `45a13f1`, `f75f5a0` | 전화 문서를 연결한 뒤 활성·비활성에서 일반 Safari·Android·FCM, 기존 글 대화·약속 전화·재연결·앱 업데이트를 다시 확인했습니다. |
+| TASK-573 | A·C 구현·자동 시험 | `e6cb25a`, `f75f5a0`, `273f4ba` | SCR-107에서 대상 확인 후 같은 앱 창에 용도별 통화 문서를 엽니다. 비활성 구독의 미수락 만료 안내, 재로그인·설치·대상·선택 확인, HTTP 마이크 정책과 복귀 초점을 확인했습니다. |
+| TASK-574 | C 구현·자동 시험, B 저장 계약 검토 대기 | `e6cb25a`, `273f4ba` | API-315의 원자적 예약·수락과 결과 확인에서 수락용 문서와 활성 구독을 확인합니다. 웹·Android 선행과 경합, 세션 만료, 같은 통화 ID 재확인을 시험했습니다. |
+| TASK-575 | A·C 구현·자동 시험, B 저장 계약 검토 대기 | `45a13f1`, `f75f5a0`, `273f4ba` | API-317의 두 시작 방식과 문서 검증, 기존 실패 프레임 11종, 동일 통화 재연결, 모의 WebRTC·PCM 전환을 확인했습니다. |
+| TASK-576 | A·C 구현·브라우저 모의 시험, B 종료 경계 대기 | `f75f5a0`, `273f4ba`, `c87dd7b` | 별도 받기와 일반 통화 시작, 마이크 거절과 대기 중 만료, 응답 유실 뒤 같은 결과, 재연결·종료·초점을 확인했습니다. |
+| TASK-577 | A·C 자동 회귀 시험 | `45a13f1`, `f75f5a0`, `273f4ba` | 일반 Safari·Android·FCM과 기존 글 대화·약속 전화·재연결을 모의 환경에서 확인했습니다. |
 
 ## TASK-575·577 독립 시험
 
@@ -112,7 +112,32 @@ iPhone 기기 확인은 앱 창 유지, 알림 탭·잠금 해제·재로그인,
 | `tests/test_notice_call_browser.py`, `tests/test_web_push_browser.py` | 통화 문서 시험은 두 엔진에서 4회 실행하여 매회 5개 통과. 기존 알림 시험 4개 통과 |
 | `git diff --check`, 두 시험 모듈의 `python -m compileall -q`, CORTHEX `term-check.py` | 통과 |
 
-문서 식별값 조건, 비활성 구독의 일반 통화 조작, 원래 창을 잃은 예약 종료는 위임 설계 검토 중입니다. 재연결 결과는 루프백과 모의 오디오 환경의 판정입니다.
+이 커밋의 범위는 시험 안정화입니다. 재연결 결과는 루프백과 모의 오디오 환경의 판정입니다. 이후 위임 승인과 구현은 아래 기록에 연결했습니다.
+
+## 만료 안내의 일반 통화와 문서 권한
+
+구현과 서버 자동 시험은 `273f4ba4c22212f676da63e3ac518f2d3b5f75b9`, 화면 준비 보완과 브라우저 시험은 `c87dd7b095e5a19745919ba422c4d89db4b33389`에서 진행했습니다. e2714의 A·B는 위임 승인 `msg_9c2b8c9e4213`과 요청 `msg_dba0a8a1acab`, C는 승인 `msg_91e4a225a770`과 요청 `msg_26e004008daf`를 따릅니다. A·B 메모의 SHA-256은 `73a71851a6014fdad8e9e503530af3f39df8b88cea2d5e15066d1d903d7e3040`, C 메모는 `d5468a1ffca83d9eb714d6c3ce5e099ec5e1f2e05ca3d064bf6fd4a020068c02`입니다. e2698 메모와 고정 06·08·09·10의 바이트를 보존했습니다. [06 통화 계약](../06-api/iphone-home-webapp-notifications-version-candidate.md) · [07 사이트맵](../07-sitemap/iphone-home-webapp-notifications-draft.md) · [08 만료 안내](../08-screens/iphone-home-webapp-notifications/SCR-001.md#notice-ring-expired) · [08 재연결과 종료](../08-screens/iphone-home-webapp-notifications/SCR-002.md) · [09 기준 화면](../../design/iphone-home-webapp-notifications-version-candidate/index.html)
+
+- **A · TASK-573·575·576, SPEC-547·548.** 만료 안내의 `일반 통화`를 선택하면 현재 세션·설치·대상 참조에 묶인 선택 증명을 같은 창의 `POST /chat/notice-call`에 보냅니다. API-314의 읽기 응답 헤더가 선택 증명을 전달하며 기존 JSON과 조회 동작을 사용합니다. 서버에서 현재 미수락 만료와 선택을 확인한 문서에 마이크를 허용합니다. 문서의 `통화 시작` 뒤 마이크 준비가 성공하면 API-317로 일반 발신을 요청합니다. 통화 생성 잠금 아래 대상을 다시 확인하며 구독 등록과 약속 전화 수락은 발생하지 않습니다.
+- **C · TASK-574·575·577, SPEC-545·546·550.** API-315의 새 수락과 결과 확인에는 현재 활성 구독과 수락용 문서가 필요합니다. API-317은 일반 발신 문서의 용도를 직접 확인하고, 알림 발신은 이 검증을 거친 API-315의 연결 토큰과 기존 소유 기록을 확인합니다. 연결 토큰의 검증 버전 변경으로 이전 초안에서 발급된 토큰은 새 코드에서 만료 응답과 동일하게 거절됩니다. API-315·317의 필드와 `not_allowed` 결과를 사용합니다.
+- **B · TASK-574·575·576, SPEC-546·550 · 저장 계약 검토 대기.** `app_rings.answered_at`은 최초 수락 시각을 보존합니다. `calls.status`는 약속 전화를 수락해 예약할 때와 웹소켓 연결을 시도할 때 이미 `live`가 될 수 있습니다. `last_beat_at`은 연결 시도·대화 기록·종료 처리에서 갱신됩니다. `segments.provider_ready_at`은 모델 연결을, `segments.closed_at`은 모델 교체·연결 정리·재시작도 기록합니다. 이 값으로 실제 첫 통화 연결과 서버의 첫 복구 대기 전환을 재시작 뒤 구분할 수 없습니다. 최소 변경안은 TBL-003의 알림 예약 통화에 첫 연결 확인과 현재 단절 확정 시각을 저장하는 nullable 시각 필드 두 개를 추가하고 기존 호출자·약속 전화·통화 잠금 아래 갱신하는 것입니다. 준비 확인에 성공했을 때 복구 대기 시각을 비우고 실제 단절이 처음 확정됐을 때만 기록합니다. 이전 행의 시각은 추정할 수 없으므로 별도 전환 기준이 필요합니다. 최초 수락 기준 120초와 단절 확정 기준 120초의 적용, 새 경계의 가상 시계·재시작·경합 시험은 이 계약 결정 뒤 진행합니다.
+
+수정 전 기준 `06baba04a8eac0680b9ee5412f9c704ab485a97e`에서 합성 계정의 미발급 ID 수락이 403 판정을 통과하지 못했습니다. 같은 기준의 화면 스크립트로 비활성 구독 재로그인 시험을 실행했을 때 Chromium과 Playwright WebKit 모두 일반 통화 조작을 찾지 못했습니다. 수정 뒤 두 경계와 일반 발신에서 약속 전화 수락·구독 변경 0건을 확인했습니다.
+
+통화 스크립트 응답을 보류한 시험은 `273f4ba`에서 두 엔진 모두 통화 시작을 먼저 활성화해 실패했습니다. `c87dd7b`는 통화 실행기가 연결된 뒤에 받기와 통화 시작을 활성화합니다. 같은 시험에서 스크립트 응답 전후의 버튼 상태와 마이크 거절 시 연결 0건을 확인했습니다.
+
+| 실행 명령 또는 파일 | 결과 |
+| --- | --- |
+| `tests/test_web_push_subscriptions.py` | `273f4ba`의 격리 PostgreSQL 28개 통과. 같은 계정 재로그인, 미발급·다른 용도·세션·설치·대상 거절, 통화 생성 직전 대상 변경, 수락 결과 재확인, 일반 Safari·Android API-107과 모의 전송을 확인했습니다. |
+| `tests/test_web_push_schema.py`, `tests/test_unified_auth.py`, `tests/test_app_ring.py`, `tests/test_app_chat.py` | `273f4ba`에서 마이그레이션 2개, 통합 인증 11개, 약속 전화 75개, 글 대화·모의 FCM 454개 확인 통과. Windows DB 시험은 Python 3.12 Selector 이벤트 루프에서 실행했습니다. |
+| `.venv/Scripts/python tests/test_notice_call_browser.py`, `.venv/Scripts/python tests/test_web_push_browser.py` | `c87dd7b`에서 통화 문서 5개와 기존 알림 4개 통과. 두 모의 엔진에서 재로그인, 같은 창과 초점, 별도 일반 통화, 준비 지연, 권한 거절, 연결 결과와 같은 ID 복구를 확인했습니다. |
+| `tools/vertex_live/test_relay.py`, `test_rtc_api.py`, `test_midcall.py`, `test_web_reconnect.py` 및 `node --test tools/vertex_live/test_transport.cjs tools/vertex_live/test_fallback.cjs tools/vertex_live/test_rtc_watchdog.cjs tools/vertex_live/test_hangup_client.cjs` | `273f4ba`에서 Python과 Node 각 4개 파일 통과. 루프백과 합성 오디오로 WebRTC·PCM 전달 및 전환을 대조했습니다. |
+| `npm test --prefix apps/android` | `273f4ba`에서 34개 통과, Gradle 산출물이 필요한 병합 매니페스트 1개 건너뜀. |
+| `node --test --test-concurrency=1 apps/android/test/call-ring.e2e.cjs apps/android/test/app-update-banners.e2e.cjs` | 다른 브라우저·DB 시험과 겹치지 않게 `c87dd7b`에서 실행해 30개 통과. 앞선 두 실행에서 TC-618 배너의 2,950ms 판정이 각각 실패했습니다. 기준 `06baba04`의 해당 시험만 실행했을 때도 통과했습니다. |
+| Ubuntu WSL Python 3.12의 `tests/test_app_update_push.py` | `273f4ba`에서 모의 FCM 23개 통과. |
+| `git diff --check`, Python `compileall`, JavaScript `node --check`, CORTHEX `term-check.py` | 통과. |
+
+실제 iPhone의 앱 창 유지, VoiceOver 초점, 잠금·망 전환과 양방향 오디오는 후속 기기 확인 범위입니다. 실제 발송과 운영 반영은 별도 승인 범위입니다.
 
 ## 승인본과 운영 경계
 
