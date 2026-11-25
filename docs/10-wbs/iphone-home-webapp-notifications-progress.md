@@ -33,10 +33,10 @@ Orca 항목 143의 e2698을 고정한 위임 답변 `msg_e6b8cd77a95b`(요청 `m
 | TASK-571 | 구현·브라우저 모의 시험 | `e6cb25a` | Chromium·WebKit의 360·430px와 두 테마, 일반 Safari 안내, 권한과 구독 상태, 명시 선택, 등록 충돌 후 재조회, 철회 |
 | TASK-572 | 구현·검증 | `e6cb25a` | API-314의 다섯 결과, 변조·계정 불일치·삭제·형식·출처·오류 응답, 조회 시 전화 변경 없음 |
 | TASK-573 | A·C 구현·자동 시험 | `e6cb25a`, `f75f5a0`, `273f4ba` | SCR-107에서 대상 확인 후 같은 앱 창에 용도별 통화 문서를 엽니다. 비활성 구독의 미수락 만료 안내, 재로그인·설치·대상·선택 확인, HTTP 마이크 정책과 복귀 초점을 확인했습니다. |
-| TASK-574 | B·C 구현·자동 시험 | `e6cb25a`, `273f4ba`, `f6f2662` | API-315의 원자적 예약·수락에 최초 연결 기한을 기록하고 결과 재확인에서는 보존합니다. 수락용 문서와 활성 구독, 웹·Android 선행과 경합도 확인했습니다. |
-| TASK-575 | A·B·C 구현·자동 시험 | `45a13f1`, `273f4ba`, `f6f2662`, `940ffd2` | API-317의 두 시작 방식과 문서 검증, 복구 기한과 동일 통화 ID, 중복 연결과 늦은 종료, 모의 WebRTC·PCM 전환을 확인했습니다. |
+| TASK-574 | B·C 구현·자동 시험 | `e6cb25a`, `273f4ba`, `f6f2662`, `8f2957e` | API-315의 원자적 예약·수락에 최초 연결 기한을 기록하고 결과 재확인에서는 보존합니다. 웹·Android 수락 경합의 단일 수락과 종료 뒤 Android 일반 발신을 확인했습니다. |
+| TASK-575 | A·B·C 구현·자동 시험 | `45a13f1`, `273f4ba`, `f6f2662`, `940ffd2`, `8f2957e` | API-317의 두 시작 방식과 문서 검증, 준비 실패 시 기존 기한, 동일 통화 복구, 중복 연결·늦은 종료, 모의 WebRTC·PCM 전환을 확인했습니다. |
 | TASK-576 | A·B·C 구현·브라우저 모의 시험 | `f75f5a0`, `c87dd7b`, `f6f2662` | 별도 받기와 일반 통화 시작, 마이크 거절, 응답 유실 뒤 같은 결과, 종료 안내 초점과 별도 다시 걸기를 확인했습니다. |
-| TASK-577 | A·B·C 자동 회귀 시험 | `273f4ba`, `f6f2662`, `940ffd2` | 통화 012 적용과 두 기한, 일반 Safari·Android·FCM과 기존 글 대화·약속 전화·재연결을 모의 환경에서 확인했습니다. |
+| TASK-577 | A·B·C 자동 회귀 시험 | `273f4ba`, `f6f2662`, `940ffd2`, `8f2957e` | 통화 012와 두 기한, Safari·Android·FCM과 기존 글 대화·약속 전화·재연결을 모의 환경에서 확인했습니다. |
 
 ## TASK-575·577 독립 시험
 
@@ -169,6 +169,31 @@ e2728의 위임 승인 `msg_802e55141477`과 요청 `msg_d8c9254e1536`을 적용
 | `git diff --check`, Python `compileall`, JavaScript `node --check`, CORTHEX `term-check.py` | 통과. |
 
 연결 중복 처리는 기존 단일 웹 통화 서버의 소켓 소유를 사용합니다. 이번 시험은 합성 계정과 루프백 환경의 범위입니다. 운영 DB의 012 적용, iPhone 앱 창·잠금·망 전환·VoiceOver, 실제 알림과 양방향 기기 오디오는 후속 승인과 확인 범위입니다.
+
+## 독립 재검토의 준비 실패와 Android 재진입
+
+재검토 기준은 `2552053ccbcb56c34ced82a1eaa7a92f636556a8`, 지적 1·2의 수정 및 회귀 실행 커밋은 `8f2957ea9d477474bb5b897363df0684c233b698`입니다. Orca 항목 143의 구현 초안 작업과 GitHub의 열린 초안 #139를 대조했습니다. 기존 통화 012 승인 메모·초안 SQL·적용 SQL의 해시를 다시 확인했습니다. 지적 3의 새 창 종료 조회와 권한·화면은 별도 위임 설계 범위입니다. [독립 재검토](https://github.com/kodonghui/marong2/pull/139#issuecomment-7160528408) · [05 보조 계약](../05-erd/iphone-webapp-call-deadline-storage-review.md)
+
+- **지적 1 · TASK-575·576, SPEC-546·550.** 첫 연결이나 복구의 구간 생성 및 준비 전환이 끝난 뒤에 통화 준비를 확정합니다. 수정 전에는 구간 생성·준비 전환 타임아웃을 첫 연결과 복구에 각각 주입한 네 경우 모두 `ready`를 반환하고 원래 기한에 종료하지 않았습니다. 수정 뒤 구간 생성 타임아웃, 준비 전환 타임아웃, 전환된 행 0건을 각각 재현했습니다. 여섯 경우 모두 `db_unavailable`로 종료됐고, 원래 기한이 유지됐으며 가상 시계를 정확한 120초 경계로 옮겼을 때 예약이 종료됐습니다. 기한 전에 허용된 유효 복구와 중복 연결 보호 시험도 통과했습니다.
+- **지적 2 · TASK-574·575·577, SPEC-546·550.** 기존 `/live`의 호출자·약속 전화·통화 잠금 아래 연결된 통화가 `ended`이면 Android가 별도 일반 발신을 시작합니다. 수정 전에는 기능을 끈 상태에서 재진입이 연결됐고, 켠 상태에서는 `call_busy`였습니다. 수정 뒤에는 두 설정에서 일반 발신의 새 통화 ID, 원래 수락 시각과 통화 ID 보존, 새 약속 수락, 진행 중인 호출의 `call_busy`를 확인했습니다. 웹·Android 경합의 단일 수락과 웹에서 종료된 약속의 Android 재진입도 검증했습니다.
+
+Windows의 PostgreSQL 시험은 Python 3.12 Selector 이벤트 루프에서 `runpy.run_path`로 실행했습니다. 통화 시험은 합성 계정과 루프백 웹소켓, 모의 모델·오디오를 사용했습니다. FCM 시험은 모의 전송을 사용했습니다.
+
+| 실행 명령 또는 파일 | 결과 |
+| --- | --- |
+| `tests/test_web_push_subscriptions.py`의 `test_notice_segment_preparation_failure_preserves_pending_deadline`, `test_577_existing_routes_and_android_eligibility_with_web_push_on_and_off` | 기준 `2552053` 소스에서 목표 시험 2개를 실행해 실패 판정 5건을 확인했습니다. 수정 뒤에는 기존 수락 경합과 웹 종료 뒤 일반 발신을 포함한 목표 시험 4개가 통과했습니다. |
+| `tests/test_web_push_schema.py`, `tests/test_web_push_subscriptions.py` | `8f2957e`에서 스키마 3개와 구독·통화 33개 통과. |
+| `tests/test_unified_auth.py`, `tests/test_app_ring.py`, `tests/test_app_chat.py` | `8f2957e`에서 통합 인증 11개, 약속 전화 75개, 글 대화·모의 FCM 확인 454개 통과. |
+| `tools/vertex_live/test_call_memory_regressions.py`, `tools/vertex_live/test_connect_server.py` | `8f2957e`에서 각각 4개와 5개 통과. |
+| `tools/vertex_live/test_relay.py`, `test_rtc_api.py`, `test_midcall.py`, `test_web_reconnect.py`, `test_hangup.py`, `test_ring.py`와 `node --test tools/vertex_live/test_transport.cjs tools/vertex_live/test_fallback.cjs tools/vertex_live/test_rtc_watchdog.cjs tools/vertex_live/test_hangup_client.cjs` | `8f2957e`에서 Python 6개 파일과 Node 4개 파일 통과. |
+| `.venv/Scripts/python tests/test_notice_call_browser.py`, `.venv/Scripts/python tests/test_web_push_browser.py` | `8f2957e`에서 Chromium·Playwright WebKit의 통화 문서 6개와 웹 알림 4개 통과. |
+| `node --test --test-concurrency=1 apps/android/test/app-update-banners.e2e.cjs apps/android/test/call-page.e2e.cjs apps/android/test/call-ring.e2e.cjs apps/android/test/chat-page.e2e.cjs apps/android/test/chat-scroll.e2e.cjs` | `8f2957e`에서 순차 재실행 63개 통과. DB 시험과 겹친 첫 실행은 기존 TC-618 배너 시간 판정 1건 실패, 나머지 62개 통과. |
+| Ubuntu WSL Python 3.12의 `tests/test_app_update_push.py` | `8f2957e`에서 모의 FCM 23개 통과. |
+| `cap sync android` 후 `gradlew.bat --offline --no-daemon --rerun-tasks :app:processDebugManifest :app:processReleaseManifest :app:testDebugUnitTest :app:lintDebug` | `8f2957e` 작업 공간에서 Java 21·SDK 36·Gradle 8.14.3으로 118개 작업 실행. 디버그·릴리스 병합 매니페스트의 권한 13개 동일, 디버그 단위 45개 통과, Lint 경고 7건. 첫 실행에서 누락된 Capacitor 생성 파일을 동기화하고 다시 실행했습니다. |
+| `npm test --prefix apps/android` | `8f2957e`의 새 병합 매니페스트를 사용해 TC-133/226 포함 35개 통과. 건너뜀 0개. |
+| `git diff --check`, Python `compileall`, CORTHEX `term-check.py`, 통화 012의 승인·적용 SHA-256 | 통과. |
+
+독립 리뷰의 Android Gradle과 매니페스트 결과는 `2552053`의 검증입니다. 위 Gradle 결과는 수정 커밋 `8f2957e`의 별도 재실행입니다. 단말 오디오와 실제 알림, 운영 반영과 구현 PR 병합은 후속 승인 범위입니다.
 
 ## 승인본과 운영 경계
 
