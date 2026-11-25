@@ -97,6 +97,23 @@ iPhone 기기 확인은 앱 창 유지, 알림 탭·잠금 해제·재로그인,
 | Ubuntu WSL Python 3.12의 `tests/test_app_update_push.py` | 모의 FCM 23개 통과. |
 | `git diff --check`, Python `compileall`, JavaScript `node --check`, CORTHEX `term-check.py` | 통과. |
 
+## 독립 재검토 뒤 시험 안정화
+
+재검토 기준은 `cf9f3038930a44ec91cad42f761eb9d7f04014a5`, 시험 수정 및 실행 커밋은 `434355a358bec067c1a4c69fbef7b313b71fad89`입니다. [독립 재검토](https://github.com/kodonghui/marong2/pull/139#issuecomment-7158831626)
+
+- 재로그인 만료 시험은 앱 시험 시각을 DB 실행 시각보다 5초 이전으로 설정했을 때 수정 전 `ring_ready`를 반환했습니다. 기한을 고정 시각보다 1마이크로초 뒤와 고정 시각에 각각 맞춰 `ring_ready`와 `ring_expired`의 경계를 확인합니다. 만료 문서의 403·마이크 차단·캐시 금지와 약속 전화 행 보존도 확인합니다.
+- 재검토에 기록된 WebKit의 최초 재연결 지연은 수정 전 Chromium·Playwright WebKit에서 직접 6회, 연결·첫 프레임·준비 응답 진단을 붙여 8회 실행하는 동안 재현되지 않았습니다. 당시 지연 원인은 확정할 수 없습니다. 시험은 지정한 루프백 연결을 끊고 다음 연결의 첫 프레임을 받은 뒤 준비 응답을 보냅니다. 준비 응답을 보류한 동안 재연결 화면과 초점을 검사합니다. 불일치한 통화의 거절, 수동 확인, 재연결 중 종료를 각각 확인합니다. 기존 화면 판정 제한 시간은 유지했습니다.
+
+| 실행 명령 또는 시험 | 결과 |
+| --- | --- |
+| `tests/test_web_push_subscriptions.py` | Windows Python 3.12 Selector 이벤트 루프와 `runpy.run_path`로 4회 실행. 매회 27개 통과 |
+| 같은 파일의 `test_review_document_binding_survives_refresh_and_rejects_same_account_relogin` | 앱 시험 시각의 차이를 -5초·0초·+5초로 두고 조건마다 3회 실행. 총 9회 통과 |
+| `tests/test_notice_call_browser.py NoticeCallBrowserTests.test_lost_response_exact_retry_reconnect_and_other_device_wins` | 수정 뒤 새 프로세스에서 Chromium·Playwright WebKit 각각 8회 통과 |
+| `tests/test_notice_call_browser.py`, `tests/test_web_push_browser.py` | 통화 문서 시험은 두 엔진에서 4회 실행하여 매회 5개 통과. 기존 알림 시험 4개 통과 |
+| `git diff --check`, 두 시험 모듈의 `python -m compileall -q`, CORTHEX `term-check.py` | 통과 |
+
+문서 식별값 조건, 비활성 구독의 일반 통화 조작, 원래 창을 잃은 예약 종료는 위임 설계 검토 중입니다. 재연결 결과는 루프백과 모의 오디오 환경의 판정입니다.
+
 ## 승인본과 운영 경계
 
 고정 WBS의 SHA-256은 `64653d0df932e8c6a14d1cb20d0cbcf2ebcf8388a2b551118d28ececf66e552e`, 10단계 검토 메모는 `9b5df39b9c6cb3b526e7db9865e5a1945e840deb140b45874d5e873649f67606`입니다. 08 화면 인덱스는 승인 원본과 LF 한 바이트 차이인 병합된 사본을 보존했습니다. 구독 409는 승인된 SCR-165와 OpenAPI의 재조회 상태를 사용합니다.
