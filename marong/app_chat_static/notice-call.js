@@ -78,6 +78,7 @@
     detail.textContent = copy;
     action.textContent = label || '';
     action.hidden = !label;
+    action.disabled = !engine && (next === 'ring_ready' || next === 'ordinary');
     action.setAttribute('aria-disabled', String(['accepting', 'resultLoading', 'limited'].includes(next)));
     const active = next === 'talking' || next === 'reconnecting';
     controls.hidden = !active;
@@ -248,7 +249,7 @@
 
   window.MarongNoticeCall = {
     clientId: client,
-    attach(value) { engine = value; },
+    attach(value) { engine = value; action.disabled = false; },
     authorize, resume,
     handshake() { return {frame, expected, ring: frame?.type === 'start_notified'}; },
     ready(message, stopping) {
