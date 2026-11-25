@@ -74,6 +74,29 @@ WebRTC 시험은 루프백 HTTP·웹소켓, 서버의 실제 `LiveSession`과 `B
 
 iPhone 기기 확인은 앱 창 유지, 알림 탭·잠금 해제·재로그인, 잠금과 망 전환 후 같은 통화 ID, 실제 VoiceOver 초점, 양방향 오디오와 ICE·Opus 전송을 포함합니다. 브라우저 모의 시험은 문서·초점·요청 순서·동일 ID의 근거입니다.
 
+## PR #139 독립 리뷰 후속
+
+리뷰 기준은 `ce2d1aeeff51751861a8fc081340494778772291`, 수정 및 실행 커밋은 `7adad59424085a862abb60001bfb408e94b6ee60`입니다. 격리 DB와 루프백 브라우저에서 수정 전에 예약 소유자 보호, 활성 구독 없는 수락, 재로그인 뒤 만료 안내, 구독 만료 정리에 대한 새 시험이 실패함을 확인했습니다. [독립 리뷰](https://github.com/kodonghui/marong2/pull/139#issuecomment-7158136567)
+
+| 리뷰 | 결과 |
+| --- | --- |
+| 1 · SPEC-546·550 | 보완. 기존 통화 행의 클라이언트 UUID에 알림 예약과 원래 로그인·설치·클라이언트의 결합을 기록합니다. 첫 연결 전과 일시 단절 중 기존 경로의 다른 클라이언트는 재개하거나 종료할 수 없습니다. 원래 클라이언트 연결·동일 ID 복구·종료와 기존 Safari 발신·HTTP 종료, Android 받기를 확인했습니다. |
+| 2 · SPEC-545·546, e2698 | 보완. 통화 문서의 UUID를 현재 세션·설치·동의에 결합합니다. 마이크 준비 뒤 선택 헤더로 읽기 검사를 하고, 변경이 확인되면 오디오를 정리하고 대상 조회로 돌아갑니다. 수락과 같은 결과 복원에서 통화 트랜잭션이 세션과 설치 잠금을 가진 동안 기존 앱 역할이 구독을 확인합니다. 철회와 수락의 두 순서, 같은 동의 갱신, 같은 계정 재로그인 뒤 재등록을 확인했습니다. 공개 요청 본문·응답 스키마를 보존했습니다. |
+| 3 · SPEC-547 | 만료 안내 보완. 재로그인 뒤 현재 계정의 미수락 만료를 확인해 마이크 차단 화면에서 표시합니다. 활성 구독일 때 별도 일반 통화 선택과 API-317 재검증을 확인했습니다. 비활성 구독의 만료 안내에서 바로 일반 통화를 여는 조작은 e2698의 통화 문서 마이크 조건과 함께 적용할 별도 계약 결정이 필요해 보류합니다. |
+| 4 · SPEC-529 | 보완. 앱 서버의 정리 작업이 60초 간격으로 구독 자체 기한에 도달한 활성 후보의 현재 버전을 잠금 아래 확인하고 만료 상태와 새 버전, 보호 재료 제거를 함께 저장합니다. API-310의 조회, 경합 중 재등록한 버전, 개별 알림·전화 기한, 다른 설치와 Android FCM을 따로 확인했습니다. |
+
+표 모양이나 SQL 마이그레이션, 06·08 승인 사본 및 e2698 메모 바이트는 보존했습니다. 새 연결은 기존 루프백의 앱 서버와 통화 서버 사이에서만 구독을 검사합니다. 별도 앱 포트를 쓰는 운영 구성 확인은 남았습니다. 이번 수정 전의 초안에서 생성한 예약 UUID는 기존 일반 통화 값과 저장 형식이 같아 자동 변환할 수 없습니다. 이번 시험은 새 예약과 기존 일반 통화 행을 사용했습니다. 원래 창의 복구 상태를 완전히 잃은 예약의 회수 조건은 후속 계약 범위입니다.
+
+| 명령 또는 시험 파일 | 결과 |
+| --- | --- |
+| `tests/test_web_push_schema.py`, `tests/test_web_push_subscriptions.py` | 마이그레이션 2개, 구독·통화·모의 전송 27개 통과. 독립 리뷰에 따른 회귀 6개와 기존 시험에 추가한 점검을 포함합니다. |
+| `tests/test_notice_call_browser.py`, `tests/test_web_push_browser.py` | 통화 문서 5개와 기존 알림 4개 통과. Chromium·Playwright WebKit 모의 환경에서 권한 확인 중 세션 변경·철회, 수락 요청 0건, 오디오 정리와 만료 안내를 확인했습니다. |
+| `tests/test_unified_auth.py`, `tests/test_app_ring.py`, `tests/test_app_chat.py` | 통합 인증 11개, 기존 약속 전화 75개, 글 대화·모의 FCM 454개 확인 항목 통과. Windows DB 시험은 Python 3.12 Selector 이벤트 루프로 실행했습니다. |
+| `tools/vertex_live/test_relay.py`, `test_rtc_api.py`, `test_midcall.py`, `test_web_reconnect.py` 및 `node --test tools/vertex_live/test_transport.cjs tools/vertex_live/test_fallback.cjs tools/vertex_live/test_rtc_watchdog.cjs tools/vertex_live/test_hangup_client.cjs` | Python과 Node 각 4개 파일 통과. 기존 연결·재연결·종료와 모의 오디오 경로를 확인했습니다. |
+| `npm test --prefix apps/android`, `node --test apps/android/test/call-ring.e2e.cjs apps/android/test/app-update-banners.e2e.cjs` | Node 34개, 브라우저 모의 시험 30개 통과. Gradle 빌드가 필요한 병합 매니페스트 검사 1개 건너뜀. |
+| Ubuntu WSL Python 3.12의 `tests/test_app_update_push.py` | 모의 FCM 23개 통과. |
+| `git diff --check`, Python `compileall`, JavaScript `node --check`, CORTHEX `term-check.py` | 통과. |
+
 ## 승인본과 운영 경계
 
 고정 WBS의 SHA-256은 `64653d0df932e8c6a14d1cb20d0cbcf2ebcf8388a2b551118d28ececf66e552e`, 10단계 검토 메모는 `9b5df39b9c6cb3b526e7db9865e5a1945e840deb140b45874d5e873649f67606`입니다. 08 화면 인덱스는 승인 원본과 LF 한 바이트 차이인 병합된 사본을 보존했습니다. 구독 409는 승인된 SCR-165와 OpenAPI의 재조회 상태를 사용합니다.
