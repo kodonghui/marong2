@@ -33,12 +33,12 @@ const Unified = (() => {
     return element;
   }
 
-  async function request(path, payload, method = payload === undefined ? 'GET' : 'POST') {
+  async function request(path, payload, method = payload === undefined ? 'GET' : 'POST', extraHeaders) {
     const controller = new AbortController();
     const deadline = setTimeout(() => controller.abort(), 10_000);
     try {
       const options = {method, credentials: 'same-origin', cache: 'no-store', redirect: 'manual',
-                       headers: {Accept: 'application/json'}, signal: controller.signal};
+                       headers: {Accept: 'application/json', ...extraHeaders}, signal: controller.signal};
       if (payload !== undefined) {
         options.headers['Content-Type'] = 'application/json';
         options.body = JSON.stringify(payload);

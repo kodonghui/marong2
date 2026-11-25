@@ -18,11 +18,13 @@ from marong.pet_app_settings import pet_voice_enabled
 from marong.unified_prompt import (ACCEPTED_FRIENDSHIPS, CHARACTER_PROFILE, PET_INTRO_COLUMNS, character_section, clean,
                                   common_prompt, marker_positions, particle)
 from marong.usage import configured_call_limit, effective_limits
+from marong.web_notice_call_protocol import BRIDGE_HEADER, SUBPROTOCOL, NoticeCallProtocol, client_uuid
+from marong.web_push_subscriptions import INSTALLATION_HEADER, installation_id
 from live_session import LiveSession, BUILD
 from call_cost import BLOCKED, budget_status, personal_budget_blocked
 from call_shop import DECLARATION as SHOP_READ, configured_reader
 from memory_tools import DECLARATIONS, END_CALL, FORGET_MEMORY
-from call_memory import CallBusy, MemoryStore, Principal
+from call_memory import CallBusy, MemoryStore, NoticeRingState, Principal
 import call_search
 import rtc_transport
 
@@ -52,6 +54,7 @@ CALL_MAX=call_capacity()
 RECONNECT_CLEANUP_TIMEOUT=15
 AUTH_MODE=os.environ.get('VERTEX_AUTH_MODE','api_key')
 AUTHENTICATION=auth_mode(os.environ.get("MARONG_AUTH","access"))
+NOTICE_CALL=NoticeCallProtocol.configured(os.environ) if AUTHENTICATION!="access" else None
 SESSION_AGE=timedelta(days=int(os.environ.get("MARONG_SESSION_DAYS","90")))
 ROOT.mkdir(mode=0o700,parents=True,exist_ok=True)
 JOIN_FILE=ROOT/'join-token'
@@ -409,8 +412,176 @@ async def end_call(req):
         print('call_end_http detached',flush=True)
     return json_response({'ok':True})
 
-async def live(req):
-    authn=await identity(req)
+NOTICE_FAILURES = {
+    'invalid_input': 400, 'login_required': 401, 'cross_site': 403, 'not_allowed': 403, 'not_found': 404,
+    'call_busy': 409, 'calls_full': 409, 'budget_exhausted': 409, 'daily_limit': 429,
+    'db_unavailable': 503, 'internal': 500,
+}
+
+
+def notice_failure(code):
+    status = NOTICE_FAILURES[code]
+    headers = {'Retry-After': '60'} if status == 429 else None
+    return web.json_response({'code': code}, status=status, headers=headers)
+
+
+async def notice_identity(req):
+    if memory_store is None:
+        raise SessionError('db_unavailable')
+    token = req.cookies.get(SESSION_COOKIE)
+    row = await find_session(memory_store.pool, token)
+    if row is None:
+        raise SessionError('login_required')
+    person = Principal(row['caller_id'], row['friend_id'], row['name'], row['context_revision'], unified=True,
+                       usage_profile={key: row[key] for key in ('usage_unlimited', 'daily_units', 'call_monthly_usd')})
+    return {'owner': f"friend:{row['friend_id']}", 'principal': person, 'voice': row['voice'],
+            'bot_name': row['bot_name'], 'session': row['session_id']}
+
+
+async def notice_accept(req):
+    if NOTICE_CALL is None or not hmac.compare_digest(req.headers.get(BRIDGE_HEADER, ''), NOTICE_CALL.bridge_secret):
+        raise web.HTTPNotFound()
+    try:
+        if req.content_type != 'application/json' or (req.content_length is not None and req.content_length > 2048):
+            raise SessionError('invalid_input')
+        try:
+            data = await req.json()
+        except (ValueError, RecursionError):
+            raise SessionError('invalid_input') from None
+        if not isinstance(data, dict) or set(data) != {'targetRef', 'clientId'}:
+            raise SessionError('invalid_input')
+        ident = installation_id(req.headers.get(INSTALLATION_HEADER))
+        client = client_uuid(data['clientId'])
+        authn = await notice_identity(req)
+        person = authn['principal']
+        now = datetime.now(timezone.utc)
+        kind, ring = NOTICE_CALL.references.open(data['targetRef'], person.friend_id, now)
+        if kind != 'call':
+            raise SessionError('not_found')
+        cid = NOTICE_CALL.bound_client(person.friend_id, ident, client)
+        target = await memory_store.one("""
+            SELECT r.status,r.answer_until,c.enabled,prior.client_id AS prior_client,
+                   prior.status AS prior_status,prior.deleted_at AS prior_deleted
+            FROM marong.app_rings r JOIN call.callers c ON c.id=r.caller_id
+            LEFT JOIN call.calls prior ON prior.id=r.call_id
+            WHERE r.caller_id=%s AND r.id=%s AND r.reason='promise'
+        """, (person.caller_id, ring))
+        if target is None:
+            raise SessionError('not_found')
+        if target['status'] == 'answered':
+            if (str(target['prior_client']) != cid or target['prior_status'] == 'ended'
+                    or target['prior_deleted'] is not None):
+                return web.json_response({'state': 'ring_answered'})
+        elif target['status'] in ('ringing', 'missed') and target['answer_until'] <= now:
+            return web.json_response({'state': 'ring_expired'})
+        elif target['status'] != 'ringing' or not target['enabled']:
+            return web.json_response({'state': 'ring_unavailable'})
+        slot = active_calls.get(person.friend_id)
+        if slot is not None and slot.client_id != cid:
+            # A legacy connection may already own the ring. Read that result before returning a limit.
+            answered = await memory_store.one("""
+                SELECT 1 FROM marong.app_rings WHERE caller_id=%s AND id=%s AND status='answered' AND reason='promise'
+            """, (person.caller_id, ring))
+            if answered:
+                return web.json_response({'state': 'ring_answered'})
+            raise SessionError('call_busy')
+        if slot is None and len(active_calls) >= CALL_MAX:
+            raise SessionError('calls_full')
+        # Recovery of a previously accepted call returns its confirmed result even
+        # if a quota was reached after acceptance.
+        if target['status'] != 'answered':
+            if await budget_status(memory_store, 'web') in BLOCKED or await person_budget_blocked(person):
+                raise SessionError('budget_exhausted')
+            if await memory_store.daily_usage.blocked(person.friend_id):
+                raise SessionError('daily_limit')
+        call, *_ = await memory_store.reserve_notice_ring(person, cid, chosen_voice(authn['voice']), BUILD, ring,
+                                                         session=authn['session'])
+        connect = NOTICE_CALL.issue(authn['session'], ident, client, call, ring, datetime.now(timezone.utc))
+        return web.json_response({'state': 'accepted', 'callId': call, 'connectToken': connect})
+    except NoticeRingState as error:
+        if error.state in {'ring_expired', 'ring_answered', 'ring_unavailable'}:
+            return web.json_response({'state': error.state})
+        return notice_failure(error.state)
+    except SessionError as error:
+        return notice_failure(error.code)
+    except CallBusy:
+        return notice_failure('call_busy')
+    except (psycopg.OperationalError, TimeoutError):
+        return notice_failure('db_unavailable')
+    except Exception as error:
+        print('notice_accept_error', type(error).__name__, flush=True)
+        return notice_failure('internal')
+
+
+async def notice_live(req):
+    if NOTICE_CALL is None:
+        raise web.HTTPNotFound()
+    if not same_origin(req):
+        return notice_failure('cross_site')
+    if req.query or req.headers.get('Sec-WebSocket-Protocol') != SUBPROTOCOL:
+        return notice_failure('invalid_input')
+    try:
+        authn = await notice_identity(req)
+        slot = active_calls.get(authn['principal'].friend_id)
+        if slot and slot.reconnecting:
+            return notice_failure('call_busy')
+        return await live(req, notice_auth=authn)
+    except SessionError as error:
+        return notice_failure(error.code)
+    except (psycopg.OperationalError, TimeoutError):
+        return notice_failure('db_unavailable')
+    except Exception as error:
+        print('notice_handshake_error', type(error).__name__, flush=True)
+        return notice_failure('internal')
+
+
+async def notice_start(ws, authn):
+    try:
+        frame = await ws.receive(timeout=5)
+        if frame.type != WSMsgType.TEXT or len(frame.data.encode()) > 2048:
+            raise SessionError('invalid_input')
+        data = json.loads(frame.data)
+    except (TimeoutError, ValueError, RecursionError):
+        raise SessionError('invalid_input') from None
+    if not isinstance(data, dict):
+        raise SessionError('invalid_input')
+    mode = data.get('type')
+    extra = 'connectToken' if mode == 'start_notified' else 'targetRef'
+    if mode not in ('start_notified', 'start_ordinary') or set(data) != {'type', 'clientId', 'installationProof', extra}:
+        raise SessionError('invalid_input')
+    ident = installation_id(data['installationProof'])
+    client = client_uuid(data['clientId'])
+    person = authn['principal']
+    now = datetime.now(timezone.utc)
+    row = await memory_store.one("""
+        SELECT 1 FROM marong.app_sessions WHERE id=%s AND friend_id=%s AND revoked_at IS NULL AND expires_at>%s
+    """, (authn['session'], person.friend_id, now))
+    if row is None:
+        raise SessionError('login_required')
+    cid = NOTICE_CALL.bound_client(person.friend_id, ident, client)
+    if mode == 'start_notified':
+        call, ring = NOTICE_CALL.verify(authn['session'], ident, client, data[extra], now)
+        return cid, str(client), call, ring
+    try:
+        kind, ring = NOTICE_CALL.references.open(data[extra], person.friend_id, now)
+    except SessionError as error:
+        raise SessionError('not_allowed' if error.code == 'not_found' else error.code) from None
+    if kind != 'call':
+        raise NoticeRingState('ring_unavailable')
+    row = await memory_store.one("""
+        SELECT status,answer_until FROM marong.app_rings WHERE caller_id=%s AND id=%s AND reason='promise'
+    """, (person.caller_id, ring))
+    if row is None:
+        raise NoticeRingState('ring_unavailable')
+    if row['status'] == 'answered':
+        raise NoticeRingState('ring_answered')
+    if row['status'] not in ('ringing', 'missed') or row['answer_until'] > now:
+        raise NoticeRingState('ring_unavailable')
+    return cid, str(client), None, ring
+
+
+async def live(req, *, notice_auth=None):
+    authn=notice_auth or await identity(req)
     if not authn:raise web.HTTPUnauthorized()
     if not same_origin(req):raise web.HTTPForbidden()
     person=await get_principal(authn)
@@ -418,7 +589,9 @@ async def live(req):
     try:client_id=str(uuid.UUID(req.query.get('client','')))
     except ValueError:client_id=str(uuid.uuid4())
     slot=None
-    ws=web.WebSocketResponse(heartbeat=20,max_msg_size=70000)
+    ws=web.WebSocketResponse(heartbeat=20,max_msg_size=70000,protocols=(SUBPROTOCOL,) if notice_auth else ())
+    if notice_auth and not ws.can_prepare(req).ok:
+        return notice_failure('invalid_input')
     ws_opened=None
     close_reason='socket_closed'
     try:
@@ -428,7 +601,12 @@ async def live(req):
         refresh_session_cookie(req,ws)
         await ws.prepare(req)
         ws_opened=time.monotonic()
-        print(f'call_ws_open client={client_id[:8]}',flush=True)
+        notice_call = notice_ring = None
+        rtc_client_id = client_id
+        if notice_auth:
+            client_id, rtc_client_id, notice_call, notice_ring = await notice_start(ws, notice_auth)
+        else:
+            print(f'call_ws_open client={client_id[:8]}',flush=True)
         resume=recent_resume(owner,client_id)
         if await budget_status(memory_store, 'web') in BLOCKED:
             if person:
@@ -484,7 +662,15 @@ async def live(req):
         resumed_voice=resume.get('voice')
         if not resumed_voice and person and hasattr(memory_store,'resume_voice'):
             resumed_voice=await memory_store.resume_voice(person,client_id)
+        notified_start = None
+        if notice_call:
+            notified_start = await memory_store.attach_notice_call(
+                person, client_id, notice_call, notice_ring, notice_auth['session'])
+            resumed_voice = notified_start[4]
         voice=resumed_voice or chosen_voice(authn.get('voice'))
+        if notice_auth and notice_call is None:
+            notified_start = await memory_store.start_notice_ordinary(
+                person, client_id, voice, BUILD, notice_ring, notice_auth['session'])
         bot_name=resume.get('bot_name') or authn.get('bot_name')
         character = resume.get("character")
         if "character" not in resume and person and person.unified:
@@ -496,18 +682,22 @@ async def live(req):
             return ws
         configure=partial(setup,voice=voice,bot_name=bot_name,character=character)
         session=LiveSession(ws,authn['owner'],memory_store,person,configure,google_headers,resume,{},LOCATION,MODEL,voice,client_id,search=SEARCH,ring=ring)
+        session.notified_start=notified_start
+        session.skip_legacy_ring=bool(notice_auth)
+        session.atomic_legacy_ring=bool(NOTICE_CALL and not notice_auth and ring and person
+                                        and 'MarongApp/' in req.headers.get('User-Agent', ''))
         session.shop=SHOP
         session.wait_enabled=WAIT_SOUND
         session.ws_opened=ws_opened
-        session.hold_requested=req.query.get('hold')=='1'
+        session.hold_requested=bool(notice_auth) or req.query.get('hold')=='1'
         slot.session=session
         # Previously loaded pages used headerless PCM. Keep their wire format
         # until the page refreshes, so headers never become audible clicks.
-        session.legacy_pcm='client' not in req.query
+        session.legacy_pcm=not notice_auth and 'client' not in req.query
         # Pages loaded before the hang-up change cannot end a call on 'hangup'.
-        session.hangup=req.query.get('hangup')=='1'
-        bridge=rtc_transport.bridges.get(client_id)
-        if bridge and not bridge.closed and bridge.owner==authn['owner'] and req.query.get('rtc')=='1':
+        session.hangup=bool(notice_auth) or req.query.get('hangup')=='1'
+        bridge=rtc_transport.bridges.get(rtc_client_id)
+        if bridge and not bridge.closed and bridge.owner==authn['owner'] and (notice_auth or req.query.get('rtc')=='1'):
             session.offer_rtc(bridge)
         elif bridge and bridge.owner==authn['owner']:await bridge.close()
         await session.run()
@@ -515,9 +705,18 @@ async def live(req):
         close_reason='call_busy'
         await ws.send_json({'type':'call_busy'})
         if slot and slot.session and slot.session.rtc:await slot.session.rtc.close()
+    except (NoticeRingState, SessionError) as error:
+        close_reason=getattr(error, 'state', getattr(error, 'code', 'invalid_input'))
+        await ws.send_json({'type':close_reason})
+    except (psycopg.OperationalError, TimeoutError):
+        if notice_auth:await ws.send_json({'type':'db_unavailable'})
+        close_reason='session_error'
     except Exception as error:
         close_reason='session_error'
-        print(f'call_ws_error client={client_id[:8]} error={type(error).__name__}',flush=True)
+        if notice_auth:
+            print('notice_live_error', type(error).__name__, flush=True)
+        else:
+            print(f'call_ws_error client={client_id[:8]} error={type(error).__name__}',flush=True)
     finally:
         try:
             if slot is not None and active_calls.get(owner) is slot:
@@ -540,8 +739,12 @@ async def live(req):
                         close_reason=finished.d['browserEnd']
                     elif ws.exception():
                         close_reason='socket_error'
-                print(f'call_ws_close client={client_id[:8]} reason={close_reason} '
-                      f'code={ws.close_code} age_ms={round((time.monotonic()-ws_opened)*1000)}',flush=True)
+                age=round((time.monotonic()-ws_opened)*1000)
+                if notice_auth:
+                    print(f'notice_ws_close reason={close_reason} code={ws.close_code} age_ms={age}',flush=True)
+                else:
+                    print(f'call_ws_close client={client_id[:8]} reason={close_reason} '
+                          f'code={ws.close_code} age_ms={age}',flush=True)
             await ws.close()
     return ws
 
@@ -612,6 +815,8 @@ app.router.add_post('/api/calls/{id}/end',end_call)
 app.router.add_post('/auth',auth)
 app.router.add_get('/status',status)
 app.router.add_get('/live',live)
+app.router.add_get('/live/web-notification',notice_live)
+app.router.add_post('/internal/web-notification/accept',notice_accept)
 app.router.add_get('/face/v1/{name}',face)
 app.router.add_get('/',static)
 app.router.add_get('/{file}',static)

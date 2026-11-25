@@ -48,6 +48,8 @@ from marong.topics import Topics
 from marong.unified_delivery import AppProactive, AppReminders, UnifiedDelivery
 from marong.unified_prompt import PET_HEALTH_REFERRAL, character_section, explicit_pet_health, marker_positions
 from marong.unified_store import UnifiedStore
+from marong.web_push_delivery import configured_web_push
+from marong.web_notice_call_protocol import NoticeCallProtocol
 from marong.work_loops import loops_home, run_locked
 
 
@@ -176,6 +178,7 @@ async def serve(settings, credentials, options, secret, authentication, home, st
                                contact_schedule=(settings.proactive_per_day, *settings.proactive_hours),
                                invite_days=int(os.getenv("MARONG_INVITE_DAYS", "7")),
                                session_days=int(os.getenv("MARONG_SESSION_DAYS", "90")))
+        web_push = configured_web_push(os.environ, store.pool, options["origin"]) if authentication != "access" else None
         diary_enabled = os.getenv("MARONG_DIARY") == "1"
         if diary_enabled or pet_settings.scene_pictures:
             diary_models = DiaryModels(settings, os.environ)
@@ -183,7 +186,11 @@ async def serve(settings, credentials, options, secret, authentication, home, st
                        origin=options["origin"], port=options["port"], timezone=settings.timezone,
                        sessions=sessions, authentication=authentication,
                        admin_email_hash=os.getenv("MARONG_ADMIN_EMAIL_SHA256"), diary_models=diary_models,
-                       pet_app_settings=pet_settings)
+                       pet_app_settings=pet_settings,
+                       web_push_subscriptions=web_push.subscriptions if web_push else None,
+                       web_push_references=web_push.references if web_push else None)
+        chat.web_push_delivery = web_push
+        chat.web_push_call = NoticeCallProtocol.configured(os.environ) if web_push else None
         chat.profile = AppProfile(chat, character=os.getenv("MARONG_CHARACTER") == "1",
                                   friends=os.getenv("MARONG_FRIENDS") == "1", google=google is not None,
                                   voice_samples=os.getenv("MARONG_VOICE_SAMPLES_DIR"))
@@ -197,7 +204,8 @@ async def serve(settings, credentials, options, secret, authentication, home, st
             chat.pulse()
 
         agent.on_saved = on_saved
-        delivery = UnifiedDelivery(store, push, authentication, on_saved, origin=options["origin"])
+        delivery = UnifiedDelivery(store, push, authentication, on_saved, origin=options["origin"],
+                                   web_push=web_push, spawn=chat._spawn)
         chat.delivery = delivery
         if os.getenv("MARONG_CALL_SHOP") == "1":
             chat.internal_shop = InternalShop(llm, web, shop, settings.anthropic_model,

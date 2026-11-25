@@ -13,6 +13,11 @@
   const token = join ? location.pathname.split('/').pop() : null;
   let stateTimer;
 
+  function installationHeaders() {
+    const proof = window.MarongWebNotifications?.proof();
+    return proof ? {'X-Marong-Installation': proof} : undefined;
+  }
+
   function setPage(title, worried = false) {
     clearInterval(stateTimer);
     headline.textContent = title;
@@ -37,7 +42,7 @@
     let target = '/chat/';
     try {
       const saved = sessionStorage.getItem('marong.session.return');
-      if (saved) {
+      if (saved && !window.MarongWebNotifications?.pending('/chat/')) {
         const url = new URL(saved, location.origin);
         if (url.origin === location.origin && (url.pathname === '/' || url.pathname.startsWith('/chat/')) &&
             !/^\/chat\/(login|join|admin)(?:\/|$)/.test(url.pathname)) target = url.pathname + url.search + url.hash;
@@ -97,7 +102,8 @@
       signal(error);
       submit.disabled = name.disabled = true;
       submit.textContent = '준비하는 중이야…';
-      const reply = await request(api + '/join', kind === 'join' ? {token, name: name.value.trim()} : {token});
+      const reply = await request(api + '/join', kind === 'join' ? {token, name: name.value.trim()} : {token},
+        'POST', installationHeaders());
       submit.textContent = buttonText;
       submit.disabled = name.disabled = false;
       if (reply.status === 201) showDone(reply.body);
@@ -156,7 +162,7 @@
       card.append(download);
       loadRelease();
     }
-    if (/iPhone/.test(navigator.userAgent)) {
+    if (/iPhone/.test(navigator.userAgent) && !window.MarongWebNotifications) {
       const installed = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
       const instructions = installed ? '' : '아이폰에서는 공유 버튼을 누르고 홈 화면에 추가를 고르면 앱처럼 열 수 있어. ';
       card.append(node('p', instructions + '알림과 전화 벨은 안드로이드 앱에서만 와', 'caption'));
@@ -195,7 +201,7 @@
       signal(error);
       submit.disabled = input.disabled = true;
       submit.textContent = '확인하는 중이야…';
-      const reply = await request(api + '/login/code', {code: input.value});
+      const reply = await request(api + '/login/code', {code: input.value}, 'POST', installationHeaders());
       if (reply.status === 200) { continueToChat(); return; }
       submit.textContent = '들어가기';
       input.disabled = false;

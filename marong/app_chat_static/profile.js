@@ -105,7 +105,7 @@
         setTimeout(() => { make.disabled = false; }, Math.max(reply.retryAfter, 1) * 1000);
       } else problem(reply);
     }, 'btn2');
-    if (/iPhone/.test(navigator.userAgent)) {
+    if (/iPhone/.test(navigator.userAgent) && !window.MarongWebNotifications) {
       const installed = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
       const instructions = installed ? '' : '아이폰에서는 공유 버튼을 누르고 홈 화면에 추가를 고르면 앱처럼 열 수 있어. ';
       card.append(node('p', instructions + '알림과 전화 벨은 안드로이드 앱에서만 와', 'caption'));
@@ -257,6 +257,8 @@
     face.replaceChildren(image);
     groups.replaceChildren(nameGroup(), link('통화 목소리 · ' + (data.voiceLabel || data.voice || '기본'),
       '/chat/me/voice', 'btn2'), codes(), usage());
+    const webNotifications = window.MarongWebNotifications?.settings(relogin);
+    if (webNotifications) groups.insertBefore(webNotifications, groups.children[2]);
     if (data.features.character) groups.insertBefore(wardrobe(), groups.children[1]);
     if (data.character) {
       const introPath = '/chat/character/' + data.character.id + '/intro';

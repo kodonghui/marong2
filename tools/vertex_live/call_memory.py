@@ -42,6 +42,12 @@ class CallBusy(Exception):
     pass
 
 
+class NoticeRingState(Exception):
+    def __init__(self, state):
+        self.state = state
+        super().__init__(state)
+
+
 SCOPE = """WITH roots AS (
  SELECT r.room_key FROM marong.rooms r WHERE r.is_channel AND EXISTS (
   SELECT 1 FROM marong.messages m JOIN marong.people p USING(user_key)
@@ -417,28 +423,139 @@ class MemoryStore:
             caller = await c.execute('SELECT id FROM call.callers WHERE id=%s AND enabled FOR UPDATE', (p.caller_id,))
             if not await caller.fetchone():
                 raise PermissionError('caller_disabled')
-            cur = await c.execute("""SELECT id,entrypoint,status,client_id,started_at FROM call.calls
-                WHERE caller_id=%s AND status<>'ended' AND deleted_at IS NULL FOR UPDATE""", (p.caller_id,))
-            row = await cur.fetchone()
-            if row:
-                same_call = row['entrypoint'] == entrypoint and (
-                    entrypoint == 'web' or str(row['client_id']) == client_id)
-                if same_call:
-                    await c.execute("""UPDATE call.calls SET status='live',client_id=%s,last_beat_at=now()
-                        WHERE id=%s""", (client_id, row['id']))
-                    return str(row['id']), True, row['started_at']
-                if row['status'] == 'live':
-                    raise CallBusy()
-                # A disconnected call from another entry point keeps its own history and memory scope.
-                if p.unified and row["entrypoint"] == "web":
-                    await self.meter_closed(c, p, row["id"])
-                await c.execute("""UPDATE call.calls SET status='ended',ended_at=now(),
-                    end_reason='beat_lost',organize_status='pending',organize_next_at=now() WHERE id=%s""",
-                    (row['id'],))
-            cur = await c.execute("""INSERT INTO call.calls(caller_id,client_id,prompt_version,voice,entrypoint)
-                VALUES(%s,%s,%s,%s,%s) RETURNING id,started_at""", (p.caller_id, client_id, prompt_version, voice, entrypoint))
-            row = await cur.fetchone()
-            return str(row['id']), False, row['started_at']
+            return await self._start_locked(c, p, client_id, voice, prompt_version, entrypoint)
+
+    async def _start_locked(self, c, p, client_id, voice, prompt_version, entrypoint, *, strict_client=False):
+        cur = await c.execute("""SELECT id,entrypoint,status,client_id,started_at FROM call.calls
+            WHERE caller_id=%s AND status<>'ended' AND deleted_at IS NULL FOR UPDATE""", (p.caller_id,))
+        row = await cur.fetchone()
+        if row:
+            same_call = row['entrypoint'] == entrypoint and (
+                (entrypoint == 'web' and not strict_client) or str(row['client_id']) == client_id)
+            if same_call:
+                await c.execute("""UPDATE call.calls SET status='live',client_id=%s,last_beat_at=now()
+                    WHERE id=%s""", (client_id, row['id']))
+                return str(row['id']), True, row['started_at']
+            if row['status'] == 'live' or strict_client:
+                raise CallBusy()
+            # A disconnected call from another entry point keeps its own history and memory scope.
+            if p.unified and row["entrypoint"] == "web":
+                await self.meter_closed(c, p, row["id"])
+            await c.execute("""UPDATE call.calls SET status='ended',ended_at=now(),
+                end_reason='beat_lost',organize_status='pending',organize_next_at=now() WHERE id=%s""", (row['id'],))
+        cur = await c.execute("""INSERT INTO call.calls(caller_id,client_id,prompt_version,voice,entrypoint)
+            VALUES(%s,%s,%s,%s,%s) RETURNING id,started_at""", (p.caller_id, client_id, prompt_version, voice, entrypoint))
+        row = await cur.fetchone()
+        return str(row['id']), False, row['started_at']
+
+    async def reserve_notice_ring(self, p, client_id, voice, version, ring_id, *, legacy=False, session=None):
+        """Reserve the existing call and promise atomically under caller then ring locks."""
+        scene = ",scene_picture_id" if self.scene_rings else ""
+        async with asyncio.timeout(3), self.pool.connection() as c, c.transaction():
+            if session is not None:
+                await self._notice_session(c, p, session)
+            caller = await (await c.execute('SELECT id,enabled FROM call.callers WHERE id=%s FOR UPDATE',
+                                            (p.caller_id,))).fetchone()
+            if not caller or not caller["enabled"]:
+                if legacy:
+                    return None
+                raise NoticeRingState("ring_unavailable")
+            ring = await (await c.execute(f"""
+                SELECT id,status,answer_until,call_id,created_at,title,say,reason,topic{scene}
+                FROM marong.app_rings WHERE caller_id=%s AND id=%s AND reason='promise' FOR UPDATE
+            """, (p.caller_id, ring_id))).fetchone()
+            if ring is None:
+                if legacy:
+                    return None
+                raise NoticeRingState("not_found")
+            if ring["status"] == "answered":
+                match = await (await c.execute("""SELECT id,started_at FROM call.calls
+                    WHERE id=%s AND caller_id=%s AND client_id=%s AND entrypoint='web'
+                      AND status<>'ended' AND deleted_at IS NULL""",
+                    (ring["call_id"], p.caller_id, client_id))).fetchone()
+                if match is None:
+                    if legacy:
+                        raise CallBusy()
+                    raise NoticeRingState("ring_answered")
+                if legacy:
+                    await c.execute("UPDATE call.calls SET status='live',last_beat_at=now() WHERE id=%s",
+                                    (match["id"],))
+                return str(match["id"]), True, match["started_at"], {**ring, "fresh": False}
+            clock = await (await c.execute("SELECT clock_timestamp() AS now")).fetchone()
+            if ring["answer_until"] <= clock["now"] and ring["status"] in {"ringing", "missed"}:
+                if legacy:
+                    return None
+                raise NoticeRingState("ring_expired")
+            if ring["status"] != "ringing":
+                if legacy:
+                    return None
+                raise NoticeRingState("ring_unavailable")
+            call_id, resumed, started_at = await self._start_locked(
+                c, p, client_id, voice, version, "web", strict_client=not legacy)
+            saved = await (await c.execute("""
+                WITH actual AS (SELECT clock_timestamp() AS now)
+                UPDATE marong.app_rings SET status='answered',answered_at=actual.now,call_id=%s
+                FROM actual WHERE id=%s AND status='ringing' AND answer_until>actual.now
+                RETURNING actual.now AS at
+            """, (call_id, ring_id))).fetchone()
+            if saved is None:
+                # Raising undoes the call reservation if the deadline passed while reserving it.
+                raise NoticeRingState("ring_expired")
+            return call_id, resumed, started_at, {**ring, "fresh": True, "waited": saved["at"] - ring["created_at"]}
+
+    @staticmethod
+    async def _notice_session(c, p, session):
+        row = await (await c.execute("""
+            SELECT friend_id,revoked_at,expires_at FROM marong.app_sessions WHERE id=%s FOR SHARE
+        """, (session,))).fetchone()
+        if (row is None or row["friend_id"] != p.friend_id or row["revoked_at"] is not None
+                or row["expires_at"] <= datetime.now(timezone.utc)):
+            raise NoticeRingState("login_required")
+
+    async def start_notice_ordinary(self, p, client_id, voice, version, ring_id, session):
+        async with asyncio.timeout(3), self.pool.connection() as c, c.transaction():
+            await self._notice_session(c, p, session)
+            caller = await (await c.execute("SELECT id FROM call.callers WHERE id=%s AND enabled FOR UPDATE",
+                                            (p.caller_id,))).fetchone()
+            if caller is None:
+                raise NoticeRingState("ring_unavailable")
+            ring = await (await c.execute("""
+                SELECT status,answer_until FROM marong.app_rings
+                WHERE id=%s AND caller_id=%s AND reason='promise' FOR UPDATE
+            """, (ring_id, p.caller_id))).fetchone()
+            if not ring:
+                raise NoticeRingState("ring_unavailable")
+            if ring["status"] == "answered":
+                raise NoticeRingState("ring_answered")
+            if ring["status"] not in {"ringing", "missed"} or ring["answer_until"] > datetime.now(timezone.utc):
+                raise NoticeRingState("ring_unavailable")
+            started = await self._start_locked(c, p, client_id, voice, version, "web", strict_client=True)
+            return (*started, None)
+
+    async def attach_notice_call(self, p, client_id, call_id, ring_id, session):
+        scene = ",scene_picture_id" if self.scene_rings else ""
+        async with asyncio.timeout(3), self.pool.connection() as c, c.transaction():
+            await self._notice_session(c, p, session)
+            caller = await (await c.execute("SELECT id FROM call.callers WHERE id=%s AND enabled FOR UPDATE",
+                                            (p.caller_id,))).fetchone()
+            if caller is None:
+                raise NoticeRingState("ring_unavailable")
+            row = await (await c.execute("""
+                SELECT started_at,voice,status FROM call.calls WHERE id=%s AND caller_id=%s AND client_id=%s
+                    AND entrypoint='web' AND status<>'ended' AND deleted_at IS NULL FOR UPDATE
+            """, (call_id, p.caller_id, client_id))).fetchone()
+            if row is None:
+                raise NoticeRingState("ring_answered")
+            ring = await (await c.execute(f"""
+                SELECT id,title,say,created_at,clock_timestamp()-created_at AS waited,reason,topic{scene}
+                FROM marong.app_rings WHERE caller_id=%s AND id=%s AND status='answered' AND call_id=%s
+            """, (p.caller_id, ring_id, call_id))).fetchone()
+            if ring is None:
+                raise NoticeRingState("ring_unavailable")
+            history = await (await c.execute("SELECT 1 FROM call.segments WHERE call_id=%s LIMIT 1",
+                                              (call_id,))).fetchone()
+            await c.execute("UPDATE call.calls SET status='live',last_beat_at=now() WHERE id=%s", (call_id,))
+            return str(call_id), bool(history), row["started_at"], {**ring, "fresh": not history}, row["voice"]
 
     async def can_resume_call(self, p, entrypoint, client_id):
         row = await self.one("""SELECT 1 FROM call.calls WHERE caller_id=%s AND entrypoint=%s

@@ -93,6 +93,9 @@ class LiveSession:
         # ring: the ring id the page was opened with (/?ring=), or None. ring_info: the promise this call answers.
         # ring_topic: the picture card of a hello call, sent once with the first 'ready' (SPEC-268, SPEC-269).
         self.ring_id=ring;self.ring_info=None;self.ring_greet=False;self.ring_topic=None
+        self.notified_start=None
+        self.atomic_legacy_ring=False
+        self.skip_legacy_ring=False
         self.call_safety=None
         self.safety_queue=asyncio.Queue(maxsize=32)
         self.ws_opened=time.monotonic()
@@ -361,13 +364,28 @@ class LiveSession:
 
     async def run(self):
         if self.store and self.p:
-            self.call_id,self.logical_resumed,self.call_started_at=await self.store.start_call(
-                self.p,self.client_id,self.voice,BUILD,
-                entrypoint='discord' if self.entry_transport=='discord' else 'web')
+            initial = self.notified_start
+            if initial is None and self.atomic_legacy_ring:
+                from call_memory import NoticeRingState
+                try:
+                    initial = await self.store.reserve_notice_ring(
+                        self.p, self.client_id, self.voice, BUILD, self.ring_id, legacy=True)
+                except NoticeRingState as error:
+                    if error.state != "ring_expired":
+                        raise
+            if initial is None:
+                self.call_id,self.logical_resumed,self.call_started_at=await self.store.start_call(
+                    self.p,self.client_id,self.voice,BUILD,
+                    entrypoint='discord' if self.entry_transport=='discord' else 'web')
+            else:
+                self.call_id, self.logical_resumed, self.call_started_at, ring, *_ = initial
             self.mark('callRow')
             if getattr(self.store, "friend_marks", False):
                 self.revision = await self.store.revision(self.p)
-            await self.claim_ring()
+            if initial is not None and ring is not None:
+                self.apply_claimed_ring(ring)
+            elif not self.skip_legacy_ring:
+                await self.claim_ring()
             if os.getenv('MARONG_SAFETY')=='on':
                 from call_safety import CallSafety
                 from server import PROJECT
@@ -422,6 +440,9 @@ class LiveSession:
         if not got:
             if self.ring_id:self.d['ring']='none';print('ring_not_answered',flush=True)
             return
+        self.apply_claimed_ring(got)
+
+    def apply_claimed_ring(self, got):
         at=got['created_at'];reason='hello' if got.get('reason')=='hello' else 'promise'
         self.ring_info={'title':got['title'],'say':got['say'],'at':at,'reason':reason}
         self.d['ring']='answered' if got['fresh'] else 'again'

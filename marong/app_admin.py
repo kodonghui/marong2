@@ -515,9 +515,7 @@ class AppAdmin:
                 raise Problem("not_found")
             await conn.execute("UPDATE marong.device_codes SET used_at=%s WHERE friend_id=%s AND used_at IS NULL",
                                (now, friend))
-            await conn.execute("""
-                UPDATE marong.app_sessions SET revoked_at=%s WHERE friend_id=%s AND revoked_at IS NULL AND expires_at>%s
-            """, (now, friend, now))
+            await self.chat.sessions.revoke_friend_sessions(conn, friend, now)
         return web.Response(status=204)
 
     async def add_tickets(self, req):

@@ -376,6 +376,8 @@ class Agent:
                         write.io(inputs={"reply": reply, "reply_to": user_id})
                     saved_reply = await self.store.add_message(msg.room_key, "assistant", reply, reply_to=user_id,
                                                                meta={**meta, "delivered": ok})
+                    if ok and getattr(msg, "via", None) == "app":
+                        msg.saved_app_reply = saved_reply
                     if write:
                         write.record(result="ok")
                 if (self.usage is not None and saved_reply and ok and not meta.get("error")

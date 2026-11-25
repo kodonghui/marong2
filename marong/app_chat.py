@@ -19,7 +19,7 @@ import secrets
 import time
 from zoneinfo import ZoneInfo
 
-from aiohttp import web
+from aiohttp import ClientError, ClientSession, ClientTimeout, web
 import psycopg
 
 from tools.vertex_live.tool_trace import app_delivery, app_step, step as trace_step
@@ -31,6 +31,9 @@ from .app_store import APP_KEY, AppDeviceLimit
 from .discord_dm import DEFAULT_ORIGIN, DiscordIncoming, proactive_preference
 from .google_calendar import LINK_MARK, command as google_command
 from .topics import KEY as TOPIC_KEY, NAME as PICTURE_NAME, SET_NAME, phrase as topic_phrase, picture_set
+from .web_push_subscriptions import CHOICE_HEADER, INSTALLATION_HEADER, PATH as WEB_NOTICE_PATH, installation_id
+from .web_push_targets import resolve_target, visible_message
+from .web_notice_call_protocol import BRIDGE_HEADER, CALL_BRIDGE, client_uuid
 
 log = logging.getLogger("marong.app")
 DEFAULT_PORT = 8796
@@ -45,6 +48,7 @@ BODY_MAX = 16 * 1024
 REPLY_TTL_S = 3600
 READ_ROOMS_MAX = 256     # rooms whose '읽음' this process keeps (one per call friend)
 STATIC = Path(__file__).with_name("app_chat_static")
+WEB_NOTICE_SCRIPT = b'<script defer src="/chat/web-notifications.js"></script>\n'
 FILES = {"": ("index.html", "text/html"), "chat.js": ("chat.js", "text/javascript"),
          "chat.css": ("chat.css", "text/css"), "update-banner.js": ("update-banner.js", "text/javascript")}
 UNIFIED_FILES = {"account.html": "text/html", "admin.html": "text/html", "unified.css": "text/css",
@@ -114,7 +118,29 @@ PROBLEMS = {
     "ai_unavailable": (503, "맞춤형 지침을 읽지 못함"),
     "db_unavailable": (503, "DB에 닿지 않음"),
     "internal": (500, "예상하지 못한 서버 오류"),
+    "state_changed": (409, "알림 상태가 바뀌었어요"),
+    "subscription_conflict": (409, "이 설치의 알림 등록을 확인할 수 없어요"),
 }
+WEB_NOTICE_TITLES = {
+    "invalid_input": "입력을 확인해 주세요",
+    "login_required": "로그인이 필요해요",
+    "cross_site": "이 출처에서 요청할 수 없어요",
+    "not_allowed": "이 설치에서 요청할 수 없어요",
+    "not_found": "알림 대상을 열 수 없어요",
+    "request_limit": "잠시 뒤 다시 시도해 주세요",
+    "db_unavailable": "지금 상태를 확인할 수 없어요",
+    "internal": "요청을 처리할 수 없어요",
+}
+WEB_CALL_ERRORS = {
+    (400, "invalid_input"), (401, "login_required"), (403, "not_allowed"), (404, "not_found"),
+    (409, "call_busy"), (409, "calls_full"), (409, "budget_exhausted"), (429, "daily_limit"),
+    (429, "request_limit"), (503, "db_unavailable"), (500, "internal"),
+}
+PROBLEMS.update({
+    "call_busy": (409, "다른 기기에서 통화 중이야"),
+    "calls_full": (409, "지금은 전화가 꽉 찼어"),
+    "budget_exhausted": (409, "통화 사용 한도에 도달했어요"),
+})
 HEADERS = {
     "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY", "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
@@ -139,7 +165,8 @@ def bad(*errors) -> Problem:
 class AppChat:
     def __init__(self, store, agent, client, access, push, *, origin: str = DEFAULT_ORIGIN, port: int = DEFAULT_PORT,
                  timezone: str = "Asia/Seoul", clock=time.monotonic, releases: AppReleases | None = None,
-                 sessions=None, authentication="access", admin_email_hash=None, diary_models=None, pet_app_settings=None):
+                 sessions=None, authentication="access", admin_email_hash=None, diary_models=None, pet_app_settings=None,
+                 web_push_subscriptions=None, web_push_references=None):
         self.store = store
         self.agent = agent      # DiscordAgent: the same one that answers the Discord DM
         self.client = client    # DiscordDM: its room locks keep one answer at a time per room
@@ -152,6 +179,12 @@ class AppChat:
         self.releases = releases if releases is not None else AppReleases()
         self.sessions = sessions
         self.authentication = auth_mode(authentication)
+        self.web_push_subscriptions = web_push_subscriptions if sessions and authentication != "access" else None
+        self.web_push_references = web_push_references
+        self.web_push_delivery = None
+        self.web_push_call = None
+        if self.web_push_subscriptions is not None:
+            sessions.web_push_subscriptions = self.web_push_subscriptions
         self.delivery = None
         self.internal_shop = None
         from .usage import Usage, configured_call_limit, configured_limit
@@ -230,17 +263,20 @@ class AppChat:
             res = self._problem(p, trace)
         except SessionError as p:
             headers = {"Retry-After": str(p.retry_after)} if p.retry_after is not None else None
-            res = self._problem(Problem(p.code, headers=headers), trace)
+            title = WEB_NOTICE_TITLES.get(p.code) if req.path.startswith(WEB_NOTICE_PATH + "/") else None
+            res = self._problem(Problem(p.code, headers=headers, title=title), trace)
         except CharacterError as p:
             res = self._problem(Problem(p.code, p.errors), trace)
         except web.HTTPException as e:
             res = e
         except (psycopg.OperationalError, TimeoutError) as e:  # includes the pool timeout
-            log.warning("app_chat_db_unavailable %s", type(e).__name__)
-            res = self._problem(Problem("db_unavailable"), trace)
+            log.warning("app_chat_db_unavailable %s trace=%s", type(e).__name__, trace)
+            title = WEB_NOTICE_TITLES["db_unavailable"] if req.path.startswith(WEB_NOTICE_PATH + "/") else None
+            res = self._problem(Problem("db_unavailable", title=title), trace)
         except Exception as e:
             log.error("app_chat_error %s trace=%s", type(e).__name__, trace)
-            res = self._problem(Problem("internal"), trace)
+            title = WEB_NOTICE_TITLES["internal"] if req.path.startswith(WEB_NOTICE_PATH + "/") else None
+            res = self._problem(Problem("internal", title=title), trace)
         if req.method == "GET" and req.path == RELEASE_CHECK_PATH:
             prefix, _, version = req.headers.get("User-Agent", "").partition("/")
             if prefix == "MarongApp" and VERSION.fullmatch(version):
@@ -255,6 +291,117 @@ class AppChat:
     def _require_app_origin(self, req):
         if req.headers.get("Origin") != self.origin:
             raise Problem("cross_site")
+
+    def _web_notice_request(self, req):
+        origin = req.headers.get("Origin")
+        site = req.headers.get("Sec-Fetch-Site")
+        if ((req.method != "GET" or origin is not None) and origin != self.origin
+                or site not in (None, "same-origin", "none")):
+            raise SessionError("cross_site")
+        return req.cookies.get(COOKIE), installation_id(req.headers.get(INSTALLATION_HEADER))
+
+    @staticmethod
+    async def _web_notice_body(req, limit):
+        if req.content_type != "application/json" or (req.content_length is not None and req.content_length > limit):
+            raise SessionError("invalid_input")
+        raw = bytearray()
+        async for chunk in req.content.iter_chunked(limit):
+            raw.extend(chunk)
+            if len(raw) > limit:
+                raise SessionError("invalid_input")
+        try:
+            body = json.loads(raw.decode("utf-8"))
+        except (ValueError, RecursionError):
+            raise SessionError("invalid_input") from None
+        if not isinstance(body, dict):
+            raise SessionError("invalid_input")
+        return body
+
+    async def web_notice_status(self, req):
+        token, ident = self._web_notice_request(req)
+        return self._json(200, await self.web_push_subscriptions.status(token, ident))
+
+    async def web_notice_choice(self, req):
+        token, ident = self._web_notice_request(req)
+        body = await self._web_notice_body(req, 2048)
+        return self._json(200, await self.web_push_subscriptions.choice(token, ident, body))
+
+    async def web_notice_register(self, req):
+        token, ident = self._web_notice_request(req)
+        body = await self._web_notice_body(req, 4096)
+        result = await self.web_push_subscriptions.register(token, ident, req.headers.get(CHOICE_HEADER), body)
+        return self._json(200, result)
+
+    async def web_notice_revoke(self, req):
+        token, ident = self._web_notice_request(req)
+        result = await self.web_push_subscriptions.revoke(token, ident, req.headers.get(CHOICE_HEADER))
+        return self._json(200, result)
+
+    async def web_notice_resolve(self, req):
+        token, ident = self._web_notice_request(req)
+        body = await self._web_notice_body(req, 2048)
+        if set(body) != {"targetRef"}:
+            raise SessionError("invalid_input")
+        async with self.web_push_subscriptions.authenticated(token, ident) as (conn, session, now):
+            result = await resolve_target(conn, self.store, self.web_push_references, session, body["targetRef"], now)
+        return self._json(200, result)
+
+    async def web_notice_reply_view(self, req):
+        token, ident = self._web_notice_request(req)
+        arrival = self.web_push_delivery.reply_arrival()
+        body = await self._web_notice_body(req, 1024)
+        if set(body) != {"messageId", "view"} or body["view"] not in ("visible", "hidden"):
+            raise SessionError("invalid_input")
+        ident_text = body["messageId"]
+        if (not isinstance(ident_text, str) or not re.fullmatch(r"[1-9][0-9]{0,18}", ident_text)
+                or int(ident_text) > 2**63 - 1):
+            raise SessionError("invalid_input")
+        message = int(ident_text)
+        async with self.web_push_subscriptions.authenticated(token, ident, limit=120) as (conn, session, now):
+            row = await self.web_push_subscriptions._row(conn, ident)
+            sid = session["id"]
+            if (row is None or row["session_id"] != sid
+                    or self.web_push_subscriptions._state(row, ident, sid, now) != "active"):
+                raise SessionError("not_allowed")
+            if not await visible_message(conn, self.store, session["friend_id"], message, reply_only=True):
+                raise SessionError("not_found")
+        self.web_push_delivery.report_reply_view(sid, ident, message, body["view"], arrival)
+        return self._json(200, {"state": "recorded" if body["view"] == "visible" else "cleared"})
+
+    async def web_notice_accept(self, req):
+        token, ident = self._web_notice_request(req)
+        body = await self._web_notice_body(req, 2048)
+        if set(body) != {"targetRef", "clientId"}:
+            raise SessionError("invalid_input")
+        client_uuid(body["clientId"])
+        async with self.web_push_subscriptions.authenticated(token, ident) as (_, session, now):
+            kind, _ = self.web_push_references.open(body["targetRef"], session["friend_id"], now)
+            if kind != "call":
+                raise SessionError("not_found")
+        headers = {BRIDGE_HEADER: self.web_push_call.bridge_secret, INSTALLATION_HEADER: req.headers[INSTALLATION_HEADER]}
+        try:
+            async with ClientSession(timeout=ClientTimeout(total=5)) as bridge:
+                async with bridge.post(CALL_BRIDGE, json=body, headers=headers, cookies={COOKIE: token},
+                                       allow_redirects=False) as response:
+                    status, result = response.status, await response.json()
+                    retry_after = response.headers.get("Retry-After")
+        except (ClientError, TimeoutError, ValueError):
+            raise SessionError("db_unavailable") from None
+        if status == 200 and isinstance(result, dict):
+            return self._json(200, result)
+        code = result.get("code") if isinstance(result, dict) else None
+        if (status, code) not in WEB_CALL_ERRORS:
+            raise SessionError("db_unavailable")
+        retry = int(retry_after) if retry_after and re.fullmatch(r"[1-9][0-9]{0,3}", retry_after) else None
+        raise SessionError(code, retry_after=retry)
+
+    def _optional_installation(self, req):
+        if self.web_push_subscriptions is None:
+            return None
+        try:
+            return installation_id(req.headers.get(INSTALLATION_HEADER))
+        except SessionError:
+            return None
 
     async def _session_body(self, req, required, optional=()):
         try:
@@ -277,15 +424,17 @@ class AppChat:
     async def join_with_invite(self, req):
         self._require_app_origin(req)
         body = await self._session_body(req, "token", ("name",))
-        session = await self.sessions.join(body["token"], body.get("name"), device_label(req.headers.get("User-Agent", "")))
+        session = await self.sessions.join(body["token"], body.get("name"), device_label(req.headers.get("User-Agent", "")),
+                                           installation=self._optional_installation(req))
         return self._set_session_cookie(self._json(201, session.public()), session.token)
 
     async def login_with_device_code(self, req):
         self._require_app_origin(req)
         body = await self._session_body(req, "code")
         address = req.headers.get("CF-Connecting-IP") or req.remote or "unknown"
-        session = await self.sessions.redeem_device_code(body["code"], address,
-                                                         device_label(req.headers.get("User-Agent", "")))
+        session = await self.sessions.redeem_device_code(
+            body["code"], address, device_label(req.headers.get("User-Agent", "")),
+            installation=self._optional_installation(req))
         return self._set_session_cookie(self._json(200, session.public()), session.token)
 
     async def create_device_code(self, req):
@@ -471,6 +620,8 @@ class AppChat:
         data, kind = self.files[name + ".html"]
         if signed_cookie:
             data = data.replace(b'<body>', b'<body data-session-cookie="yes">', 1)
+        if self.web_push_subscriptions is not None and name in {"account", "profile"}:
+            data = data.replace(b'<script ', WEB_NOTICE_SCRIPT + b'<script ', 1)
         return web.Response(body=data, content_type=kind, charset="utf-8")
 
     async def account_page(self, req):
@@ -507,7 +658,12 @@ class AppChat:
         if not found:
             raise web.HTTPNotFound()
         data, kind = found
+        if self.web_push_subscriptions is not None and kind == "text/html":
+            data = data.replace(b'<script ', WEB_NOTICE_SCRIPT + b'<script ', 1)
         return web.Response(body=data, content_type=kind, charset="utf-8")
+
+    async def web_notice_asset(self, req):
+        return web.FileResponse(STATIC / req.match_info["asset"], headers={"Content-Type": "text/javascript"})
 
     # ── API ────────────────────────────────────────────────────
 
@@ -620,6 +776,8 @@ class AppChat:
                 trace.record(result="ok")
                 trace.app_reply(reply)
             log.info("app_chat_replied")
+            if self.web_push_delivery is not None and (reply_id := getattr(msg, "saved_app_reply", None)) is not None:
+                self._spawn(self.web_push_delivery.publish(who["friend_id"], "reply", reply_id, REPLY_TTL_S))
             # The friend closed the chat before the answer came: tell their phone (SPEC-120). Never Discord.
             if not self.waiters.get(who["friend_id"]) and self.push.enabled:
                 try:
@@ -783,6 +941,20 @@ class AppChat:
             app.router.add_post("/chat/api/login/code", self.login_with_device_code)
             app.router.add_post("/chat/api/device-codes", self.create_device_code)
             app.router.add_post("/chat/api/logout", self.logout)
+            if self.web_push_subscriptions is not None:
+                app.router.add_get("/chat/{asset:web-notifications\\.js|web-notification-worker\\.js}",
+                                   self.web_notice_asset)
+                subscription = WEB_NOTICE_PATH + "/subscription"
+                app.router.add_get(subscription, self.web_notice_status, allow_head=False)
+                app.router.add_post(subscription + "/intent", self.web_notice_choice)
+                app.router.add_put(subscription, self.web_notice_register)
+                app.router.add_delete(subscription, self.web_notice_revoke)
+                if self.web_push_references is not None:
+                    app.router.add_post(WEB_NOTICE_PATH + "/target/resolve", self.web_notice_resolve)
+                if self.web_push_call is not None:
+                    app.router.add_post(WEB_NOTICE_PATH + "/call/accept", self.web_notice_accept)
+                if self.web_push_delivery is not None:
+                    app.router.add_post(WEB_NOTICE_PATH + "/reply-view", self.web_notice_reply_view)
             self.admin.register(app.router)
             self.profile.register(app.router)
             app.router.add_get("/chat/api/usage", self.profile.usage)
