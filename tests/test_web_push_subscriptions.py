@@ -1,6 +1,7 @@
 """TASK-561–564: installation-scoped API-310–313 against isolated PostgreSQL."""
 
 import asyncio
+from collections import deque
 from datetime import datetime, timedelta, timezone
 import json
 import secrets
@@ -19,6 +20,7 @@ from psycopg import OperationalError
 
 from test_web_push_schema import MIGRATION, ROOT, app_database, session
 from marong.app_chat import AppChat
+from marong.app_push import AppPush
 from marong.app_session import AppSessions, COOKIE, token_hash
 from marong.unified_delivery import UnifiedDelivery
 from marong.unified_store import UnifiedStore
@@ -599,11 +601,16 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         call_app = web.Application()
         call_app.router.add_post("/internal/web-notification/accept", server.notice_accept)
         call_app.router.add_get("/live/web-notification", server.notice_live)
+        call_app.router.add_get("/live", server.live)
+        call_app.router.add_post("/api/rtc", server.rtc_config)
+        call_app.router.add_get("/status", server.status)
+        call_app.router.add_get("/api/me", server.status)
         call_site = TestServer(call_app)
         await call_site.start_server()
         self.addAsyncCleanup(call_site.close)
         for obj, key, value in (
             (server, "memory_store", store), (server, "NOTICE_CALL", protocol),
+            (server, "AUTHENTICATION", "session"), (server, "active_calls", {}), (server, "resume_state", {}),
             (server, "budget_status", AsyncMock(return_value="ok")),
             (server, "person_budget_blocked", AsyncMock(return_value=False)),
             (store.daily_usage, "blocked", AsyncMock(return_value=False)),
@@ -743,6 +750,70 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
                          [("ringing", None)])
         self.assertEqual(self.db.admin("SELECT count(*) FROM call.calls WHERE caller_id=%s", (p.caller_id,)), [(0,)])
 
+    async def test_575_all_failure_frames_leave_db_and_media_untouched(self):
+        from contextlib import nullcontext
+        from call_cost import BLOCKED
+        from call_memory import NoticeRingState
+
+        server, store, protocol, who = await self.call_fixture()
+        endpoint = self.call_site.make_url("/live/web-notification")
+        headers = {"Cookie": f"{COOKIE}={self.token}", "Origin": str(endpoint.origin())}
+        ring = self.ring(who, until=-5)
+        reference = self.references.seal("call", who["friend_id"], ring, self.now)
+        client = str(uuid4())
+        start = {"type": "start_ordinary", "clientId": client, "installationProof": self.proof, "targetRef": reference}
+        # A once-valid connection credential can outlive a reservation rollback.
+        # Use a synthetic signed credential for an expired, unaccepted ring.
+        expired = protocol.issue(self.sid, installation_id(self.proof), client_uuid(client), str(uuid4()), ring, self.now)
+        notified = {"type": "start_notified", "clientId": client, "installationProof": self.proof,
+                    "connectToken": expired}
+        before = self.db.admin("SELECT status,call_id,answered_at FROM marong.app_rings WHERE id=%s", (ring,))
+        seen = set()
+        cases = (
+            ("invalid_input", '{"type":"ignored",' + json.dumps(start)[1:], nullcontext()),
+            ("invalid_input", b"binary-first", nullcontext()),
+            ("invalid_input", json.dumps(start).ljust(2049), nullcontext()),
+            ("invalid_input", None, nullcontext()),
+            ("not_allowed", {**notified, "installationProof": self.other_proof}, nullcontext()),
+            ("not_allowed", {**notified, "clientId": str(uuid4())}, nullcontext()),
+            ("ring_expired", notified, nullcontext()),
+            ("ring_answered", start, patch.object(store, "start_notice_ordinary",
+                          side_effect=NoticeRingState("ring_answered"))),
+            ("ring_unavailable", {**start, "targetRef": self.references.seal(
+                "call", who["friend_id"], uuid4(), self.now)}, nullcontext()),
+            ("call_busy", start, patch.object(server, "active_calls",
+                                             {who["friend_id"]: server.CallSlot(str(uuid4()))})),
+            ("calls_full", start, patch.object(server, "CALL_MAX", 0)),
+            ("daily_limit", start, patch.object(store.daily_usage, "blocked", return_value=True)),
+            ("budget_exhausted", start, patch.object(server, "budget_status", return_value=next(iter(BLOCKED)))),
+            ("db_unavailable", start, patch.object(store, "one", side_effect=OperationalError)),
+            ("login_required", start, nullcontext()),
+        )
+        with patch.object(server, "LiveSession") as live_factory:
+            for code, frame, fault in cases:
+                with self.subTest(code=code, frame_kind=type(frame).__name__), fault:
+                    async with self.client.session.ws_connect(endpoint, protocols=[SUBPROTOCOL], headers=headers) as ws:
+                        self.assertEqual(ws.protocol, SUBPROTOCOL)
+                        if code == "login_required":
+                            self.db.admin("UPDATE marong.app_sessions SET revoked_at=now() WHERE id=%s", (self.sid,))
+                        if isinstance(frame, dict):
+                            await ws.send_json(frame)
+                        elif isinstance(frame, str):
+                            await ws.send_str(frame)
+                        elif isinstance(frame, bytes):
+                            await ws.send_bytes(frame)
+                        self.assertEqual(await ws.receive_json(timeout=7), {"type": code})
+                        seen.add(code)
+                        await ws.close()
+                    self.assertEqual(self.db.admin("SELECT count(*) FROM call.calls WHERE caller_id=%s",
+                                                   (who["caller_id"],)), [(0,)])
+                    self.assertEqual(self.db.admin("SELECT status,call_id,answered_at FROM marong.app_rings WHERE id=%s",
+                                                   (ring,)), before)
+            live_factory.assert_not_called()
+        self.assertEqual(seen, {"login_required", "not_allowed", "invalid_input", "ring_expired", "ring_answered",
+                                "ring_unavailable", "call_busy", "calls_full", "daily_limit", "budget_exhausted",
+                                "db_unavailable"})
+
     async def test_575_socket_protocol_first_frame_and_preaccepted_call(self):
         server, store, protocol, who = await self.call_fixture()
         origin = str(self.call_site.make_url("/")).rstrip("/")
@@ -769,23 +840,31 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
                 await self.websocket.send_bytes(pcm)
 
         with patch.object(server, "LiveSession", CallDouble):
-            for incoming, offers, status in (
-                (headers, (), 400), ({**headers, "Origin": "https://off.invalid"}, [SUBPROTOCOL], 403),
-                ({"Origin": origin}, [SUBPROTOCOL], 401),
+            for incoming, offers, status, code in (
+                (headers, (), 400, "invalid_input"),
+                ({**headers, "Origin": "https://off.invalid"}, [SUBPROTOCOL], 403, "cross_site"),
+                ({"Origin": origin}, [SUBPROTOCOL], 401, "login_required"),
             ):
                 with self.assertRaises(WSServerHandshakeError) as caught:
                     await self.client.session.ws_connect(endpoint, protocols=offers, headers=incoming)
                 self.assertEqual(caught.exception.status, status)
+                protocol_header = {"Sec-WebSocket-Protocol": SUBPROTOCOL} if offers else {}
+                async with self.client.session.get(endpoint, headers=incoming | protocol_header) as blocked:
+                    self.assertEqual((blocked.status, await blocked.json()), (status, {"code": code}))
             pending = server.CallSlot(client, reconnecting=True)
             previews = (
-                (patch.object(server, "active_calls", {who["friend_id"]: pending}), 409),
-                (patch.object(server, "notice_identity", side_effect=OperationalError), 503),
-                (patch.object(server, "notice_identity", side_effect=RuntimeError), 500),
+                (patch.object(server, "active_calls", {who["friend_id"]: pending}), 409, "call_busy"),
+                (patch.object(server, "notice_identity", side_effect=OperationalError), 503, "db_unavailable"),
+                (patch.object(server, "notice_identity", side_effect=RuntimeError), 500, "internal"),
             )
-            for condition, status in previews:
-                with condition, self.assertRaises(WSServerHandshakeError) as caught:
-                    await self.client.session.ws_connect(endpoint, protocols=[SUBPROTOCOL], headers=headers)
-                self.assertEqual(caught.exception.status, status)
+            for condition, status, code in previews:
+                with condition:
+                    with self.assertRaises(WSServerHandshakeError) as caught:
+                        await self.client.session.ws_connect(endpoint, protocols=[SUBPROTOCOL], headers=headers)
+                    self.assertEqual(caught.exception.status, status)
+                    async with self.client.session.get(
+                            endpoint, headers=headers | {"Sec-WebSocket-Protocol": SUBPROTOCOL}) as blocked:
+                        self.assertEqual((blocked.status, await blocked.json()), (status, {"code": code}))
             valid = {"type": "start_notified", "clientId": client, "installationProof": self.proof,
                      "connectToken": accepted["connectToken"]}
             expired_token = protocol.issue(
@@ -821,6 +900,209 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(await ws.receive_bytes(timeout=3), b"synthetic-audio")
         self.assertEqual(self.db.admin("SELECT status,call_id FROM marong.app_rings WHERE id=%s", (expired,)),
                          [("ringing", None)])
+
+    async def test_575_relay_webrtc_pcm_reconnect_and_rejected_stop(self):
+        server, _, _, who = await self.call_fixture()
+        import live_session
+        from rtc_transport import Bridge
+        from test_relay import HTTP, Upstream, event, turn
+
+        endpoint = self.call_site.make_url("/live/web-notification")
+        headers = {"Cookie": f"{COOKIE}={self.token}", "Origin": str(endpoint.origin())}
+        client = str(uuid4())
+        ring = self.ring(who)
+        reference = self.references.seal("call", who["friend_id"], ring, self.now)
+        accepted = await (await self.request("POST", ACCEPT, body={"targetRef": reference, "clientId": client})).json()
+        frame = {"type": "start_notified", "clientId": client, "installationProof": self.proof,
+                 "connectToken": accepted["connectToken"]}
+        call_id = accepted["callId"]
+        upstreams = []
+        code, _ = await self.sessions.create_device_code(who["friend_id"])
+        sibling = await self.sessions.redeem_device_code(code, "192.0.2.5", "Fixture")
+
+        def provider(**_settings):
+            upstream = Upstream()
+            upstreams.append(upstream)
+            return HTTP(upstream)
+
+        bridge = Bridge.__new__(Bridge)
+        bridge.owner = f"friend:{who['friend_id']}"
+        bridge.client, bridge.name = client, "fixture-room"
+        bridge.closed, bridge.session, bridge.task = False, None, None
+        bridge.epoch, bridge.turns = 0, deque()
+        bridge.source = Mock()
+        bridge.close = AsyncMock()
+        bridge.token = lambda: "synthetic-media-token"
+
+        async def send_mic(ws, upstream):
+            await ws.send_bytes(b"\x01\x02" * 480)
+            for _ in range(80):
+                if any("realtimeInput" in item and "audio" in item["realtimeInput"] for item in upstream.sent):
+                    return
+                await asyncio.sleep(.025)
+            self.fail("synthetic microphone audio did not reach the relay upstream")
+
+        async def open_socket():
+            return await self.client.session.ws_connect(endpoint, protocols=[SUBPROTOCOL], headers=headers)
+
+        async def prepare_media(owner, config_client, *, capacity):
+            self.assertEqual((owner, config_client), (bridge.owner, client))
+            server.rtc_transport.bridges[client] = bridge
+            return bridge
+
+        with (patch.object(server, "google_headers", AsyncMock(return_value={})),
+              patch.object(live_session, "ClientSession", provider),
+              patch.object(server.rtc_transport, "bridges", {}),
+              patch.object(server.rtc_transport, "enabled", return_value=True),
+              patch.object(server.rtc_transport, "acquire", side_effect=prepare_media)):
+            async with await open_socket() as ws:
+                # Exactly 2,048 bytes is a legal JSON frame with whitespace.
+                await ws.send_str(json.dumps(frame).ljust(2048))
+                ready = await event(ws, "ready")
+                self.assertEqual((ready["callId"], ready["ring"], ready["memoryConnected"]),
+                                 (call_id, True, True))
+                rtc_reply = await self.client.session.post(self.call_site.make_url("/api/rtc"),
+                                                           headers=headers, json={"client": client})
+                self.assertEqual(rtc_reply.status, 200)
+                self.assertEqual((await rtc_reply.json())["room"], bridge.name)
+                wrong_install = await self.client.session.post(
+                    self.call_site.make_url("/api/rtc"), headers={**headers, "Cookie": f"{COOKIE}={sibling.token}"},
+                    json={"client": client})
+                self.assertEqual(wrong_install.status, 409)
+                await ws.send_json({"type": "audio_ready", "path": "webrtc"})
+                await event(ws, "audio_end")
+                await event(ws, "turn")
+                await send_mic(ws, upstreams[0])
+                self.assertEqual(len(bridge.turns), 1)
+                self.assertEqual(bytes(bridge.turns[0]["pcm"]), b"\x00\x01" * 240)
+
+                async with await open_socket() as rejected:
+                    await rejected.send_json({**frame, "clientId": str(uuid4())})
+                    await rejected.send_json({"type": "stop"})
+                    self.assertEqual(await rejected.receive_json(timeout=3), {"type": "not_allowed"})
+                current = server.active_calls[who["friend_id"]].session
+                self.assertFalse(current.stop.is_set())
+                self.assertEqual(self.db.admin("SELECT status FROM call.calls WHERE id=%s", (call_id,)), [("live",)])
+
+                await ws.send_json({"type": "audio_transport", "mode": "pcm", "reason": "rtc_media_stalled"})
+                fallback = await event(ws, "audio_transport")
+                self.assertEqual((fallback["callId"], fallback["switched"], fallback["mode"]), (call_id, True, "pcm"))
+                pcm = await ws.receive_bytes(timeout=3)
+                self.assertEqual(live_session.FRAME.unpack(pcm[:24])[0], b"MRG2")
+                self.assertEqual(pcm[24:], b"\x00\x01" * 240)
+                await event(ws, "audio_end")
+                await ws.send_json({"type": "text", "text": "Synthetic test prompt"})
+                await turn(ws)
+                self.assertEqual(len(upstreams), 1)
+
+            server.rtc_transport.bridges.clear()
+            async with await open_socket() as restored:
+                await restored.send_json(frame)
+                ready = await event(restored, "ready")
+                self.assertEqual((ready["callId"], ready["ring"], ready["audioTransport"], ready["resumed"]),
+                                 (call_id, True, "pcm", True))
+                await restored.send_json({"type": "audio_ready", "path": "pcm"})
+                await send_mic(restored, upstreams[-1])
+                await restored.send_json({"type": "text", "text": "Synthetic test after reconnect"})
+                await turn(restored)
+                await restored.send_json({"type": "stop"})
+                await restored.receive(timeout=3)
+            async with await open_socket() as ended:
+                await ended.send_json(frame)
+                self.assertEqual(await ended.receive_json(timeout=3), {"type": "ring_answered"})
+        self.assertEqual(self.db.admin("""
+            SELECT c.status,r.status,r.call_id::text FROM call.calls c JOIN marong.app_rings r ON r.call_id=c.id
+            WHERE c.caller_id=%s AND r.id=%s
+        """, (who["caller_id"], ring)), [("ended", "answered", call_id)])
+        self.assertEqual(self.db.admin("SELECT count(*) FROM call.calls WHERE caller_id=%s",
+                                       (who["caller_id"],)), [(1,)])
+        self.assertEqual(self.db.admin("SELECT count(*) FROM call.segments WHERE call_id=%s", (call_id,)), [(2,)])
+
+    async def test_577_existing_routes_and_android_eligibility_with_web_push_on_and_off(self):
+        server, _, protocol, who = await self.call_fixture()
+        import live_session
+        from test_relay import HTTP, Upstream, event
+
+        fcm = Mock(send=AsyncMock(return_value="ok"))
+        self.chat.push = AppPush(self.store, fcm, ring_enabled=True)
+        room_lock = asyncio.Lock()
+        self.chat.client = Mock(room_lock=Mock(return_value=room_lock))
+        await self.store.add_message(who["room_key"], "assistant", "Synthetic saved reply",
+                                     meta={"delivered": True})
+        device = uuid4()
+        device_path = f"/chat/api/devices/{device}"
+        granted = {"fid": "fixture" * 3, "notifications": "granted", "appVersion": "0.3.4",
+                   "ring": {"channel": "enabled", "fullScreen": "denied"}}
+        android_headers = {"User-Agent": "MarongApp/0.3.4"}
+        status_url = self.call_site.make_url("/api/me")
+        status_headers = {"Cookie": f"{COOKIE}={self.token}", "Origin": str(status_url.origin())}
+        flags = []
+        for enabled in (False, True):
+            self.chat.web_push_subscriptions = self.service if enabled else None
+            self.chat.web_push_call = protocol if enabled else None
+            app = TestClient(TestServer(self.chat.web_app()))
+            await app.start_server()
+            self.addAsyncCleanup(app.close)
+            self.client = app
+            if enabled:
+                await self.register_fixture()
+            with (patch.object(server, "NOTICE_CALL", protocol if enabled else None),
+                  patch.object(server, "google_headers", AsyncMock(return_value={})),
+                  patch.object(live_session, "ClientSession", side_effect=lambda **_: HTTP(Upstream())),
+                  patch.object(server.rtc_transport, "enabled", return_value=False),
+                  patch.object(server.rtc_transport, "bridges", {})):
+                before = await self.request("PUT", device_path, body=granted, headers=android_headers)
+                self.assertEqual(before.status, 200 if enabled else 201)
+                delivery = await before.json()
+                self.assertEqual(delivery["delivery"]["to"], "app")
+                self.assertEqual(delivery["ring"], {"to": "app", "reason": "app_on", "fullScreen": False})
+                self.assertEqual(len(await self.chat.push.ring_devices(who["friend_id"])), 1)
+                await self.chat.push.notify(who["friend_id"], "reply", "Synthetic notification")
+                self.assertEqual(fcm.send.await_count, len(flags) + 1)
+                me = await self.request("GET", "/chat/api/me", proof=None,
+                                        headers={"User-Agent": "iPhone Fixture Safari"})
+                self.assertEqual(me.status, 200)
+                messages = await self.request("GET", "/chat/api/messages", proof=None)
+                self.assertEqual(messages.status, 200)
+                refused = await self.request("PUT", device_path, body={**granted, "notifications": "denied"},
+                                             headers=android_headers)
+                self.assertEqual(refused.status, 200)
+                self.assertEqual(await self.chat.push.ring_devices(who["friend_id"]), [])
+                self.assertEqual(await self.chat.push.notify(who["friend_id"], "reply", "Synthetic notification"),
+                                 (0, 0))
+                async with self.client.session.get(status_url, headers=status_headers) as reply:
+                    self.assertEqual(reply.status, 200)
+                    call_status = await reply.json()
+                    self.assertTrue(call_status["canCall"])
+                async with self.client.session.get(status_url) as unauthorized:
+                    self.assertEqual(unauthorized.status, 401)
+                with patch.object(server, "budget_status", side_effect=RuntimeError):
+                    async with self.client.session.get(status_url, headers=status_headers) as unavailable:
+                        self.assertEqual(unavailable.status, 500)
+                # Ordinary Safari dials without a notification credential.
+                # Android answers the existing explicit ring on the legacy route.
+                frames = []
+                ring = self.ring(who)
+                for android in (True, False):
+                    query = {"client": str(uuid4()), "hangup": "1"}
+                    if android:
+                        query["ring"] = str(ring)
+                    endpoint = self.call_site.make_url("/live").with_query(query)
+                    headers = status_headers | (android_headers if android else {"User-Agent": "iPhone Fixture Safari"})
+                    with self.assertRaises(WSServerHandshakeError) as origin_error:
+                        await self.client.session.ws_connect(endpoint, headers=headers | {"Origin": "https://off.invalid"})
+                    self.assertEqual(origin_error.exception.status, 403)
+                    async with self.client.session.ws_connect(endpoint, headers=headers) as ws:
+                        ready = await event(ws, "ready")
+                        self.assertEqual((ready["ring"], ready["memoryConnected"]), (android, True))
+                        frames.append((ready["ring"], ready["memoryConnected"], ready["audioFormat"]))
+                        competing = endpoint.with_query({**query, "client": str(uuid4())})
+                        async with self.client.session.ws_connect(competing, headers=headers) as second:
+                            self.assertEqual(await second.receive_json(timeout=3), {"type": "call_busy"})
+                        await ws.send_json({"type": "stop"})
+                        await ws.receive(timeout=3)
+                flags.append((delivery, await me.json(), await messages.json(), await refused.json(), call_status, frames))
+        self.assertEqual(flags[0], flags[1])
 
 
 if __name__ == "__main__":

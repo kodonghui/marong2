@@ -545,18 +545,28 @@ class MemoryStore:
                                             (p.caller_id,))).fetchone()
             if caller is None:
                 raise NoticeRingState("ring_unavailable")
+            ring = await (await c.execute(f"""
+                SELECT id,title,say,created_at,clock_timestamp()-created_at AS waited,
+                       reason,topic,status,answer_until,call_id{scene}
+                FROM marong.app_rings WHERE caller_id=%s AND id=%s AND reason='promise' FOR UPDATE
+            """, (p.caller_id, ring_id))).fetchone()
+            now = datetime.now(timezone.utc)
+            if session_until <= now:
+                raise NoticeRingState("login_required")
+            if ring is None:
+                raise NoticeRingState("ring_unavailable")
+            if ring["status"] != "answered":
+                if ring["status"] in ("ringing", "missed") and ring["answer_until"] <= now:
+                    raise NoticeRingState("ring_expired")
+                raise NoticeRingState("ring_unavailable")
+            if str(ring["call_id"]) != str(call_id):
+                raise NoticeRingState("ring_answered")
             row = await (await c.execute("""
                 SELECT started_at,voice,status FROM call.calls WHERE id=%s AND caller_id=%s AND client_id=%s
                     AND entrypoint='web' AND status<>'ended' AND deleted_at IS NULL FOR UPDATE
             """, (call_id, p.caller_id, client_id))).fetchone()
             if row is None:
                 raise NoticeRingState("ring_answered")
-            ring = await (await c.execute(f"""
-                SELECT id,title,say,created_at,clock_timestamp()-created_at AS waited,reason,topic{scene}
-                FROM marong.app_rings WHERE caller_id=%s AND id=%s AND status='answered' AND call_id=%s
-            """, (p.caller_id, ring_id, call_id))).fetchone()
-            if ring is None:
-                raise NoticeRingState("ring_unavailable")
             if session_until <= datetime.now(timezone.utc):
                 raise NoticeRingState("login_required")
             history = await (await c.execute("SELECT 1 FROM call.segments WHERE call_id=%s LIMIT 1",

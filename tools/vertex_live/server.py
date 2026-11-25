@@ -112,6 +112,13 @@ class CallSlot:
     session: LiveSession | None = None
     released: asyncio.Event = field(default_factory=asyncio.Event)
     reconnecting: bool = False
+    rtc_client_id: str | None = None
+    rtc_session_id: int | None = None
+
+    def permits_rtc(self, client, session_id):
+        if self.rtc_client_id is not None:
+            return self.rtc_client_id == client and self.rtc_session_id == session_id
+        return self.client_id == client
 
 
 active_calls: dict[int | str, CallSlot] = {}
@@ -174,6 +181,7 @@ async def identity(req):
                                        ("usage_unlimited", "daily_units", "call_monthly_usd")}),
             "voice": row["voice"],
             "bot_name": row["bot_name"],
+            "session": row["session_id"],
         }
 
     try:
@@ -535,12 +543,21 @@ async def notice_live(req):
         return notice_failure('internal')
 
 
+def unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON property")
+        result[key] = value
+    return result
+
+
 async def notice_start(ws, authn):
     try:
         frame = await ws.receive(timeout=5)
         if frame.type != WSMsgType.TEXT or len(frame.data.encode()) > 2048:
             raise SessionError('invalid_input')
-        data = json.loads(frame.data)
+        data = json.loads(frame.data, object_pairs_hook=unique_json_object)
     except (TimeoutError, ValueError, RecursionError):
         raise SessionError('invalid_input') from None
     if not isinstance(data, dict):
@@ -635,6 +652,7 @@ async def live(req, *, notice_auth=None):
                 return ws
             if previous.reconnecting:
                 close_reason='reconnect_pending'
+                if notice_auth:await ws.send_json({'type':'call_busy'})
                 return ws
             # Keep the slot reserved while the old session saves its resume state and finishes its DB work.
             previous.reconnecting=True
@@ -645,6 +663,7 @@ async def live(req, *, notice_auth=None):
                 await asyncio.wait_for(previous.released.wait(),RECONNECT_CLEANUP_TIMEOUT)
             except TimeoutError:
                 close_reason='reconnect_timeout'
+                if notice_auth:await ws.send_json({'type':'call_busy'})
                 return ws
             finally:
                 previous.reconnecting=False
@@ -657,7 +676,8 @@ async def live(req, *, notice_auth=None):
             close_reason='calls_full'
             await ws.send_json({'type':'calls_full'})
             return ws
-        slot=CallSlot(client_id)
+        slot=CallSlot(client_id, rtc_client_id=rtc_client_id if notice_auth else None,
+                      rtc_session_id=notice_auth['session'] if notice_auth else None)
         active_calls[owner]=slot
         resumed_voice=resume.get('voice')
         if not resumed_voice and person and hasattr(memory_store,'resume_voice'):
@@ -697,9 +717,11 @@ async def live(req, *, notice_auth=None):
         # Pages loaded before the hang-up change cannot end a call on 'hangup'.
         session.hangup=bool(notice_auth) or req.query.get('hangup')=='1'
         bridge=rtc_transport.bridges.get(rtc_client_id)
-        if bridge and not bridge.closed and bridge.owner==authn['owner'] and (notice_auth or req.query.get('rtc')=='1'):
+        bound_rtc = notice_auth and getattr(bridge, 'device_session_id', None) == notice_auth['session']
+        if bridge and not bridge.closed and bridge.owner==authn['owner'] and (
+                bound_rtc or (not notice_auth and req.query.get('rtc')=='1')):
             session.offer_rtc(bridge)
-        elif bridge and bridge.owner==authn['owner']:await bridge.close()
+        elif not notice_auth and bridge and bridge.owner==authn['owner']:await bridge.close()
         await session.run()
     except CallBusy:
         close_reason='call_busy'
@@ -768,16 +790,24 @@ async def rtc_config(req):
     try:client=str(uuid.UUID(body['client']))
     except (ValueError,KeyError,TypeError):raise web.HTTPBadRequest()
     owner=call_owner(authn,await get_principal(authn))
+    session_id=authn.get('session')
     slot=active_calls.get(owner)
-    if slot and (slot.client_id!=client or (slot.session and slot.session.pcm_forced)):raise web.HTTPConflict()
+    if slot and (not slot.permits_rtc(client, session_id) or (slot.session and slot.session.pcm_forced)):
+        raise web.HTTPConflict()
     try:bridge=await rtc_transport.acquire(authn['owner'],client,capacity=CALL_MAX)
     except PermissionError:raise web.HTTPForbidden()
     except ValueError:raise web.HTTPConflict()
+    if getattr(bridge, 'device_session_id', None) is None:
+        bridge.device_session_id=session_id
     slot=active_calls.get(owner)
     if slot:
         session=slot.session
-        if slot.client_id!=client or (session and session.pcm_forced):
-            await bridge.close();raise web.HTTPConflict()
+        if not slot.permits_rtc(client, session_id) or (session and session.pcm_forced):
+            if slot.rtc_client_id is None or getattr(bridge, 'device_session_id', None) == session_id:
+                await bridge.close()
+            raise web.HTTPConflict()
+        if slot.rtc_client_id is not None and getattr(bridge, 'device_session_id', None) != session_id:
+            raise web.HTTPConflict()
         if session:
             session.offer_rtc(bridge)
     return json_response({'url':'wss://'+req.host,'token':bridge.token(),'room':bridge.name})
