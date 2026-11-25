@@ -1498,6 +1498,9 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
     async def test_575_socket_protocol_first_frame_and_preaccepted_call(self):
         server, store, protocol, who = await self.call_fixture()
         await self.register_fixture()
+        import live_session
+        from call_memory import MemoryStore
+        from test_relay import HTTP, Upstream, event
         origin = str(self.call_site.make_url("/")).rstrip("/")
         ring = self.ring(who)
         reference = self.references.seal("call", who["friend_id"], ring, self.now)
@@ -1571,28 +1574,55 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.admin("SELECT count(*) FROM call.calls WHERE caller_id=%s", (who["caller_id"],)), [(1,)])
         self.db.admin("""UPDATE call.calls SET status='ended',ended_at=now(),end_reason='hangup',organize_status='pending'
                          WHERE id=%s""", (accepted["callId"],))
+        original_history = self.db.admin("SELECT status,call_id,answered_at FROM marong.app_rings WHERE id=%s", (ring,))
+        original_call = self.notice_call_state(accepted['callId'])
         expired = self.ring(who, until=-5)
         reference = self.references.seal("call", who["friend_id"], expired, self.now)
         ident = installation_id(self.proof)
         ordinary_client = str(protocol.document_client(self.sid, ident, reference, None))
         ordinary = {"type": "start_ordinary", "clientId": ordinary_client, "installationProof": self.proof,
                     "targetRef": reference}
-        with patch.object(server, "LiveSession", CallDouble):
+        with (patch.object(server, "google_headers", AsyncMock(return_value={})),
+              patch.object(live_session, "ClientSession", side_effect=lambda **_: HTTP(Upstream()))):
             async with self.client.session.ws_connect(endpoint, protocols=[SUBPROTOCOL], headers=headers) as ws:
                 await ws.send_json(ordinary)
-                ready = await ws.receive_json(timeout=3)
+                ready = await event(ws, 'ready')
                 self.assertEqual((ready["type"], ready["ring"]), ("ready", False))
-                await ws.send_bytes(b"synthetic-audio")
-                self.assertEqual(await ws.receive_bytes(timeout=3), b"synthetic-audio")
+                ordinary_call = ready['callId']
+                slot = server.active_calls[who['friend_id']]
+                await ws.send_json({'type': 'stop'})
+                await asyncio.wait_for(slot.released.wait(), 5)
+        status, _, _, _, reason = self.notice_call_state(ordinary_call)
+        self.assertEqual((status, reason), ('ended', 'hangup'))
         self.assertEqual(self.db.admin("SELECT status,call_id FROM marong.app_rings WHERE id=%s", (expired,)),
                          [("ringing", None)])
         count = self.db.admin("SELECT count(*) FROM call.calls WHERE caller_id=%s", (who["caller_id"],))
-        self.db.admin("""UPDATE call.calls SET status='ended',ended_at=now(),end_reason='hangup',organize_status='pending'
-                         WHERE caller_id=%s AND status<>'ended'""", (who["caller_id"],))
-        async with self.client.session.ws_connect(endpoint, protocols=[SUBPROTOCOL], headers=headers) as ws:
-            await ws.send_json(ordinary)
-            self.assertEqual(await ws.receive_json(timeout=3), {"type": "ring_unavailable"})
+        self.assertEqual(count, [(2,)])
+
+        # Recreate the relay's local state. The target and document are still valid, so rejection
+        # has to come from the finished call row rather than an expired credential or an active slot.
+        new_store = MemoryStore(self.db.admin_url.replace('postgres:@', 'marong_call@', 1), notice_deadlines=True)
+        await new_store.open()
+        self.addAsyncCleanup(new_store.close)
+        restarted = web.Application()
+        restarted.router.add_get('/live/web-notification', server.notice_live)
+        relay = TestServer(restarted)
+        await relay.start_server()
+        self.addAsyncCleanup(relay.close)
+        retry = relay.make_url('/live/web-notification')
+        with (patch.object(server, 'memory_store', new_store), patch.object(server, 'active_calls', {}),
+              patch.object(server, 'resume_state', {}),
+              patch.object(new_store.daily_usage, 'blocked', AsyncMock(return_value=False)),
+              patch.object(server, 'LiveSession') as unexpected):
+            async with self.client.session.ws_connect(retry, protocols=[SUBPROTOCOL],
+                                                     headers=headers | {'Origin': str(retry.origin())}) as ws:
+                await ws.send_json(ordinary)
+                self.assertEqual(await ws.receive_json(timeout=3), {"type": "ring_unavailable"})
+            unexpected.assert_not_called()
         self.assertEqual(self.db.admin("SELECT count(*) FROM call.calls WHERE caller_id=%s", (who["caller_id"],)), count)
+        self.assertEqual(self.db.admin("SELECT status,call_id,answered_at FROM marong.app_rings WHERE id=%s", (ring,)),
+                         original_history)
+        self.assertEqual(self.notice_call_state(accepted['callId']), original_call)
 
     async def test_575_relay_webrtc_pcm_reconnect_and_rejected_stop(self):
         server, _, _, who = await self.call_fixture()
