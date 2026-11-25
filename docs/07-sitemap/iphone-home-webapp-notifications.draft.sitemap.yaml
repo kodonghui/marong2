@@ -1,0 +1,527 @@
+# 항목 143의 07 초안. screens가 영향 범위의 기존 형식 화면 트리입니다.
+# without a screen: 웹 푸시 구독의 저장 상태와 서버 전송·구독 상태 판정. 서비스 워커는 실행 처리입니다.
+status: "draft"
+source: "sitemap.yaml"
+scope: "마롱이 Orca 항목 143 · 아이폰 홈 화면 웹앱 알림만 대조하는 로컬 사이트맵"
+date: "2026-11-25 KST"
+omittedFromScreens: "권한 팝업·공유 메뉴·잠금 해제는 OS 표면입니다. 웹 푸시 구독의 저장·버전, 공급자 전송·열람 확인과 응답 기한 자체는 화면을 갖지 않습니다."
+groups:
+  web-call: "웹 통화"
+  web-chat: "글 대화"
+  web-account: "웹 계정과 설치"
+  ios-notice: "아이폰 시스템 알림"
+  android: "Android 기존 진입"
+entryPoints:
+  - screens: ["SCR-001", "SCR-107"]
+    condition: "일반 Safari의 기존 주소 또는 홈 화면 아이콘의 /chat/ 진입"
+  - screens: ["SCR-163", "SCR-164"]
+    condition: "기존 초대 링크 또는 기존 기기 로그인 주소"
+  - screens: ["SCR-230"]
+    condition: "OS가 홈 화면 웹앱 알림을 표시"
+  - screens: ["SCR-101", "SCR-108", "SCR-111", "SCR-130"]
+    condition: "Android 기존 앱 실행, 유형별 기존 알림 또는 업데이트"
+screens:
+  - id: "SCR-001"
+    name: "통화 홈"
+    path: "/"
+    access: "기기 로그인과 통화 자격이 있는 사용자"
+    status: "active"
+    flows: ["FL-001", "FL-002", "FL-006", "FL-007", "FL-008", "FL-009", "FL-121", "FL-148", "FL-177", "FL-179", "FL-225", "FL-226", "FL-227"]
+    terms: ["CTX-002", "CTX-006", "CTX-021", "CTX-029", "TERM-001", "TERM-003", "TERM-014", "TERM-018", "TERM-167", "TERM-178", "TERM-190", "TERM-199", "TERM-224"]
+    change: "adjust"
+    branch: "web-call"
+    sourceAccess: "허용된 Google 계정(통화하는 친구)"
+    diagramAccess: "기기 로그인·통화 자격"
+    states08: ["알림의 전화 상태 확인", "이 계정의 응답 가능·미수락 만료·이미 수락·응답 불가", "받기 처리 중·결과 확인 필요·기존 통화 제한", "대상 검증 실패 또는 연결 불가", "별도 일반 통화 선택·기존 다시 걸기"]
+    api: ["API-124", "API-314", "API-315", "API-317"]
+    spec: ["SPEC-545", "SPEC-546", "SPEC-547", "SPEC-548", "SPEC-549", "SPEC-550", "SPEC-551", "SPEC-552"]
+    routeNote: "사이트맵의 통화 홈 경로는 /입니다. 알림 진입의 /chat/에서 논리적으로 통화 홈 상태를 사용합니다. 홈 화면 웹앱의 창과 클라이언트가 유지되는 방법은 08과 실기기에서 확인합니다."
+    children:
+      - id: "SCR-002"
+        name: "통화 중"
+        path: "/call"
+        access: "기기 로그인과 기존 통화에 대한 접근 조건을 충족한 사용자"
+        status: "active"
+        flows: ["FL-002", "FL-003", "FL-004", "FL-005", "FL-006", "FL-007", "FL-009", "FL-142", "FL-178", "FL-225", "FL-226", "FL-227"]
+        terms: ["CTX-002", "CTX-003", "CTX-020", "TERM-001", "TERM-002", "TERM-009", "TERM-010", "TERM-011", "TERM-012", "TERM-017", "TERM-018", "TERM-019", "TERM-080", "TERM-083", "TERM-179", "TERM-197"]
+        change: "reuse"
+        branch: "web-call"
+        sourceAccess: "허용된 Google 계정(통화하는 친구)"
+        diagramAccess: "기기 로그인·통화 권한"
+        states08: ["연결 중·통화 중", "같은 클라이언트 재연결·연결 확인 필요"]
+        api: ["API-107", "API-315", "API-317"]
+        spec: ["SPEC-546", "SPEC-548", "SPEC-550", "SPEC-551", "SPEC-552"]
+        routeNote: "/call은 기존 사이트맵의 화면 주소입니다. 현재 서버는 /의 통화 문서와 /live를 사용합니다. 별도의 /call HTTP 페이지나 새 딥 링크를 전제하지 않습니다."
+  - id: "SCR-107"
+    name: "글 대화"
+    path: "/chat/"
+    access: "자기 글 대화를 볼 수 있는 유효한 기기 로그인. 알림 대상의 보호된 내용은 확인 전까지 표시하지 않음"
+    status: "active"
+    flows: ["FL-141", "FL-143", "FL-144", "FL-148", "FL-176", "FL-177", "FL-179", "FL-220", "FL-222", "FL-223", "FL-225", "FL-227", "FL-228"]
+    terms: ["CTX-001", "CTX-020", "CTX-021", "CTX-029", "TERM-163", "TERM-080", "TERM-083", "TERM-178", "TERM-190", "TERM-199", "TERM-224", "CTX-026", "TERM-174"]
+    change: "adjust"
+    branch: "web-chat"
+    sourceAccess: "허용된 Google 계정(통화하는 친구, 마롱이 친구에 묶임)"
+    diagramAccess: "기기 로그인·자기 방"
+    states08: ["알림 탭 진입·대상 확인 중·대상 미확인", "권한 없는 계정·누락되거나 변조된 대상의 접근 거절", "확인된 글 대화·기존 안 읽은 기록", "직접 진입한 기존 약속 전화 받기"]
+    api: ["API-101", "API-102", "API-103", "API-104", "API-216", "API-314", "API-316"]
+    spec: ["SPEC-520", "SPEC-531", "SPEC-532", "SPEC-533", "SPEC-534", "SPEC-536", "SPEC-538", "SPEC-539", "SPEC-540", "SPEC-541", "SPEC-542", "SPEC-552", "SPEC-554"]
+    routeNote: "/chat/#notice=<대상 참조>는 /chat/의 진입 형태입니다. 읽고 난 fragment는 제거하고 잠금 해제 또는 로그인 복귀 때 대상 확인을 다시 합니다."
+    children:
+      - id: "SCR-109"
+        name: "알림 상태(글 대화 메뉴)"
+        path: "/chat/#menu"
+        access: "자기 글 대화를 볼 수 있는 유효한 기기 로그인"
+        status: "active"
+        flows: ["FL-148", "FL-220", "FL-227", "FL-228"]
+        terms: ["CTX-021", "TERM-092", "TERM-097"]
+        change: "reuse"
+        branch: "web-chat"
+        sourceAccess: "허용된 Google 계정(통화하는 친구, 마롱이 친구에 묶임)"
+        diagramAccess: "기기 로그인·자기 방"
+        states08: ["기존 글 대화 메뉴와 내 마롱이 진입", "Android에만 기존 업데이트 메뉴"]
+        api: ["API-216", "API-141"]
+        spec: ["SPEC-520", "SPEC-552", "SPEC-553"]
+        routeNote: "#menu는 기존 같은 페이지 메뉴입니다. 기존 메뉴에서 내 마롱이로 이동합니다."
+  - id: "SCR-112"
+    name: "글 대화 창(앱)"
+    path: "app:ChatActivity"
+    access: "Android 앱의 기존 인증 조건과 방 접근을 충족한 사용자"
+    status: "active"
+    flows: ["FL-141", "FL-143", "FL-228"]
+    terms: ["CTX-001", "TERM-163"]
+    change: "reuse"
+    branch: "android"
+    sourceAccess: "마롱이 앱을 깐 폰(로그인은 웹과 같은 Access)"
+    diagramAccess: "Android 앱·자기 방"
+    states08: ["기존 앱 글 대화 창과 SCR-107 내용"]
+    api: ["API-101", "API-102"]
+    spec: ["SPEC-541", "SPEC-553"]
+  - id: "SCR-101"
+    name: "통화 화면(앱 창)"
+    path: "app:MainActivity"
+    access: "Android 앱과 기존 로그인·통화 조건을 충족한 사용자"
+    status: "active"
+    flows: ["FL-142", "FL-228"]
+    terms: ["CTX-002", "CTX-020", "TERM-001", "TERM-080", "TERM-083"]
+    change: "adjust"
+    branch: "android"
+    sourceAccess: "마롱이 앱을 깐 폰(로그인은 웹과 같은 Access)"
+    diagramAccess: "Android 앱·기존 인증"
+    states08: ["기존 통화 시작·통화 중·유효한 재연결", "동일 약속 전화를 다른 클라이언트가 먼저 수락한 경우 기존 call_busy"]
+    api: ["API-107", "API-124"]
+    spec: ["SPEC-546", "SPEC-550", "SPEC-553"]
+  - id: "SCR-110"
+    name: "벨 화면"
+    path: "app:RingActivity"
+    access: "Android 앱의 수신과 기존 벨 권한에 맞는 기기"
+    status: "active"
+    flows: ["FL-142", "FL-143", "FL-228"]
+    terms: ["CTX-020", "TERM-168", "TERM-080", "TERM-081", "TERM-091"]
+    change: "reuse"
+    branch: "android"
+    sourceAccess: "마롱이 앱을 깐 폰"
+    diagramAccess: "Android 기존 벨 조건"
+    states08: ["기존 벨·받기·거절"]
+    api: ["API-105", "API-107"]
+    spec: ["SPEC-546", "SPEC-553"]
+  - id: "SCR-111"
+    name: "전화 알림"
+    path: "app:notification/ring"
+    access: "Android 앱의 기존 약속 전화 알림 자격을 충족한 기기"
+    status: "active"
+    flows: ["FL-142", "FL-143", "FL-228"]
+    terms: ["CTX-020", "TERM-168", "TERM-091"]
+    change: "reuse"
+    branch: "android"
+    sourceAccess: "마롱이 앱을 깐 폰"
+    diagramAccess: "Android 기존 전화 알림"
+    states08: ["기존 시스템 전화 알림"]
+    api: ["API-105", "API-107"]
+    spec: ["SPEC-543", "SPEC-553"]
+  - id: "SCR-108"
+    name: "앱 알림"
+    path: "app:notification/talk"
+    access: "Android 앱의 기존 글·일정 알림 자격을 충족한 기기"
+    status: "active"
+    flows: ["FL-141", "FL-143", "FL-228"]
+    terms: ["CTX-020", "TERM-083", "TERM-091"]
+    change: "reuse"
+    branch: "android"
+    sourceAccess: "마롱이 앱을 깐 폰"
+    diagramAccess: "Android 기존 알림 허용"
+    states08: ["기존 글·일정 알림과 탭 진입"]
+    api: ["API-105"]
+    spec: ["SPEC-531", "SPEC-533", "SPEC-534", "SPEC-553"]
+  - id: "SCR-130"
+    name: "앱 업데이트 알림"
+    path: "app:notification/update"
+    access: "Android 앱과 APK 업데이트의 기존 자격을 충족한 기기"
+    status: "active"
+    flows: ["FL-148", "FL-228"]
+    terms: ["CTX-021", "TERM-172", "TERM-095", "TERM-098"]
+    change: "reuse"
+    branch: "android"
+    sourceAccess: "마롱이 앱을 깐 폰"
+    diagramAccess: "Android 기존 업데이트"
+    states08: ["기존 APK 업데이트 알림·배너 회귀"]
+    api: ["API-141", "API-142"]
+    spec: ["SPEC-553"]
+  - id: "SCR-163"
+    name: "가입"
+    path: "/chat/join/:token"
+    access: "가입은 기존 초대 링크 검증을 마친 사용자. 로그인 전에는 기존 가입 안내"
+    status: "active"
+    flows: ["FL-169", "FL-170", "FL-171", "FL-227"]
+    terms: ["CTX-026", "TERM-173", "TERM-174", "TERM-175", "TERM-178"]
+    change: "adjust"
+    branch: "web-account"
+    sourceAccess: "누구나(초대 링크를 가진 사람, 로그인 전)"
+    diagramAccess: "기존 초대 링크"
+    states08: ["가입 전·가입 성공", "가입 뒤 기존 아이폰 설치 안내의 플랫폼 제한 문구 조정"]
+    api: ["API-211", "API-212"]
+    spec: ["SPEC-520", "SPEC-552"]
+  - id: "SCR-164"
+    name: "로그인"
+    path: "/chat/login"
+    access: "유효한 로그인이 없는 사용자. 기존 기기 인증 조건 적용"
+    status: "active"
+    flows: ["FL-171", "FL-220", "FL-221", "FL-223", "FL-225", "FL-227"]
+    terms: ["CTX-026", "TERM-173", "TERM-174", "TERM-175"]
+    change: "reuse"
+    branch: "web-account"
+    sourceAccess: "누구나(로그인 전)"
+    diagramAccess: "로그인 전"
+    states08: ["기존 로그인·재로그인", "기존 로그인 취소·실패", "로그인 뒤 알림 대상 재검증"]
+    api: ["API-213", "API-314"]
+    spec: ["SPEC-522", "SPEC-525", "SPEC-528", "SPEC-530", "SPEC-539", "SPEC-540", "SPEC-542", "SPEC-545", "SPEC-547", "SPEC-552", "SPEC-554"]
+  - id: "SCR-165"
+    name: "내 마롱이"
+    path: "/chat/me"
+    access: "유효한 기기 로그인. 일반 Safari는 설치 안내, 지원되는 홈 화면 웹앱에서만 현재 설치의 알림 설정"
+    status: "active"
+    flows: ["FL-171", "FL-173", "FL-174", "FL-177", "FL-179", "FL-220", "FL-221", "FL-227"]
+    terms: ["CTX-027", "CTX-029", "TERM-175", "TERM-177", "TERM-178", "TERM-179", "TERM-182", "TERM-183", "TERM-186", "TERM-190", "TERM-191", "TERM-192", "TERM-199", "CTX-026", "TERM-174"]
+    change: "adjust"
+    branch: "web-account"
+    sourceAccess: "로그인한 사람(초대 링크로 가입)"
+    diagramAccess: "기기 로그인·설치별 설정"
+    states08: ["일반 Safari 홈 화면 추가 안내", "미지원·연결 필요·서버 등록 확인 불가", "명시적 권한 선택·거절·OS 설정 안내", "구독 등록 중·등록 미완료·수신 가능", "갱신·철회·해제·구독 만료·영구 무효·다시 켜기", "계정·설치 검증 실패·오래된 요청"]
+    api: ["API-215", "API-216", "API-310", "API-311", "API-312", "API-313"]
+    spec: ["SPEC-520", "SPEC-521", "SPEC-522", "SPEC-523", "SPEC-524", "SPEC-525", "SPEC-526", "SPEC-527", "SPEC-528", "SPEC-529", "SPEC-530", "SPEC-554"]
+    routeNote: "알림 설정과 구독 관리는 /chat/me 안에서 표시합니다. iOS 공유 메뉴·시스템 권한 요청·설정은 OS가 표시합니다."
+  - id: "SCR-230"
+    name: "홈 화면 웹앱 알림"
+    path: "ios:notification/webpush"
+    access: "유효 로그인·수신 자격과 기기별 허용이 확인된 홈 화면 웹앱에 전달된 알림. OS 표시 뒤 탭에서는 계정과 대상을 다시 확인"
+    status: "active"
+    flows: ["FL-222", "FL-223", "FL-224", "FL-225"]
+    terms: ["CTX-001", "CTX-020", "CTX-026", "TERM-081", "TERM-174"]
+    change: "new"
+    branch: "ios-notice"
+    diagramAccess: "iOS 홈 화면 웹앱<br/>기기별 허용"
+    states08: ["잠금 화면과 알림 센터의 글·일정 또는 약속 전화 알림", "OS 잠금 해제 요구·취소", "기기별 단일 표시·원문 제외"]
+    api: ["API-314"]
+    spec: ["SPEC-532", "SPEC-533", "SPEC-534", "SPEC-535", "SPEC-537", "SPEC-538", "SPEC-543", "SPEC-544"]
+    routeNote: "ios:notification/webpush는 OS 알림 표면의 식별자입니다. 주소로 열 수 있는 제품 페이지가 아니며 탭 시 /chat/#notice=<대상 참조>로 들어갑니다."
+navigation:
+  - key: "installation"
+    name: "설치·알림 설정"
+    transitions:
+      - from: "SCR-107"
+        to: "SCR-109"
+        action: "글 대화 메뉴 열기"
+        condition: "기존 메뉴"
+        api: []
+      - from: "SCR-109"
+        to: "SCR-165"
+        action: "내 마롱이 열기"
+        condition: "기기 로그인"
+        api: []
+      - from: "SCR-165"
+        to: "SCR-107"
+        action: "기존 또는 새 홈 화면 아이콘 열기"
+        condition: "Safari 설치 후 사용자 실행, 일반 Safari 계속 이용도 가능"
+        api: []
+      - from: "SCR-165"
+        to: "SCR-164"
+        action: "유효 로그인 없음"
+        condition: "기존 로그인"
+        api: ["API-310"]
+      - from: "SCR-164"
+        to: "SCR-165"
+        action: "설정으로 복귀"
+        condition: "인증 완료 뒤 현재 설치 상태 확인"
+        api: ["API-310"]
+      - from: "SCR-165"
+        to: "SCR-165"
+        action: "알림 켜기·갱신·해제·재동의"
+        condition: "지원 홈 화면 웹앱, 명시적 동의와 구독 결과 분리"
+        api: ["API-310", "API-311", "API-312", "API-313"]
+      - from: "SCR-165"
+        to: "SCR-164"
+        action: "로그아웃 완료"
+        condition: "기존 응답 후 자기 설치의 이후 수신 차단"
+        api: ["API-215"]
+  - key: "notice"
+    name: "알림 탭·인증·대상 확인"
+    transitions:
+      - from: "SCR-230"
+        to: "SCR-107"
+        action: "글·일정 또는 전화 알림을 탭"
+        condition: "잠금 해제 후 /chat/#notice, 대상 확인만 실행"
+        api: ["API-314"]
+      - from: "SCR-107"
+        to: "SCR-164"
+        action: "현재 로그인 없음"
+        condition: "대상·통화 정보 비표시"
+        api: ["API-314"]
+      - from: "SCR-164"
+        to: "SCR-107"
+        action: "알림 진입으로 복귀"
+        condition: "인증 완료 뒤 현재 계정으로 대상 재검증"
+        api: ["API-213", "API-314"]
+      - from: "SCR-107"
+        to: "SCR-107"
+        action: "방 열기 또는 대상 미확인"
+        condition: "권한 있는 방만 열기. 접근 거절·오프라인은 상태"
+        api: ["API-314"]
+      - from: "SCR-107"
+        to: "SCR-001"
+        action: "현재 계정의 약속 전화 결과 확인"
+        condition: "유효 대기·미수락 만료·선행 수락·응답 불가 상태"
+        api: ["API-314"]
+  - key: "call"
+    name: "별도 받기·일반 통화·복귀"
+    transitions:
+      - from: "SCR-001"
+        to: "SCR-002"
+        action: "별도 받기 뒤 연결"
+        condition: "유효한 최초 수락 또는 같은 클라이언트의 확정 통화"
+        api: ["API-315", "API-317"]
+      - from: "SCR-001"
+        to: "SCR-001"
+        action: "수락 전 상태 표시"
+        condition: "응답 유실의 재확인·미수락 만료·선행 수락·권한·오프라인"
+        api: ["API-315"]
+      - from: "SCR-001"
+        to: "SCR-164"
+        action: "받기나 연결 전에 로그인 종료 확인"
+        condition: "로그인 완료 뒤 SCR-107에서 대상과 기한을 다시 확인. 이전 받기 선택은 자동 실행하지 않음"
+        api: ["API-315", "API-317"]
+      - from: "SCR-001"
+        to: "SCR-002"
+        action: "미수락 만료 뒤 일반 통화 선택"
+        condition: "별도 선택, 약속 전화 조회·수락 없이 일반 발신"
+        api: ["API-317"]
+      - from: "SCR-002"
+        to: "SCR-002"
+        action: "같은 클라이언트 복구"
+        condition: "기존 통화 ID 유지"
+        api: ["API-317"]
+      - from: "SCR-002"
+        to: "SCR-001"
+        action: "재연결 불가 또는 실제 다른 기기 통화"
+        condition: "기존 종료·다시 걸기·통화 중 안내"
+        api: ["API-107", "API-317"]
+  - key: "safari"
+    name: "일반 Safari 기존 진입"
+    transitions:
+      - from: "SCR-163"
+        to: "SCR-107"
+        action: "기존 가입 완료"
+        condition: "가입 승인 후 진입"
+        api: ["API-212"]
+      - from: "SCR-164"
+        to: "SCR-001"
+        action: "기존 통화 홈 복귀"
+        condition: "기기 로그인과 통화 허용"
+        api: ["API-213", "API-124"]
+      - from: "SCR-001"
+        to: "SCR-107"
+        action: "기존 글 대화 진입"
+        condition: "기존 탭에서 사용"
+        api: ["API-101"]
+      - from: "SCR-107"
+        to: "SCR-002"
+        action: "기존 직접 약속 전화 받기"
+        condition: "일반 Safari·직접 진입의 기존 pendingRing 규칙"
+        api: ["API-216", "API-107"]
+      - from: "SCR-001"
+        to: "SCR-002"
+        action: "기존 일반 발신"
+        condition: "기존 마이크·계정 조건"
+        api: ["API-107"]
+  - key: "android"
+    name: "Android 기존 진입"
+    transitions:
+      - from: "SCR-108"
+        to: "SCR-112"
+        action: "기존 글·일정 알림 열기"
+        condition: "기존 Android 수신 자격"
+        api: ["API-105"]
+      - from: "SCR-112"
+        to: "SCR-107"
+        action: "앱 창에 기존 글 대화 표시"
+        condition: "자기 방·기존 Android 인증"
+        api: ["API-102"]
+      - from: "SCR-111"
+        to: "SCR-110"
+        action: "기존 전화 알림에서 벨 보기"
+        condition: "기존 Android 벨 자격"
+        api: ["API-105"]
+      - from: "SCR-110"
+        to: "SCR-101"
+        action: "기존 받기 선택"
+        condition: "동일 전화 선행 수락이 확인되면 기존 call_busy, 그 밖은 기존 규칙"
+        api: ["API-107"]
+      - from: "SCR-110"
+        to: "SCR-110"
+        action: "기존 벨 거절"
+        condition: "벨을 닫고 통화로 이동하지 않음"
+        api: []
+      - from: "SCR-101"
+        to: "SCR-112"
+        action: "기존 앱에서 글 대화 열기"
+        condition: "기존 Android 앱 경로"
+        api: ["API-101"]
+      - from: "SCR-130"
+        to: "SCR-101"
+        action: "업데이트 뒤 기존 앱 다시 열기"
+        condition: "기존 APK 설치와 필요한 OS 확인을 마친 뒤 사용자가 앱을 다시 엶"
+        api: ["API-141", "API-142"]
+flowTrace:
+  FL-220:
+    visible:
+      A: ["SCR-165"]
+      C: ["SCR-165"]
+      D: ["SCR-165"]
+      E: ["SCR-107"]
+      F: ["SCR-107"]
+      G: ["SCR-165"]
+      I: ["SCR-165"]
+      J: ["SCR-165"]
+      L: ["SCR-164"]
+      M: ["SCR-164"]
+      N: ["SCR-165"]
+      O: ["SCR-165"]
+      P: ["SCR-165"]
+      Q: ["SCR-165"]
+      S: ["SCR-165"]
+      T: ["SCR-165"]
+      U: ["SCR-165"]
+      W: ["SCR-165"]
+      X: ["SCR-165"]
+    os:
+      D: "Safari 공유 메뉴·홈 화면 추가는 OS"
+      E: "홈 화면 아이콘은 OS"
+      S: "시스템 권한 요청은 OS"
+      T: "허용·거절·닫기는 OS 권한 요청"
+    withoutScreen: ["B", "H", "K", "R", "V"]
+    reason: "설치 지원·로그인·등록 성공 여부는 분기 판정이며, 공유 메뉴·권한 팝업·아이콘은 OS에 속합니다."
+  FL-221:
+    visible:
+      A: ["SCR-165"]
+      D: ["SCR-165"]
+      E: ["SCR-165"]
+      F: ["SCR-165"]
+      G: ["SCR-165"]
+      H: ["SCR-165"]
+      I: ["SCR-165"]
+      J: ["SCR-165"]
+      O: ["SCR-165"]
+    withoutScreen: ["B", "C", "M", "N", "P", "Q", "R", "S", "T", "U"]
+    reason: "구독 교체·세션 종료 후 대상 차단·권한 철회·영구 무효·오류 기록은 서버 처리입니다. 다시 확인한 상태는 SCR-165에, 로그아웃 후 인증은 SCR-164에 표시합니다."
+  FL-222:
+    visible:
+      F: ["SCR-107"]
+      M: ["SCR-230"]
+      N: ["SCR-230"]
+      O: ["SCR-107"]
+    os:
+      M: "기기에서 OS 알림이 보임"
+    withoutScreen: ["A", "B", "C", "D", "E", "G", "H", "I", "J", "K", "L", "P", "V"]
+    reason: "방 저장과 발송 자격·열람·중복 판정은 내부 처리입니다. F에서 이미 보고 있는 답변은 SCR-107입니다."
+  FL-223:
+    visible:
+      A: ["SCR-230"]
+      C: ["SCR-107"]
+      E: ["SCR-164"]
+      F: ["SCR-164"]
+      G: ["SCR-164"]
+      I: ["SCR-107"]
+      J: ["SCR-107"]
+      K: ["SCR-107"]
+    os:
+      A: "OS 알림 탭"
+    withoutScreen: ["B", "D", "H"]
+    reason: "연결·로그인·계정·방 판정은 내부 처리입니다. 다른 계정이나 대상 무효는 SCR-107에서 안전한 상태로 표시합니다."
+  FL-224:
+    visible:
+      K: ["SCR-230"]
+      L: ["SCR-230"]
+    os:
+      K: "기기에서 OS 알림이 보임"
+    withoutScreen: ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "M", "N", "P"]
+    reason: "전화 생성·대상·기한·개별 알림 수명과 공급자 결과는 화면 없이 판정합니다."
+  FL-225:
+    visible:
+      A: ["SCR-230"]
+      C: ["SCR-230"]
+      D: ["SCR-230"]
+      E: ["SCR-230", "SCR-164", "SCR-001"]
+      G: ["SCR-107", "SCR-001"]
+      I: ["SCR-164"]
+      J: ["SCR-164"]
+      L: ["SCR-107", "SCR-001"]
+      N: ["SCR-001"]
+      O: ["SCR-001"]
+      R: ["SCR-002"]
+      S: ["SCR-001"]
+      T: ["SCR-001"]
+      U: ["SCR-001"]
+      V: ["SCR-001"]
+      W: ["SCR-001", "SCR-002"]
+      X: ["SCR-001"]
+    os:
+      A: "OS 알림 탭"
+      C: "OS 잠금 해제 시도"
+      D: "OS 잠금 해제 완료 또는 실패"
+      E: "OS 취소, 로그인 취소 또는 받기 취소 중 해당 단계"
+    withoutScreen: ["B", "F", "H", "K", "M", "P", "Q"]
+    reason: "탭은 조회이고 유효 수락은 별도 선택입니다. 첫 수락 자체는 서버 트랜잭션이며 통화 연결에서 화면이 바뀝니다."
+  FL-226:
+    visible:
+      A: ["SCR-002", "SCR-001"]
+      C: ["SCR-002"]
+      D: ["SCR-002"]
+      F: ["SCR-002"]
+      G: ["SCR-002"]
+      H: ["SCR-001"]
+      I: ["SCR-001"]
+      J: ["SCR-001", "SCR-002"]
+      K: ["SCR-001"]
+      L: ["SCR-001"]
+    os:
+      A: "OS 잠금 해제·앱 복귀 후 기존 통화 상태 확인"
+    withoutScreen: ["B", "E"]
+    reason: "기존 연결과 재연결 결과의 판정은 내부 처리입니다. 연결 중 또는 이어진 통화는 SCR-002, 다른 기기 통화와 종료 안내는 SCR-001입니다."
+  FL-227:
+    visible:
+      A: ["SCR-001", "SCR-107"]
+      B: ["SCR-001", "SCR-107"]
+      C: ["SCR-163", "SCR-164"]
+      D: ["SCR-107"]
+      E: ["SCR-001", "SCR-002", "SCR-107"]
+      F: ["SCR-165"]
+    withoutScreen: []
+    reason: "일반 Safari의 가입·글·통화는 기존 접근으로 열립니다. 설치는 별도 안내입니다."
+  FL-228:
+    visible:
+      D: ["SCR-108", "SCR-111"]
+      F: ["SCR-108", "SCR-107", "SCR-112"]
+      G: ["SCR-101", "SCR-110", "SCR-111"]
+    os:
+      D: "Android 기존 OS 알림 표시"
+    withoutScreen: ["A", "B", "C", "E"]
+    reason: "Android의 대상 자격과 알림 종류는 내부 판정입니다. 앱 업데이트는 기존 SCR-130 회귀 경로입니다."

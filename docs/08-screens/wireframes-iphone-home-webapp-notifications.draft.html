@@ -1,0 +1,843 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>마롱이 아이폰 웹앱 알림 화면 와이어프레임</title><style>*{box-sizing:border-box}
+:root{font:16px/1.5 system-ui,sans-serif;color:#202020;background:#f1f1f1}
+body{margin:0;word-break:keep-all;overflow-wrap:break-word}
+a{color:#202020;text-decoration-thickness:.1em;text-underline-offset:.2em}
+a:focus-visible,button:focus-visible,input:focus-visible,[tabindex="-1"]:focus-visible{outline:3px solid #252525;outline-offset:3px}
+.page{max-width:904px;margin:auto;padding:20px 14px 48px}
+.page h1{font-size:1.75rem;line-height:1.2;margin:.5rem 0 1rem}
+.page h2{padding-top:12px;border-top:2px solid #747474;font-size:1.3rem}
+.intro{margin:0 0 .75rem;max-width:62ch}
+.index{display:flex;flex-wrap:wrap;gap:4px 12px;margin:12px 0 0;padding:0;list-style:none}
+.index a{display:inline-flex;padding:8px 4px;min-height:44px;align-items:center}
+.case{margin:0 0 28px}
+.case h3{margin:.75rem 0 .35rem;font-size:1rem}
+.caption{margin:0 0 4px;color:#464646;font-size:.875rem}
+.pair{display:flex;flex-wrap:wrap;align-items:start;gap:16px}
+.phone{all:unset;display:block;box-sizing:border-box;inline-size:min(var(--frame),100%);max-inline-size:100%;background:#fff;border:1px solid #6a6a6a;border-radius:12px;padding:14px;color:#202020;word-break:keep-all;overflow-wrap:break-word}
+.phone figcaption{min-block-size:23px;font-size:.8125rem;color:#404040}
+.chrome{font-size:.875rem;font-weight:650;border-bottom:1px solid #7a7a7a;padding:8px 0;margin:0 0 12px}
+.panel{padding:14px;background:#f8f8f8;border:1px solid #777;border-radius:8px}
+.panel h4{font-size:1.25rem;line-height:1.32;margin:0 0 8px;color:#202020}
+.panel-copy{margin:0 0 10px;min-block-size:92px;color:#292929}
+.layout-reserved{min-block-size:42px;margin-block-end:10px}
+.skeleton {display:block;background:#dedede;border-radius:3px;height:8px;width:78%;margin-bottom:6px}
+.skeleton:nth-child(2){width:63%}.skeleton:nth-child(3){width:42%}
+.actions{display:grid;align-content:start;gap:8px;min-block-size:var(--control-height,44px)}
+.actions button,.mock-input input{font:inherit;font-weight:650;line-height:1.35;min-height:44px;padding:8px 10px;border:1px solid #555;border-radius:6px;background:#fff;color:#202020;max-width:100%;min-width:0;white-space:normal;overflow-wrap:break-word;word-break:keep-all}
+.actions button{width:100%}.actions button:first-child{background:#303030;color:#fff;border-color:#303030}
+.actions button[aria-disabled="true"]{background:#ececec;color:#434343;border-color:#777}
+.mock-input{display:grid;gap:4px;margin:0 0 10px;font-size:.9375rem;max-width:100%}
+.mock-input input{width:100%}.mock-input input::placeholder{color:#555;opacity:1}
+.preview-os .panel{background:#f1f1f1}
+@media(max-width:450px){.page{padding:14px 10px 40px}.pair{gap:10px}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}}
+@media print{.case{break-inside:avoid}.page{max-width:none}.index{display:none}}
+</style></head><body>
+<main class="page"><h1>아이폰 홈 화면 웹앱 알림</h1>
+<p class="intro">08 화면 와이어프레임 · 변경 상태를 360px와 430px에서 나란히 검토합니다.</p>
+<p class="intro">문구와 데이터는 검토용입니다. SCR-230은 시스템 표면의 구분만, SCR-109는 별도 문구 승인 후보입니다.</p>
+<p class="intro"><a href="iphone-home-webapp-notifications/README.md">화면 정의와 API 응답 대조표</a></p>
+<nav aria-label="화면별 바로가기"><ul class="index">
+<li><a href="#scr-165">SCR-165 내 마롱이 · 알림 설정</a></li>
+<li><a href="#scr-163">SCR-163 가입 · 아이폰 안내</a></li>
+<li><a href="#scr-164">SCR-164 로그인 · 알림에서 복귀</a></li>
+<li><a href="#scr-107">SCR-107 글 대화 · 알림 대상 확인</a></li>
+<li><a href="#scr-001">SCR-001 통화 홈 · 알림으로 확인한 전화</a></li>
+<li><a href="#scr-002">SCR-002 통화 중 · 알림 준비와 같은 통화로 복귀</a></li>
+<li><a href="#scr-230">SCR-230 홈 화면 웹앱 알림 · iOS 시스템 표면</a></li>
+<li><a href="#scr-109">SCR-109 글 대화 메뉴 · 문구 변경 검토</a></li>
+</ul></nav>
+<section id="scr-165"><h2>SCR-165 내 마롱이 · 알림 설정</h2>
+<article class="case" id="scr-165-ios-guide"><h3><a href="iphone-home-webapp-notifications/SCR-165.md#ios-guide">SCR-165#ios-guide</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-165-ios-guide" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-ios-guide-360-heading">
+    <h4 tabindex="-1" id="scr-165-ios-guide-360-heading">홈 화면에 추가</h4><p class="panel-copy">Safari에서 공유를 열고 홈 화면에 추가해 줘. ‘웹 앱으로 열기’가 보이면 켜고 추가한 뒤 홈 화면 아이콘을 열어 봐. 지금 창에서도 글 대화와 통화를 쓸 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-165-ios-guide" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-ios-guide-430-heading">
+    <h4 tabindex="-1" id="scr-165-ios-guide-430-heading">홈 화면에 추가</h4><p class="panel-copy">Safari에서 공유를 열고 홈 화면에 추가해 줘. ‘웹 앱으로 열기’가 보이면 켜고 추가한 뒤 홈 화면 아이콘을 열어 봐. 지금 창에서도 글 대화와 통화를 쓸 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-165-notify-loading"><h3><a href="iphone-home-webapp-notifications/SCR-165.md#notify-loading">SCR-165#notify-loading</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-165-notify-loading" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-loading-360-heading" aria-busy="true">
+    <h4 tabindex="-1" id="scr-165-notify-loading-360-heading">알림 설정 확인 중</h4><p class="panel-copy">이 기기의 알림 권한과 수신 상태를 확인하고 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span></div>
+    <div class="actions"></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-165-notify-loading" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-loading-430-heading" aria-busy="true">
+    <h4 tabindex="-1" id="scr-165-notify-loading-430-heading">알림 설정 확인 중</h4><p class="panel-copy">이 기기의 알림 권한과 수신 상태를 확인하고 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span></div>
+    <div class="actions"></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-165-notify-unsupported"><h3><a href="iphone-home-webapp-notifications/SCR-165.md#notify-unsupported">SCR-165#notify-unsupported</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-165-notify-unsupported" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-unsupported-360-heading">
+    <h4 tabindex="-1" id="scr-165-notify-unsupported-360-heading">이 기기에서는 알림을 켤 수 없어</h4><p class="panel-copy">이 환경에서는 웹 알림을 이용할 수 없어. 글 대화와 통화는 계속 쓸 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-165-notify-unsupported" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-unsupported-430-heading">
+    <h4 tabindex="-1" id="scr-165-notify-unsupported-430-heading">이 기기에서는 알림을 켤 수 없어</h4><p class="panel-copy">이 환경에서는 웹 알림을 이용할 수 없어. 글 대화와 통화는 계속 쓸 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-165-notify-off"><h3><a href="iphone-home-webapp-notifications/SCR-165.md#notify-off">SCR-165#notify-off</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-165-notify-off" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-off-360-heading">
+    <h4 tabindex="-1" id="scr-165-notify-off-360-heading">이 기기 알림이 꺼져 있어</h4><p class="panel-copy">홈 화면에서 알림을 켜면 이 기기에서 새 알림을 확인할 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">알림 켜기</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-165-notify-off" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-off-430-heading">
+    <h4 tabindex="-1" id="scr-165-notify-off-430-heading">이 기기 알림이 꺼져 있어</h4><p class="panel-copy">홈 화면에서 알림을 켜면 이 기기에서 새 알림을 확인할 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">알림 켜기</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-165-notify-register"><h3><a href="iphone-home-webapp-notifications/SCR-165.md#notify-register">SCR-165#notify-register</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-165-notify-register" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-register-360-heading">
+    <h4 tabindex="-1" id="scr-165-notify-register-360-heading">알림 등록이 필요해</h4><p class="panel-copy">기기 권한은 허용됐어. 이 기기에서 알림을 켜서 등록을 마쳐 줘.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">알림 켜기</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-165-notify-register" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-register-430-heading">
+    <h4 tabindex="-1" id="scr-165-notify-register-430-heading">알림 등록이 필요해</h4><p class="panel-copy">기기 권한은 허용됐어. 이 기기에서 알림을 켜서 등록을 마쳐 줘.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">알림 켜기</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-165-notify-denied"><h3><a href="iphone-home-webapp-notifications/SCR-165.md#notify-denied">SCR-165#notify-denied</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-165-notify-denied" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-denied-360-heading">
+    <h4 tabindex="-1" id="scr-165-notify-denied-360-heading">기기에서 알림이 꺼져 있어</h4><p class="panel-copy">아이폰 설정에서 권한을 바꿀 수 있어. 설정을 바꾼 뒤 여기로 돌아와 상태를 확인해 줘.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">상태 다시 확인</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-165-notify-denied" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-denied-430-heading">
+    <h4 tabindex="-1" id="scr-165-notify-denied-430-heading">기기에서 알림이 꺼져 있어</h4><p class="panel-copy">아이폰 설정에서 권한을 바꿀 수 있어. 설정을 바꾼 뒤 여기로 돌아와 상태를 확인해 줘.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">상태 다시 확인</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-165-notify-active"><h3><a href="iphone-home-webapp-notifications/SCR-165.md#notify-active">SCR-165#notify-active</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-165-notify-active" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-active-360-heading">
+    <h4 tabindex="-1" id="scr-165-notify-active-360-heading">이 기기에서 알림을 받을 수 있어</h4><p class="panel-copy">이 기기의 알림이 켜져 있어. 다른 기기의 설정은 각 기기에서 관리해 줘.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">알림 끄기</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-165-notify-active" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-active-430-heading">
+    <h4 tabindex="-1" id="scr-165-notify-active-430-heading">이 기기에서 알림을 받을 수 있어</h4><p class="panel-copy">이 기기의 알림이 켜져 있어. 다른 기기의 설정은 각 기기에서 관리해 줘.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">알림 끄기</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-165-notify-saving"><h3><a href="iphone-home-webapp-notifications/SCR-165.md#notify-saving">SCR-165#notify-saving</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-165-notify-saving" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-saving-360-heading" aria-busy="true">
+    <h4 tabindex="-1" id="scr-165-notify-saving-360-heading">변경한 알림 설정을 확인 중이야</h4><p class="panel-copy">이 기기의 설정이 바뀌었는지 확인하고 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span></div>
+    <div class="actions"><button type="button" aria-disabled="true">변경 확인 중</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-165-notify-saving" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-saving-430-heading" aria-busy="true">
+    <h4 tabindex="-1" id="scr-165-notify-saving-430-heading">변경한 알림 설정을 확인 중이야</h4><p class="panel-copy">이 기기의 설정이 바뀌었는지 확인하고 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span></div>
+    <div class="actions"><button type="button" aria-disabled="true">변경 확인 중</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-165-notify-revoked"><h3><a href="iphone-home-webapp-notifications/SCR-165.md#notify-revoked">SCR-165#notify-revoked</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-165-notify-revoked" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-revoked-360-heading">
+    <h4 tabindex="-1" id="scr-165-notify-revoked-360-heading">이 기기에서 알림을 껐어</h4><p class="panel-copy">이 기기에서 새 알림을 받지 않아. 다시 받으려면 여기서 알림을 직접 켜 줘.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">알림 다시 켜기</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-165-notify-revoked" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-revoked-430-heading">
+    <h4 tabindex="-1" id="scr-165-notify-revoked-430-heading">이 기기에서 알림을 껐어</h4><p class="panel-copy">이 기기에서 새 알림을 받지 않아. 다시 받으려면 여기서 알림을 직접 켜 줘.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">알림 다시 켜기</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-165-notify-expired"><h3><a href="iphone-home-webapp-notifications/SCR-165.md#notify-expired">SCR-165#notify-expired</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-165-notify-expired" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-expired-360-heading">
+    <h4 tabindex="-1" id="scr-165-notify-expired-360-heading">알림을 다시 등록해 줘</h4><p class="panel-copy">기존 등록으로는 새 알림을 받을 수 없어. 이 기기에서 알림을 다시 켤 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">알림 다시 켜기</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-165-notify-expired" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-expired-430-heading">
+    <h4 tabindex="-1" id="scr-165-notify-expired-430-heading">알림을 다시 등록해 줘</h4><p class="panel-copy">기존 등록으로는 새 알림을 받을 수 없어. 이 기기에서 알림을 다시 켤 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">알림 다시 켜기</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-165-notify-conflict"><h3><a href="iphone-home-webapp-notifications/SCR-165.md#notify-conflict">SCR-165#notify-conflict</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-165-notify-conflict" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-conflict-360-heading">
+    <h4 tabindex="-1" id="scr-165-notify-conflict-360-heading">알림 설정이 바뀌었어</h4><p class="panel-copy">지금 상태를 다시 확인해 줘. 방금 선택이 반영됐는지는 확인 뒤에 알 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">상태 다시 확인</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-165-notify-conflict" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-conflict-430-heading">
+    <h4 tabindex="-1" id="scr-165-notify-conflict-430-heading">알림 설정이 바뀌었어</h4><p class="panel-copy">지금 상태를 다시 확인해 줘. 방금 선택이 반영됐는지는 확인 뒤에 알 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">상태 다시 확인</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-165-notify-input-error"><h3><a href="iphone-home-webapp-notifications/SCR-165.md#notify-input-error">SCR-165#notify-input-error</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-165-notify-input-error" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-input-error-360-heading">
+    <h4 tabindex="-1" id="scr-165-notify-input-error-360-heading">알림 설정을 확인하지 못했어</h4><p class="panel-copy">입력된 설정을 다시 확인해 줘. 이 상태에서는 알림 변경을 완료로 표시하지 않아.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">상태 다시 확인</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-165-notify-input-error" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-input-error-430-heading">
+    <h4 tabindex="-1" id="scr-165-notify-input-error-430-heading">알림 설정을 확인하지 못했어</h4><p class="panel-copy">입력된 설정을 다시 확인해 줘. 이 상태에서는 알림 변경을 완료로 표시하지 않아.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">상태 다시 확인</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-165-notify-blocked"><h3><a href="iphone-home-webapp-notifications/SCR-165.md#notify-blocked">SCR-165#notify-blocked</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-165-notify-blocked" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-blocked-360-heading">
+    <h4 tabindex="-1" id="scr-165-notify-blocked-360-heading">여기에서 알림 설정을 열 수 없어</h4><p class="panel-copy">현재 설치에서 다시 열어 줘. 다른 계정이나 기기의 설정은 여기서 열 수 없어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-165-notify-blocked" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-blocked-430-heading">
+    <h4 tabindex="-1" id="scr-165-notify-blocked-430-heading">여기에서 알림 설정을 열 수 없어</h4><p class="panel-copy">현재 설치에서 다시 열어 줘. 다른 계정이나 기기의 설정은 여기서 열 수 없어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-165-notify-rate-limited"><h3><a href="iphone-home-webapp-notifications/SCR-165.md#notify-rate-limited">SCR-165#notify-rate-limited</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-165-notify-rate-limited" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-rate-limited-360-heading">
+    <h4 tabindex="-1" id="scr-165-notify-rate-limited-360-heading">잠시 뒤 알림 설정을 확인해 줘</h4><p class="panel-copy">요청이 많아 잠시 기다려야 해. 안내된 시간이 지나면 상태를 다시 확인할 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button" aria-disabled="true">상태 다시 확인</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-165-notify-rate-limited" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-rate-limited-430-heading">
+    <h4 tabindex="-1" id="scr-165-notify-rate-limited-430-heading">잠시 뒤 알림 설정을 확인해 줘</h4><p class="panel-copy">요청이 많아 잠시 기다려야 해. 안내된 시간이 지나면 상태를 다시 확인할 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button" aria-disabled="true">상태 다시 확인</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-165-notify-unavailable"><h3><a href="iphone-home-webapp-notifications/SCR-165.md#notify-unavailable">SCR-165#notify-unavailable</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-165-notify-unavailable" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-unavailable-360-heading">
+    <h4 tabindex="-1" id="scr-165-notify-unavailable-360-heading">지금 알림 상태를 확인할 수 없어</h4><p class="panel-copy">인터넷 연결을 확인한 뒤 다시 확인해 줘. 켜기나 끄기가 완료됐는지 아직 확인되지 않았어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">상태 다시 확인</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-165-notify-unavailable" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">내 마롱이</p>
+  <div class="panel" role="group" aria-labelledby="scr-165-notify-unavailable-430-heading">
+    <h4 tabindex="-1" id="scr-165-notify-unavailable-430-heading">지금 알림 상태를 확인할 수 없어</h4><p class="panel-copy">인터넷 연결을 확인한 뒤 다시 확인해 줘. 켜기나 끄기가 완료됐는지 아직 확인되지 않았어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">상태 다시 확인</button></div>
+  </div>
+</figure>
+</div></article>
+</section>
+<section id="scr-163"><h2>SCR-163 가입 · 아이폰 안내</h2>
+<article class="case" id="scr-163-ios-join-done"><h3><a href="iphone-home-webapp-notifications/SCR-163.md#ios-join-done">SCR-163#ios-join-done</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-163-ios-join-done" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">가입</p>
+  <div class="panel" role="group" aria-labelledby="scr-163-ios-join-done-360-heading">
+    <h4 tabindex="-1" id="scr-163-ios-join-done-360-heading">가입됐어</h4><p class="panel-copy">아이폰에서 웹 알림을 쓰려면 홈 화면에 추가한 뒤 아이콘으로 열어 줘. 글 대화는 지금 바로 쓸 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-163-ios-join-done" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">가입</p>
+  <div class="panel" role="group" aria-labelledby="scr-163-ios-join-done-430-heading">
+    <h4 tabindex="-1" id="scr-163-ios-join-done-430-heading">가입됐어</h4><p class="panel-copy">아이폰에서 웹 알림을 쓰려면 홈 화면에 추가한 뒤 아이콘으로 열어 줘. 글 대화는 지금 바로 쓸 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+</div></article>
+</section>
+<section id="scr-164"><h2>SCR-164 로그인 · 알림에서 복귀</h2>
+<article class="case" id="scr-164-notice-login"><h3><a href="iphone-home-webapp-notifications/SCR-164.md#notice-login">SCR-164#notice-login</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-164-notice-login" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">로그인</p>
+  <div class="panel" role="group" aria-labelledby="scr-164-notice-login-360-heading">
+    <h4 tabindex="-1" id="scr-164-notice-login-360-heading">로그인한 뒤 알림을 확인할게</h4><p class="panel-copy">기존 기기 코드로 로그인해 줘. 여기에서는 알림 내용을 먼저 보여 주지 않아.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <label class="mock-input"><span>기기 코드</span><input inputmode="numeric" placeholder="6자리" autocomplete="off"></label><div class="actions"><button type="button">들어가기</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-164-notice-login" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">로그인</p>
+  <div class="panel" role="group" aria-labelledby="scr-164-notice-login-430-heading">
+    <h4 tabindex="-1" id="scr-164-notice-login-430-heading">로그인한 뒤 알림을 확인할게</h4><p class="panel-copy">기존 기기 코드로 로그인해 줘. 여기에서는 알림 내용을 먼저 보여 주지 않아.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <label class="mock-input"><span>기기 코드</span><input inputmode="numeric" placeholder="6자리" autocomplete="off"></label><div class="actions"><button type="button">들어가기</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-164-notification-settings-login"><h3><a href="iphone-home-webapp-notifications/SCR-164.md#notification-settings-login">SCR-164#notification-settings-login</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-164-notification-settings-login" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">로그인</p>
+  <div class="panel" role="group" aria-labelledby="scr-164-notification-settings-login-360-heading">
+    <h4 tabindex="-1" id="scr-164-notification-settings-login-360-heading">알림 설정을 보려면 로그인해 줘</h4><p class="panel-copy">이 기기의 알림 설정을 확인하기 전에 먼저 로그인해 줘.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <label class="mock-input"><span>기기 코드</span><input inputmode="numeric" placeholder="6자리" autocomplete="off"></label><div class="actions"><button type="button">들어가기</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-164-notification-settings-login" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">로그인</p>
+  <div class="panel" role="group" aria-labelledby="scr-164-notification-settings-login-430-heading">
+    <h4 tabindex="-1" id="scr-164-notification-settings-login-430-heading">알림 설정을 보려면 로그인해 줘</h4><p class="panel-copy">이 기기의 알림 설정을 확인하기 전에 먼저 로그인해 줘.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <label class="mock-input"><span>기기 코드</span><input inputmode="numeric" placeholder="6자리" autocomplete="off"></label><div class="actions"><button type="button">들어가기</button></div>
+  </div>
+</figure>
+</div></article>
+</section>
+<section id="scr-107"><h2>SCR-107 글 대화 · 알림 대상 확인</h2>
+<article class="case" id="scr-107-notice-loading"><h3><a href="iphone-home-webapp-notifications/SCR-107.md#notice-loading">SCR-107#notice-loading</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-107-notice-loading" data-width="360" style="--frame:360px;--control-height:96px">
+  <figcaption>360px</figcaption><p class="chrome">글 대화</p>
+  <div class="panel" role="group" aria-labelledby="scr-107-notice-loading-360-heading" aria-busy="true">
+    <h4 tabindex="-1" id="scr-107-notice-loading-360-heading">알림을 확인하고 있어</h4><p class="panel-copy">지금 로그인과 알림을 열 수 있는지 확인 중이야.</p>
+    <div class="layout-reserved" aria-hidden="true"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span></div>
+    <div class="actions"></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-107-notice-loading" data-width="430" style="--frame:430px;--control-height:96px">
+  <figcaption>430px</figcaption><p class="chrome">글 대화</p>
+  <div class="panel" role="group" aria-labelledby="scr-107-notice-loading-430-heading" aria-busy="true">
+    <h4 tabindex="-1" id="scr-107-notice-loading-430-heading">알림을 확인하고 있어</h4><p class="panel-copy">지금 로그인과 알림을 열 수 있는지 확인 중이야.</p>
+    <div class="layout-reserved" aria-hidden="true"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span></div>
+    <div class="actions"></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-107-notice-room"><h3><a href="iphone-home-webapp-notifications/SCR-107.md#notice-room">SCR-107#notice-room</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-107-notice-room" data-width="360" style="--frame:360px;--control-height:96px">
+  <figcaption>360px</figcaption><p class="chrome">글 대화</p>
+  <div class="panel" role="group" aria-labelledby="scr-107-notice-room-360-heading">
+    <h4 tabindex="-1" id="scr-107-notice-room-360-heading">글 대화</h4><p class="panel-copy">확인된 이 대화방의 글을 보여 줘요. 원래 대화 목록과 쓰기 흐름을 사용해요.</p>
+    <div class="layout-reserved" aria-hidden="true"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span></div>
+    <div class="actions"><button type="button">메시지 입력</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-107-notice-room" data-width="430" style="--frame:430px;--control-height:96px">
+  <figcaption>430px</figcaption><p class="chrome">글 대화</p>
+  <div class="panel" role="group" aria-labelledby="scr-107-notice-room-430-heading">
+    <h4 tabindex="-1" id="scr-107-notice-room-430-heading">글 대화</h4><p class="panel-copy">확인된 이 대화방의 글을 보여 줘요. 원래 대화 목록과 쓰기 흐름을 사용해요.</p>
+    <div class="layout-reserved" aria-hidden="true"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span></div>
+    <div class="actions"><button type="button">메시지 입력</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-107-notice-denied"><h3><a href="iphone-home-webapp-notifications/SCR-107.md#notice-denied">SCR-107#notice-denied</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-107-notice-denied" data-width="360" style="--frame:360px;--control-height:96px">
+  <figcaption>360px</figcaption><p class="chrome">글 대화</p>
+  <div class="panel" role="group" aria-labelledby="scr-107-notice-denied-360-heading">
+    <h4 tabindex="-1" id="scr-107-notice-denied-360-heading">이 알림을 열 수 없어</h4><p class="panel-copy">글 대화로 돌아가 다시 확인할 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-107-notice-denied" data-width="430" style="--frame:430px;--control-height:96px">
+  <figcaption>430px</figcaption><p class="chrome">글 대화</p>
+  <div class="panel" role="group" aria-labelledby="scr-107-notice-denied-430-heading">
+    <h4 tabindex="-1" id="scr-107-notice-denied-430-heading">이 알림을 열 수 없어</h4><p class="panel-copy">글 대화로 돌아가 다시 확인할 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-107-notice-unavailable"><h3><a href="iphone-home-webapp-notifications/SCR-107.md#notice-unavailable">SCR-107#notice-unavailable</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-107-notice-unavailable" data-width="360" style="--frame:360px;--control-height:96px">
+  <figcaption>360px</figcaption><p class="chrome">글 대화</p>
+  <div class="panel" role="group" aria-labelledby="scr-107-notice-unavailable-360-heading">
+    <h4 tabindex="-1" id="scr-107-notice-unavailable-360-heading">아직 알림을 확인할 수 없어</h4><p class="panel-copy">연결을 확인한 뒤 다시 시도해 줘. 확인 전에는 알림 내용을 열 수 없어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">다시 확인</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-107-notice-unavailable" data-width="430" style="--frame:430px;--control-height:96px">
+  <figcaption>430px</figcaption><p class="chrome">글 대화</p>
+  <div class="panel" role="group" aria-labelledby="scr-107-notice-unavailable-430-heading">
+    <h4 tabindex="-1" id="scr-107-notice-unavailable-430-heading">아직 알림을 확인할 수 없어</h4><p class="panel-copy">연결을 확인한 뒤 다시 시도해 줘. 확인 전에는 알림 내용을 열 수 없어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">다시 확인</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-107-notice-rate-limited"><h3><a href="iphone-home-webapp-notifications/SCR-107.md#notice-rate-limited">SCR-107#notice-rate-limited</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-107-notice-rate-limited" data-width="360" style="--frame:360px;--control-height:96px">
+  <figcaption>360px</figcaption><p class="chrome">글 대화</p>
+  <div class="panel" role="group" aria-labelledby="scr-107-notice-rate-limited-360-heading">
+    <h4 tabindex="-1" id="scr-107-notice-rate-limited-360-heading">잠시 뒤 알림을 확인해 줘</h4><p class="panel-copy">안내된 대기 시간이 지나면 알림을 다시 확인할 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button" aria-disabled="true">다시 확인</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-107-notice-rate-limited" data-width="430" style="--frame:430px;--control-height:96px">
+  <figcaption>430px</figcaption><p class="chrome">글 대화</p>
+  <div class="panel" role="group" aria-labelledby="scr-107-notice-rate-limited-430-heading">
+    <h4 tabindex="-1" id="scr-107-notice-rate-limited-430-heading">잠시 뒤 알림을 확인해 줘</h4><p class="panel-copy">안내된 대기 시간이 지나면 알림을 다시 확인할 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button" aria-disabled="true">다시 확인</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+</div></article>
+</section>
+<section id="scr-001"><h2>SCR-001 통화 홈 · 알림으로 확인한 전화</h2>
+<article class="case" id="scr-001-notice-ring-ready"><h3><a href="iphone-home-webapp-notifications/SCR-001.md#notice-ring-ready">SCR-001#notice-ring-ready</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-001-notice-ring-ready" data-width="360" style="--frame:360px;--control-height:96px">
+  <figcaption>360px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-ready-360-heading">
+    <h4 tabindex="-1" id="scr-001-notice-ring-ready-360-heading">약속 전화가 와 있어</h4><p class="panel-copy">받기를 누르면 이 전화를 연결해 볼게. 화면을 열기만 해서는 수락하지 않아.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">받기</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-001-notice-ring-ready" data-width="430" style="--frame:430px;--control-height:96px">
+  <figcaption>430px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-ready-430-heading">
+    <h4 tabindex="-1" id="scr-001-notice-ring-ready-430-heading">약속 전화가 와 있어</h4><p class="panel-copy">받기를 누르면 이 전화를 연결해 볼게. 화면을 열기만 해서는 수락하지 않아.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">받기</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-001-notice-ring-accepting"><h3><a href="iphone-home-webapp-notifications/SCR-001.md#notice-ring-accepting">SCR-001#notice-ring-accepting</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-001-notice-ring-accepting" data-width="360" style="--frame:360px;--control-height:96px">
+  <figcaption>360px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-accepting-360-heading" aria-busy="true">
+    <h4 tabindex="-1" id="scr-001-notice-ring-accepting-360-heading">전화 받는 중</h4><p class="panel-copy">전화가 아직 유효한지 확인하고 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span></div>
+    <div class="actions"><button type="button" aria-disabled="true">받는 중</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-001-notice-ring-accepting" data-width="430" style="--frame:430px;--control-height:96px">
+  <figcaption>430px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-accepting-430-heading" aria-busy="true">
+    <h4 tabindex="-1" id="scr-001-notice-ring-accepting-430-heading">전화 받는 중</h4><p class="panel-copy">전화가 아직 유효한지 확인하고 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span></div>
+    <div class="actions"><button type="button" aria-disabled="true">받는 중</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-001-notice-ring-expired"><h3><a href="iphone-home-webapp-notifications/SCR-001.md#notice-ring-expired">SCR-001#notice-ring-expired</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-001-notice-ring-expired" data-width="360" style="--frame:360px;--control-height:96px">
+  <figcaption>360px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-expired-360-heading">
+    <h4 tabindex="-1" id="scr-001-notice-ring-expired-360-heading">약속 전화 시간이 지났어</h4><p class="panel-copy">더 이상 이 약속 전화를 받을 수 없어. 원하면 일반 통화를 걸 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">일반 통화</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-001-notice-ring-expired" data-width="430" style="--frame:430px;--control-height:96px">
+  <figcaption>430px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-expired-430-heading">
+    <h4 tabindex="-1" id="scr-001-notice-ring-expired-430-heading">약속 전화 시간이 지났어</h4><p class="panel-copy">더 이상 이 약속 전화를 받을 수 없어. 원하면 일반 통화를 걸 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">일반 통화</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-001-notice-ring-answered"><h3><a href="iphone-home-webapp-notifications/SCR-001.md#notice-ring-answered">SCR-001#notice-ring-answered</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-001-notice-ring-answered" data-width="360" style="--frame:360px;--control-height:96px">
+  <figcaption>360px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-answered-360-heading">
+    <h4 tabindex="-1" id="scr-001-notice-ring-answered-360-heading">이미 받은 전화야</h4><p class="panel-copy">이 약속 전화는 이미 처리됐어. 글 대화로 돌아갈 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-001-notice-ring-answered" data-width="430" style="--frame:430px;--control-height:96px">
+  <figcaption>430px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-answered-430-heading">
+    <h4 tabindex="-1" id="scr-001-notice-ring-answered-430-heading">이미 받은 전화야</h4><p class="panel-copy">이 약속 전화는 이미 처리됐어. 글 대화로 돌아갈 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-001-notice-ring-unavailable"><h3><a href="iphone-home-webapp-notifications/SCR-001.md#notice-ring-unavailable">SCR-001#notice-ring-unavailable</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-001-notice-ring-unavailable" data-width="360" style="--frame:360px;--control-height:96px">
+  <figcaption>360px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-unavailable-360-heading">
+    <h4 tabindex="-1" id="scr-001-notice-ring-unavailable-360-heading">지금은 이 전화를 받을 수 없어</h4><p class="panel-copy">현재 확인한 상태로는 이 약속 전화를 연결할 수 없어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">상태 다시 확인</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-001-notice-ring-unavailable" data-width="430" style="--frame:430px;--control-height:96px">
+  <figcaption>430px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-unavailable-430-heading">
+    <h4 tabindex="-1" id="scr-001-notice-ring-unavailable-430-heading">지금은 이 전화를 받을 수 없어</h4><p class="panel-copy">현재 확인한 상태로는 이 약속 전화를 연결할 수 없어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">상태 다시 확인</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-001-notice-ring-result"><h3><a href="iphone-home-webapp-notifications/SCR-001.md#notice-ring-result">SCR-001#notice-ring-result</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-001-notice-ring-result" data-width="360" style="--frame:360px;--control-height:96px">
+  <figcaption>360px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-result-360-heading">
+    <h4 tabindex="-1" id="scr-001-notice-ring-result-360-heading">전화 받기 결과를 확인해 줘</h4><p class="panel-copy">수락이 끝났는지 아직 확인되지 않았어. 확인하면 이미 수락한 경우 같은 통화로 돌아갈 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">결과 확인</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-001-notice-ring-result" data-width="430" style="--frame:430px;--control-height:96px">
+  <figcaption>430px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-result-430-heading">
+    <h4 tabindex="-1" id="scr-001-notice-ring-result-430-heading">전화 받기 결과를 확인해 줘</h4><p class="panel-copy">수락이 끝났는지 아직 확인되지 않았어. 확인하면 이미 수락한 경우 같은 통화로 돌아갈 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">결과 확인</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-001-notice-ring-result-loading"><h3><a href="iphone-home-webapp-notifications/SCR-001.md#notice-ring-result-loading">SCR-001#notice-ring-result-loading</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-001-notice-ring-result-loading" data-width="360" style="--frame:360px;--control-height:96px">
+  <figcaption>360px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-result-loading-360-heading" aria-busy="true">
+    <h4 tabindex="-1" id="scr-001-notice-ring-result-loading-360-heading">받기 결과 확인 중</h4><p class="panel-copy">처음 요청한 전화의 결과를 확인하고 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span></div>
+    <div class="actions"><button type="button" aria-disabled="true">결과 확인 중</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-001-notice-ring-result-loading" data-width="430" style="--frame:430px;--control-height:96px">
+  <figcaption>430px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-result-loading-430-heading" aria-busy="true">
+    <h4 tabindex="-1" id="scr-001-notice-ring-result-loading-430-heading">받기 결과 확인 중</h4><p class="panel-copy">처음 요청한 전화의 결과를 확인하고 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span></div>
+    <div class="actions"><button type="button" aria-disabled="true">결과 확인 중</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-001-notice-ring-denied"><h3><a href="iphone-home-webapp-notifications/SCR-001.md#notice-ring-denied">SCR-001#notice-ring-denied</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-001-notice-ring-denied" data-width="360" style="--frame:360px;--control-height:96px">
+  <figcaption>360px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-denied-360-heading">
+    <h4 tabindex="-1" id="scr-001-notice-ring-denied-360-heading">이 알림을 열 수 없어</h4><p class="panel-copy">글 대화로 돌아가 다시 확인할 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-001-notice-ring-denied" data-width="430" style="--frame:430px;--control-height:96px">
+  <figcaption>430px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-denied-430-heading">
+    <h4 tabindex="-1" id="scr-001-notice-ring-denied-430-heading">이 알림을 열 수 없어</h4><p class="panel-copy">글 대화로 돌아가 다시 확인할 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-001-notice-ring-offline"><h3><a href="iphone-home-webapp-notifications/SCR-001.md#notice-ring-offline">SCR-001#notice-ring-offline</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-001-notice-ring-offline" data-width="360" style="--frame:360px;--control-height:96px">
+  <figcaption>360px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-offline-360-heading">
+    <h4 tabindex="-1" id="scr-001-notice-ring-offline-360-heading">지금 전화 상태를 확인할 수 없어</h4><p class="panel-copy">연결을 확인한 뒤 이 전화의 상태를 다시 확인해 줘.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">상태 다시 확인</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-001-notice-ring-offline" data-width="430" style="--frame:430px;--control-height:96px">
+  <figcaption>430px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-offline-430-heading">
+    <h4 tabindex="-1" id="scr-001-notice-ring-offline-430-heading">지금 전화 상태를 확인할 수 없어</h4><p class="panel-copy">연결을 확인한 뒤 이 전화의 상태를 다시 확인해 줘.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">상태 다시 확인</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-001-notice-ring-rate-limited"><h3><a href="iphone-home-webapp-notifications/SCR-001.md#notice-ring-rate-limited">SCR-001#notice-ring-rate-limited</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-001-notice-ring-rate-limited" data-width="360" style="--frame:360px;--control-height:96px">
+  <figcaption>360px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-rate-limited-360-heading">
+    <h4 tabindex="-1" id="scr-001-notice-ring-rate-limited-360-heading">잠시 뒤 다시 확인해 줘</h4><p class="panel-copy">안내된 시간이 지나면 전화 상태를 다시 확인할 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button" aria-disabled="true">상태 다시 확인</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-001-notice-ring-rate-limited" data-width="430" style="--frame:430px;--control-height:96px">
+  <figcaption>430px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-ring-rate-limited-430-heading">
+    <h4 tabindex="-1" id="scr-001-notice-ring-rate-limited-430-heading">잠시 뒤 다시 확인해 줘</h4><p class="panel-copy">안내된 시간이 지나면 전화 상태를 다시 확인할 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button" aria-disabled="true">상태 다시 확인</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-001-notice-call-ended"><h3><a href="iphone-home-webapp-notifications/SCR-001.md#notice-call-ended">SCR-001#notice-call-ended</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-001-notice-call-ended" data-width="360" style="--frame:360px;--control-height:96px">
+  <figcaption>360px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-call-ended-360-heading">
+    <h4 tabindex="-1" id="scr-001-notice-call-ended-360-heading">통화가 끝났어</h4><p class="panel-copy">기존 통화에 다시 연결할 수 없어. 원하면 새로 전화를 걸 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">다시 걸기</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-001-notice-call-ended" data-width="430" style="--frame:430px;--control-height:96px">
+  <figcaption>430px</figcaption><p class="chrome">통화 홈</p>
+  <div class="panel" role="group" aria-labelledby="scr-001-notice-call-ended-430-heading">
+    <h4 tabindex="-1" id="scr-001-notice-call-ended-430-heading">통화가 끝났어</h4><p class="panel-copy">기존 통화에 다시 연결할 수 없어. 원하면 새로 전화를 걸 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">다시 걸기</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+</div></article>
+</section>
+<section id="scr-002"><h2>SCR-002 통화 중 · 알림 준비와 같은 통화로 복귀</h2>
+<article class="case" id="scr-002-notice-connecting"><h3><a href="iphone-home-webapp-notifications/SCR-002.md#notice-connecting">SCR-002#notice-connecting</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-002-notice-connecting" data-width="360" style="--frame:360px;--control-height:96px">
+  <figcaption>360px</figcaption><p class="chrome">통화</p>
+  <div class="panel" role="group" aria-labelledby="scr-002-notice-connecting-360-heading" aria-busy="true">
+    <h4 tabindex="-1" id="scr-002-notice-connecting-360-heading">통화 연결을 준비하고 있어</h4><p class="panel-copy">아직 통화가 연결되지 않았어. 잠시 기다려 줘.</p>
+    <div class="layout-reserved" aria-hidden="true"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span></div>
+    <div class="actions"><button type="button">닫기</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-002-notice-connecting" data-width="430" style="--frame:430px;--control-height:96px">
+  <figcaption>430px</figcaption><p class="chrome">통화</p>
+  <div class="panel" role="group" aria-labelledby="scr-002-notice-connecting-430-heading" aria-busy="true">
+    <h4 tabindex="-1" id="scr-002-notice-connecting-430-heading">통화 연결을 준비하고 있어</h4><p class="panel-copy">아직 통화가 연결되지 않았어. 잠시 기다려 줘.</p>
+    <div class="layout-reserved" aria-hidden="true"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span></div>
+    <div class="actions"><button type="button">닫기</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-002-notice-reconnecting"><h3><a href="iphone-home-webapp-notifications/SCR-002.md#notice-reconnecting">SCR-002#notice-reconnecting</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-002-notice-reconnecting" data-width="360" style="--frame:360px;--control-height:96px">
+  <figcaption>360px</figcaption><p class="chrome">통화</p>
+  <div class="panel" role="group" aria-labelledby="scr-002-notice-reconnecting-360-heading" aria-busy="true">
+    <h4 tabindex="-1" id="scr-002-notice-reconnecting-360-heading">같은 통화에 다시 연결 중이야</h4><p class="panel-copy">잠금 해제나 연결 전환 뒤 기존 통화를 확인하고 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span></div>
+    <div class="actions"><button type="button">끊기</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-002-notice-reconnecting" data-width="430" style="--frame:430px;--control-height:96px">
+  <figcaption>430px</figcaption><p class="chrome">통화</p>
+  <div class="panel" role="group" aria-labelledby="scr-002-notice-reconnecting-430-heading" aria-busy="true">
+    <h4 tabindex="-1" id="scr-002-notice-reconnecting-430-heading">같은 통화에 다시 연결 중이야</h4><p class="panel-copy">잠금 해제나 연결 전환 뒤 기존 통화를 확인하고 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span></div>
+    <div class="actions"><button type="button">끊기</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-002-notice-call-check"><h3><a href="iphone-home-webapp-notifications/SCR-002.md#notice-call-check">SCR-002#notice-call-check</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-002-notice-call-check" data-width="360" style="--frame:360px;--control-height:96px">
+  <figcaption>360px</figcaption><p class="chrome">통화</p>
+  <div class="panel" role="group" aria-labelledby="scr-002-notice-call-check-360-heading">
+    <h4 tabindex="-1" id="scr-002-notice-call-check-360-heading">지금 통화 연결을 확인할 수 없어</h4><p class="panel-copy">연결을 다시 확인해 줘. 확인 전에는 새 통화를 시작하지 않아.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">연결 확인</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-002-notice-call-check" data-width="430" style="--frame:430px;--control-height:96px">
+  <figcaption>430px</figcaption><p class="chrome">통화</p>
+  <div class="panel" role="group" aria-labelledby="scr-002-notice-call-check-430-heading">
+    <h4 tabindex="-1" id="scr-002-notice-call-check-430-heading">지금 통화 연결을 확인할 수 없어</h4><p class="panel-copy">연결을 다시 확인해 줘. 확인 전에는 새 통화를 시작하지 않아.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">연결 확인</button><button type="button">글 대화로</button></div>
+  </div>
+</figure>
+</div></article>
+</section>
+<section id="scr-230"><h2>SCR-230 홈 화면 웹앱 알림 · iOS 시스템 표면</h2>
+<article class="case" id="scr-230-notice-reply"><h3><a href="iphone-home-webapp-notifications/SCR-230.md#notice-reply">SCR-230#notice-reply</a></h3><div class="pair">
+<figure class="phone preview-os" data-frame="scr-230-notice-reply" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">iOS 시스템 표면</p>
+  <div class="panel" role="group" aria-labelledby="scr-230-notice-reply-360-heading">
+    <h4 tabindex="-1" id="scr-230-notice-reply-360-heading">마롱이</h4><p class="panel-copy">새 답변이 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">알림 탭</button></div>
+  </div>
+</figure>
+<figure class="phone preview-os" data-frame="scr-230-notice-reply" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">iOS 시스템 표면</p>
+  <div class="panel" role="group" aria-labelledby="scr-230-notice-reply-430-heading">
+    <h4 tabindex="-1" id="scr-230-notice-reply-430-heading">마롱이</h4><p class="panel-copy">새 답변이 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">알림 탭</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-230-notice-proactive"><h3><a href="iphone-home-webapp-notifications/SCR-230.md#notice-proactive">SCR-230#notice-proactive</a></h3><div class="pair">
+<figure class="phone preview-os" data-frame="scr-230-notice-proactive" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">iOS 시스템 표면</p>
+  <div class="panel" role="group" aria-labelledby="scr-230-notice-proactive-360-heading">
+    <h4 tabindex="-1" id="scr-230-notice-proactive-360-heading">마롱이</h4><p class="panel-copy">새 선톡이 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">알림 탭</button></div>
+  </div>
+</figure>
+<figure class="phone preview-os" data-frame="scr-230-notice-proactive" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">iOS 시스템 표면</p>
+  <div class="panel" role="group" aria-labelledby="scr-230-notice-proactive-430-heading">
+    <h4 tabindex="-1" id="scr-230-notice-proactive-430-heading">마롱이</h4><p class="panel-copy">새 선톡이 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">알림 탭</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-230-notice-schedule"><h3><a href="iphone-home-webapp-notifications/SCR-230.md#notice-schedule">SCR-230#notice-schedule</a></h3><div class="pair">
+<figure class="phone preview-os" data-frame="scr-230-notice-schedule" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">iOS 시스템 표면</p>
+  <div class="panel" role="group" aria-labelledby="scr-230-notice-schedule-360-heading">
+    <h4 tabindex="-1" id="scr-230-notice-schedule-360-heading">마롱이</h4><p class="panel-copy">일정 알림이 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">알림 탭</button></div>
+  </div>
+</figure>
+<figure class="phone preview-os" data-frame="scr-230-notice-schedule" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">iOS 시스템 표면</p>
+  <div class="panel" role="group" aria-labelledby="scr-230-notice-schedule-430-heading">
+    <h4 tabindex="-1" id="scr-230-notice-schedule-430-heading">마롱이</h4><p class="panel-copy">일정 알림이 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">알림 탭</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-230-notice-ring"><h3><a href="iphone-home-webapp-notifications/SCR-230.md#notice-ring">SCR-230#notice-ring</a></h3><div class="pair">
+<figure class="phone preview-os" data-frame="scr-230-notice-ring" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">iOS 시스템 표면</p>
+  <div class="panel" role="group" aria-labelledby="scr-230-notice-ring-360-heading">
+    <h4 tabindex="-1" id="scr-230-notice-ring-360-heading">마롱이</h4><p class="panel-copy">약속 전화 알림이 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">알림 탭</button></div>
+  </div>
+</figure>
+<figure class="phone preview-os" data-frame="scr-230-notice-ring" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">iOS 시스템 표면</p>
+  <div class="panel" role="group" aria-labelledby="scr-230-notice-ring-430-heading">
+    <h4 tabindex="-1" id="scr-230-notice-ring-430-heading">마롱이</h4><p class="panel-copy">약속 전화 알림이 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">알림 탭</button></div>
+  </div>
+</figure>
+</div></article>
+<article class="case" id="scr-230-notice-locked"><h3><a href="iphone-home-webapp-notifications/SCR-230.md#notice-locked">SCR-230#notice-locked</a></h3><div class="pair">
+<figure class="phone preview-os" data-frame="scr-230-notice-locked" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">iOS 시스템 표면</p>
+  <div class="panel" role="group" aria-labelledby="scr-230-notice-locked-360-heading">
+    <h4 tabindex="-1" id="scr-230-notice-locked-360-heading">잠금 해제 뒤 열 수 있어</h4><p class="panel-copy">시스템에서 잠금을 해제하면 마롱이에서 알림을 확인해.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"></div>
+  </div>
+</figure>
+<figure class="phone preview-os" data-frame="scr-230-notice-locked" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">iOS 시스템 표면</p>
+  <div class="panel" role="group" aria-labelledby="scr-230-notice-locked-430-heading">
+    <h4 tabindex="-1" id="scr-230-notice-locked-430-heading">잠금 해제 뒤 열 수 있어</h4><p class="panel-copy">시스템에서 잠금을 해제하면 마롱이에서 알림을 확인해.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"></div>
+  </div>
+</figure>
+</div></article>
+</section>
+<section id="scr-109"><h2>SCR-109 글 대화 메뉴 · 문구 변경 검토</h2>
+<article class="case" id="scr-109-ios-menu-copy"><h3><a href="iphone-home-webapp-notifications/SCR-109.md#ios-menu-copy">SCR-109#ios-menu-copy</a></h3><div class="pair">
+<figure class="phone" data-frame="scr-109-ios-menu-copy" data-width="360" style="--frame:360px;--control-height:44px">
+  <figcaption>360px</figcaption><p class="chrome">글 대화 메뉴</p>
+  <div class="panel" role="group" aria-labelledby="scr-109-ios-menu-copy-360-heading">
+    <h4 tabindex="-1" id="scr-109-ios-menu-copy-360-heading">알림 안내</h4><p class="panel-copy">아이폰에서는 홈 화면에 추가한 뒤 내 마롱이에서 이 기기의 알림을 확인할 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">내 마롱이</button></div>
+  </div>
+</figure>
+<figure class="phone" data-frame="scr-109-ios-menu-copy" data-width="430" style="--frame:430px;--control-height:44px">
+  <figcaption>430px</figcaption><p class="chrome">글 대화 메뉴</p>
+  <div class="panel" role="group" aria-labelledby="scr-109-ios-menu-copy-430-heading">
+    <h4 tabindex="-1" id="scr-109-ios-menu-copy-430-heading">알림 안내</h4><p class="panel-copy">아이폰에서는 홈 화면에 추가한 뒤 내 마롱이에서 이 기기의 알림을 확인할 수 있어.</p>
+    <div class="layout-reserved" aria-hidden="true"></div>
+    <div class="actions"><button type="button">내 마롱이</button></div>
+  </div>
+</figure>
+</div></article>
+</section>
+</main></body></html>

@@ -1,0 +1,1554 @@
+# 06 version candidate for Orca item 143. Examples use synthetic values only.
+openapi: "3.1.0"
+info:
+  title: "마롱이 홈 화면 웹앱 알림 API 버전 확정 후보"
+  version: "0.1.0-candidate"
+  description: "Orca 항목 143, Q1~Q6 승인 반영 및 버전 고정 대기. API-310~316 HTTP, API-317 웹소켓. 기존 가입·글 대화·Android의 응답 구조를 사용합니다. 기기 지원은 실제 설치별 단일 표시 시험을 통과한 버전과 전송 경로에서 확정합니다."
+servers:
+  - url: "/"
+paths:
+  "/chat/api/web-notifications/subscription":
+    get:
+      operationId: "getWebNotificationSubscription"
+      summary: "현재 설치의 알림 등록 상태"
+      description: "유효한 기기 로그인과 현재 브라우저 설치를 확인합니다. 조회는 구독을 쓰지 않습니다. 서버 등록 상태와 OS의 권한·지원 상태를 화면이 함께 판단합니다. 신규 설치와 이전 계정 정보는 같은 비공개 미등록 상태로 응답합니다. 상태 토큰에는 설치와 로그인에 묶인 검증용 값을 넣으며 원본 구독 주소, 키, 동의 식별자는 반환하지 않습니다."
+      x-corthex:
+        id: "API-310"
+        spec:
+          - "SPEC-522"
+          - "SPEC-525"
+        tbl:
+          - "TBL-165"
+          - "TBL-183"
+        omit:
+          "404": "현재 설치의 슬롯이 없으면 200 not_registered입니다."
+          "409": "조회 결과는 최신 상태 토큰이며 갱신하지 않습니다."
+        origin: "같은 출처 요청만 허용합니다. Origin이 제공되면 검증하고, 교차 사이트 Fetch Metadata는 거절합니다."
+      security:
+        - sessionCookie: []
+          installationProof: []
+      responses:
+        "200":
+          description: "현재 설치의 등록 상태입니다."
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/SubscriptionState"
+              examples:
+                notRegistered:
+                  value:
+                    state: "not_registered"
+                    stateToken: "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV"
+                    vapid:
+                      keyId: "mock-v1"
+                      publicKey: "BQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+                active:
+                  value:
+                    state: "active"
+                    stateToken: "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV"
+                    vapid:
+                      keyId: "mock-v1"
+                      publicKey: "BQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+                revoked:
+                  value:
+                    state: "revoked"
+                    stateToken: "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV"
+                    vapid:
+                      keyId: "mock-v1"
+                      publicKey: "BQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+                expired:
+                  value:
+                    state: "expired"
+                    stateToken: "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV"
+                    vapid:
+                      keyId: "mock-v1"
+                      publicKey: "BQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+                invalid:
+                  value:
+                    state: "invalid"
+                    stateToken: "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV"
+                    vapid:
+                      keyId: "mock-v1"
+                      publicKey: "BQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "403":
+          $ref: "#/components/responses/Error403"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "503":
+          $ref: "#/components/responses/Error503"
+        default:
+          $ref: "#/components/responses/ErrorDefault"
+      parameters:
+        - $ref: "#/components/parameters/Installation"
+    put:
+      operationId: "setWebNotificationSubscription"
+      summary: "현재 설치의 구독 등록 또는 갱신"
+      description: "권한을 확인한 브라우저에서 구독을 등록합니다. 신규·다시 등록은 enable, 활성 상태의 교체는 refresh 선택 토큰이 필요합니다. 동일 결과를 다시 확인할 수 있습니다. 오래된 선택에 의한 활성화와 다른 설치 주소 덮어쓰기를 거절합니다. 같은 동의의 자동 갱신은 활성 암호화 봉투의 동의 식별자를 보존하고, 새 명시적 동의는 새로운 식별자를 발급합니다. 이전 로그인 요청과 이전 버전을 자동 재생하지 않습니다."
+      x-corthex:
+        id: "API-312"
+        spec:
+          - "SPEC-524"
+          - "SPEC-525"
+          - "SPEC-526"
+          - "SPEC-530"
+        tbl:
+          - "TBL-165"
+          - "TBL-183"
+        omit:
+          "404": "현재 설치 슬롯 생성과 교체를 동일 경로로 요청합니다."
+        maxBodyBytes: 4096
+        origin: "Origin이 마롱이 웹 출처와 정확하게 일치해야 합니다."
+      security:
+        - sessionCookie: []
+          installationProof: []
+      parameters:
+        - $ref: "#/components/parameters/Installation"
+        - $ref: "#/components/parameters/Choice"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+            examples:
+              synthetic:
+                value:
+                  vapidKeyId: "mock-v1"
+                  subscription:
+                    endpoint: "https://web.push.example.invalid/mock"
+                    expirationTime: null
+                    keys:
+                      p256dh: "BQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+                      auth: "KKKKKKKKKKKKKKKKKKKKKK"
+      responses:
+        "200":
+          description: "등록·갱신 또는 동일 결과 확인이 끝났습니다."
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/SubscriptionState"
+              examples:
+                registered:
+                  value:
+                    state: "active"
+                    stateToken: "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV"
+                    vapid:
+                      keyId: "mock-v1"
+                      publicKey: "BQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "403":
+          $ref: "#/components/responses/Error403"
+        "409":
+          description: "등록 상태가 바뀌었거나 이 설치의 주소를 확인할 수 없습니다."
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            "application/problem+json":
+              schema:
+                $ref: "#/components/schemas/Problem"
+              examples:
+                state_changed:
+                  value:
+                    type: "/problems/state-changed"
+                    title: "알림 상태가 바뀌었어요"
+                    status: 409
+                    code: "state_changed"
+                    traceId: "0af7651916cd43dd"
+                subscription_conflict:
+                  value:
+                    type: "/problems/subscription-conflict"
+                    title: "이 설치의 알림 등록을 확인할 수 없어요"
+                    status: 409
+                    code: "subscription_conflict"
+                    traceId: "0af7651916cd43dd"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "503":
+          $ref: "#/components/responses/Error503"
+        default:
+          $ref: "#/components/responses/ErrorDefault"
+    delete:
+      operationId: "revokeWebNotificationSubscription"
+      summary: "현재 설치의 알림 해제"
+      description: "현재 설치의 명시적 끄기 또는 확인된 OS 권한 철회의 선택 토큰을 사용합니다. 현재 허용 범위 안의 구독만 제외하고 주소·키·지문·기한을 같은 트랜잭션에서 비웁니다. 해제되지 않은 상태를 해제 완료로 표시하지 않습니다. 같은 동의에서 자동 갱신이 먼저 끝나도 철회할 수 있습니다. 새로운 동의가 이미 확인됐으면 이전 철회는 409이며 변경이 없습니다. 비활성 행에는 식별자 및 보호 재료를 남기지 않습니다."
+      x-corthex:
+        id: "API-313"
+        spec:
+          - "SPEC-525"
+          - "SPEC-527"
+          - "SPEC-528"
+          - "SPEC-529"
+          - "SPEC-530"
+        tbl:
+          - "TBL-165"
+          - "TBL-183"
+        omit:
+          "404": "이미 없거나 해제된 자신의 설치는 현재 상태로 응답합니다."
+        origin: "Origin이 마롱이 웹 출처와 정확하게 일치해야 합니다."
+      security:
+        - sessionCookie: []
+          installationProof: []
+      parameters:
+        - $ref: "#/components/parameters/Installation"
+        - $ref: "#/components/parameters/Choice"
+      responses:
+        "200":
+          description: "현재 설치의 수신 해제 결과입니다."
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/SubscriptionState"
+              examples:
+                revoked:
+                  value:
+                    state: "revoked"
+                    stateToken: "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV"
+                    vapid:
+                      keyId: "mock-v1"
+                      publicKey: "BQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+                notRegistered:
+                  value:
+                    state: "not_registered"
+                    stateToken: "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV"
+                    vapid:
+                      keyId: "mock-v1"
+                      publicKey: "BQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "403":
+          $ref: "#/components/responses/Error403"
+        "409":
+          $ref: "#/components/responses/Error409"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "503":
+          $ref: "#/components/responses/Error503"
+        default:
+          $ref: "#/components/responses/ErrorDefault"
+  "/chat/api/web-notifications/subscription/intent":
+    post:
+      operationId: "beginWebNotificationChoice"
+      summary: "현재 상태에 묶인 구독 변경 선택 확인"
+      description: "최신 상태 토큰과 제출한 동작을 설치 및 로그인 세션에 묶어 짧은 수명의 선택 토큰을 발급합니다. 구독은 아직 바뀌지 않습니다. enable은 새로 누른 명시적 알림 켜기에만 사용하고 자동 갱신에서 쓰지 않습니다. 등록·갱신은 기대 버전을 검증합니다. 철회에서는 같은 동의의 자동 갱신을 구분할 수 있는 단기 검증값을 사용합니다. 원본 동의 식별자는 토큰에 넣지 않습니다."
+      x-corthex:
+        id: "API-311"
+        spec:
+          - "SPEC-523"
+          - "SPEC-524"
+          - "SPEC-525"
+          - "SPEC-526"
+          - "SPEC-527"
+          - "SPEC-530"
+        tbl:
+          - "TBL-165"
+          - "TBL-183"
+        omit:
+          "404": "새 설치도 명시적 허용 절차를 시작할 수 있습니다."
+        maxBodyBytes: 2048
+        origin: "Origin이 마롱이 웹 출처와 정확하게 일치해야 합니다."
+      security:
+        - sessionCookie: []
+          installationProof: []
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              $ref: "#/components/schemas/ChoiceRequest"
+            examples:
+              synthetic:
+                value:
+                  action: "enable"
+                  stateToken: "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV"
+      responses:
+        "200":
+          description: "현재 선택의 짧은 수명 토큰입니다."
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/ChoiceResult"
+              examples:
+                granted:
+                  value:
+                    choiceToken: "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG"
+                    expiresAt: "2026-11-25T02:00:00Z"
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "403":
+          $ref: "#/components/responses/Error403"
+        "409":
+          $ref: "#/components/responses/Error409"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "503":
+          $ref: "#/components/responses/Error503"
+        default:
+          $ref: "#/components/responses/ErrorDefault"
+      parameters:
+        - $ref: "#/components/parameters/Installation"
+  "/chat/api/web-notifications/target/resolve":
+    post:
+      operationId: "resolveWebNotificationTarget"
+      summary: "알림을 연 현재 계정의 대상 확인"
+      description: "대상 참조를 URL 경로에 넣지 않고 본문으로 제출합니다. 서버가 현재 계정과 실제 방 또는 약속 전화 소유 관계를 확인합니다. 이 작업은 방을 쓰거나 전화를 받지 않습니다. 다른 클라이언트가 이미 수락한 전화는 전화 응답 기한이 지난 뒤에도 200 ring_answered입니다. 미수락 상태에서 기한이 지나면 ring_expired입니다."
+      x-corthex:
+        id: "API-314"
+        spec:
+          - "SPEC-538"
+          - "SPEC-539"
+          - "SPEC-540"
+          - "SPEC-541"
+          - "SPEC-542"
+          - "SPEC-545"
+          - "SPEC-547"
+          - "SPEC-549"
+        tbl:
+          - "TBL-165"
+          - "TBL-102"
+          - "TBL-001"
+          - "TBL-003"
+        omit:
+          "409": "볼 수 있는 전화의 최신 상태는 200에 표시하며 변경하지 않습니다."
+        maxBodyBytes: 2048
+        origin: "Origin이 마롱이 웹 출처와 정확하게 일치해야 합니다."
+      security:
+        - sessionCookie: []
+          installationProof: []
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              $ref: "#/components/schemas/ResolveRequest"
+            examples:
+              synthetic:
+                value:
+                  targetRef: "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM"
+      responses:
+        "200":
+          description: "현재 계정으로 볼 수 있는 대상의 진입 상태입니다."
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/ResolveResult"
+              examples:
+                chat:
+                  value:
+                    state: "chat"
+                    path: "/chat/"
+                ready:
+                  value:
+                    state: "ring_ready"
+                    answerUntil: "2026-11-25T02:00:00Z"
+                expired:
+                  value:
+                    state: "ring_expired"
+                answered:
+                  value:
+                    state: "ring_answered"
+                unavailable:
+                  value:
+                    state: "ring_unavailable"
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "403":
+          $ref: "#/components/responses/Error403"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "503":
+          $ref: "#/components/responses/Error503"
+        default:
+          $ref: "#/components/responses/ErrorDefault"
+      parameters:
+        - $ref: "#/components/parameters/Installation"
+  "/chat/api/web-notifications/call/accept":
+    post:
+      operationId: "acceptWebNotificationCall"
+      summary: "알림에서 확인한 약속 전화 받기"
+      description: "별도 받기 선택에서만 호출합니다. 계정·전화·기한·최초 수락·기존 통화 조건을 다시 확인합니다. 같은 유효한 클라이언트에서 기존 확정 결과를 확인할 수 있습니다. 이 응답은 양방향 오디오 연결의 성공을 뜻하지 않습니다. 같은 약속 전화의 웹·Android 경합에서 최초 유효 수락과 최초 오디오 연결은 각 한 건입니다. 다른 클라이언트의 선행 수락은 웹에서 200 ring_answered이며 기존 Android에서는 승인된 동일 전화 충돌에 한해 기존 call_busy를 사용합니다."
+      x-corthex:
+        id: "API-315"
+        spec:
+          - "SPEC-545"
+          - "SPEC-546"
+          - "SPEC-547"
+          - "SPEC-549"
+          - "SPEC-550"
+          - "SPEC-551"
+          - "SPEC-553"
+        tbl:
+          - "TBL-165"
+          - "TBL-102"
+          - "TBL-001"
+          - "TBL-003"
+          - "TBL-004"
+        omit: {}
+        maxBodyBytes: 2048
+        origin: "Origin이 마롱이 웹 출처와 정확하게 일치해야 합니다."
+      security:
+        - sessionCookie: []
+          installationProof: []
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              $ref: "#/components/schemas/AcceptRequest"
+            examples:
+              synthetic:
+                value:
+                  targetRef: "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM"
+                  clientId: "11111111-2222-4333-8444-555555555555"
+      responses:
+        "200":
+          description: "현재 전화의 본인 접근이 확인됐습니다."
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/AcceptResult"
+              examples:
+                accepted:
+                  value:
+                    state: "accepted"
+                    callId: "92345678-1234-4333-8888-333333333333"
+                    connectToken: "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN"
+                expired:
+                  value:
+                    state: "ring_expired"
+                answered:
+                  value:
+                    state: "ring_answered"
+                unavailable:
+                  value:
+                    state: "ring_unavailable"
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "403":
+          $ref: "#/components/responses/Error403"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "409":
+          description: "기존 통화 상태나 예산 조건에 맞지 않습니다."
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            "application/problem+json":
+              schema:
+                $ref: "#/components/schemas/Problem"
+              examples:
+                call_busy:
+                  value:
+                    type: "/problems/call-busy"
+                    title: "지금은 전화를 받을 수 없어요"
+                    status: 409
+                    code: "call_busy"
+                    traceId: "0af7651916cd43dd"
+                calls_full:
+                  value:
+                    type: "/problems/calls-full"
+                    title: "지금은 연결할 수 없어요"
+                    status: 409
+                    code: "calls_full"
+                    traceId: "0af7651916cd43dd"
+                budget_exhausted:
+                  value:
+                    type: "/problems/budget-exhausted"
+                    title: "지금은 통화를 시작할 수 없어요"
+                    status: 409
+                    code: "budget_exhausted"
+                    traceId: "0af7651916cd43dd"
+        "429":
+          description: "요청 횟수 또는 기존 일일 사용 한도입니다."
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+            Retry-After:
+              $ref: "#/components/headers/RetryAfter"
+          content:
+            "application/problem+json":
+              schema:
+                $ref: "#/components/schemas/Problem"
+              examples:
+                request_limit:
+                  value:
+                    type: "/problems/request-limit"
+                    title: "잠시 뒤 다시 시도해 주세요"
+                    status: 429
+                    code: "request_limit"
+                    traceId: "0af7651916cd43dd"
+                daily_limit:
+                  value:
+                    type: "/problems/daily-limit"
+                    title: "오늘의 사용 한도에 도달했어요"
+                    status: 429
+                    code: "daily_limit"
+                    traceId: "0af7651916cd43dd"
+        "503":
+          $ref: "#/components/responses/Error503"
+        default:
+          $ref: "#/components/responses/ErrorDefault"
+      parameters:
+        - $ref: "#/components/parameters/Installation"
+  "/chat/api/web-notifications/reply-view":
+    post:
+      operationId: "reportVisibleWebNotificationReply"
+      summary: "동일 설치에서 해당 답변이 보이는지 확인"
+      description: "확인된 개인 방의 기존 답변을 현재 홈 화면 웹앱 설치에서 보고 있다는 단기 신호입니다. 숨김에서는 신호를 종료합니다. 발송을 이미 인계했을 수 있어 200은 푸시 생략을 보장하지 않습니다. 신호는 영구 열람 기록에 쓰지 않습니다."
+      x-corthex:
+        id: "API-316"
+        spec:
+          - "SPEC-531"
+          - "SPEC-532"
+          - "SPEC-535"
+          - "SPEC-536"
+        tbl:
+          - "TBL-165"
+          - "TBL-183"
+        omit:
+          "409": "등록·방 기록을 바꾸지 않으며 반복 신호는 현재의 단기 상태만 바꿉니다."
+        maxBodyBytes: 1024
+        origin: "Origin이 마롱이 웹 출처와 정확하게 일치해야 합니다."
+      security:
+        - sessionCookie: []
+          installationProof: []
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              $ref: "#/components/schemas/ReplyViewRequest"
+            examples:
+              synthetic:
+                value:
+                  messageId: "42"
+                  view: "visible"
+      responses:
+        "200":
+          description: "현재 설치의 단기 신호 결과입니다."
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/ReplyViewResult"
+              examples:
+                observed:
+                  value:
+                    state: "recorded"
+                hidden:
+                  value:
+                    state: "cleared"
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "403":
+          $ref: "#/components/responses/Error403"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "503":
+          $ref: "#/components/responses/Error503"
+        default:
+          $ref: "#/components/responses/ErrorDefault"
+      parameters:
+        - $ref: "#/components/parameters/Installation"
+components:
+  securitySchemes:
+    sessionCookie:
+      type: "apiKey"
+      in: "cookie"
+      name: "marong_session"
+    installationProof:
+      type: "apiKey"
+      in: "header"
+      name: "X-Marong-Installation"
+      description: "설치의 32바이트 무작위 자격 증명. 설치·계정 검증을 건너뛸 수 없습니다."
+  headers:
+    NoStore:
+      description: "계정 및 알림 정보는 캐시에 보관하지 않습니다."
+      schema:
+        type: "string"
+        const: "no-store"
+      example: "no-store"
+    RetryAfter:
+      description: "최소 대기 초."
+      schema:
+        type: "string"
+        pattern: "^[1-9][0-9]{0,3}$"
+      example: "10"
+  parameters:
+    Choice:
+      name: "X-Marong-Choice"
+      in: "header"
+      required: true
+      schema:
+        $ref: "#/components/schemas/ChoiceToken"
+      example: "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV"
+    Installation:
+      name: "X-Marong-Installation"
+      in: "header"
+      required: true
+      schema:
+        type: "string"
+        pattern: "^[A-Za-z0-9_-]{43}$"
+        minLength: 43
+        maxLength: 43
+      example: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      description: "홈 화면 웹앱 설치별 32바이트 난수 base64url. 원본은 로그와 응답에 내보내지 않습니다."
+  schemas:
+    StateToken:
+      type: "string"
+      pattern: "^[A-Za-z0-9_-]+$"
+      minLength: 48
+      maxLength: 512
+    ChoiceToken:
+      type: "string"
+      pattern: "^[A-Za-z0-9_-]+$"
+      minLength: 48
+      maxLength: 768
+    TargetRef:
+      type: "string"
+      pattern: "^[A-Za-z0-9_-]+$"
+      minLength: 48
+      maxLength: 768
+    ConnectToken:
+      type: "string"
+      pattern: "^[A-Za-z0-9_-]+$"
+      minLength: 48
+      maxLength: 768
+    UUID:
+      type: "string"
+      format: "uuid"
+      minLength: 36
+      maxLength: 36
+      pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    MessageId:
+      type: "string"
+      pattern: "^[1-9][0-9]{0,18}$"
+      minLength: 1
+      maxLength: 19
+      description: "기존 messages.id. 서버는 bigint 양의 범위를 검사합니다."
+    VapidKeyId:
+      type: "string"
+      pattern: "^[A-Za-z0-9_-]{1,24}$"
+      minLength: 1
+      maxLength: 24
+    PublicP256Key:
+      type: "string"
+      pattern: "^B[A-Za-z0-9_-]{86}$"
+      minLength: 87
+      maxLength: 87
+      description: "패딩 없는 base64url. 실제 처리에서는 65바이트 비압축 P-256 유효 점을 확인합니다."
+    Action:
+      type: "string"
+      enum:
+        - "enable"
+        - "refresh"
+        - "revoke"
+        - "permission_revoked"
+    Vapid:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "keyId"
+        - "publicKey"
+      properties:
+        keyId:
+          $ref: "#/components/schemas/VapidKeyId"
+        publicKey:
+          $ref: "#/components/schemas/PublicP256Key"
+    SubscriptionState:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "state"
+        - "stateToken"
+        - "vapid"
+      properties:
+        state:
+          type: "string"
+          enum:
+            - "not_registered"
+            - "active"
+            - "revoked"
+            - "expired"
+            - "invalid"
+        stateToken:
+          $ref: "#/components/schemas/StateToken"
+        vapid:
+          $ref: "#/components/schemas/Vapid"
+    ChoiceRequest:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "action"
+        - "stateToken"
+      properties:
+        action:
+          $ref: "#/components/schemas/Action"
+        stateToken:
+          $ref: "#/components/schemas/StateToken"
+    ChoiceResult:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "choiceToken"
+        - "expiresAt"
+      properties:
+        choiceToken:
+          $ref: "#/components/schemas/ChoiceToken"
+        expiresAt:
+          type: "string"
+          format: "date-time"
+          maxLength: 40
+    PushKeys:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "p256dh"
+        - "auth"
+      properties:
+        p256dh:
+          $ref: "#/components/schemas/PublicP256Key"
+        auth:
+          type: "string"
+          pattern: "^[A-Za-z0-9_-]+$"
+          minLength: 22
+          maxLength: 22
+    SubscriptionInput:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "endpoint"
+        - "expirationTime"
+        - "keys"
+      properties:
+        endpoint:
+          type: "string"
+          format: "uri"
+          pattern: "^https://[^\\s]+$"
+          maxLength: 2048
+          minLength: 12
+          description: "공급자 HTTPS 주소. 서버는 등록·송신 직전에 허용 호스트와 외부 연결 정책을 검증합니다."
+        expirationTime:
+          type:
+            - "integer"
+            - "null"
+          minimum: 0
+          maximum: 8640000000000000
+          description: "PushSubscription의 UTC epoch 밀리초 또는 null."
+        keys:
+          $ref: "#/components/schemas/PushKeys"
+    RegisterRequest:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "vapidKeyId"
+        - "subscription"
+      properties:
+        vapidKeyId:
+          $ref: "#/components/schemas/VapidKeyId"
+        subscription:
+          $ref: "#/components/schemas/SubscriptionInput"
+    ResolveRequest:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "targetRef"
+      properties:
+        targetRef:
+          $ref: "#/components/schemas/TargetRef"
+    ResolveChat:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "state"
+        - "path"
+      properties:
+        state:
+          type: "string"
+          const: "chat"
+        path:
+          type: "string"
+          const: "/chat/"
+    ResolveRingReady:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "state"
+        - "answerUntil"
+      properties:
+        state:
+          type: "string"
+          const: "ring_ready"
+        answerUntil:
+          type: "string"
+          format: "date-time"
+          maxLength: 40
+    ResolveRingExpired:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "state"
+      properties:
+        state:
+          type: "string"
+          const: "ring_expired"
+    ResolveRingAnswered:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "state"
+      properties:
+        state:
+          type: "string"
+          const: "ring_answered"
+    ResolveRingUnavailable:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "state"
+      properties:
+        state:
+          type: "string"
+          const: "ring_unavailable"
+    ResolveResult:
+      oneOf:
+        - $ref: "#/components/schemas/ResolveChat"
+        - $ref: "#/components/schemas/ResolveRingReady"
+        - $ref: "#/components/schemas/ResolveRingExpired"
+        - $ref: "#/components/schemas/ResolveRingAnswered"
+        - $ref: "#/components/schemas/ResolveRingUnavailable"
+    AcceptRequest:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "targetRef"
+        - "clientId"
+      properties:
+        targetRef:
+          $ref: "#/components/schemas/TargetRef"
+        clientId:
+          $ref: "#/components/schemas/UUID"
+    AcceptConnected:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "state"
+        - "callId"
+        - "connectToken"
+      properties:
+        state:
+          type: "string"
+          const: "accepted"
+        callId:
+          $ref: "#/components/schemas/UUID"
+        connectToken:
+          $ref: "#/components/schemas/ConnectToken"
+    AcceptResult:
+      oneOf:
+        - $ref: "#/components/schemas/AcceptConnected"
+        - $ref: "#/components/schemas/ResolveRingExpired"
+        - $ref: "#/components/schemas/ResolveRingAnswered"
+        - $ref: "#/components/schemas/ResolveRingUnavailable"
+    ReplyViewRequest:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "messageId"
+        - "view"
+      properties:
+        messageId:
+          $ref: "#/components/schemas/MessageId"
+        view:
+          type: "string"
+          enum:
+            - "visible"
+            - "hidden"
+    ReplyViewResult:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "state"
+      properties:
+        state:
+          type: "string"
+          enum:
+            - "recorded"
+            - "cleared"
+    LiveAcceptFrame:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "type"
+        - "clientId"
+        - "installationProof"
+        - "connectToken"
+      properties:
+        type:
+          type: "string"
+          const: "start_notified"
+        clientId:
+          $ref: "#/components/schemas/UUID"
+        installationProof:
+          type: "string"
+          pattern: "^[A-Za-z0-9_-]+$"
+          minLength: 43
+          maxLength: 43
+        connectToken:
+          $ref: "#/components/schemas/ConnectToken"
+    LiveOrdinaryFrame:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "type"
+        - "clientId"
+        - "installationProof"
+        - "targetRef"
+      properties:
+        type:
+          type: "string"
+          const: "start_ordinary"
+        clientId:
+          $ref: "#/components/schemas/UUID"
+        installationProof:
+          type: "string"
+          pattern: "^[A-Za-z0-9_-]+$"
+          minLength: 43
+          maxLength: 43
+        targetRef:
+          $ref: "#/components/schemas/TargetRef"
+    LiveStartFrame:
+      oneOf:
+        - $ref: "#/components/schemas/LiveAcceptFrame"
+        - $ref: "#/components/schemas/LiveOrdinaryFrame"
+    LiveFailureFrame:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "type"
+      properties:
+        type:
+          type: "string"
+          enum:
+            - "login_required"
+            - "not_allowed"
+            - "invalid_input"
+            - "ring_expired"
+            - "ring_answered"
+            - "ring_unavailable"
+            - "call_busy"
+            - "calls_full"
+            - "daily_limit"
+            - "budget_exhausted"
+            - "db_unavailable"
+    PushPresentation:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "web_push"
+        - "notification"
+      properties:
+        web_push:
+          type: "integer"
+          const: 8030
+        notification:
+          type: "object"
+          additionalProperties: false
+          required:
+            - "title"
+            - "body"
+            - "lang"
+            - "navigate"
+            - "tag"
+            - "renotify"
+          properties:
+            title:
+              type: "string"
+              minLength: 1
+              maxLength: 32
+            body:
+              type: "string"
+              minLength: 1
+              maxLength: 56
+            lang:
+              type: "string"
+              const: "ko"
+            navigate:
+              type: "string"
+              format: "uri"
+              minLength: 20
+              maxLength: 1024
+              description: "마롱이 같은 출처 /chat/의 #notice=대상 참조."
+            tag:
+              type: "string"
+              pattern: "^[A-Za-z0-9_-]+$"
+              minLength: 24
+              maxLength: 24
+            renotify:
+              type: "boolean"
+              const: false
+    Problem:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "title"
+        - "status"
+        - "code"
+        - "traceId"
+      properties:
+        type:
+          type: "string"
+          format: "uri-reference"
+          maxLength: 192
+        title:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        status:
+          type: "integer"
+          minimum: 400
+          maximum: 599
+        code:
+          type: "string"
+          enum:
+            - "invalid_input"
+            - "login_required"
+            - "cross_site"
+            - "not_allowed"
+            - "not_found"
+            - "state_changed"
+            - "subscription_conflict"
+            - "call_busy"
+            - "calls_full"
+            - "budget_exhausted"
+            - "daily_limit"
+            - "request_limit"
+            - "db_unavailable"
+            - "internal"
+        traceId:
+          type: "string"
+          pattern: "^[0-9a-f]{16}$"
+          minLength: 16
+          maxLength: 16
+        errors:
+          type: "array"
+          maxItems: 10
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "field"
+              - "reason"
+            properties:
+              field:
+                type: "string"
+                enum:
+                  - "body"
+                  - "action"
+                  - "stateToken"
+                  - "choiceToken"
+                  - "subscription"
+                  - "endpoint"
+                  - "expirationTime"
+                  - "p256dh"
+                  - "auth"
+                  - "vapidKeyId"
+                  - "targetRef"
+                  - "clientId"
+                  - "messageId"
+                  - "view"
+              reason:
+                type: "string"
+                enum:
+                  - "required"
+                  - "too_short"
+                  - "too_long"
+                  - "bad_format"
+                  - "out_of_range"
+                  - "not_an_option"
+  responses:
+    Error400:
+      description: "입력 형식이나 한도가 맞지 않습니다."
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        "application/problem+json":
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            invalid_input:
+              value:
+                type: "/problems/invalid-input"
+                title: "입력을 확인해 주세요"
+                status: 400
+                code: "invalid_input"
+                traceId: "0af7651916cd43dd"
+                errors:
+                  - field: "body"
+                    reason: "bad_format"
+    Error401:
+      description: "로그인이 없거나 종료됐습니다."
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        "application/problem+json":
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            login_required:
+              value:
+                type: "/problems/login-required"
+                title: "로그인이 필요해요"
+                status: 401
+                code: "login_required"
+                traceId: "0af7651916cd43dd"
+    Error403:
+      description: "출처 또는 설치 자격을 확인할 수 없습니다."
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        "application/problem+json":
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            cross_site:
+              value:
+                type: "/problems/cross-site"
+                title: "이 출처에서 요청할 수 없어요"
+                status: 403
+                code: "cross_site"
+                traceId: "0af7651916cd43dd"
+            not_allowed:
+              value:
+                type: "/problems/not-allowed"
+                title: "이 설치에서 요청할 수 없어요"
+                status: 403
+                code: "not_allowed"
+                traceId: "0af7651916cd43dd"
+    Error404:
+      description: "대상이 없거나 볼 수 없습니다."
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        "application/problem+json":
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            not_found:
+              value:
+                type: "/problems/not-found"
+                title: "알림 대상을 열 수 없어요"
+                status: 404
+                code: "not_found"
+                traceId: "0af7651916cd43dd"
+    Error409:
+      description: "앞서 확인한 설치의 상태가 바뀌었습니다."
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        "application/problem+json":
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            state_changed:
+              value:
+                type: "/problems/state-changed"
+                title: "알림 상태가 바뀌었어요"
+                status: 409
+                code: "state_changed"
+                traceId: "0af7651916cd43dd"
+    Error429:
+      description: "요청 횟수 제한입니다."
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+      content:
+        "application/problem+json":
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            request_limit:
+              value:
+                type: "/problems/request-limit"
+                title: "잠시 뒤 다시 시도해 주세요"
+                status: 429
+                code: "request_limit"
+                traceId: "0af7651916cd43dd"
+    Error503:
+      description: "현재 상태를 확인할 수 없습니다."
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        "application/problem+json":
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            db_unavailable:
+              value:
+                type: "/problems/db-unavailable"
+                title: "지금 상태를 확인할 수 없어요"
+                status: 503
+                code: "db_unavailable"
+                traceId: "0af7651916cd43dd"
+    ErrorDefault:
+      description: "그 밖의 서버 실패입니다."
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        "application/problem+json":
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            internal:
+              value:
+                type: "/problems/internal"
+                title: "요청을 처리할 수 없어요"
+                status: 500
+                code: "internal"
+                traceId: "0af7651916cd43dd"
+x-corthex:
+  status: "version-candidate"
+  inputs:
+    - "SPEC-520~554"
+    - "TBL-165"
+    - "TBL-183"
+    - "TBL-102"
+    - "TBL-003"
+    - "SCR-001"
+    - "SCR-107"
+    - "SCR-163"
+    - "SCR-164"
+    - "SCR-165"
+  directory: "docs/06-api"
+  errors:
+    invalid_input:
+      status: 400
+      meaning: "형식·한도·허용 범위를 벗어남"
+      message: "입력을 확인해 주세요"
+      client: "입력을 수정합니다. 잘못된 값을 반사하지 않습니다."
+    login_required:
+      status: 401
+      meaning: "현재 유효한 기기 로그인 없음"
+      message: "로그인이 필요해요"
+      client: "기존 로그인 뒤 대상을 다시 확인합니다."
+    cross_site:
+      status: 403
+      meaning: "요청 출처 검증 실패"
+      message: "이 출처에서 요청할 수 없어요"
+      client: "현재 마롱이 웹에서 다시 시도합니다."
+    not_allowed:
+      status: 403
+      meaning: "설치 자격 증명 또는 세션 연결을 확인할 수 없음"
+      message: "이 설치에서 요청할 수 없어요"
+      client: "다른 설치 정보 없이 현재 설치 상태를 확인합니다."
+    not_found:
+      status: 404
+      meaning: "존재하지 않거나 접근할 수 없는 대상"
+      message: "알림 대상을 열 수 없어요"
+      client: "대상 내용 없이 홈으로 안내합니다."
+    state_changed:
+      status: 409
+      meaning: "현재 상태와 선택 또는 기기가 일치하지 않음"
+      message: "알림 상태가 바뀌었어요"
+      client: "현재 설치를 다시 조회하고 이전 켜기 요청을 자동 재생하지 않습니다."
+    subscription_conflict:
+      status: 409
+      meaning: "제출한 주소가 현재 설치에 연결 가능한 유일 조건을 충족하지 않음"
+      message: "이 설치의 알림 등록을 확인할 수 없어요"
+      client: "다른 설치·계정 정보 없이 현재 브라우저 등록을 확인합니다."
+    call_busy:
+      status: 409
+      meaning: "기존 동시 통화 조건"
+      message: "지금은 전화를 받을 수 없어요"
+      client: "통화나 수락을 만들지 않고 현재 상태로 돌아갑니다."
+    calls_full:
+      status: 409
+      meaning: "기존 전체 동시 통화 조건"
+      message: "지금은 연결할 수 없어요"
+      client: "수락을 완료하지 않고 현재 상태로 돌아갑니다."
+    budget_exhausted:
+      status: 409
+      meaning: "기존 통화 예산 조건"
+      message: "지금은 통화를 시작할 수 없어요"
+      client: "예산 상태를 안내하고 자동으로 일반 통화를 시작하지 않습니다."
+    daily_limit:
+      status: 429
+      meaning: "기존 사용 한도 조건"
+      message: "오늘의 사용 한도에 도달했어요"
+      client: "기존 한도 상태를 사용합니다."
+    request_limit:
+      status: 429
+      meaning: "이 계약의 요청 횟수 제한"
+      message: "잠시 뒤 다시 시도해 주세요"
+      client: "Retry-After를 지킵니다. 알림 켜기나 받기를 대신 선택하지 않습니다."
+    db_unavailable:
+      status: 503
+      meaning: "저장·인증 또는 수락 결과를 확인할 수 없음"
+      message: "지금 상태를 확인할 수 없어요"
+      client: "성공 표시 없이 동일 요청 또는 최신 상태를 확인합니다."
+    internal:
+      status: 500
+      meaning: "분류되지 않은 서버 예외"
+      message: "요청을 처리할 수 없어요"
+      client: "오류 상태를 보여 주고 확인되지 않은 성공을 표시하지 않습니다."
+  approval:
+    item: "143/e2451"
+    response: "msg_9e2de219d5d8"
+    request: "msg_30a9ec87b511"
+    scope:
+      - "Q1"
+      - "Q2"
+      - "Q3"
+      - "Q4"
+      - "Q5"
+      - "Q6"
+    versionFreeze: "pending"
+x-marong-client-contracts:
+  websocket:
+    path: "/live/web-notification"
+    operationId: "openWebNotificationCall"
+    subprotocol: "marong-notified-v1"
+    security:
+      - "sessionCookie"
+      - "same-origin"
+      - "installationProof"
+    x-corthex:
+      id: "API-317"
+      spec:
+        - "SPEC-546"
+        - "SPEC-548"
+        - "SPEC-550"
+        - "SPEC-551"
+        - "SPEC-552"
+        - "SPEC-553"
+      tbl:
+        - "TBL-165"
+        - "TBL-102"
+        - "TBL-001"
+        - "TBL-003"
+        - "TBL-004"
+      omit:
+        "200": "웹소켓 업그레이드(101), 이후 연결 상태는 프레임으로 안내합니다."
+        "404": "URL에는 대상 ID가 없으며 프레임에서 접근을 판단합니다."
+        "429": "기존 통화 한도는 연결 뒤 허용된 실패 프레임으로 전달합니다."
+    handshake:
+      responses:
+        "101":
+          description: "업그레이드 후 지정된 첫 프레임을 기다립니다."
+          example: "marong-notified-v1"
+        "400":
+          description: "잘못된 프로토콜이나 핸드셰이크입니다."
+          example: "invalid_input"
+        "401":
+          description: "현재 기기 로그인이 없습니다."
+          example: "login_required"
+        "403":
+          description: "요청 출처가 다릅니다."
+          example: "cross_site"
+        "409":
+          description: "기존 준비 연결과 충돌합니다."
+          example: "call_busy"
+        "503":
+          description: "상태를 확인할 수 없습니다."
+          example: "db_unavailable"
+        default:
+          description: "그 밖의 연결 실패입니다."
+          example: "internal"
+    maxStartFrameBytes: 2048
+    clientFrame:
+      schema:
+        $ref: "#/components/schemas/LiveStartFrame"
+      examples:
+        resume:
+          type: "start_notified"
+          clientId: "11111111-2222-4333-8444-555555555555"
+          installationProof: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          connectToken: "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN"
+        ordinary:
+          type: "start_ordinary"
+          clientId: "11111111-2222-4333-8444-555555555555"
+          installationProof: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          targetRef: "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM"
+    failureFrame:
+      schema:
+        $ref: "#/components/schemas/LiveFailureFrame"
+      example:
+        type: "ring_answered"
+    successFrames:
+      - type: "ready"
+        callId: "92345678-1234-4333-8888-333333333333"
+        memoryConnected: true
+        ring: true
+      - type: "ready"
+        callId: "92345678-1234-4333-8888-333333333333"
+        memoryConnected: true
+        ring: false
+    description: "초기 프레임 확인 전 통화를 할당하지 않습니다. 일반 통화 분기는 약속 전화 행을 찾거나 수락하지 않습니다. 브라우저는 업그레이드 실패 HTTP 상태를 읽기 어려우므로 HTTP 대상 확인으로 돌아갑니다. 승인된 같은 약속 전화 충돌에서 실패한 연결은 기존 통화 종료 또는 일반 통화 시작을 요청하지 않습니다."
+  push:
+    spec:
+      - "SPEC-529"
+      - "SPEC-531"
+      - "SPEC-532"
+      - "SPEC-533"
+      - "SPEC-534"
+      - "SPEC-535"
+      - "SPEC-536"
+      - "SPEC-537"
+      - "SPEC-538"
+      - "SPEC-543"
+      - "SPEC-544"
+      - "SPEC-554"
+    tbl:
+      - "TBL-165"
+      - "TBL-183"
+      - "TBL-102"
+    schema:
+      $ref: "#/components/schemas/PushPresentation"
+    example:
+      web_push: 8030
+      notification:
+        title: "마롱이"
+        body: "새 알림이 있어요"
+        lang: "ko"
+        navigate: "https://marong.example.invalid/chat/#notice=MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM"
+        tag: "DDDDDDDDDDDDDDDDDDDDDDDD"
+        renotify: false
+    maxPlaintextBytes: 2048
+    maxEncodedBytes: 4096
+    description: "전송 접수와 실제 표시를 분리합니다. 확인된 Apple Web Push 410만 해당 구독 버전에 영구 무효로 적용합니다. 개별 알림 수명·전화 응답 기한은 해당 전송을 종료합니다."
+    validationCandidates:
+      - minimumIOS: "16.4"
+        path: "standard-web-push"
+      - minimumIOS: "18.4"
+        path: "declarative-fallback"
+    releaseGate:
+      scope: "실기기에서 설치별 최초 표시와 중복·닫은 알림 재도착 후 누적 표시 1회인 버전과 전송 경로만 출시합니다."
+      requiredCases:
+        - "서비스 워커 표시"
+        - "선언형 기본 표시"
+        - "기존 알림이 남은 중복 도착"
+        - "사용자가 닫은 뒤 같은 이벤트 재도착"
+        - "같은 계정의 별도 허용 설치"
+        - "잠금 화면과 전면·백그라운드"
+      exception: "보장 범위를 바꾸려면 별도로 승인받습니다."
+      evidence: "device-test-pending"
+  session:
+    existingApi:
+      - "API-212"
+      - "API-213"
+      - "API-215"
+      - "API-216"
+      - "API-236"
+    spec:
+      - "SPEC-528"
+      - "SPEC-530"
+      - "SPEC-539"
+    tbl:
+      - "TBL-165"
+      - "TBL-183"
+    description: "기존 로그인·로그아웃·세션 폐기의 모양을 유지합니다. 홈 화면 웹앱의 검증된 기존 설치에 한해 바인딩 종료를 세션 트랜잭션에 연결합니다."
+  legacyRingConflict:
+    existingApi: "API-107"
+    spec:
+      - "SPEC-546"
+      - "SPEC-549"
+      - "SPEC-553"
+    tbl:
+      - "TBL-102"
+      - "TBL-001"
+      - "TBL-003"
+      - "TBL-004"
+    when: "계정 검증을 통과한 Android 받기 요청과 같은 약속 전화를 다른 클라이언트가 먼저 유효하게 수락한 사실이 확인됩니다."
+    androidResponse:
+      type: "call_busy"
+    webResponse:
+      state: "ring_answered"
+    invariants:
+      - "양쪽 선착순에서 동일 전화 수락 1건, 새 통화 1건, 최초 양방향 오디오 연결 1건."
+      - "응답 유실 시 같은 유효 클라이언트와 전화는 기존 통화 ID만 확인합니다."
+      - "일반·미수락 만료·직접 통화의 기존 동작·응답 형식을 그대로 사용합니다."
+  subscriptionLifecycle:
+    spec:
+      - "SPEC-524"
+      - "SPEC-525"
+      - "SPEC-526"
+      - "SPEC-527"
+      - "SPEC-528"
+      - "SPEC-529"
+      - "SPEC-530"
+    tbl:
+      - "TBL-165"
+      - "TBL-183"
+    consentId:
+      storage: "활성 protected_material 암호화 봉투에만 무작위 식별자를 보관합니다."
+      renew: "같은 동의 식별자를 유지하고 구독 버전을 바꿉니다."
+      reactivate: "현재 설치·유효 로그인·별도의 명시적 동의에서 새 식별자와 버전을 발급합니다."
+      verify: "활성 발송 역할 안에서 원본을 사용합니다. 사용자 API는 토큰의 단기 검증값과 일치 여부만 사용하며 원본을 토큰·로그·응답에 넣지 않습니다."
+    deactivate:
+      nullFields:
+        - "protected_material"
+        - "endpoint_fingerprint"
+        - "subscription_expires_at"
+      note: "주소·키·동의 식별자는 봉투와 함께 비웁니다. 설치 ID·세션 FK·새 버전·상태만 남깁니다."
+    providerResult: "현재 활성 설치와 인계 당시 구독 버전 일치에서만 상태를 바꿀 수 있습니다."
+    oldMutation: "종료된 세션은 401, 선행 선택·버전 충돌은 409, 같은 요청의 현재 확정 결과만 200으로 재확인합니다."
+    handoff: "로그아웃·폐기·계정 변경과 공급자 인계를 같은 세션 경계에서 직렬화하며 종료 확정 후 미인계 전송은 0건입니다."
+    retention:
+      decryptRole: "활성 발송 역할"
+      beforeRelease:
+        - "잔여 행"
+        - "복제"
+        - "백업"
+        - "키"
+        - "대상 참조"
+      state: "release-contract-pending"
