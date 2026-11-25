@@ -531,14 +531,13 @@ class MemoryStore:
             raise NoticeRingState("login_required")
         return row["expires_at"]
 
-    async def start_notice_ordinary(self, p, client_id, voice, version, ring_id, session, *, installation=None,
-                                    validate_installation=None):
+    async def start_notice_ordinary(self, p, client_id, voice, version, ring_id, session, *, installation,
+                                    verify_document):
         async with asyncio.timeout(3), self.pool.connection() as c, c.transaction():
             session_until = await self._notice_session(c, p, session)
-            if installation is not None:
-                await lock_installation(c, installation)
-            caller = await (await c.execute("SELECT id FROM call.callers WHERE id=%s AND enabled FOR UPDATE",
-                                            (p.caller_id,))).fetchone()
+            await lock_installation(c, installation)
+            caller = await (await c.execute("SELECT id FROM call.callers WHERE id=%s AND friend_id=%s AND enabled FOR UPDATE",
+                                            (p.caller_id, p.friend_id))).fetchone()
             if caller is None:
                 raise NoticeRingState("ring_unavailable")
             ring = await (await c.execute("""
@@ -547,10 +546,11 @@ class MemoryStore:
             """, (ring_id, p.caller_id))).fetchone()
             if not ring:
                 raise NoticeRingState("ring_unavailable")
-            subscription_until = await validate_installation() if validate_installation is not None else None
             now = datetime.now(timezone.utc)
             if session_until <= now:
                 raise NoticeRingState("login_required")
+            if verify_document(now) != ring_id:
+                raise NoticeRingState("not_allowed")
             if ring["status"] == "answered":
                 raise NoticeRingState("ring_answered")
             if ring["status"] not in {"ringing", "missed"} or ring["answer_until"] > now:
@@ -567,8 +567,6 @@ class MemoryStore:
             now = datetime.now(timezone.utc)
             if session_until <= now:
                 raise NoticeRingState("login_required")
-            if subscription_until is not None and subscription_until <= now.timestamp() * 1000:
-                raise NoticeRingState("not_allowed")
             return (*started, None)
 
     async def attach_notice_call(self, p, client_id, call_id, ring_id, session):

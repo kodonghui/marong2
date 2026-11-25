@@ -606,14 +606,21 @@ async def notice_start(ws, authn):
     if mode == 'start_notified':
         call, ring = NOTICE_CALL.verify(authn['session'], ident, client, data[extra], now)
         return cid, str(client), call, ring, {}
-    try:
-        kind, ring = NOTICE_CALL.references.open(data[extra], person.friend_id, now)
-    except SessionError as error:
-        raise SessionError('not_allowed' if error.code == 'not_found' else error.code) from None
-    if kind != 'call':
-        raise NoticeRingState('ring_unavailable')
+    reference = data[extra]
+
+    def verify_ordinary_document(checked_at):
+        try:
+            kind, target = NOTICE_CALL.references.open(reference, person.friend_id, checked_at)
+        except SessionError as error:
+            raise SessionError('not_allowed' if error.code == 'not_found' else error.code) from None
+        if kind != 'call' or not NOTICE_CALL.matches_document(sid, ident, reference, None, client):
+            raise SessionError('not_allowed')
+        return target
+
+    ring = verify_ordinary_document(now)
     row = await memory_store.one("""
-        SELECT status,answer_until FROM marong.app_rings WHERE caller_id=%s AND id=%s AND reason='promise'
+        SELECT status,answer_until FROM marong.app_rings
+        WHERE caller_id=%s AND id=%s AND reason='promise'
     """, (person.caller_id, ring))
     if row is None:
         raise NoticeRingState('ring_unavailable')
@@ -621,10 +628,7 @@ async def notice_start(ws, authn):
         raise NoticeRingState('ring_answered')
     if row['status'] not in ('ringing', 'missed') or row['answer_until'] > now:
         raise NoticeRingState('ring_unavailable')
-    validation = {}
-    if notice_client(client):
-        lookup = {'targetRef': data['targetRef'], 'clientId': str(client)}
-        validation = {'installation': ident, 'validate_installation': partial(validate_notice_installation, sid, proof, lookup)}
+    validation = {'installation': ident, 'verify_document': verify_ordinary_document}
     return cid, str(client), None, ring, validation
 
 

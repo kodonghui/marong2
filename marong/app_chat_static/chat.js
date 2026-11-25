@@ -1026,15 +1026,17 @@ async function openNotice(reference) {
   const title = document.createElement('h1');
   const message = document.createElement('p');
   const retry = document.createElement('button');
+  const ordinary = document.createElement('button');
   const chat = document.createElement('button');
   title.className = 'state-title';
   message.className = 'state-text';
   title.tabIndex = -1;
-  retry.type = chat.type = 'button';
-  retry.className = chat.className = 'state-action';
+  retry.type = ordinary.type = chat.type = 'button';
+  retry.className = ordinary.className = chat.className = 'state-action';
   retry.textContent = '다시 확인';
+  ordinary.textContent = '일반 통화';
   chat.textContent = '글 대화로';
-  dialog.append(title, message, retry, chat);
+  dialog.append(title, message, retry, ordinary, chat);
   ui.log.before(dialog);
   const hidden = [ui.log, ui.form, ui.menuButton];
   for (const element of hidden) element.hidden = true;
@@ -1054,6 +1056,7 @@ async function openNotice(reference) {
     title.textContent = head;
     message.textContent = line;
     retry.hidden = !allowRetry;
+    ordinary.hidden = true;
     chat.hidden = head === '알림을 확인하고 있어';
   }
   async function verify(first = false) {
@@ -1066,7 +1069,7 @@ async function openNotice(reference) {
       location.replace('/chat/login?expired=1');
       return;
     }
-    if (response.status === 200 && ['ring_ready', 'ring_expired'].includes(response.data?.state)
+    if (response.status === 200 && response.data?.state === 'ring_ready'
         && document.body.dataset.noticeCallEnabled === 'true') {
       const subscription = await webNotifications.request('/subscription');
       if (inactive) return;
@@ -1085,6 +1088,15 @@ async function openNotice(reference) {
     }[response.status === 200 ? response.data?.state : ''];
     if (ringState) {
       show(...ringState, response.data.state === 'ring_unavailable');
+      if (response.data.state === 'ring_expired' && response.ordinaryChoice
+          && document.body.dataset.noticeCallEnabled === 'true') {
+        ordinary.hidden = false;
+        ordinary.onclick = () => {
+          if (submitted) return;
+          submitted = webNotifications.openCall(reference, previousFocus, response.ordinaryChoice);
+          if (!submitted) void verify();
+        };
+      }
     } else if ([400, 403, 404].includes(response.status)) {
       webNotifications.clear();
       show('이 알림을 열 수 없어', '글 대화로 돌아가 다시 확인할 수 있어.');

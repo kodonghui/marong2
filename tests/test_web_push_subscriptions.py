@@ -646,6 +646,116 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         """, (schedule, who["friend_id"], who["caller_id"], until))
         return ring
 
+    async def answer_body(self, reference):
+        ident = installation_id(self.proof)
+        async with self.service.pool.connection() as conn:
+            consent, _ = await self.service.active_consent(conn, ident, self.sid, self.now)
+        client = self.chat.web_push_call.document_client(self.sid, ident, reference, consent)
+        return {'targetRef': reference, 'clientId': str(client)}
+
+    async def test_notice_call_requires_issued_document_and_explicit_ordinary_choice(self):
+        server, store, _, who = await self.call_fixture()
+        await self.register_fixture()
+        ring = self.ring(who)
+        reference = self.references.seal('call', who['friend_id'], ring, self.now)
+        await self.problem(await self.request('POST', ACCEPT, body={
+            'targetRef': reference, 'clientId': str(uuid4()),
+        }), 403, 'not_allowed')
+        answer = await self.answer_body(reference)
+        deadline = min(self.now, datetime.now(timezone.utc)) - timedelta(seconds=1)
+        set_deadline = 'UPDATE marong.app_rings SET answer_until=%s WHERE id=%s'
+        self.db.admin(set_deadline, (deadline, ring))
+        result = await self.request('POST', RESOLVE, body={'targetRef': reference})
+        self.assertEqual(await result.json(), {'state': 'ring_expired'})
+        old_choice = result.headers['X-Marong-Ordinary-Choice']
+        form = {'targetRef': reference, 'installationProof': self.proof, 'navigation': uuid4().hex}
+
+        async def document(body, *, status, allowed=False, session=True):
+            current = self.token if session is True else session
+            headers = {'Cookie': f'{COOKIE}={current}', 'Origin': ORIGIN}
+            async with self.client.post('/chat/notice-call', data=body, headers=headers) as reply:
+                self.assertEqual(reply.status, status)
+                self.assertIn('microphone=(self)' if allowed else 'microphone=()', reply.headers['Permissions-Policy'])
+                self.assertEqual(reply.headers['Cache-Control'], 'no-store')
+                html = await reply.text()
+                for private in (reference, self.proof, current, old_choice):
+                    self.assertNotIn(private, html)
+                return html
+
+        old_html = await document(form | {'ordinaryChoice': old_choice}, status=200, allowed=True)
+        old_client = old_html.split('data-client-id="', 1)[1].split('"', 1)[0]
+        await self.problem(await self.request('POST', ACCEPT, body=answer | {'clientId': old_client}),
+                           403, 'not_allowed')
+        code, _ = await self.sessions.create_device_code(who['friend_id'])
+        logged = await self.request('POST', '/chat/api/login/code', body={'code': code})
+        token = logged.cookies[COOKIE].value
+        await self.state(await self.request('GET', SUB, token=token), 'not_registered')
+        await document(form, status=403, session=token)
+        await document(form | {'ordinaryChoice': old_choice}, status=403, session=token)
+        lookup = await self.request('POST', RESOLVE, body={'targetRef': reference}, token=token)
+        chosen = form | {'ordinaryChoice': lookup.headers['X-Marong-Ordinary-Choice']}
+        await document(chosen | {'installationProof': self.other_proof}, status=403, session=token)
+        await document(chosen, status=403, session=self.alt)
+        other_reference = self.references.seal('call', who['friend_id'], ring, self.now)
+        await document(chosen | {'targetRef': other_reference}, status=403, session=token)
+        self.db.admin('UPDATE call.callers SET enabled=false WHERE id=%s', (who['caller_id'],))
+        await document(chosen, status=403, session=token)
+        self.db.admin('UPDATE call.callers SET enabled=true WHERE id=%s', (who['caller_id'],))
+        html = await document(chosen, status=200, allowed=True, session=token)
+        self.assertIn('data-purpose="ordinary"', html)
+        self.assertNotIn(chosen['ordinaryChoice'], html)
+        client = html.split('data-client-id="', 1)[1].split('"', 1)[0]
+        await self.problem(await self.request('POST', ACCEPT, token=token, body=answer | {'clientId': client}),
+                           403, 'not_allowed')
+
+        endpoint = self.call_site.make_url('/live/web-notification')
+        socket_headers = {'Cookie': f'{COOKIE}={token}', 'Origin': str(endpoint.origin())}
+        start = {'type': 'start_ordinary', 'clientId': client, 'installationProof': self.proof,
+                 'targetRef': reference}
+        with patch.object(server, 'LiveSession') as relay:
+            for denied in (start | {'clientId': str(uuid4())}, start | {'clientId': answer['clientId']},
+                           start | {'targetRef': other_reference}, start | {'installationProof': self.other_proof}):
+                async with self.client.session.ws_connect(endpoint, protocols=[SUBPROTOCOL], headers=socket_headers) as ws:
+                    await ws.send_json(denied)
+                    self.assertEqual(await ws.receive_json(timeout=3), {'type': 'not_allowed'})
+            reserve = store.start_notice_ordinary
+
+            async def changed_target(*args, **kwargs):
+                self.db.admin(set_deadline, (datetime.now(timezone.utc) + timedelta(minutes=1), ring))
+                return await reserve(*args, **kwargs)
+
+            with patch.object(store, 'start_notice_ordinary', side_effect=changed_target):
+                async with self.client.session.ws_connect(endpoint, protocols=[SUBPROTOCOL], headers=socket_headers) as ws:
+                    await ws.send_json(start)
+                    self.assertEqual(await ws.receive_json(timeout=3), {'type': 'ring_unavailable'})
+            relay.assert_not_called()
+        await document(chosen, status=403, session=token)
+        self.db.admin(set_deadline, (deadline, ring))
+        self.assertEqual(self.db.admin('SELECT count(*) FROM call.calls WHERE caller_id=%s', (who['caller_id'],)), [(0,)])
+
+        class OrdinaryCall:
+            def __init__(self, websocket, *args, **kwargs):
+                self.websocket = websocket
+                self.explicit = False
+                self.d = {}
+
+            async def run(self):
+                call, _, _, notification = self.notified_start
+                await self.websocket.send_json({'type': 'ready', 'callId': call, 'ring': bool(notification)})
+
+        with patch.object(server, 'LiveSession', OrdinaryCall):
+            for _ in range(2):
+                async with self.client.session.ws_connect(endpoint, protocols=[SUBPROTOCOL], headers=socket_headers) as ws:
+                    await ws.send_json(start)
+                    ready = await ws.receive_json(timeout=3)
+                    self.assertEqual((ready['type'], ready['ring']), ('ready', False))
+                    call_id = ready['callId']
+                self.assertEqual(self.db.admin('SELECT id::text FROM call.calls WHERE caller_id=%s',
+                                               (who['caller_id'],)), [(call_id,)])
+        self.assertEqual(self.db.admin('SELECT status,call_id,answered_at FROM marong.app_rings WHERE id=%s', (ring,)),
+                         [('ringing', None, None)])
+        await self.state(await self.request('GET', SUB, token=token), 'not_registered')
+
     async def test_574_web_first_replay_and_android_first_share_atomic_ring(self):
         server, store, protocol, who = await self.call_fixture()
         await self.register_fixture()
@@ -654,8 +764,7 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         p = Principal(who["caller_id"], who["friend_id"], "Fixture", unified=True)
         ring = self.ring(who)
         reference = self.references.seal("call", who["friend_id"], ring, self.now)
-        web_client = uuid4()
-        answer = {"targetRef": reference, "clientId": str(web_client)}
+        answer = await self.answer_body(reference)
         with patch.object(server, "CALL_MAX", 0):
             await self.problem(await self.request("POST", ACCEPT, body=answer), 409, "calls_full")
         with patch.object(server, "active_calls", {who["friend_id"]: server.CallSlot(str(uuid4()))}):
@@ -683,9 +792,9 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
                          [("answered", accepted["callId"])])
         with self.assertRaises(CallBusy):
             await store.reserve_notice_ring(p, str(uuid4()), "Fixture", "fixture", ring, legacy=True)
-        result = await (await self.request("POST", ACCEPT, body={**answer, "clientId": str(uuid4())})).json()
+        result = await (await self.request("POST", ACCEPT, body=await self.answer_body(reference))).json()
         self.assertEqual(result, {"state": "ring_answered"})
-        await self.problem(await self.request("POST", ACCEPT, body=answer, token=self.alt), 404, "not_found")
+        await self.problem(await self.request("POST", ACCEPT, body=answer, token=self.alt), 403, "not_allowed")
         await self.problem(await self.request("POST", ACCEPT, body={**answer, "clientId": "bad"}), 400, "invalid_input")
         await self.problem(await self.request("POST", ACCEPT, body=answer, token=None), 401, "login_required")
         await self.problem(await self.request("POST", ACCEPT, body=answer, proof=None), 403, "not_allowed")
@@ -696,13 +805,13 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
                          WHERE id=%s""", (accepted["callId"],))
         expired = self.ring(who, until=-1)
         expired_ref = self.references.seal("call", who["friend_id"], expired, self.now)
-        expired_answer = {**answer, "targetRef": expired_ref}
+        expired_answer = await self.answer_body(expired_ref)
         self.assertEqual(await (await self.request("POST", ACCEPT, body=expired_answer)).json(), {"state": "ring_expired"})
         self.db.admin("UPDATE marong.app_rings SET status='missed',resolved_at=now() WHERE id=%s", (expired,))
         second = self.ring(who)
         winner = await store.reserve_notice_ring(p, str(uuid4()), "Fixture", "fixture", second, legacy=True)
         second_ref = self.references.seal("call", who["friend_id"], second, self.now)
-        self.assertEqual(await (await self.request("POST", ACCEPT, body={**answer, "targetRef": second_ref})).json(),
+        self.assertEqual(await (await self.request("POST", ACCEPT, body=await self.answer_body(second_ref))).json(),
                          {"state": "ring_answered"})
         self.assertEqual(self.db.admin("SELECT count(*) FROM call.calls WHERE caller_id=%s", (p.caller_id,)), [(2,)])
         self.db.admin("""UPDATE call.calls SET status='ended',ended_at=now(),end_reason='hangup',organize_status='pending'
@@ -710,8 +819,8 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         third = self.ring(who)
         third_ref = self.references.seal("call", who["friend_id"], third, self.now)
         submitted = await asyncio.gather(
-            self.request("POST", ACCEPT, body={**answer, "targetRef": third_ref}),
-            self.request("POST", ACCEPT, body={"clientId": str(uuid4()), "targetRef": third_ref}),
+            self.request("POST", ACCEPT, body=await self.answer_body(third_ref)),
+            self.request("POST", ACCEPT, body=await self.answer_body(third_ref)),
         )
         self.assertEqual(sorted([(await item.json())["state"] for item in submitted]), ["accepted", "ring_answered"])
         self.assertEqual(self.db.admin("SELECT count(*) FROM call.calls WHERE caller_id=%s", (p.caller_id,)), [(3,)])
@@ -720,7 +829,7 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         contested = self.ring(who)
         contested_ref = self.references.seal("call", who["friend_id"], contested, self.now)
         web_request, android = await asyncio.gather(
-            self.request("POST", ACCEPT, body={**answer, "targetRef": contested_ref}),
+            self.request("POST", ACCEPT, body=await self.answer_body(contested_ref)),
             store.reserve_notice_ring(p, str(uuid4()), "Fixture", "fixture", contested, legacy=True),
             return_exceptions=True,
         )
@@ -744,7 +853,7 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         principal = Principal(who['caller_id'], who['friend_id'], 'Fixture', unified=True)
         ring = self.ring(who)
         ref = self.references.seal('call', who['friend_id'], ring, self.now)
-        body = {'targetRef': ref, 'clientId': str(uuid4())}
+        body = await self.answer_body(ref)
         accepted = await self.request('POST', ACCEPT, body=body)
         self.assertEqual(accepted.status, 200)
         call = (await accepted.json())['callId']
@@ -773,6 +882,7 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         await self.problem(await self.request('POST', ACCEPT, body=body), 403, 'not_allowed')
         self.assertEqual(self.db.admin('SELECT status,call_id FROM marong.app_rings WHERE id=%s', (ring,)), [('ringing', None)])
         await self.register_fixture()
+        body = await self.answer_body(ref)
         self.db.admin("UPDATE marong.web_push_subscriptions SET subscription_expires_at='10001-01-01' WHERE installation_id=%s",
                       (installation_id(self.proof),))
         accepted = await self.request('POST', ACCEPT, body=body)
@@ -830,7 +940,7 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         await self.register_fixture()
         ring = self.ring(who)
         ref = self.references.seal('call', who['friend_id'], ring, self.now)
-        body = {'targetRef': ref, 'clientId': str(uuid4())}
+        body = await self.answer_body(ref)
         ready, proceed = asyncio.Event(), asyncio.Event()
         reserve = store.reserve_notice_ring
 
@@ -850,6 +960,7 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
             await self.problem(await request, 403, 'not_allowed')
         self.assertEqual(self.db.admin('SELECT status,call_id FROM marong.app_rings WHERE id=%s', (ring,)), [('ringing', None)])
         await self.register_fixture()
+        body = await self.answer_body(ref)
         choice = await self.select('revoke')
         ready.clear()
         proceed.clear()
@@ -946,18 +1057,22 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         from call_memory import NoticeRingState
 
         server, store, protocol, who = await self.call_fixture()
+        await self.register_fixture()
         endpoint = self.call_site.make_url("/live/web-notification")
         headers = {"Cookie": f"{COOKIE}={self.token}", "Origin": str(endpoint.origin())}
         ring = self.ring(who, until=-5)
         reference = self.references.seal("call", who["friend_id"], ring, self.now)
-        client = str(uuid4())
-        start = {"type": "start_ordinary", "clientId": client, "installationProof": self.proof, "targetRef": reference}
+        ident = installation_id(self.proof)
+        ordinary = str(protocol.document_client(self.sid, ident, reference, None))
+        start = {"type": "start_ordinary", "clientId": ordinary, "installationProof": self.proof, "targetRef": reference}
+        client = (await self.answer_body(reference))["clientId"]
         # A once-valid connection credential can outlive a reservation rollback.
         # Use a synthetic signed credential for an expired, unaccepted ring.
         expired = protocol.issue(self.sid, installation_id(self.proof), client_uuid(client), str(uuid4()), ring, self.now)
         notified = {"type": "start_notified", "clientId": client, "installationProof": self.proof,
                     "connectToken": expired}
         before = self.db.admin("SELECT status,call_id,answered_at FROM marong.app_rings WHERE id=%s", (ring,))
+        missing = self.references.seal("call", who["friend_id"], uuid4(), self.now)
         seen = set()
         cases = (
             ("invalid_input", '{"type":"ignored",' + json.dumps(start)[1:], nullcontext()),
@@ -969,8 +1084,8 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
             ("ring_expired", notified, nullcontext()),
             ("ring_answered", start, patch.object(store, "start_notice_ordinary",
                           side_effect=NoticeRingState("ring_answered"))),
-            ("ring_unavailable", {**start, "targetRef": self.references.seal(
-                "call", who["friend_id"], uuid4(), self.now)}, nullcontext()),
+            ("ring_unavailable", {**start, "targetRef": missing,
+                                  "clientId": str(protocol.document_client(self.sid, ident, missing, None))}, nullcontext()),
             ("call_busy", start, patch.object(server, "active_calls",
                                              {who["friend_id"]: server.CallSlot(str(uuid4()))})),
             ("calls_full", start, patch.object(server, "CALL_MAX", 0)),
@@ -1010,7 +1125,7 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         origin = str(self.call_site.make_url("/")).rstrip("/")
         ring = self.ring(who)
         reference = self.references.seal("call", who["friend_id"], ring, self.now)
-        client = str(uuid4())
+        client = (await self.answer_body(reference))["clientId"]
         result = await self.request("POST", ACCEPT, body={"targetRef": reference, "clientId": client})
         self.assertEqual(result.status, 200)
         accepted = await result.json()
@@ -1061,8 +1176,10 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
             expired_token = protocol.issue(
                 self.sid, installation_id(self.proof), client_uuid(client), accepted["callId"], ring,
                 self.now - timedelta(seconds=120))
+            ordinary_id = str(protocol.document_client(self.sid, installation_id(self.proof), reference, None))
             for body, failure in (({**valid, "extra": "x" * 2048}, "invalid_input"),
                                   ({**valid, "installationProof": self.other_proof}, "not_allowed"),
+                                  ({**valid, "clientId": ordinary_id}, "not_allowed"),
                                   ({**valid, "connectToken": expired_token}, "not_allowed")):
                 async with self.client.session.ws_connect(endpoint, protocols=[SUBPROTOCOL], headers=headers) as ws:
                     self.assertEqual(ws.protocol, SUBPROTOCOL)
@@ -1081,9 +1198,7 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         expired = self.ring(who, until=-5)
         reference = self.references.seal("call", who["friend_id"], expired, self.now)
         ident = installation_id(self.proof)
-        async with self.service.pool.connection() as conn:
-            consent, _ = await self.service.active_consent(conn, ident, self.sid, self.now)
-        ordinary_client = str(protocol.document_client(self.sid, ident, reference, consent))
+        ordinary_client = str(protocol.document_client(self.sid, ident, reference, None))
         ordinary = {"type": "start_ordinary", "clientId": ordinary_client, "installationProof": self.proof,
                     "targetRef": reference}
         with patch.object(server, "LiveSession", CallDouble):
@@ -1112,9 +1227,9 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
 
         endpoint = self.call_site.make_url("/live/web-notification")
         headers = {"Cookie": f"{COOKIE}={self.token}", "Origin": str(endpoint.origin())}
-        client = str(uuid4())
         ring = self.ring(who)
         reference = self.references.seal("call", who["friend_id"], ring, self.now)
+        client = (await self.answer_body(reference))["clientId"]
         accepted = await (await self.request("POST", ACCEPT, body={"targetRef": reference, "clientId": client})).json()
         frame = {"type": "start_notified", "clientId": client, "installationProof": self.proof,
                  "connectToken": accepted["connectToken"]}
@@ -1376,8 +1491,8 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
             async with self.client.get('/chat/', headers=cookie) as chat:
                 self.assertEqual(chat.headers['Referrer-Policy'], 'no-referrer')
                 self.assertTrue(chat.headers['Content-Security-Policy'].endswith("form-action 'none'"))
-        self.db.admin('UPDATE marong.app_rings SET answer_until=now()-interval \'2 seconds\' WHERE id=%s', (ring,))
-        await visit(200, microphone=True)
+        self.db.admin('UPDATE marong.app_rings SET answer_until=%s WHERE id=%s', (self.now, ring))
+        await visit(200, heading='약속 전화 시간이 지났어')
         self.assertEqual(self.db.admin('SELECT status,call_id FROM marong.app_rings WHERE id=%s', (ring,)), [('ringing', None)])
         self.assertEqual(self.db.admin('SELECT count(*) FROM call.calls WHERE caller_id=%s', (who['caller_id'],)), [(0,)])
         self.db.admin('UPDATE marong.app_rings SET answer_until=now()+interval \'30 seconds\' WHERE id=%s', (ring,))

@@ -62,7 +62,7 @@ async def visible_message(conn, store, friend, message_id, *, reply_only=False):
     """ + store._shown("m.room_key"), {"friend": friend, "message": message_id, "reply_only": reply_only})
 
 
-async def resolve_target(conn, store, references, session, reference, now):
+async def resolve_target(conn, store, references, session, reference, now, *, require_enabled_caller=False):
     friend = session["friend_id"]
     kind, ident = references.open(reference, friend, now)
     if kind == "message":
@@ -77,6 +77,8 @@ async def resolve_target(conn, store, references, session, reference, now):
     """, (ident, friend))
     if ring is None:
         raise SessionError("not_found")
+    if require_enabled_caller and not ring["enabled"]:
+        return {"state": "ring_unavailable"}
     if ring["status"] == "answered":
         return {"state": "ring_answered"}
     if ring["status"] in {"ringing", "missed"} and ring["answer_until"] <= now:

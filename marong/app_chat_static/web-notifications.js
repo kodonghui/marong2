@@ -85,7 +85,7 @@
     }
   }
 
-  function openCall(reference, focus) {
+  function openCall(reference, focus, ordinaryChoice) {
     const device = proof();
     if (!device || document.body.dataset.noticeCallEnabled !== 'true' || !referencePattern.test(reference)) return false;
     try {
@@ -96,7 +96,9 @@
       form.hidden = true;
       form.action = '/chat/notice-call';
       form.method = 'post';
-      for (const [name, value] of Object.entries({targetRef: reference, installationProof: device, navigation})) {
+      const fields = {targetRef: reference, installationProof: device, navigation};
+      if (ordinaryChoice) fields.ordinaryChoice = ordinaryChoice;
+      for (const [name, value] of Object.entries(fields)) {
         const input = document.createElement('input');
         input.type = 'hidden';
         input.name = name;
@@ -146,7 +148,8 @@
     try {
       const reply = await fetch(api + path, options);
       const data = await reply.json().catch(() => null);
-      return {status: reply.status, data, wait: Number(reply.headers.get('Retry-After')) || 0};
+      return {status: reply.status, data, wait: Number(reply.headers.get('Retry-After')) || 0,
+        ordinaryChoice: reply.headers.get('X-Marong-Ordinary-Choice')};
     } catch {
       return {status: 0};
     } finally {

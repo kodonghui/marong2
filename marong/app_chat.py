@@ -35,7 +35,8 @@ from .google_calendar import LINK_MARK, command as google_command
 from .topics import KEY as TOPIC_KEY, NAME as PICTURE_NAME, SET_NAME, phrase as topic_phrase, picture_set
 from .web_push_subscriptions import CHOICE_HEADER, INSTALLATION_HEADER, PATH as WEB_NOTICE_PATH, installation_id, lock_installation
 from .web_push_targets import resolve_target, visible_message
-from .web_notice_call_protocol import BRIDGE_HEADER, CALL_BRIDGE, INSTALLATION_CHECK_PATH, client_uuid, notice_client
+from .web_notice_call_protocol import (BRIDGE_HEADER, CALL_BRIDGE, INSTALLATION_CHECK_PATH, ORDINARY_CHOICE_HEADER,
+                                       client_uuid)
 
 log = logging.getLogger("marong.app")
 DEFAULT_PORT = 8796
@@ -324,13 +325,15 @@ class AppChat:
             raise SessionError("invalid_input")
         try:
             pairs = parse_qsl((await req.read()).decode("ascii"), strict_parsing=True, errors="strict",
-                              max_num_fields=3)
+                              max_num_fields=4)
         except ValueError:
             raise SessionError("invalid_input") from None
         values = dict(pairs)
-        if (len(pairs) != 3 or set(values) != {"targetRef", "installationProof", "navigation"}
+        required = {"targetRef", "installationProof", "navigation"}
+        if (len(pairs) != len(values) or set(values) not in (required, required | {"ordinaryChoice"})
                 or not re.fullmatch(r"[A-Za-z0-9_-]{48,768}", values["targetRef"])
-                or not re.fullmatch(r"[0-9a-f]{32}", values["navigation"])):
+                or not re.fullmatch(r"[0-9a-f]{32}", values["navigation"])
+                or ("ordinaryChoice" in values and not re.fullmatch(r"[A-Za-z0-9_-]{43}", values["ordinaryChoice"]))):
             raise SessionError("invalid_input")
         return values
 
@@ -338,7 +341,7 @@ class AppChat:
     def _notice_call_failure(state, status, *, retry=None):
         title, detail = NOTICE_CALL_FAILURES[state]
         action = '<a id="notice-login" href="/chat/login?expired=1">들어가기</a>' if state == "login" else ""
-        if state in {"unavailable", "offline", "limited"}:
+        if state in {"expired", "unavailable", "offline", "limited"}:
             action = '<button type="button" id="notice-retry">상태 다시 확인</button>'
         delay = str(retry or 0)
         body = f'''<!doctype html><html lang="ko"><meta charset="utf-8">
@@ -366,27 +369,38 @@ class AppChat:
             except SessionError:
                 raise SessionError("not_allowed") from None
             subscriptions = self.web_push_subscriptions
+            protocol = self.web_push_call
+            reference = form["targetRef"]
+            choice = form.get("ordinaryChoice")
             async with subscriptions.authenticated(req.cookies.get(COOKIE), ident, write=True) as (conn, session, _):
                 await lock_installation(conn, ident)
                 now = subscriptions.now()
                 if session["expires_at"] <= now:
                     raise SessionError("login_required")
                 sid = session["id"]
-                try:
-                    consent, _ = await subscriptions.active_consent(conn, ident, sid, now)
-                except SessionError as error:
-                    if error.code != "not_allowed":
-                        raise
+                if choice:
+                    if not hmac.compare_digest(choice, protocol.ordinary_choice(sid, ident, reference)):
+                        raise SessionError("not_allowed")
+                    consent = None
+                else:
                     try:
-                        result = await resolve_target(conn, self.store, self.web_push_references, session,
-                                                      form["targetRef"], now)
-                    except SessionError:
-                        raise error from None
-                    if result["state"] == "ring_expired":
-                        return self._notice_call_failure("expired", 403)
-                    raise
-                result = await resolve_target(conn, self.store, self.web_push_references, session, form["targetRef"], now)
-                call_client = self.web_push_call.document_client(sid, ident, form["targetRef"], consent)
+                        consent, _ = await subscriptions.active_consent(conn, ident, sid, now)
+                    except SessionError as error:
+                        if error.code != "not_allowed":
+                            raise
+                        try:
+                            result = await resolve_target(conn, self.store, self.web_push_references, session,
+                                                          reference, now)
+                        except SessionError:
+                            raise error from None
+                        if result["state"] == "ring_expired":
+                            return self._notice_call_failure("expired", 403)
+                        raise
+                result = await resolve_target(conn, self.store, self.web_push_references, session, reference, now,
+                                              require_enabled_caller=bool(choice))
+                if choice and result["state"] != "ring_expired":
+                    return self._notice_call_failure("unavailable", 403)
+                call_client = protocol.document_client(sid, ident, reference, consent)
         except SessionError as error:
             state, status = {
                 "login_required": ("login", 401), "not_allowed": ("denied", 403),
@@ -404,11 +418,14 @@ class AppChat:
             return self._notice_call_failure("answered", 200)
         if state == "ring_unavailable":
             return self._notice_call_failure("unavailable", 200)
+        if state == "ring_expired" and not choice:
+            return self._notice_call_failure("expired", 200)
         if state not in {"ring_ready", "ring_expired"}:
             return self._notice_call_failure("denied", 404)
         # Opaque document identifiers only. Do not echo the reference or installation proof.
         data = self.files["notice-call.html"][0].replace(b"@NAVIGATION@", form["navigation"].encode("ascii"))
         data = data.replace(b"@CALL_CLIENT@", str(call_client).encode("ascii"))
+        data = data.replace(b"@PURPOSE@", b"ordinary" if choice else b"answer")
         req["notice_call_document"] = True
         return web.Response(body=data, content_type="text/html", charset="utf-8")
 
@@ -462,24 +479,32 @@ class AppChat:
         body = await self._web_notice_body(req, 2048)
         if set(body) != {"targetRef"}:
             raise SessionError("invalid_input")
+        reference = body["targetRef"]
+        if not isinstance(reference, str) or not re.fullmatch(r"[A-Za-z0-9_-]{48,768}", reference):
+            raise SessionError("invalid_input")
         async with self.web_push_subscriptions.authenticated(token, ident) as (conn, session, now):
-            result = await resolve_target(conn, self.store, self.web_push_references, session, body["targetRef"], now)
+            protocol = self.web_push_call
+            sid = session["id"]
             document = req.headers.get("X-Marong-Notice-Document")
+            ordinary = False
             if document is not None:
-                if self.web_push_call is None:
+                if protocol is None:
                     raise SessionError("not_allowed")
                 client = client_uuid(document)
-                if not notice_client(client):
-                    raise SessionError("not_allowed")
-                await self._check_notice_consent(conn, ident, session["id"], now, client, body["targetRef"])
-        return self._json(200, result)
+                ordinary = protocol.matches_document(sid, ident, reference, None, client)
+            result = await resolve_target(conn, self.store, self.web_push_references, session, reference, now,
+                                          require_enabled_caller=ordinary)
+            if document is not None and not ordinary:
+                await self._check_notice_consent(conn, ident, sid, now, client, reference)
+            response = self._json(200, result)
+            if protocol is not None and document is None and result["state"] == "ring_expired":
+                response.headers[ORDINARY_CHOICE_HEADER] = protocol.ordinary_choice(sid, ident, reference)
+        return response
 
     async def _check_notice_consent(self, conn, ident, sid, now, client, reference):
         consent, expires = await self.web_push_subscriptions.active_consent(conn, ident, sid, now)
-        if notice_client(client):
-            expected = self.web_push_call.document_client(sid, ident, reference, consent, client=client)
-            if not hmac.compare_digest(client.bytes, expected.bytes):
-                raise SessionError("not_allowed")
+        if not self.web_push_call.matches_document(sid, ident, reference, consent, client):
+            raise SessionError("not_allowed")
         return expires
 
     async def notice_installation_check(self, req):
@@ -529,11 +554,14 @@ class AppChat:
         if set(body) != {"targetRef", "clientId"}:
             raise SessionError("invalid_input")
         client = client_uuid(body["clientId"])
+        reference = body["targetRef"]
+        if not isinstance(reference, str) or not re.fullmatch(r"[A-Za-z0-9_-]{48,768}", reference):
+            raise SessionError("invalid_input")
         async with self.web_push_subscriptions.authenticated(token, ident) as (conn, session, now):
-            kind, _ = self.web_push_references.open(body["targetRef"], session["friend_id"], now)
+            await self._check_notice_consent(conn, ident, session["id"], now, client, reference)
+            kind, _ = self.web_push_references.open(reference, session["friend_id"], now)
             if kind != "call":
                 raise SessionError("not_found")
-            await self._check_notice_consent(conn, ident, session["id"], now, client, body["targetRef"])
         headers = {BRIDGE_HEADER: self.web_push_call.bridge_secret, INSTALLATION_HEADER: req.headers[INSTALLATION_HEADER]}
         try:
             async with ClientSession(timeout=ClientTimeout(total=5)) as bridge:

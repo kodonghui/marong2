@@ -39,13 +39,14 @@
   delete page.dataset.navigation;
   const client = page.dataset.clientId;
   delete page.dataset.clientId;
+  const ordinary = page.dataset.purpose === 'ordinary';
   const installation = web?.proof();
   const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
   const token = /^[A-Za-z0-9_-]{48,768}$/;
   const screens = {
     ring_ready: ['약속 전화가 와 있어', '받기를 누르면 이 전화를 연결해 볼게. 화면을 열기만 해서는 수락하지 않아.', '받기'],
     accepting: ['전화 받는 중', '전화가 아직 유효한지 확인하고 있어.', '받는 중'],
-    ring_expired: ['약속 전화 시간이 지났어', '더 이상 이 약속 전화를 받을 수 없어. 원하면 일반 통화를 걸 수 있어.', '일반 통화'],
+    ordinary: ['일반 통화', '일반 통화를 선택했어. 통화 시작을 누르면 마이크를 준비할게.', '통화 시작'],
     ring_answered: ['이미 받은 전화야', '이 약속 전화는 이미 처리됐어. 글 대화로 돌아갈 수 있어.'],
     ring_unavailable: ['지금은 이 전화를 받을 수 없어', '현재 확인한 상태로는 이 약속 전화를 연결할 수 없어.', '상태 다시 확인'],
     result: ['전화 받기 결과를 확인해 줘', '수락이 끝났는지 아직 확인되지 않았어. 확인하면 이미 수락한 경우 같은 통화로 돌아갈 수 있어.', '결과 확인'],
@@ -122,14 +123,18 @@
   async function inspect() {
     const run = ++version;
     if (!current()) { show('denied'); return; }
-    const subscribed = await web.request('/subscription');
-    if (run !== version) return;
-    if (subscribed.status !== 200) { failed(subscribed, 'offline'); return; }
-    if (subscribed.data?.state !== 'active') { returnToLookup(); return; }
+    if (!ordinary) {
+      const subscribed = await web.request('/subscription');
+      if (run !== version) return;
+      if (subscribed.status !== 200) { failed(subscribed, 'offline'); return; }
+      if (subscribed.data?.state !== 'active') { returnToLookup(); return; }
+    }
     const result = await resolve();
     if (run !== version) return;
     if (result.status === 200 && ['ring_ready', 'ring_expired', 'ring_answered', 'ring_unavailable'].includes(result.data?.state)) {
-      show(result.data.state);
+      if (ordinary && result.data.state === 'ring_expired') show('ordinary');
+      else if (ordinary || result.data.state === 'ring_expired') returnToLookup();
+      else show(result.data.state);
     } else lookupRejected(result.status === 200 ? {status: 404} : result, 'offline');
   }
 
@@ -154,15 +159,18 @@
     if (run !== version) return false;
     if (verified.status !== 200) { lookupRejected(verified, 'offline'); return false; }
     if (mode === 'ordinary') {
+      if (!ordinary || verified.data?.state !== 'ring_expired') { returnToLookup(); return false; }
       frame = {type: 'start_ordinary', clientId, installationProof: installation, targetRef: reference};
     } else {
+      if (ordinary || verified.data?.state === 'ring_expired') { returnToLookup(); return false; }
       pending = mode;
       const result = await accept(clientId);
       if (run !== version) return false;
       if (!accepted(result, clientId)) {
         if (result.status === 200 && ['ring_answered', 'ring_expired', 'ring_unavailable'].includes(result.data?.state)) {
           pending = null;
-          show(result.data.state);
+          if (result.data.state === 'ring_expired') returnToLookup();
+          else show(result.data.state);
         } else lookupRejected(result, 'result');
         return false;
       }
@@ -217,7 +225,7 @@
   action.onclick = () => {
     if (action.getAttribute('aria-disabled') === 'true') return;
     if (state === 'ring_ready') start('accept');
-    else if (state === 'ring_expired') start('ordinary');
+    else if (state === 'ordinary') start('ordinary');
     else if (state === 'result' && pending) start('result');
     else if (state === 'mic' || state === 'micResume') start(micMode);
     else if (state === 'connecting') { version++; void engine?.end(); show('checking'); }
@@ -263,8 +271,7 @@
         return true;
       }
       if (type === 'ring_expired') {
-        frame = pending = expected = null;
-        void inspect();
+        returnToLookup();
         return true;
       }
       const mapped = {

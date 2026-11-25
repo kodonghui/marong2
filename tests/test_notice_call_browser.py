@@ -23,6 +23,8 @@ TOKEN = 'C' * 64
 CALL_ID = '11111111-2222-4333-8444-555555555555'
 DOCUMENT_CLIENT = '11111111-2222-8333-8444-555555555555'
 NEXT_CLIENT = '22222222-2222-8333-8444-555555555555'
+ORDINARY_CLIENT = '33333333-2222-8333-8444-555555555555'
+ORDINARY_CHOICE = 'O' * 43
 
 MEDIA = """
     Object.defineProperty(navigator, 'standalone', {value: true, configurable: true});
@@ -155,8 +157,10 @@ class CallFixture:
             self.post_login = False
             return AppChat._notice_call_failure('login', 401)
         navigation = form['navigation'] if not self.break_nonce else 'f' * 32
+        ordinary = form.get('ordinaryChoice') == ORDINARY_CHOICE and self.ring == 'ring_expired'
         body = (CHAT / 'notice-call.html').read_text(encoding='utf-8').replace('@NAVIGATION@', navigation).replace(
-            '@CALL_CLIENT@', self.document_client)
+            '@CALL_CLIENT@', ORDINARY_CLIENT if ordinary else self.document_client).replace(
+            '@PURPOSE@', 'ordinary' if ordinary else 'answer')
         headers = HEADERS | {'Permissions-Policy': 'camera=(), microphone=(self), geolocation=()'}
         return web.Response(text=body, content_type='text/html', headers=headers)
 
@@ -173,9 +177,10 @@ class CallFixture:
         if self.resolve_login:
             return web.json_response({'code': 'login_required'}, status=401)
         document = req.headers.get('X-Marong-Notice-Document')
-        if document and (document != self.document_client or self.subscription != 'active'):
+        if document and document != ORDINARY_CLIENT and (document != self.document_client or self.subscription != 'active'):
             return web.json_response({'code': 'not_allowed'}, status=403)
-        return web.json_response({'state': self.ring})
+        headers = {'X-Marong-Ordinary-Choice': ORDINARY_CHOICE} if not document and self.ring == 'ring_expired' else {}
+        return web.json_response({'state': self.ring}, headers=headers)
 
     async def accept(self, req):
         body = await req.json()
@@ -273,13 +278,19 @@ class NoticeCallBrowserTests(unittest.TestCase):
                 fixture.ring = 'ring_expired'
                 page.evaluate('() => { fixture.lag = false; fixture.releaseMic(); }')
                 expect(self.heading(page, '약속 전화 시간이 지났어')).to_be_focused()
-                expect(page.locator('html')).to_have_attribute('data-test-stopped', '1')
-                self.assertEqual(len(fixture.accepts), 1)
+                self.assertEqual(page.evaluate("sessionStorage.getItem('fixture.stopped')"), '1')
+                self.assertEqual(fixture.accepts, [])
                 self.assertEqual(fixture.frames, [])
                 page.get_by_role('button', name='일반 통화').click()
+                expect(self.heading(page, '일반 통화')).to_be_focused()
+                self.assertEqual(page.evaluate('fixture.prompts'), 0)
+                self.assertEqual(len(page.context.pages), 1)
+                self.assertEqual(fixture.posts[-1][2]['ordinaryChoice'], ORDINARY_CHOICE)
+                page.get_by_role('button', name='통화 시작', exact=True).click()
                 self.heading(page, '통화 중이야')
-                self.assertEqual(fixture.frames[0]['type'], 'start_ordinary')
-                self.assertEqual(len(fixture.accepts), 1)
+                self.assertEqual(fixture.frames[0], {'type': 'start_ordinary', 'clientId': ORDINARY_CLIENT,
+                                                    'installationProof': PROOF, 'targetRef': REF})
+                self.assertEqual(fixture.accepts, [])
                 page.get_by_role('button', name='끊기').click()
                 self.heading(page, '통화가 끝났어')
                 page.get_by_role('link', name='글 대화로').click()
@@ -360,6 +371,22 @@ class NoticeCallBrowserTests(unittest.TestCase):
                 self.assertEqual(fixture.accepts, [])
                 self.assertEqual(fixture.frames, [])
                 self.assertEqual(page.evaluate('fixture.prompts'), 0)
+
+                page.get_by_role('button', name='일반 통화').click()
+                expect(self.heading(page, '일반 통화')).to_be_focused()
+                self.assertEqual(page.url, fixture.origin + '/chat/notice-call')
+                self.assertEqual(page.evaluate('fixture.prompts'), 0)
+                self.assertEqual(fixture.frames, [])
+                page.evaluate("() => { fixture.permission = 'deny'; }")
+                page.get_by_role('button', name='통화 시작', exact=True).click()
+                self.heading(page, '마이크를 허용해야 통화할 수 있어')
+                self.assertEqual(fixture.frames, [])
+                page.evaluate("() => { fixture.permission = 'allow'; }")
+                page.get_by_role('button', name='다시 해 볼게').click()
+                self.heading(page, '통화 중이야')
+                self.assertEqual(fixture.frames[0]['type'], 'start_ordinary')
+                self.assertEqual(fixture.accepts, [])
+                self.assertEqual(fixture.subscription, 'not_registered')
 
     def test_review_waiting_microphone_is_discarded_when_session_or_consent_changes(self):
         for engine in (self.playwright.chromium, self.playwright.webkit):

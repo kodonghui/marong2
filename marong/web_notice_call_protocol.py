@@ -17,6 +17,7 @@ from .web_push_targets import NoticeReferences
 CALL_BRIDGE = "http://127.0.0.1:8792/internal/web-notification/accept"
 INSTALLATION_CHECK_PATH = "/internal/web-notification/installation"
 BRIDGE_HEADER = "X-Marong-Call-Bridge"
+ORDINARY_CHOICE_HEADER = "X-Marong-Ordinary-Choice"
 SUBPROTOCOL = "marong-notified-v1"
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
@@ -44,7 +45,9 @@ class NoticeCallProtocol:
         self.bridge_secret = encode(hmac.digest(challenge_key, b"marong:notice-call:bridge:v1", "sha256"))
         self._client_key = hmac.digest(challenge_key, b"marong:notice-call:client:v1", "sha256")
         self._document_key = hmac.digest(challenge_key, b"marong:notice-call:document:v1", "sha256")
-        self._secret = AESGCM(hmac.digest(challenge_key, b"marong:notice-call:token:v1", "sha256"))
+        self._ordinary_key = hmac.digest(challenge_key, b"marong:notice-call:ordinary:v1", "sha256")
+        # Only the locked API-315 check of a server-issued answer document may mint v2 tokens.
+        self._secret = AESGCM(hmac.digest(challenge_key, b"marong:notice-call:token:v2", "sha256"))
         self.references = references
 
     @classmethod
@@ -66,9 +69,23 @@ class NoticeCallProtocol:
     def document_client(self, sid, ident, reference, consent, *, client=None):
         # Keep a random 56-bit nonce and a 66-bit MAC in the existing UUID field.
         nonce = secrets.token_bytes(7) if client is None else client.bytes[:6] + client.bytes[7:8]
-        domain = sid.to_bytes(8, "big") + ident.bytes + nonce + consent.encode("ascii") + reference.encode("ascii")
-        tag = hmac.digest(self._document_key, domain, "sha256")
+        prefix = sid.to_bytes(8, "big") + ident.bytes + nonce
+        encoded_ref = reference.encode("ascii")
+        if consent is None:
+            tag = hmac.digest(self._ordinary_key, b"document\0" + prefix + encoded_ref, "sha256")
+        else:
+            tag = hmac.digest(self._document_key, prefix + consent.encode("ascii") + encoded_ref, "sha256")
         return _notice_uuid(nonce[:6] + tag[:1] + nonce[6:] + tag[1:9])
+
+    def matches_document(self, sid, ident, reference, consent, client):
+        if not notice_client(client):
+            return False
+        expected = self.document_client(sid, ident, reference, consent, client=client)
+        return hmac.compare_digest(client.bytes, expected.bytes)
+
+    def ordinary_choice(self, sid, ident, reference):
+        domain = b"choice\0" + sid.to_bytes(8, "big") + ident.bytes + reference.encode("ascii")
+        return encode(hmac.digest(self._ordinary_key, domain, "sha256"))
 
     @staticmethod
     def _aad(sid, ident, client):
@@ -83,6 +100,8 @@ class NoticeCallProtocol:
     def verify(self, sid, ident, client, token, now):
         if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{48,768}", token):
             raise SessionError("invalid_input")
+        if not notice_client(client):
+            raise SessionError("not_allowed")
         try:
             raw = decode(token)
             plain = self._secret.decrypt(raw[:12], raw[12:], self._aad(sid, ident, client))
