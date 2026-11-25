@@ -63,7 +63,7 @@ MEDIA = """
 
 
 @dataclass(frozen=True)
-class PendingReconnect:
+class PendingReady:
     first_frame: Future
     release_ready: asyncio.Future
 
@@ -83,7 +83,7 @@ class CallFixture:
         self.ended = False
         self.accepts = []
         self.connections = []
-        self.reconnects = {}
+        self.held_ready = {}
         self.posts = []
         self.resolved = 0
         self.frames = []
@@ -97,6 +97,17 @@ class CallFixture:
         self.loop.call_soon_threadsafe(self.stop.set)
         self.thread.join(timeout=12)
 
+    def _hold_ready(self, number):
+        pending = PendingReady(Future(), self.loop.create_future())
+        self.held_ready[number] = pending
+        return pending
+
+    def hold_next_ready(self):
+        async def hold():
+            return self._hold_ready(len(self.connections) + 1)
+
+        return asyncio.run_coroutine_threadsafe(hold(), self.loop).result(timeout=5)
+
     def drop_socket(self, number):
         async def disconnect():
             if len(self.connections) != number:
@@ -104,8 +115,7 @@ class CallFixture:
             ws, transport = self.connections[number - 1]
             if transport is None or ws.closed or transport.is_closing():
                 raise AssertionError(f'Connection {number} already closed')
-            pending = PendingReconnect(Future(), self.loop.create_future())
-            self.reconnects[number + 1] = pending
+            pending = self._hold_ready(number + 1)
             # Simulate network loss without waiting for a peer close handshake.
             transport.abort()
             return pending
@@ -141,7 +151,7 @@ class CallFixture:
         await site.start()
         self.origin_ready.set_result('http://127.0.0.1:' + str(runner.addresses[0][1]))
         await self.stop.wait()
-        for pending in self.reconnects.values():
+        for pending in self.held_ready.values():
             pending.release_ready.cancel()
         await asyncio.gather(*(ws.close() for ws, _ in self.connections))
         await runner.cleanup()
@@ -222,7 +232,7 @@ class CallFixture:
         ws = web.WebSocketResponse(protocols=(SUBPROTOCOL,))
         await ws.prepare(req)
         self.connections.append((ws, req.transport))
-        pending = self.reconnects.get(len(self.connections))
+        pending = self.held_ready.get(len(self.connections))
         frame = await ws.receive_json(timeout=4)
         self.frames.append(frame)
         if ws.ws_protocol != SUBPROTOCOL or req.query_string:
@@ -438,13 +448,41 @@ class NoticeCallBrowserTests(unittest.TestCase):
                 self.heading(page, '마이크를 허용해야 통화할 수 있어')
                 self.assertEqual(len(fixture.frames), started)
                 page.evaluate("fixture.permission = 'allow'")
+                pending = fixture.hold_next_ready()
                 page.get_by_role('button', name='다시 해 볼게').click()
-                self.heading(page, '통화 중이야')
+                start = {'type': 'start_ordinary', 'clientId': ORDINARY_CLIENT, 'installationProof': PROOF,
+                         'targetRef': REF, 'redialChoice': REDIAL_CHOICE}
+                self.assertEqual(pending.first_frame.result(timeout=4), start)
+                self.heading(page, '통화 연결을 준비하고 있어')
+                expect(page.get_by_role('heading', name='통화 중이야')).to_have_count(0)
+                expect(page.locator('#status')).to_be_hidden()
+                fixture.release_ready(pending)
+
+                expect(self.heading(page, '통화 중이야')).to_be_focused()
+                detail = page.locator('#notice-detail')
+                expect(detail).to_have_text('')
+                expect(detail).to_be_hidden()
+                expect(page.locator('#status')).to_be_visible()
+                expect(page.get_by_role('button', name='마이크 끄기', exact=True)).to_be_visible()
+                self.assertEqual(page.evaluate('MarongNoticeCall.handshake().expected'), REDIAL_CALL)
                 self.assertEqual([frame for frame in fixture.frames if frame['type'] == 'start_ordinary'],
-                                 [{'type': 'start_ordinary', 'clientId': ORDINARY_CLIENT, 'installationProof': PROOF,
-                                   'targetRef': REF, 'redialChoice': REDIAL_CHOICE}])
+                                 [start])
                 self.assertEqual(len(fixture.accepts), 2)
-                page.get_by_role('button', name='끊기').click()
+                stop = page.get_by_role('button', name='끊기', exact=True)
+                stop.focus()
+                pending = fixture.drop_socket(2)
+                self.assertEqual(pending.first_frame.result(timeout=4), start)
+                self.heading(page, '같은 통화에 다시 연결 중이야')
+                expect(stop).to_be_focused()
+                fixture.release_ready(pending)
+
+                self.heading(page, '통화 중이야')
+                expect(detail).to_have_text('기존 통화에 연결됐어.')
+                expect(detail).to_be_visible()
+                expect(stop).to_be_focused()
+                self.assertEqual(page.evaluate('MarongNoticeCall.handshake().expected'), REDIAL_CALL)
+                self.assertEqual(len(fixture.accepts), 2)
+                stop.click()
                 self.heading(page, '통화가 끝났어')
                 page.evaluate('key => localStorage.removeItem(key)', key)
                 page.goto(fixture.origin + '/chat/#notice=' + REF)

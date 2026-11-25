@@ -77,8 +77,10 @@
     clearTimeout(retryTimer);
     state = next;
     const [heading, copy, label] = screens[next];
+    const firstRedialConnection = next === 'talking' && redial && !connected;
     title.textContent = heading;
-    detail.textContent = copy;
+    detail.textContent = firstRedialConnection ? '' : copy;
+    detail.hidden = firstRedialConnection;
     action.textContent = label || '';
     action.hidden = !label;
     action.disabled = !engine && (next === 'ring_ready' || next === 'ordinary');
