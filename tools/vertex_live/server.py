@@ -126,6 +126,7 @@ class CallSlot:
 
 
 active_calls: dict[int | str, CallSlot] = {}
+NOTICE_DEADLINE_TASK = web.AppKey('notice_deadline_task', asyncio.Task)
 
 
 def call_owner(authn, person):
@@ -491,6 +492,7 @@ async def notice_accept(req):
             raise SessionError('not_found')
         sid = authn['session']
         cid = NOTICE_CALL.bound_client(person.friend_id, sid, ident, client)
+        await memory_store.expire_notice_calls(person.caller_id)
         target = await memory_store.one("""
             SELECT r.status,r.answer_until,c.enabled,prior.client_id AS prior_client,
                    prior.status AS prior_status,prior.deleted_at AS prior_deleted
@@ -648,6 +650,7 @@ async def live(req, *, notice_auth=None):
         return notice_failure('invalid_input')
     ws_opened=None
     close_reason='socket_closed'
+    notice_connection = None
     try:
         # API-107: the ring a page opened from Marong's call carries (/?ring=). Anything else is no ring.
         try:ring=str(uuid.UUID(req.query.get('ring','')))
@@ -659,6 +662,7 @@ async def live(req, *, notice_auth=None):
         rtc_client_id = client_id
         if notice_auth:
             client_id, rtc_client_id, notice_call, notice_ring, notice_validation = await notice_start(ws, notice_auth)
+            await memory_store.expire_notice_calls(person.caller_id)
         else:
             print(f'call_ws_open client={client_id[:8]}',flush=True)
             if (person and owner not in active_calls and hasattr(memory_store, 'notice_call_reserved')
@@ -727,6 +731,7 @@ async def live(req, *, notice_auth=None):
             notified_start = await memory_store.attach_notice_call(
                 person, client_id, notice_call, notice_ring, notice_auth['session'])
             resumed_voice = notified_start[4]
+            notice_connection = notified_start[5]
         voice=resumed_voice or chosen_voice(authn.get('voice'))
         if notice_auth and notice_call is None:
             notified_start = await memory_store.start_notice_ordinary(
@@ -743,6 +748,7 @@ async def live(req, *, notice_auth=None):
         configure=partial(setup,voice=voice,bot_name=bot_name,character=character)
         session=LiveSession(ws,authn['owner'],memory_store,person,configure,google_headers,resume,{},LOCATION,MODEL,voice,client_id,search=SEARCH,ring=ring)
         session.notified_start=notified_start
+        session.notice_connection=notice_connection
         session.skip_legacy_ring=bool(notice_auth)
         session.atomic_legacy_ring=bool(NOTICE_CALL and not notice_auth and ring and person
                                         and 'MarongApp/' in req.headers.get('User-Agent', ''))
@@ -769,6 +775,11 @@ async def live(req, *, notice_auth=None):
         if slot and slot.session and slot.session.rtc:await slot.session.rtc.close()
     except (NoticeRingState, SessionError) as error:
         close_reason=getattr(error, 'state', getattr(error, 'code', 'invalid_input'))
+        if notice_auth and close_reason == 'ring_answered':
+            try:
+                await memory_store.expire_notice_calls(person.caller_id)
+            except Exception as error:
+                print('notice_deadline_error', type(error).__name__, flush=True)
         await ws.send_json({'type':close_reason})
     except (psycopg.OperationalError, TimeoutError):
         if notice_auth:await ws.send_json({'type':'db_unavailable'})
@@ -781,6 +792,13 @@ async def live(req, *, notice_auth=None):
             print(f'call_ws_error client={client_id[:8]} error={type(error).__name__}',flush=True)
     finally:
         try:
+            if notice_connection is not None:
+                current = slot.session
+                try:
+                    await memory_store.finish_notice_connection(person, notice_connection,
+                        explicit=bool(current and current.explicit), reason=getattr(current, 'close_reason', None))
+                except Exception as error:
+                    print('notice_finish_error', type(error).__name__, flush=True)
             if slot is not None and active_calls.get(owner) is slot:
                 if resume and slot.session and not slot.session.explicit:
                     resume.update(voice=voice,bot_name=bot_name,character=character)
@@ -810,15 +828,29 @@ async def live(req, *, notice_auth=None):
             await ws.close()
     return ws
 
+async def notice_deadline_loop(store):
+    while True:
+        await asyncio.sleep(5)
+        try:
+            await store.expire_notice_calls()
+        except Exception as error:
+            print('notice_deadline_error', type(error).__name__, flush=True)
+
+
 async def startup(app):
     global memory_store
     dsn=os.environ.get('MARONG_CALL_DSN')
     if dsn:
-        memory_store=MemoryStore(dsn)
+        memory_store=MemoryStore(dsn, notice_deadlines=NOTICE_CALL is not None)
         await memory_store.open()
         await memory_store.recover_entrypoint('web')
+        if NOTICE_CALL is not None:
+            app[NOTICE_DEADLINE_TASK] = asyncio.create_task(notice_deadline_loop(memory_store))
 
 async def cleanup(app):
+    if task := app.get(NOTICE_DEADLINE_TASK):
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
     await asyncio.gather(*(b.close() for b in list(rtc_transport.bridges.values())),return_exceptions=True)
     if memory_store:await memory_store.close()
 

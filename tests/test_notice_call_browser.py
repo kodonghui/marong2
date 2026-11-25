@@ -73,6 +73,7 @@ class CallFixture:
         self.subscription = 'active'
         self.document_client = DOCUMENT_CLIENT
         self.expire_on_login = False
+        self.expire_on_reconnect = False
         self.right_call = True
         self.accepts = []
         self.connections = []
@@ -112,6 +113,7 @@ class CallFixture:
         self.loop = asyncio.get_running_loop()
         self.stop = asyncio.Event()
         app = web.Application()
+        app.router.add_get('/', lambda _: web.Response(text='Fixture ordinary call'))
         app.router.add_get('/chat/', self.chat)
         app.router.add_post('/chat/notice-call', self.open_call)
         app.router.add_post('/chat/api/web-notifications/target/resolve', self.resolve)
@@ -215,6 +217,9 @@ class CallFixture:
         if pending:
             pending.first_frame.set_result(frame)
             matching = await pending.release_ready
+            if self.expire_on_reconnect:
+                await ws.send_json({'type': 'ring_answered'})
+                return ws
         await ws.send_json({'type': 'ready', 'ring': frame['type'] == 'start_notified', 'memoryConnected': True,
                             'callId': CALL_ID if matching else '22222222-2222-4333-8444-555555555555'})
         async for message in ws:
@@ -353,6 +358,27 @@ class NoticeCallBrowserTests(unittest.TestCase):
                 self.assertEqual(sum(frame['type'] == 'stop' for frame in fixture.frames), 1)
                 self.assertEqual([frame for frame in fixture.frames if frame['type'] == 'start_notified'], [start] * 5)
                 self.assertEqual(len(fixture.accepts), 2)
+
+    def test_expired_recovery_offers_explicit_ordinary_redial(self):
+        for engine in (self.playwright.chromium, self.playwright.webkit):
+            with self.subTest(engine=engine.name):
+                fixture = CallFixture()
+                self.addCleanup(fixture.close)
+                page = self.page(engine, fixture)
+                page.get_by_role('button', name='받기', exact=True).click()
+                self.heading(page, '통화 중이야')
+                first = fixture.frames[0]
+                fixture.expire_on_reconnect = True
+                pending = fixture.drop_socket(1)
+                self.assertEqual(pending.first_frame.result(timeout=4), first)
+                fixture.release_ready(pending)
+                expect(self.heading(page, '통화가 끝났어')).to_be_focused()
+                self.assertEqual(page.url, fixture.origin + '/chat/notice-call')
+                self.assertEqual(len(fixture.accepts), 1)
+                self.assertEqual([frame for frame in fixture.frames if frame['type'] == 'start_notified'], [first, first])
+                page.get_by_role('button', name='다시 걸기', exact=True).click()
+                expect(page).to_have_url(fixture.origin + '/')
+                self.assertEqual(len(fixture.accepts), 1)
 
     def test_review_relogin_shows_confirmed_expiry_without_microphone(self):
         for engine in (self.playwright.chromium, self.playwright.webkit):

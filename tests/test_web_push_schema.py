@@ -15,6 +15,7 @@ TABLE = "marong.web_push_subscriptions"
 MIGRATIONS = ROOT / "marong" / "migrations"
 MIGRATION = MIGRATIONS / "024_web_push_subscriptions.sql"
 APPROVED = ROOT / "docs" / "05-erd" / "024_web_push_subscriptions.draft.sql"
+CALL_DEADLINES = ROOT / "marong" / "call" / "migrations" / "012_notice_call_deadlines.sql"
 
 
 def app_database():
@@ -131,6 +132,48 @@ class WebPushSchemaTests(unittest.TestCase):
         self.assertEqual(self.db.admin(f"SELECT * FROM {TABLE} ORDER BY session_id"), before_rows)
         self.db.admin("DELETE FROM marong.app_sessions WHERE id=%s", (first,))
         self.assertEqual(self.db.admin(f"SELECT session_id FROM {TABLE}"), [(second,)])
+
+
+class NoticeCallSchemaTests(unittest.TestCase):
+    def test_deadline_migration_on_empty_and_existing_calls(self):
+        fields = ('notice_first_connected_at', 'notice_connection_deadline_at')
+        approved = ROOT / 'docs' / '05-erd' / '012_notice_call_deadlines.draft.sql'
+        self.assertEqual(CALL_DEADLINES.read_bytes(), approved.read_bytes())
+        for seeded in (False, True):
+            with self.subTest(seeded=seeded):
+                db = app_database()
+                self.addCleanup(db.close)
+                if seeded:
+                    db.admin("""
+                        WITH friend AS (INSERT INTO marong.friends(name) VALUES ('Fixture') RETURNING id),
+                        caller AS (INSERT INTO call.callers(friend_id) SELECT id FROM friend RETURNING id)
+                        INSERT INTO call.calls(caller_id,status,client_id,prompt_version,voice,ended_at,end_reason,
+                                               organize_status)
+                        SELECT id,'resting',%s,'fixture','Fixture',NULL,NULL,'none' FROM caller
+                        UNION ALL
+                        SELECT id,'ended',%s,'fixture','Fixture',now(),'hangup','pending' FROM caller
+                    """, (uuid4(), uuid4()))
+                row_sql = "SELECT to_jsonb(c)-%s::text[] FROM call.calls c ORDER BY id"
+                column_sql = """
+                    SELECT attname,format_type(atttypid,atttypmod),attnotnull,atthasdef,attacl
+                    FROM pg_attribute WHERE attrelid='call.calls'::regclass AND attnum>0 AND NOT attisdropped
+                    ORDER BY attnum
+                """
+                acl_sql = "SELECT relowner,relacl FROM pg_class WHERE oid='call.calls'::regclass"
+                before = (db.admin(row_sql, (list(fields),)), db.admin(column_sql), db.admin(acl_sql))
+                self.assertEqual(len(before[0]), 2 if seeded else 0)
+                for _ in range(2):
+                    db.apply_sql(CALL_DEADLINES)
+                    rows, columns, acl = db.admin(row_sql, (list(fields),)), db.admin(column_sql), db.admin(acl_sql)
+                    self.assertEqual((rows, columns[:-2], acl), before)
+                    self.assertEqual(columns[-2:], [(field, 'timestamp with time zone', False, False, None)
+                                                    for field in fields])
+                    self.assertEqual(db.admin('SELECT notice_first_connected_at, notice_connection_deadline_at '
+                                              'FROM call.calls'), [(None, None)] * len(rows))
+                for field in fields:
+                    for role, allowed in (('marong_call', True), ('marong', False)):
+                        self.assertEqual(db.admin("SELECT has_column_privilege(%s,'call.calls',%s,'UPDATE')",
+                                                  (role, field)), [(allowed,)])
 
 
 if __name__ == "__main__":

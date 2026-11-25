@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from aiohttp import ClientSession,ClientTimeout,WSMsgType
 from marong import continuity
 from marong.continuity import BUDGET_GOODBYE, RING_ANSWERED_TEXT
+from call_memory import NoticeRingState
 from memory_tools import CALL_GREETING_TEXT,TranscriptRecorder,execute_tool
 from hangup import Consent
 from call_search import queries as search_queries
@@ -94,6 +95,8 @@ class LiveSession:
         # ring_topic: the picture card of a hello call, sent once with the first 'ready' (SPEC-268, SPEC-269).
         self.ring_id=ring;self.ring_info=None;self.ring_greet=False;self.ring_topic=None
         self.notified_start=None
+        self.notice_connection=None
+        self.notice_connection_confirmed=False
         self.atomic_legacy_ring=False
         self.skip_legacy_ring=False
         self.call_safety=None
@@ -297,7 +300,7 @@ class LiveSession:
                     if not isinstance(item,dict):continue
                     if item.get('type')=='stop':
                         self.d.setdefault('browserEnd','client_stop')
-                        self.explicit=True
+                        self.explicit=self.notice_connection is None or self.notice_connection_confirmed
                         return
                     if self.entry_transport=='discord':continue
                     if item.get('type')=='timing':
@@ -366,7 +369,6 @@ class LiveSession:
         if self.store and self.p:
             initial = self.notified_start
             if initial is None and self.atomic_legacy_ring:
-                from call_memory import NoticeRingState
                 try:
                     initial = await self.store.reserve_notice_ring(
                         self.p, self.client_id, self.voice, BUILD, self.ring_id, legacy=True)
@@ -420,8 +422,9 @@ class LiveSession:
                 if self.timing_segment or self.playback_reports:
                     try:await asyncio.wait_for(self.flush_connection_reports(),1)
                     except Exception:print('call_connect_report_write_error',flush=True)
-                try:await asyncio.wait_for(self.store.finish(self.p,self.call_id,self.explicit,client_id=self.client_id,reason=self.close_reason),4)
-                except Exception:self.d['memoryCloseFailed']=True
+                if self.notice_connection is None:
+                    try:await asyncio.wait_for(self.store.finish(self.p,self.call_id,self.explicit,client_id=self.client_id,reason=self.close_reason),4)
+                    except Exception:self.d['memoryCloseFailed']=True
             if self.explicit:self.resume.clear()
             if self.rtc:
                 self.rtc.session=None;self.rtc.idle_at=time.monotonic()
@@ -574,6 +577,11 @@ class LiveSession:
         else:self.quiet_mic=None
 
     async def ready_message(self):
+        if self.notice_connection is not None and not self.notice_connection_confirmed:
+            if self.stop.is_set() or self.ws.closed:
+                raise ConnectionError('notice_disconnected')
+            await self.store.confirm_notice_connection(self.p, self.notice_connection)
+            self.notice_connection_confirmed=True
         self.ready=True
         ready={'type':'ready','resumed':bool(self.handle) or self.logical_resumed,'callId':self.call_id,
             'build':BUILD,'audioFormat':2,'epoch':self.epoch,'audioTransport':self.entry_transport or ('webrtc' if self.rtc else 'pcm'),
@@ -698,8 +706,10 @@ class LiveSession:
                     self.configure_mic(tuning)
                     await self.ready_message();delay=1
                     await self.run_provider(upstream,ledger,usage_mode,tuning,lead_in)
-            except asyncio.CancelledError:raise
+            except (asyncio.CancelledError, NoticeRingState):raise
             except Exception as error:
+                if self.notice_connection is not None and not self.notice_connection_confirmed:
+                    raise
                 print(f'connection_retry client={self.client_id[:8]} error={type(error).__name__}',flush=True)
             if not self.prepared:self.ready=False
             if self.close_reason=='budget_hard_stop':

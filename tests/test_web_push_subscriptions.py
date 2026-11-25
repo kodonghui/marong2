@@ -18,7 +18,7 @@ import http_ece
 import jwt
 from psycopg import OperationalError
 
-from test_web_push_schema import MIGRATION, ROOT, app_database, session
+from test_web_push_schema import CALL_DEADLINES, MIGRATION, ROOT, app_database, session
 from marong.app_chat import AppChat
 from marong.app_push import AppPush
 from marong.app_session import AppSessions, COOKIE, token_hash
@@ -74,7 +74,7 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
     def setUpClass(cls):
         cls.db = app_database()
         cls.addClassCleanup(cls.db.close)
-        cls.db.apply_sql(MIGRATION)
+        cls.db.apply_sql(CALL_DEADLINES, MIGRATION)
 
     async def asyncSetUp(self):
         self.now = datetime.now(timezone.utc).replace(microsecond=0)
@@ -594,7 +594,7 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         from call_memory import MemoryStore
 
         call_db = self.db.admin_url.replace("postgres:@", "marong_call@", 1)
-        store = MemoryStore(call_db)
+        store = MemoryStore(call_db, notice_deadlines=True)
         await store.open()
         self.addAsyncCleanup(store.close)
         protocol = NoticeCallProtocol(secrets.token_bytes(32), self.references)
@@ -652,6 +652,275 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
             consent, _ = await self.service.active_consent(conn, ident, self.sid, self.now)
         client = self.chat.web_push_call.document_client(self.sid, ident, reference, consent)
         return {'targetRef': reference, 'clientId': str(client)}
+
+    def notice_call_state(self, call_id):
+        (row,) = self.db.admin("""
+            SELECT status,notice_first_connected_at,notice_connection_deadline_at,ended_at,end_reason
+            FROM call.calls WHERE id=%s
+        """, (call_id,))
+        return row
+
+    async def notice_reservation(self, who, protocol):
+        ring = self.ring(who, until=3600)
+        reference = self.references.seal('call', who['friend_id'], ring, self.now)
+        request = await self.answer_body(reference)
+        reply = await self.request('POST', ACCEPT, body=request)
+        self.assertEqual(reply.status, 200)
+        accepted = await reply.json()
+        self.assertEqual(accepted['state'], 'accepted')
+        client = protocol.bound_client(who['friend_id'], self.sid, installation_id(self.proof),
+                                       client_uuid(request['clientId']))
+        return ring, request, accepted, client
+
+    async def test_notice_first_connection_deadline_and_unanswered_preparation(self):
+        from call_memory import NoticeRingState, Principal
+
+        _, store, protocol, who = await self.call_fixture()
+        await self.register_fixture()
+        p = Principal(who['caller_id'], who['friend_id'], 'Fixture', unified=True)
+        now = self.now
+        store.notice_clock = lambda: now
+        for offset in (-1, 0, 1):
+            with self.subTest(offset=offset):
+                accepted_at = now
+                deadline = now + timedelta(seconds=120)
+                ring, body, accepted, client = await self.notice_reservation(who, protocol)
+                call = accepted['callId']
+                self.assertEqual(self.notice_call_state(call), ('live', None, deadline, None, None))
+                now = accepted_at + timedelta(seconds=3)
+                first = (await store.attach_notice_call(p, client, call, ring, self.sid))[-1]
+                await store.finish_notice_connection(p, first)  # Setup failed or the browser withdrew.
+                now = accepted_at + timedelta(seconds=20)
+                await store.finish_notice_connection(p, first)
+                replay = await self.request('POST', ACCEPT, body=body)
+                self.assertEqual((await replay.json())['callId'], call)
+                read = await self.request('POST', RESOLVE, body={'targetRef': body['targetRef']})
+                self.assertEqual(await read.json(), {'state': 'ring_answered'})
+                self.assertEqual(self.notice_call_state(call), ('resting', None, deadline, None, None))
+                connecting = None
+                if offset == 0:
+                    now = deadline - timedelta(microseconds=1)
+                    connecting = (await store.attach_notice_call(p, client, call, ring, self.sid))[-1]
+                now = deadline + timedelta(microseconds=offset)
+                if offset < 0:
+                    current = (await store.attach_notice_call(p, client, call, ring, self.sid))[-1]
+                    await store.confirm_notice_connection(p, current)
+                    first_connected = now
+                    now += timedelta(days=1)
+                    await store.expire_notice_calls(p.caller_id)
+                    self.assertEqual(self.notice_call_state(call), ('live', first_connected, None, None, None))
+                    await store.finish_notice_connection(p, current, explicit=True)
+                    self.assertEqual(self.notice_call_state(call), ('ended', first_connected, None, now, 'hangup'))
+                    now = deadline + timedelta(seconds=1)
+                else:
+                    if connecting:
+                        with self.assertRaisesRegex(NoticeRingState, 'ring_answered'):
+                            await store.confirm_notice_connection(p, connecting)
+                    with self.assertRaisesRegex(NoticeRingState, 'ring_answered'):
+                        await store.expire_notice_calls(p.caller_id)
+                        await store.attach_notice_call(p, client, call, ring, self.sid)
+                    if connecting:
+                        await store.finish_notice_connection(p, connecting)
+                    await store.expire_notice_calls(p.caller_id)
+                    await store.expire_notice_calls(p.caller_id)
+                    self.assertEqual(self.notice_call_state(call), ('ended', None, None, now, 'reconnect_limit'))
+                    result = await self.request('POST', ACCEPT, body=body)
+                    self.assertEqual(await result.json(), {'state': 'ring_answered'})
+                self.assertEqual(self.db.admin("SELECT status,call_id::text,answered_at FROM marong.app_rings WHERE id=%s",
+                                               (ring,)), [('answered', call, accepted_at)])
+
+    async def test_notice_recovery_deadline_race_and_stale_close(self):
+        from call_memory import NoticeRingState, Principal
+
+        _, store, protocol, who = await self.call_fixture()
+        await self.register_fixture()
+        p = Principal(who['caller_id'], who['friend_id'], 'Fixture', unified=True)
+        now = self.now
+        store.notice_clock = lambda: now
+        for offset in (-1, 0, 1):
+            with self.subTest(offset=offset):
+                ring, body, result, client = await self.notice_reservation(who, protocol)
+                call = result['callId']
+                attach = lambda: store.attach_notice_call(p, client, call, ring, self.sid)
+                old = (await attach())[-1]
+                now += timedelta(seconds=4)
+                await store.confirm_notice_connection(p, old)
+                first = now
+                now += timedelta(seconds=10)
+                deadline = now + timedelta(seconds=120)
+                await store.finish_notice_connection(p, old)
+                self.assertEqual(self.notice_call_state(call), ('resting', first, deadline, None, None))
+                now += timedelta(seconds=7)
+                failed = (await attach())[-1]
+                await store.finish_notice_connection(p, failed)
+                await store.finish_notice_connection(p, old, explicit=True)
+                replay = await self.request('POST', ACCEPT, body=body)
+                self.assertEqual((await replay.json())['callId'], call)
+                self.assertEqual(self.notice_call_state(call), ('resting', first, deadline, None, None))
+                now = deadline + timedelta(microseconds=offset)
+                if offset < 0:
+                    recovered = (await attach())[-1]
+                    now = deadline
+                    await asyncio.gather(store.expire_notice_calls(p.caller_id),
+                                         store.finish_notice_connection(p, failed, explicit=True),
+                                         store.confirm_notice_connection(p, recovered))
+                    self.assertEqual(self.notice_call_state(call), ('live', first, None, None, None))
+                    now += timedelta(seconds=10)
+                    await store.finish_notice_connection(p, recovered)
+                    new_deadline = now + timedelta(seconds=120)
+                    self.assertEqual(self.notice_call_state(call), ('resting', first, new_deadline, None, None))
+                    final = (await attach())[-1]
+                    await store.confirm_notice_connection(p, final)
+                    await store.finish_notice_connection(p, final, explicit=True)
+                    self.assertEqual(self.notice_call_state(call), ('ended', first, None, now, 'hangup'))
+                else:
+                    # Move the clock while the reconnect waits for the existing caller lock.
+                    now = deadline - timedelta(microseconds=1)
+                    waiting = asyncio.Event()
+                    authenticate = store._notice_session
+
+                    async def session_checked(*args):
+                        result = await authenticate(*args)
+                        waiting.set()
+                        return result
+
+                    with patch.object(store, '_notice_session', side_effect=session_checked):
+                        async with store.pool.connection() as conn, conn.transaction():
+                            await conn.execute('SELECT id FROM call.callers WHERE id=%s FOR UPDATE', (p.caller_id,))
+                            late = asyncio.create_task(attach())
+                            await asyncio.wait_for(waiting.wait(), 2)
+                            now = deadline + timedelta(microseconds=offset)
+                            expiry = asyncio.create_task(store.expire_notice_calls(p.caller_id))
+                        with self.assertRaisesRegex(NoticeRingState, 'ring_answered'):
+                            await late
+                        await expiry
+                    self.assertEqual(self.notice_call_state(call), ('ended', first, None, now, 'reconnect_limit'))
+                    with self.assertRaisesRegex(NoticeRingState, 'ring_answered'):
+                        await attach()
+                self.assertEqual(self.db.admin('SELECT status,call_id::text FROM marong.app_rings WHERE id=%s', (ring,)),
+                                 [('answered', call)])
+
+    async def test_notice_restart_creates_one_recovery_deadline_and_preserves_older_rows(self):
+        from call_memory import MemoryStore, Principal
+
+        _, old_store, protocol, who = await self.call_fixture()
+        await self.register_fixture()
+        p = Principal(who['caller_id'], who['friend_id'], 'Fixture', unified=True)
+        now = self.now
+        old_store.notice_clock = lambda: now
+        ring, _, result, client = await self.notice_reservation(who, protocol)
+        call = result['callId']
+        first = (await old_store.attach_notice_call(p, client, call, ring, self.sid))[-1]
+        await old_store.confirm_notice_connection(p, first)
+        first_connected = now
+
+        # Older open rows have no reliable timestamps, including earlier draft notification calls.
+        older_session = await self.sessions.find_session(self.alt)
+        await self.sessions.ensure_profile(older_session['friend_id'])
+        older = await self.sessions.find_session(self.alt)
+        older_ring = self.ring(older)
+        previous_client = protocol.bound_client(older['friend_id'], self.alt_sid, installation_id(self.other_proof),
+                                                uuid4())
+        legacy = await old_store.reserve_notice_ring(
+            Principal(older['caller_id'], older['friend_id'], 'Fixture', unified=True), previous_client,
+            'Fixture', 'fixture', older_ring, legacy=True)
+        older_call = legacy[0]
+        self.assertEqual(self.notice_call_state(older_call), ('live', None, None, None, None))
+
+        now += timedelta(seconds=300)
+        pending_token = secrets.token_urlsafe(32)
+        pending_session = session(self.db, token_hash(pending_token))
+        pending_owner = await self.sessions.find_session(pending_token)
+        await self.sessions.ensure_profile(pending_owner['friend_id'])
+        pending_owner = await self.sessions.find_session(pending_token)
+        pending_principal = Principal(pending_owner['caller_id'], pending_owner['friend_id'], 'Fixture', unified=True)
+        pending_ring = self.ring(pending_owner, until=3600)
+        pending_client = protocol.bound_client(pending_owner['friend_id'], pending_session,
+                                               installation_id(self.other_proof), uuid4())
+        pending_call, *_ = await old_store.reserve_notice_ring(pending_principal, pending_client, 'Fixture', 'fixture',
+                                                               pending_ring, session=pending_session)
+        pending_deadline = now + timedelta(seconds=120)
+        call_db = self.db.admin_url.replace('postgres:@', 'marong_call@', 1)
+        restarted = MemoryStore(call_db, notice_deadlines=True, notice_clock=lambda: now)
+        await restarted.open()
+        self.addAsyncCleanup(restarted.close)
+        now += timedelta(seconds=10)
+        await restarted.recover_entrypoint('web')
+        deadline = now + timedelta(seconds=120)
+        self.assertEqual(self.notice_call_state(call), ('resting', first_connected, deadline, None, None))
+        now += timedelta(seconds=30)
+        await restarted.recover_entrypoint('web')
+        self.assertEqual(self.notice_call_state(call), ('resting', first_connected, deadline, None, None))
+        self.assertEqual(self.notice_call_state(pending_call), ('resting', None, pending_deadline, None, None))
+        self.assertEqual(self.notice_call_state(older_call), ('resting', None, None, None, None))
+        now = deadline
+        await restarted.recover_entrypoint('web')
+        self.assertEqual(self.notice_call_state(call), ('ended', first_connected, None, now, 'reconnect_limit'))
+        self.assertEqual(self.notice_call_state(pending_call), ('ended', None, None, now, 'reconnect_limit'))
+        self.assertEqual(self.notice_call_state(older_call), ('resting', None, None, None, None))
+
+    async def test_notice_relay_expiry_leaves_history_and_redial_is_ordinary(self):
+        import live_session
+        from test_relay import HTTP, Upstream, event
+
+        server, store, protocol, who = await self.call_fixture()
+        await self.register_fixture()
+        now = self.now
+        store.notice_clock = lambda: now
+        ring, body, result, _ = await self.notice_reservation(who, protocol)
+        call = result['callId']
+        initial_deadline = now + timedelta(seconds=120)
+        endpoint = self.call_site.make_url('/live/web-notification')
+        headers = {'Cookie': f'{COOKIE}={self.token}', 'Origin': str(endpoint.origin())}
+        start = {'type': 'start_notified', 'clientId': body['clientId'], 'installationProof': self.proof,
+                 'connectToken': result['connectToken']}
+        upstreams = []
+
+        def upstream(**_):
+            model = Upstream()
+            if not upstreams:
+                model.receive = AsyncMock(side_effect=ConnectionError('fixture setup failed'))
+            upstreams.append(model)
+            return HTTP(model)
+
+        async def open_notice():
+            return await self.client.session.ws_connect(endpoint, protocols=[SUBPROTOCOL], headers=headers)
+
+        with (patch.object(server, 'google_headers', AsyncMock(return_value={})),
+              patch.object(live_session, 'ClientSession', side_effect=upstream)):
+            async with await open_notice() as failed:
+                await failed.send_json(start)
+                async with asyncio.timeout(5):
+                    async for message in failed:
+                        self.assertNotEqual(message.json().get('type'), 'ready')
+            self.assertEqual(self.notice_call_state(call), ('resting', None, initial_deadline, None, None))
+            now += timedelta(seconds=5)
+            async with await open_notice() as current:
+                await current.send_json(start)
+                ready = await event(current, 'ready')
+                self.assertEqual((ready['callId'], ready['resumed']), (call, False))
+                self.assertEqual(self.notice_call_state(call), ('live', now, None, None, None))
+                slot = server.active_calls[who['friend_id']]
+                first_connected = now
+                now += timedelta(seconds=10)
+            await asyncio.wait_for(slot.released.wait(), 5)
+            now += timedelta(seconds=120)
+            async with await open_notice() as late:
+                await late.send_json(start)
+                self.assertEqual(await late.receive_json(timeout=3), {'type': 'ring_answered'})
+            self.assertEqual(self.notice_call_state(call), ('ended', first_connected, None, now, 'reconnect_limit'))
+            self.assertEqual(len(upstreams), 2)
+            self.assertEqual(await (await self.request('POST', ACCEPT, body=body)).json(), {'state': 'ring_answered'})
+
+            ordinary = self.call_site.make_url('/live').with_query(client=str(uuid4()), hangup='1')
+            async with self.client.session.ws_connect(ordinary, headers=headers) as active:
+                ready = await event(active, 'ready')
+                self.assertNotEqual(ready['callId'], call)
+                self.assertFalse(ready['ring'])
+                await active.send_json({'type': 'stop'})
+            self.assertEqual(self.notice_call_state(ready['callId'])[1:3], (None, None))
+            self.assertEqual(self.db.admin('SELECT status,call_id::text FROM marong.app_rings WHERE id=%s', (ring,)),
+                             [('answered', call)])
 
     async def test_notice_call_requires_issued_document_and_explicit_ordinary_choice(self):
         server, store, _, who = await self.call_fixture()
