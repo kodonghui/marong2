@@ -245,6 +245,16 @@ Windows PostgreSQL 시험은 Python 3.12에서 `asyncio.set_event_loop_policy(as
 | `node --test --test-concurrency=1 apps/android/test/app-update-banners.e2e.cjs apps/android/test/call-page.e2e.cjs apps/android/test/call-ring.e2e.cjs apps/android/test/chat-page.e2e.cjs apps/android/test/chat-scroll.e2e.cjs` | `a9c451a`에서 Playwright 모의 브라우저 63개 통과. 초기 두 파일 실행은 Node의 Playwright 탐색 경로가 비어 건너뛰었습니다. 설치된 모듈의 경로를 `NODE_PATH`로 지정해 다시 실행했습니다. |
 | `git diff --check`, Python `py_compile`, JavaScript `node --check`, CORTHEX `term-check.py` | 통과. 승인 SQL과 적용 SQL의 Git 개체 SHA-256을 비교했습니다. |
 
+### 독립 재검토 후 새 발신의 연결 안내
+
+독립 재검토는 `2a6298e185e1f17a3abaaca6de41b8a8c4d6cf37`에서 이전 지적 1~3이 해결됐음을 확인했습니다. 남은 지적은 종료된 알림에서 다시 걸어 새 일반 통화가 연결됐을 때 “기존 통화에 연결됐어.”가 표시되는 낮은 중요도의 문구 1건이었습니다. [독립 재검토](https://github.com/kodonghui/marong2/pull/139#issuecomment-7161861534)
+
+TASK-576에서 08의 SCR-002#talking과 고정 09 A 화면을 대조했습니다. 새 발신 별도 연결 문구는 정의돼 있지 않습니다. 다시 걸기로 시작한 새 일반 통화의 첫 `ready`가 확인되면 기존 “통화 중이야” 제목과 상태·조작을 표시하고 보조 문구를 생략합니다. 같은 통화 ID로 복구되면 기존 연결 문구와 끊기 버튼의 초점을 유지합니다. [08 기존 통화 상태](../08-screens/SCR-002.md) · [08 준비·복구 규칙](../08-screens/iphone-home-webapp-notifications/SCR-002.md) · [09 고정 A 화면](../../iphone-webapp-09-mockup-version-candidate-2026-11-25.md#화면별-링크)
+
+수정 전에는 브라우저 회귀의 두 엔진 모두 새 발신에 기존 연결 문구가 표시돼 실패했습니다. 수정 후에는 루프백에서 첫 `ready`를 보류하는 동안 준비 제목을 표시하고 성공 상태를 숨겼습니다. 유효한 `ready` 뒤에만 새 통화 ID, 통화 중 제목과 초점, 상태 및 통화 조작을 확인했습니다. 연결 단절 뒤에는 같은 통화 ID, 기존 연결 문구와 끊기 버튼의 초점을 확인했습니다.
+
+`b9c2333ed35d580d3409bee081945654cb3814c1`에서 `PYTHONPATH`를 저장소 루트로 지정해 `.venv/Scripts/python.exe tests/test_notice_call_browser.py`를 실행했습니다. 모의 Chromium·Playwright WebKit 통화 문서 시험 7개와 `node --check marong/app_chat_static/notice-call.js`, `git diff --check`, CORTHEX `term-check.py`가 통과했습니다. 기기별 실사용, 실제 푸시, 운영 반영과 병합은 후속 단계입니다.
+
 ## 승인본과 운영 경계
 
 고정 WBS의 SHA-256은 `64653d0df932e8c6a14d1cb20d0cbcf2ebcf8388a2b551118d28ececf66e552e`, 10단계 검토 메모는 `9b5df39b9c6cb3b526e7db9865e5a1945e840deb140b45874d5e873649f67606`입니다. 08 화면 인덱스는 승인 원본과 LF 한 바이트 차이인 병합된 사본을 보존했습니다. 구독 409는 승인된 SCR-165와 OpenAPI의 재조회 상태를 사용합니다.
