@@ -660,6 +660,76 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         """, (call_id,))
         return row
 
+    async def test_notice_segment_preparation_failure_preserves_pending_deadline(self):
+        import live_session
+        from test_relay import HTTP, Upstream, event
+
+        server, store, protocol, who = await self.call_fixture()
+        await self.register_fixture()
+        now = self.now
+        store.notice_clock = lambda: now
+        endpoint = self.call_site.make_url('/live/web-notification')
+        headers = {'Cookie': f'{COOKIE}={self.token}', 'Origin': str(endpoint.origin())}
+
+        async def socket():
+            return await self.client.session.ws_connect(endpoint, protocols=[SUBPROTOCOL], headers=headers)
+
+        with (patch.object(server, 'google_headers', AsyncMock(return_value={})),
+              patch.object(live_session, 'ClientSession', side_effect=lambda **_: HTTP(Upstream()))):
+            for recovering in (False, True):
+                failures = (('start_segment', False), ('segment_ready', False), ('segment_ready', True))
+                for fault, missing_transition in failures:
+                    with self.subTest(recovering=recovering, fault=fault, missing_transition=missing_transition):
+                        ring, body, result, _ = await self.notice_reservation(who, protocol)
+                        call = result['callId']
+                        start = {'type': 'start_notified', 'clientId': body['clientId'],
+                                 'installationProof': self.proof, 'connectToken': result['connectToken']}
+                        first_connected = None
+                        if recovering:
+                            now += timedelta(seconds=5)
+                            async with await socket() as first:
+                                await first.send_json(start)
+                                self.assertEqual((await event(first, 'ready'))['callId'], call)
+                                slot = server.active_calls[who['friend_id']]
+                                first_connected = now
+                                now += timedelta(seconds=10)
+                            await asyncio.wait_for(slot.released.wait(), 5)
+                        deadline = now + timedelta(seconds=120)
+                        now += timedelta(seconds=10)
+                        failing_slot = None
+
+                        async def fail(*args, **kwargs):
+                            nonlocal failing_slot
+                            failing_slot = server.active_calls[who['friend_id']]
+                            if missing_transition:
+                                return False
+                            raise TimeoutError('synthetic segment preparation timeout')
+
+                        with patch.object(store, fault, side_effect=fail):
+                            async with await socket() as ws:
+                                await ws.send_json(start)
+                                async with asyncio.timeout(5):
+                                    async for message in ws:
+                                        frame = message.json()
+                                        if frame['type'] in {'ready', 'db_unavailable'}:
+                                            break
+                                    else:
+                                        self.fail('Missing readiness or preparation failure response')
+                            await asyncio.wait_for(failing_slot.released.wait(), 5)
+                        after_failure = self.notice_call_state(call)
+                        now = deadline
+                        await store.expire_notice_calls(who['caller_id'])
+                        at_deadline = self.notice_call_state(call)
+                        self.assertEqual(self.db.admin('SELECT status,call_id::text FROM marong.app_rings WHERE id=%s',
+                                                       (ring,)), [('answered', call)])
+                        # Keep the next subtest independent even on a pre-fix implementation.
+                        now += timedelta(seconds=120)
+                        await store.expire_notice_calls(who['caller_id'])
+                        self.assertEqual((frame['type'], after_failure, at_deadline), (
+                            'db_unavailable', ('resting', first_connected, deadline, None, None),
+                            ('ended', first_connected, None, deadline, 'reconnect_limit'),
+                        ))
+
     async def notice_reservation(self, who, protocol):
         ring = self.ring(who, until=3600)
         reference = self.references.seal('call', who['friend_id'], ring, self.now)
@@ -941,13 +1011,21 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(upstreams), 3)
             self.assertEqual(await (await self.request('POST', ACCEPT, body=body)).json(), {'state': 'ring_answered'})
 
-            ordinary = self.call_site.make_url('/live').with_query(client=str(uuid4()), hangup='1')
-            async with self.client.session.ws_connect(ordinary, headers=headers) as active:
-                ready = await event(active, 'ready')
-                self.assertNotEqual(ready['callId'], call)
-                self.assertFalse(ready['ring'])
-                await active.send_json({'type': 'stop'})
-            self.assertEqual(self.notice_call_state(ready['callId'])[1:3], (None, None))
+            for android in (False, True):
+                query = {'client': str(uuid4()), 'hangup': '1'}
+                incoming = headers
+                if android:
+                    query['ring'] = str(ring)
+                    incoming = headers | {'User-Agent': 'MarongApp/0.3.4'}
+                ordinary = self.call_site.make_url('/live').with_query(query)
+                async with self.client.session.ws_connect(ordinary, headers=incoming) as active:
+                    ready = await event(active, 'ready')
+                    self.assertNotEqual(ready['callId'], call)
+                    self.assertFalse(ready['ring'])
+                    slot = server.active_calls[who['friend_id']]
+                    await active.send_json({'type': 'stop'})
+                    await asyncio.wait_for(slot.released.wait(), 5)
+                self.assertEqual(self.notice_call_state(ready['callId'])[:3], ('ended', None, None))
             self.assertEqual(self.db.admin('SELECT status,call_id::text FROM marong.app_rings WHERE id=%s', (ring,)),
                              [('answered', call)])
 
@@ -1640,7 +1718,7 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
     async def test_577_existing_routes_and_android_eligibility_with_web_push_on_and_off(self):
         server, _, protocol, who = await self.call_fixture()
         import live_session
-        from test_relay import HTTP, Upstream, event
+        from test_relay import HTTP, Upstream
 
         fcm = Mock(send=AsyncMock(return_value="ok"))
         self.chat.push = AppPush(self.store, fcm, ring_enabled=True)
@@ -1702,7 +1780,9 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
                 # Android answers the existing explicit ring on the legacy route.
                 frames = []
                 ring = self.ring(who)
-                for android in (True, False):
+                original = None
+                answered_at = None
+                for android, taking_ring in ((True, True), (True, False), (False, False)):
                     query = {"client": str(uuid4()), "hangup": "1"}
                     if android:
                         query["ring"] = str(ring)
@@ -1712,12 +1792,23 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
                         await self.client.session.ws_connect(endpoint, headers=headers | {"Origin": "https://off.invalid"})
                     self.assertEqual(origin_error.exception.status, 403)
                     async with self.client.session.ws_connect(endpoint, headers=headers) as ws:
-                        ready = await event(ws, "ready")
-                        self.assertEqual((ready["ring"], ready["memoryConnected"]), (android, True))
+                        async with asyncio.timeout(5):
+                            while (ready := await ws.receive_json())['type'] not in {'ready', 'call_busy'}:
+                                pass
+                        self.assertEqual(ready['type'], 'ready', f'Android={android}, enabled={enabled}')
+                        self.assertEqual((ready["ring"], ready["memoryConnected"]), (taking_ring, True))
                         frames.append((ready["ring"], ready["memoryConnected"], ready["audioFormat"]))
+                        if taking_ring:
+                            original = ready['callId']
+                            (answered_at,), = self.db.admin('SELECT answered_at FROM marong.app_rings WHERE id=%s',
+                                                           (ring,))
+                            self.assertIsNotNone(answered_at)
+                        else:
+                            self.assertNotEqual(ready['callId'], original)
                         competing = endpoint.with_query({**query, "client": str(uuid4())})
                         async with self.client.session.ws_connect(competing, headers=headers) as second:
                             self.assertEqual(await second.receive_json(timeout=3), {"type": "call_busy"})
+                        slot = server.active_calls[who['friend_id']]
                         if android:
                             await ws.send_json({"type": "stop"})
                         else:
@@ -1725,6 +1816,10 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
                             async with self.client.session.post(end, headers=headers, json={}) as stopped:
                                 self.assertEqual((stopped.status, await stopped.json()), (200, {'ok': True}))
                         await ws.receive(timeout=3)
+                    await asyncio.wait_for(slot.released.wait(), 5)
+                    self.assertEqual(self.notice_call_state(ready['callId'])[0], 'ended')
+                    self.assertEqual(self.db.admin('SELECT status,call_id::text,answered_at FROM marong.app_rings '
+                                                   'WHERE id=%s', (ring,)), [('answered', original, answered_at)])
                 flags.append((delivery, await me.json(), await messages.json(), await refused.json(), call_status, frames))
         self.assertEqual(flags[0], flags[1])
 

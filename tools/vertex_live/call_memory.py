@@ -507,11 +507,14 @@ class MemoryStore:
                 raise NoticeRingState("not_allowed")
             if ring["status"] == "answered":
                 deadline_column = ",notice_connection_deadline_at" if self.notice_deadlines and not legacy else ""
-                match = await (await c.execute(f"""SELECT id,started_at{deadline_column} FROM call.calls
-                    WHERE id=%s AND caller_id=%s AND client_id=%s AND entrypoint='web'
-                      AND status<>'ended' AND deleted_at IS NULL FOR UPDATE""",
-                    (ring["call_id"], p.caller_id, client_id))).fetchone()
-                if match is None:
+                match = await (await c.execute(f"""SELECT id,started_at,client_id,entrypoint,status,deleted_at{deadline_column}
+                    FROM call.calls WHERE id=%s AND caller_id=%s FOR UPDATE""",
+                    (ring["call_id"], p.caller_id))).fetchone()
+                if legacy and match and match["status"] == "ended":
+                    # The promise is still answered. Let the legacy route handle a separate ordinary call.
+                    return None
+                if (match is None or str(match["client_id"]) != client_id or match["entrypoint"] != "web"
+                        or match["status"] == "ended" or match["deleted_at"] is not None):
                     if legacy:
                         raise CallBusy()
                     raise NoticeRingState("ring_answered")
@@ -855,10 +858,11 @@ class MemoryStore:
 
     async def segment_ready(self, segment):
         async with self.pool.connection() as c:
-            await c.execute("""
+            changed = await c.execute("""
                 UPDATE call.segments SET state='open',provider_ready_at=clock_timestamp()
                 WHERE id=%s AND state='opening'
             """, (segment,))
+            return changed.rowcount == 1
 
     async def segment_start_failed(self, segment):
         async with self.pool.connection() as c:

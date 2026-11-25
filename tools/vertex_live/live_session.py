@@ -580,6 +580,8 @@ class LiveSession:
         if self.notice_connection is not None and not self.notice_connection_confirmed:
             if self.stop.is_set() or self.ws.closed:
                 raise ConnectionError('notice_disconnected')
+            if not self.segment:
+                raise NoticeRingState('db_unavailable')
             await self.store.confirm_notice_connection(self.p, self.notice_connection)
             self.notice_connection_confirmed=True
         self.ready=True
@@ -629,6 +631,7 @@ class LiveSession:
     async def google_loop(self):
         delay=1
         while not self.stop.is_set():
+            preparing_notice = self.notice_connection is not None and not self.notice_connection_confirmed
             if not self.prepared:self.ready=False
             self.epoch+=1;self.in_turn=False;self.offset=0;self.sequence=0
             await self.emit({'type':'audio_reset','epoch':self.epoch})
@@ -670,6 +673,8 @@ class LiveSession:
                                     self.p,self.call_id,self.client_id,self.model,**segment_options),3)
                             except Exception:
                                 self.d['memoryConnected']=False
+                                if preparing_notice:
+                                    raise
                             else:
                                 if not self.handle:
                                     previous, older = await self.pick_previous(segment_kind, opened_at)
@@ -693,8 +698,15 @@ class LiveSession:
                             raise
                         if self.segment and self.entry_transport!='discord':
                             self.mark('providerReady')
-                            try:await asyncio.wait_for(self.store.segment_ready(self.segment), .4)
-                            except Exception:print('segment_ready_write_error',flush=True)
+                            try:
+                                opened = await asyncio.wait_for(self.store.segment_ready(self.segment), .4)
+                            except Exception:
+                                if preparing_notice:
+                                    raise
+                                print('segment_ready_write_error',flush=True)
+                            else:
+                                if preparing_notice and not opened:
+                                    raise NoticeRingState('db_unavailable')
                             self.timing_segment=self.timing_segment or self.segment
                         if self.entry_transport!='discord':self.mark('providerReady')
                         if self.hold_continuity_audio() and previous:
