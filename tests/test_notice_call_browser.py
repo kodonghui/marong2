@@ -3,6 +3,8 @@
 import asyncio
 from concurrent.futures import Future
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from pathlib import Path
 from threading import Event, Thread
 import unittest
@@ -11,7 +13,7 @@ from aiohttp import WSMsgType, web
 from playwright.sync_api import expect, sync_playwright
 
 from marong.app_chat import HEADERS
-from marong.web_notice_call_protocol import SUBPROTOCOL
+from marong.web_notice_call_protocol import RECEIPT_EXPIRES_HEADER, RECEIPT_HEADER, REDIAL_HEADER, SUBPROTOCOL
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +27,9 @@ DOCUMENT_CLIENT = '11111111-2222-8333-8444-555555555555'
 NEXT_CLIENT = '22222222-2222-8333-8444-555555555555'
 ORDINARY_CLIENT = '33333333-2222-8333-8444-555555555555'
 ORDINARY_CHOICE = 'O' * 43
+REDIAL_CHOICE = 'R' * 102
+RECEIPT = 'T' * 102
+REDIAL_CALL = '33333333-2222-4333-8444-555555555555'
 
 MEDIA = """
     Object.defineProperty(navigator, 'standalone', {value: true, configurable: true});
@@ -75,6 +80,7 @@ class CallFixture:
         self.expire_on_login = False
         self.expire_on_reconnect = False
         self.right_call = True
+        self.ended = False
         self.accepts = []
         self.connections = []
         self.reconnects = {}
@@ -160,9 +166,10 @@ class CallFixture:
             return AppChat._notice_call_failure('login', 401)
         navigation = form['navigation'] if not self.break_nonce else 'f' * 32
         ordinary = form.get('ordinaryChoice') == ORDINARY_CHOICE and self.ring == 'ring_expired'
+        redial = form.get('redialChoice') == REDIAL_CHOICE and self.ended
         body = (CHAT / 'notice-call.html').read_text(encoding='utf-8').replace('@NAVIGATION@', navigation).replace(
-            '@CALL_CLIENT@', ORDINARY_CLIENT if ordinary else self.document_client).replace(
-            '@PURPOSE@', 'ordinary' if ordinary else 'answer')
+            '@CALL_CLIENT@', ORDINARY_CLIENT if ordinary or redial else self.document_client).replace(
+            '@PURPOSE@', 'redial' if redial else 'ordinary' if ordinary else 'answer')
         headers = HEADERS | {'Permissions-Policy': 'camera=(), microphone=(self), geolocation=()'}
         return web.Response(text=body, content_type='text/html', headers=headers)
 
@@ -182,6 +189,8 @@ class CallFixture:
         if document and document != ORDINARY_CLIENT and (document != self.document_client or self.subscription != 'active'):
             return web.json_response({'code': 'not_allowed'}, status=403)
         headers = {'X-Marong-Ordinary-Choice': ORDINARY_CHOICE} if not document and self.ring == 'ring_expired' else {}
+        if not document and self.ended and req.headers.get(RECEIPT_HEADER) == RECEIPT:
+            headers[REDIAL_HEADER] = REDIAL_CHOICE
         return web.json_response({'state': self.ring}, headers=headers)
 
     async def accept(self, req):
@@ -197,11 +206,17 @@ class CallFixture:
             req.transport.abort()
             return partial
         if before and body == before[-1] and self.ring == 'ring_answered' and self.right_call:
-            return web.json_response({'state': 'accepted', 'callId': CALL_ID, 'connectToken': TOKEN})
+            return self.accepted()
         if self.ring != 'ring_ready':
             return web.json_response({'state': self.ring})
         self.ring = 'ring_answered'
-        return web.json_response({'state': 'accepted', 'callId': CALL_ID, 'connectToken': TOKEN})
+        return self.accepted()
+
+    @staticmethod
+    def accepted():
+        expires = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        return web.json_response({'state': 'accepted', 'callId': CALL_ID, 'connectToken': TOKEN},
+                                 headers={RECEIPT_HEADER: RECEIPT, RECEIPT_EXPIRES_HEADER: expires})
 
     async def socket(self, req):
         ws = web.WebSocketResponse(protocols=(SUBPROTOCOL,))
@@ -220,8 +235,9 @@ class CallFixture:
             if self.expire_on_reconnect:
                 await ws.send_json({'type': 'ring_answered'})
                 return ws
+        call = REDIAL_CALL if frame.get('redialChoice') == REDIAL_CHOICE else CALL_ID
         await ws.send_json({'type': 'ready', 'ring': frame['type'] == 'start_notified', 'memoryConnected': True,
-                            'callId': CALL_ID if matching else '22222222-2222-4333-8444-555555555555'})
+                            'callId': call if matching else '22222222-2222-4333-8444-555555555555'})
         async for message in ws:
             if message.type == WSMsgType.TEXT:
                 self.frames.append(message.json())
@@ -240,7 +256,8 @@ class NoticeCallBrowserTests(unittest.TestCase):
     def page(self, engine, fixture, *, width=360, standalone=True):
         browser = engine.launch()
         self.addCleanup(browser.close)
-        page = browser.new_page(viewport={'width': width, 'height': 820}, user_agent='iPhone Fixture Safari')
+        context = browser.new_context(viewport={'width': width, 'height': 820}, user_agent='iPhone Fixture Safari')
+        page = context.new_page()
         page.set_default_timeout(6000)
         page.add_init_script(MEDIA.replace('value: true, configurable', f'value: {str(standalone).lower()}, configurable'))
         page.goto(fixture.origin + '/chat/#notice=' + REF)
@@ -379,6 +396,60 @@ class NoticeCallBrowserTests(unittest.TestCase):
                 page.get_by_role('button', name='다시 걸기', exact=True).click()
                 expect(page).to_have_url(fixture.origin + '/')
                 self.assertEqual(len(fixture.accepts), 1)
+
+    def test_ended_notification_reopens_with_receipt_and_requires_separate_redial_and_start(self):
+        for engine in (self.playwright.chromium, self.playwright.webkit):
+            with self.subTest(engine=engine.name):
+                fixture = CallFixture()
+                self.addCleanup(fixture.close)
+                fixture.lose_response = True
+                first = self.page(engine, fixture)
+                first.get_by_role('button', name='받기', exact=True).click()
+                self.heading(first, '전화 받기 결과를 확인해 줘')
+                key = 'marong.web-notifications.receipt.' + sha256(REF.encode()).hexdigest()
+                self.assertIsNone(first.evaluate('key => localStorage.getItem(key)', key))
+                first.get_by_role('button', name='결과 확인', exact=True).click()
+                self.heading(first, '통화 중이야')
+                saved = first.evaluate('key => JSON.parse(localStorage.getItem(key))', key)
+                self.assertEqual(set(saved), {'receipt', 'until'})
+                self.assertEqual(saved['receipt'], RECEIPT)
+                first.get_by_role('button', name='끊기').click()
+                self.heading(first, '통화가 끝났어')
+                self.assertTrue(fixture.call_stopped.wait(3))
+                context = first.context
+                page = context.new_page()
+                first.close()
+                fixture.ended = True
+                page.set_default_timeout(6000)
+                page.add_init_script(MEDIA)
+                page.goto(fixture.origin + '/chat/#notice=' + REF)
+                expect(self.heading(page, '통화가 끝났어')).to_be_focused()
+                self.assertEqual(page.url, fixture.origin + '/chat/')
+                self.assertEqual(page.evaluate('fixture.prompts'), 0)
+                page.get_by_role('button', name='다시 걸기', exact=True).click()
+                expect(self.heading(page, '일반 통화')).to_be_focused()
+                self.assertEqual(page.url, fixture.origin + '/chat/notice-call')
+                self.assertEqual(len(context.pages), 1)
+                self.assertEqual(fixture.posts[-1][2]['redialChoice'], REDIAL_CHOICE)
+                self.assertEqual(page.evaluate('fixture.prompts'), 0)
+                started = len(fixture.frames)
+                page.evaluate("fixture.permission = 'deny'")
+                page.get_by_role('button', name='통화 시작', exact=True).click()
+                self.heading(page, '마이크를 허용해야 통화할 수 있어')
+                self.assertEqual(len(fixture.frames), started)
+                page.evaluate("fixture.permission = 'allow'")
+                page.get_by_role('button', name='다시 해 볼게').click()
+                self.heading(page, '통화 중이야')
+                self.assertEqual([frame for frame in fixture.frames if frame['type'] == 'start_ordinary'],
+                                 [{'type': 'start_ordinary', 'clientId': ORDINARY_CLIENT, 'installationProof': PROOF,
+                                   'targetRef': REF, 'redialChoice': REDIAL_CHOICE}])
+                self.assertEqual(len(fixture.accepts), 2)
+                page.get_by_role('button', name='끊기').click()
+                self.heading(page, '통화가 끝났어')
+                page.evaluate('key => localStorage.removeItem(key)', key)
+                page.goto(fixture.origin + '/chat/#notice=' + REF)
+                expect(self.heading(page, '이미 받은 전화야')).to_be_focused()
+                expect(page.get_by_role('button', name='다시 걸기')).to_have_count(0)
 
     def test_review_relogin_shows_confirmed_expiry_without_microphone(self):
         for engine in (self.playwright.chromium, self.playwright.webkit):

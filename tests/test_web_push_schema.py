@@ -16,6 +16,7 @@ MIGRATIONS = ROOT / "marong" / "migrations"
 MIGRATION = MIGRATIONS / "024_web_push_subscriptions.sql"
 APPROVED = ROOT / "docs" / "05-erd" / "024_web_push_subscriptions.draft.sql"
 CALL_DEADLINES = ROOT / "marong" / "call" / "migrations" / "012_notice_call_deadlines.sql"
+CALL_RECEIPTS = CALL_DEADLINES.with_name("013_notice_receipt_expiry.sql")
 
 
 def app_database():
@@ -135,6 +136,45 @@ class WebPushSchemaTests(unittest.TestCase):
 
 
 class NoticeCallSchemaTests(unittest.TestCase):
+    def test_receipt_migration_after_deadlines_with_existing_roles_and_rows(self):
+        approved = ROOT / 'docs' / '05-erd' / '013_notice_receipt_expiry.draft.sql'
+        self.assertEqual(approved.read_bytes(), CALL_RECEIPTS.read_bytes())
+        for seeded in (False, True):
+            with self.subTest(seeded=seeded):
+                db = app_database()
+                self.addCleanup(db.close)
+                db.apply_sql(CALL_DEADLINES)
+                if seeded:
+                    db.admin("""
+                        WITH friend AS (INSERT INTO marong.friends(name) VALUES ('Fixture') RETURNING id),
+                        caller AS (INSERT INTO call.callers(friend_id) SELECT id FROM friend RETURNING id)
+                        INSERT INTO call.calls(caller_id,status,client_id,prompt_version,voice,ended_at,end_reason,
+                                               organize_status,notice_first_connected_at,notice_connection_deadline_at)
+                        SELECT id,'resting',%s,'fixture','Fixture',NULL,NULL,'none',now(),now() + interval '120s' FROM caller
+                        UNION ALL
+                        SELECT id,'ended',%s,'fixture','Fixture',now(),'hangup','pending',now(),NULL FROM caller
+                    """, (uuid4(), uuid4()))
+                field = 'notice_receipt_expires_at'
+                rows = "SELECT to_jsonb(c)-%s::text FROM call.calls c ORDER BY id"
+                columns = """
+                    SELECT attname,format_type(atttypid,atttypmod),attnotnull,atthasdef,attacl
+                    FROM pg_attribute WHERE attrelid='call.calls'::regclass AND attnum>0 AND NOT attisdropped
+                    ORDER BY attnum
+                """
+                acl = "SELECT relowner,relacl FROM pg_class WHERE oid='call.calls'::regclass"
+                before = (db.admin(rows, (field,)), db.admin(columns), db.admin(acl))
+                db.admin('CREATE ROLE notice_receipt_fixture_public')
+                for _ in range(2):
+                    db.apply_sql(CALL_RECEIPTS)
+                    after = db.admin(columns)
+                    self.assertEqual((db.admin(rows, (field,)), after[:-1], db.admin(acl)), before)
+                    self.assertEqual(after[-1], (field, 'timestamp with time zone', False, False, None))
+                    self.assertEqual(db.admin(f'SELECT {field} FROM call.calls'), [(None,)] * len(before[0]))
+                for role, allowed in (('marong_call', True), ('marong', False), ('notice_receipt_fixture_public', False)):
+                    for privilege in ('SELECT', 'UPDATE'):
+                        self.assertEqual(db.admin("SELECT has_column_privilege(%s,'call.calls',%s,%s)",
+                                                  (role, field, privilege)), [(allowed,)])
+
     def test_deadline_migration_on_empty_and_existing_calls(self):
         fields = ('notice_first_connected_at', 'notice_connection_deadline_at')
         approved = ROOT / 'docs' / '05-erd' / '012_notice_call_deadlines.draft.sql'

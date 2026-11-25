@@ -12,7 +12,7 @@
     const hour = (new Date(Date.now() + 9 * 3600000)).getUTCHours();
     document.documentElement.dataset.theme = hour >= 8 && hour < 20 ? 'chestnut' : 'night';
     title.focus();
-    const reference = web?.takeCall();
+    const reference = web?.takeCall()?.reference;
     const login = document.getElementById('notice-login');
     if (login && reference) login.addEventListener('click', () => web.preserveReference(reference, '/chat/'));
     const retry = document.getElementById('notice-retry');
@@ -35,11 +35,14 @@
   const controls = document.getElementById('notice-controls');
   const mute = document.getElementById('mute');
   const status = document.getElementById('status');
-  const reference = web?.takeCall(page.dataset.navigation);
+  const handoff = web?.takeCall(page.dataset.navigation);
+  const reference = handoff?.reference;
   delete page.dataset.navigation;
   const client = page.dataset.clientId;
   delete page.dataset.clientId;
-  const ordinary = page.dataset.purpose === 'ordinary';
+  const redial = page.dataset.purpose === 'redial';
+  const ordinary = page.dataset.purpose === 'ordinary' || redial;
+  const ordinaryState = redial ? 'ring_answered' : 'ring_expired';
   const installation = web?.proof();
   const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
   const token = /^[A-Za-z0-9_-]{48,768}$/;
@@ -105,7 +108,7 @@
   }
 
   function resolve() {
-    return web.request('/target/resolve', 'POST', {targetRef: reference}, undefined, client);
+    return web.request('/target/resolve', 'POST', {targetRef: reference}, undefined, client, handoff?.redialChoice);
   }
 
   function returnToLookup() {
@@ -124,7 +127,7 @@
   async function inspect() {
     const run = ++version;
     if (!current()) { show('denied'); return; }
-    if (!ordinary) {
+    if (!ordinary || redial) {
       const subscribed = await web.request('/subscription');
       if (run !== version) return;
       if (subscribed.status !== 200) { failed(subscribed, 'offline'); return; }
@@ -133,7 +136,7 @@
     const result = await resolve();
     if (run !== version) return;
     if (result.status === 200 && ['ring_ready', 'ring_expired', 'ring_answered', 'ring_unavailable'].includes(result.data?.state)) {
-      if (ordinary && result.data.state === 'ring_expired') show('ordinary');
+      if (ordinary && result.data.state === ordinaryState) show('ordinary');
       else if (ordinary || result.data.state === 'ring_expired') returnToLookup();
       else show(result.data.state);
     } else lookupRejected(result.status === 200 ? {status: 404} : result, 'offline');
@@ -160,8 +163,9 @@
     if (run !== version) return false;
     if (verified.status !== 200) { lookupRejected(verified, 'offline'); return false; }
     if (mode === 'ordinary') {
-      if (!ordinary || verified.data?.state !== 'ring_expired') { returnToLookup(); return false; }
+      if (!ordinary || verified.data?.state !== ordinaryState) { returnToLookup(); return false; }
       frame = {type: 'start_ordinary', clientId, installationProof: installation, targetRef: reference};
+      if (redial) frame.redialChoice = handoff.redialChoice;
     } else {
       if (ordinary || verified.data?.state === 'ring_expired') { returnToLookup(); return false; }
       pending = mode;
@@ -218,7 +222,7 @@
     if (run !== version) return;
     if (result.status !== 200) { lookupRejected(result, 'checking'); return; }
     if (frame && ((frame.type === 'start_notified' && result.data?.state === 'ring_answered')
-        || (frame.type === 'start_ordinary' && expected && result.data?.state === 'ring_expired'))) {
+        || (frame.type === 'start_ordinary' && expected && result.data?.state === ordinaryState))) {
       start('resume');
     } else show('ended');
   }

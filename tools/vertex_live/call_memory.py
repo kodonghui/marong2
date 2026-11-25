@@ -25,7 +25,7 @@ from marong.room_scope import writing_room
 from marong.friend_scope import RELATIONSHIP, accepted_circle
 from marong.relative_time import relative_time
 from marong.usage import Usage, configured_limit
-from marong.web_notice_call_protocol import notice_client
+from marong.web_notice_call_protocol import RECEIPT_AGE, notice_client
 from marong.web_push_subscriptions import lock_installation
 
 
@@ -478,7 +478,7 @@ class MemoryStore:
         return connection is not None and connection.recovering
 
     async def reserve_notice_ring(self, p, client_id, voice, version, ring_id, *, legacy=False, session=None,
-                                  installation=None, validate_installation=None):
+                                  installation=None, validate_installation=None, target_until=None):
         """Reserve the existing call and promise atomically under caller then ring locks."""
         scene = ",scene_picture_id" if self.scene_rings else ""
         async with asyncio.timeout(3), self.pool.connection() as c, c.transaction():
@@ -501,12 +501,16 @@ class MemoryStore:
                 raise NoticeRingState("not_found")
             subscription_until = await validate_installation() if validate_installation is not None else None
             now = await self._notice_time(c)
+            if target_until is not None and target_until <= now:
+                raise NoticeRingState("not_found")
             if session_until is not None and session_until <= now:
                 raise NoticeRingState("login_required")
             if subscription_until is not None and subscription_until <= now.timestamp() * 1000:
                 raise NoticeRingState("not_allowed")
             if ring["status"] == "answered":
                 deadline_column = ",notice_connection_deadline_at" if self.notice_deadlines and not legacy else ""
+                if target_until is not None:
+                    deadline_column += ",notice_receipt_expires_at"
                 match = await (await c.execute(f"""SELECT id,started_at,client_id,entrypoint,status,deleted_at{deadline_column}
                     FROM call.calls WHERE id=%s AND caller_id=%s FOR UPDATE""",
                     (ring["call_id"], p.caller_id))).fetchone()
@@ -525,7 +529,8 @@ class MemoryStore:
                 if legacy:
                     await c.execute("UPDATE call.calls SET status='live',last_beat_at=now() WHERE id=%s",
                                     (match["id"],))
-                return str(match["id"]), True, match["started_at"], {**ring, "fresh": False}
+                return str(match["id"]), True, match["started_at"], {
+                    **ring, "fresh": False, "receipt_until": match.get("notice_receipt_expires_at")}
             if ring["answer_until"] <= now and ring["status"] in {"ringing", "missed"}:
                 if legacy:
                     return None
@@ -542,21 +547,30 @@ class MemoryStore:
                 FROM actual WHERE id=%s AND status='ringing' AND answer_until>actual.now
                   AND (%s::bigint IS NULL OR %s>extract(epoch FROM actual.now)*1000)
                   AND (%s::timestamptz IS NULL OR %s>actual.now)
+                  AND (%s::timestamptz IS NULL OR %s>actual.now)
                 RETURNING actual.now AS at
             """, (self.notice_clock() if self.notice_clock is not None else None, call_id, ring_id,
-                  subscription_until, subscription_until, session_until, session_until))).fetchone()
+                  subscription_until, subscription_until, session_until, session_until, target_until, target_until))).fetchone()
             if saved is None:
                 # Raising undoes the call reservation if the deadline passed while reserving it.
-                now = datetime.now(timezone.utc)
+                now = await self._notice_time(c)
                 if session_until is not None and session_until <= now:
                     raise NoticeRingState("login_required")
                 if subscription_until is not None and subscription_until <= now.timestamp() * 1000:
                     raise NoticeRingState("not_allowed")
+                if target_until is not None and target_until <= now:
+                    raise NoticeRingState("not_found")
                 raise NoticeRingState("ring_expired")
             if self.notice_deadlines and not legacy:
                 await c.execute("UPDATE call.calls SET notice_connection_deadline_at=%s WHERE id=%s",
                                 (saved["at"] + NOTICE_CONNECTION_WINDOW, call_id))
-            return call_id, resumed, started_at, {**ring, "fresh": True, "waited": saved["at"] - ring["created_at"]}
+            receipt_until = None
+            if target_until is not None:
+                receipt_until = min(target_until, session_until, saved["at"] + RECEIPT_AGE)
+                await c.execute("UPDATE call.calls SET notice_receipt_expires_at=%s WHERE id=%s",
+                                (receipt_until, call_id))
+            return call_id, resumed, started_at, {**ring, "fresh": True, "waited": saved["at"] - ring["created_at"],
+                                                 "receipt_until": receipt_until}
 
     @staticmethod
     async def _notice_session(c, p, session):
@@ -569,7 +583,7 @@ class MemoryStore:
         return row["expires_at"]
 
     async def start_notice_ordinary(self, p, client_id, voice, version, ring_id, session, *, installation,
-                                    verify_document):
+                                    verify_document, verify_redial=None):
         async with asyncio.timeout(3), self.pool.connection() as c, c.transaction():
             session_until = await self._notice_session(c, p, session)
             await lock_installation(c, installation)
@@ -586,11 +600,16 @@ class MemoryStore:
             now = datetime.now(timezone.utc)
             if session_until <= now:
                 raise NoticeRingState("login_required")
-            if verify_document(now) != ring_id:
+            if verify_document is not None and verify_document(now) != ring_id:
                 raise NoticeRingState("not_allowed")
-            if ring["status"] == "answered":
+            if verify_redial is not None:
+                check = await verify_redial()
+                if ring["status"] != "answered" or not await self.notice_ended(
+                        c, p.friend_id, session, ring_id, check(), lock=True):
+                    raise NoticeRingState("not_allowed")
+            elif ring["status"] == "answered":
                 raise NoticeRingState("ring_answered")
-            if ring["status"] not in {"ringing", "missed"} or ring["answer_until"] > now:
+            elif ring["status"] not in {"ringing", "missed"} or ring["answer_until"] > now:
                 raise NoticeRingState("ring_unavailable")
             previous = await (await c.execute("""
                 SELECT c.status,c.deleted_at FROM call.calls c
@@ -604,7 +623,25 @@ class MemoryStore:
             now = datetime.now(timezone.utc)
             if session_until <= now:
                 raise NoticeRingState("login_required")
+            if verify_redial is not None:
+                check()
             return (*started, None)
+
+    @staticmethod
+    async def notice_ended(c, friend, session, ring, claim, *, lock=False):
+        result = await (await c.execute("""
+            SELECT 1 FROM marong.app_rings r
+            JOIN call.callers p ON p.id=r.caller_id
+            JOIN call.calls prior ON prior.id=r.call_id AND prior.caller_id=p.id
+            JOIN marong.app_sessions s ON s.id=%s AND s.friend_id=p.friend_id
+            WHERE r.id=%s AND p.friend_id=%s AND r.reason='promise' AND r.status='answered'
+              AND p.enabled AND s.revoked_at IS NULL AND s.expires_at>clock_timestamp()
+              AND prior.id=%s AND prior.client_id=%s AND prior.entrypoint='web'
+              AND prior.status='ended' AND prior.ended_at IS NOT NULL AND prior.deleted_at IS NULL
+              AND prior.notice_receipt_expires_at=%s AND prior.notice_receipt_expires_at>clock_timestamp()
+        """ + (" FOR SHARE OF prior" if lock else ""), (session, ring, friend, claim.call, claim.owner,
+                                                        claim.expires))).fetchone()
+        return result is not None
 
     async def attach_notice_call(self, p, client_id, call_id, ring_id, session):
         scene = ",scene_picture_id" if self.scene_rings else ""

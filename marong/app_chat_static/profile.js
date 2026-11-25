@@ -239,7 +239,11 @@
     const quit = button('로그아웃', async () => {
       quit.disabled = cancel.disabled = true;
       const reply = await request('/chat/api/logout', undefined, 'POST');
-      if (reply.status === 204) { location.replace('/chat/login'); return; }
+      if (reply.status === 204) {
+        window.MarongWebNotifications?.cleanReceipts(true);
+        location.replace('/chat/login');
+        return;
+      }
       quit.disabled = cancel.disabled = false;
       problem(reply);
     }, 'btn2 danger');

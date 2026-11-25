@@ -5,6 +5,7 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 import json
 import secrets
+import subprocess
 import sys
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
@@ -18,7 +19,7 @@ import http_ece
 import jwt
 from psycopg import OperationalError
 
-from test_web_push_schema import CALL_DEADLINES, MIGRATION, ROOT, app_database, session
+from test_web_push_schema import CALL_DEADLINES, CALL_RECEIPTS, MIGRATION, ROOT, app_database, session
 from marong.app_chat import AppChat
 from marong.app_push import AppPush
 from marong.app_session import AppSessions, COOKIE, token_hash
@@ -30,7 +31,8 @@ from marong.web_push_subscriptions import (
     installation_id,
 )
 from marong.web_push_targets import NoticeReferences
-from marong.web_notice_call_protocol import INSTALLATION_CHECK_PATH, SUBPROTOCOL, NoticeCallProtocol, client_uuid
+from marong.web_notice_call_protocol import (BRIDGE_HEADER, ENDED_PATH, INSTALLATION_CHECK_PATH, READ_BRIDGE_HEADER,
+    RECEIPT_EXPIRES_HEADER, RECEIPT_HEADER, REDIAL_HEADER, SUBPROTOCOL, NoticeCallProtocol, client_uuid)
 
 
 ORIGIN = "https://fixture.invalid"
@@ -74,7 +76,7 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
     def setUpClass(cls):
         cls.db = app_database()
         cls.addClassCleanup(cls.db.close)
-        cls.db.apply_sql(CALL_DEADLINES, MIGRATION)
+        cls.db.apply_sql(CALL_DEADLINES, CALL_RECEIPTS, MIGRATION)
 
     async def asyncSetUp(self):
         self.now = datetime.now(timezone.utc).replace(microsecond=0)
@@ -96,7 +98,8 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
                                             vapid_public_keys={"fixture": self.public_key},
                                             now=lambda: self.now, monotonic=lambda: self.monotonic,
                                             resolve=AsyncMock(return_value=("1.1.1.1",)))
-        self.references = NoticeReferences(secrets.token_bytes(32), timedelta(days=1))
+        self.reference_key = secrets.token_bytes(32)
+        self.references = NoticeReferences(self.reference_key, timedelta(days=1))
         self.transport = Mock()
         self.transport.prepare = AsyncMock(side_effect=lambda *args, **kwargs: FakeRequest())
         self.delivery = WebPushDelivery(self.service, self.references, self.transport, origin=ORIGIN,
@@ -597,9 +600,11 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         store = MemoryStore(call_db, notice_deadlines=True)
         await store.open()
         self.addAsyncCleanup(store.close)
-        protocol = NoticeCallProtocol(secrets.token_bytes(32), self.references)
+        self.notice_key = secrets.token_bytes(32)
+        protocol = NoticeCallProtocol(self.notice_key, self.references)
         call_app = web.Application()
         call_app.router.add_post("/internal/web-notification/accept", server.notice_accept)
+        call_app.router.add_post(ENDED_PATH, server.notice_ended)
         call_app.router.add_get("/live/web-notification", server.notice_live)
         call_app.router.add_get("/live", server.live)
         call_app.router.add_post("/api/rtc", server.rtc_config)
@@ -622,6 +627,9 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         call_bridge = patch("marong.app_chat.CALL_BRIDGE", str(call_site.make_url("/internal/web-notification/accept")))
         call_bridge.start()
         self.addCleanup(call_bridge.stop)
+        ended_bridge = patch("marong.app_chat.ENDED_BRIDGE", str(call_site.make_url(ENDED_PATH)))
+        ended_bridge.start()
+        self.addCleanup(ended_bridge.stop)
         self.chat.web_push_call = protocol
         public = TestClient(TestServer(self.chat.web_app()))
         await public.start_server()
@@ -741,6 +749,317 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
         client = protocol.bound_client(who['friend_id'], self.sid, installation_id(self.proof),
                                        client_uuid(request['clientId']))
         return ring, request, accepted, client
+
+    async def test_ended_notice_redial_choice_after_normal_hangup_and_relay_reopen(self):
+        server, store, protocol, who = await self.call_fixture()
+        await self.register_fixture(proof=self.other_proof)
+        await self.register_fixture()
+        from call_memory import Principal
+        import live_session
+        from test_relay import HTTP, Upstream, event
+
+        ring = self.ring(who, until=3600)
+        reference = self.references.seal('call', who['friend_id'], ring, self.now)
+        answer = await self.answer_body(reference)
+        accepted = await self.request('POST', ACCEPT, body=answer)
+        call = (await accepted.json())['callId']
+        receipt = accepted.headers[RECEIPT_HEADER]
+        expiry = accepted.headers[RECEIPT_EXPIRES_HEADER]
+        repeated = await self.request('POST', ACCEPT, body=answer)
+        self.assertEqual((await repeated.json())['callId'], call)
+        self.assertEqual(repeated.headers[RECEIPT_EXPIRES_HEADER], expiry)
+
+        async def lookup(**kwargs):
+            response = await self.request('POST', RESOLVE, body={'targetRef': reference},
+                                          headers={RECEIPT_HEADER: receipt}, **kwargs)
+            self.assertEqual(await response.json(), {'state': 'ring_answered'})
+            self.assertEqual(response.headers['Cache-Control'], 'no-store')
+            return response.headers.get(REDIAL_HEADER)
+
+        self.assertIsNone(await lookup())
+        pending_call = self.notice_call_state(call)
+        deadline = pending_call[2]
+        for offset in (-1, 0, 1):
+            store.notice_clock = lambda: deadline + timedelta(microseconds=offset)
+            self.assertIsNone(await lookup())
+            self.assertEqual(self.notice_call_state(call), pending_call)
+        store.notice_clock = None
+        principal = Principal(who['caller_id'], who['friend_id'], 'Fixture', 0, unified=True)
+        owner = protocol.bound_client(who['friend_id'], self.sid, installation_id(self.proof),
+                                      client_uuid(answer['clientId']))
+        attached = (await store.attach_notice_call(principal, owner, call, ring, self.sid))[-1]
+        await store.confirm_notice_connection(principal, attached)
+        self.assertIsNone(await lookup())
+        await store.finish_notice_connection(principal, attached, explicit=True)
+        original = self.notice_call_state(call)
+        ring_query = 'SELECT status,call_id,answered_at FROM marong.app_rings WHERE id=%s'
+        answer_history = self.db.admin(ring_query, (ring,))
+        original_subscription = self.row()
+        self.assertIsNone(await lookup(proof=self.other_proof))
+        public = await self.request('POST', RESOLVE, body={'targetRef': reference})
+        self.assertNotIn(REDIAL_HEADER, public.headers)
+        choice = await lookup()
+        self.assertIsNotNone(choice)
+        self.assertIsNotNone(await lookup())
+        self.assertEqual(self.row(), original_subscription)
+        self.assertEqual(self.notice_call_state(call), original)
+        self.assertEqual(self.db.admin(ring_query, (ring,)), answer_history)
+        refresh = await self.select('refresh')
+        await self.state(await self.request('PUT', SUB, choice=refresh, body=self.subscription()), 'active')
+        another_choice = await lookup()
+        self.assertIsNotNone(another_choice)
+
+        headers = {'Cookie': f'{COOKIE}={self.token}'}
+        async def open_document(selected):
+            form = {'targetRef': reference, 'installationProof': self.proof, 'navigation': uuid4().hex,
+                    'redialChoice': selected}
+            return await self.client.post('/chat/notice-call', data=form, headers=headers | {'Origin': ORIGIN})
+
+        denied = await open_document(receipt)
+        self.assertEqual(denied.status, 403)
+        self.assertIn('microphone=()', denied.headers['Permissions-Policy'])
+        direct = await self.client.get('/chat/notice-call', headers=headers)
+        self.assertIn('microphone=()', direct.headers['Permissions-Policy'])
+        doc = await open_document(choice)
+        self.assertEqual(doc.status, 200)
+        self.assertIn('microphone=(self)', doc.headers['Permissions-Policy'])
+        self.assertEqual(doc.headers['Cache-Control'], 'no-store')
+        markup = await doc.text()
+        self.assertIn('data-purpose="redial"', markup)
+        for secret in (choice, receipt, reference, self.proof):
+            self.assertNotIn(secret, markup)
+        client = markup.split('data-client-id="', 1)[1].split('"', 1)[0]
+        doc_check = await self.request('POST', RESOLVE, body={'targetRef': reference},
+                                       headers={REDIAL_HEADER: choice, 'X-Marong-Notice-Document': client})
+        self.assertEqual(await doc_check.json(), {'state': 'ring_answered'})
+        rejected_answer = await self.request('POST', ACCEPT, body={'targetRef': reference, 'clientId': client})
+        self.assertEqual(rejected_answer.status, 403)
+
+        ident = installation_id(self.proof)
+        async with self.store.pool.connection() as conn:
+            consent, _ = await self.service.active_consent(conn, ident, self.sid, self.now)
+        scope = protocol.receipt_scope(who['friend_id'], self.sid, ident, reference, consent)
+        claim = protocol.check_redial(scope, receipt, self.now)
+        expired = protocol.redial_choice(scope, claim, self.now - timedelta(minutes=5))
+        self.assertEqual((await open_document(expired)).status, 403)
+
+        bridge = self.call_site.make_url(ENDED_PATH)
+        read_body = {'friend': who['friend_id'], 'session': self.sid, 'targetRef': reference, 'receipt': receipt,
+                     'choice': False, 'consent': 'a' * 43}
+        for auth in ({BRIDGE_HEADER: protocol.bridge_secret}, {READ_BRIDGE_HEADER: protocol.read_secret}):
+            async with self.client.session.post(bridge, json=read_body, headers=auth) as response:
+                self.assertEqual(response.status, 404)
+        writer = self.call_site.make_url('/internal/web-notification/accept')
+        async with self.client.session.post(writer, json=answer, headers={READ_BRIDGE_HEADER: protocol.read_secret}) as response:
+            self.assertEqual(response.status, 404)
+
+        frame = {'type': 'start_ordinary', 'clientId': client, 'installationProof': self.proof,
+                 'targetRef': reference, 'redialChoice': choice}
+        endpoint = self.call_site.make_url('/live/web-notification')
+        async def sockets(url):
+            return await self.client.session.ws_connect(url, protocols=[SUBPROTOCOL],
+                                                        headers=headers | {'Origin': str(url.origin())})
+
+        async with await sockets(endpoint) as ws:
+            await ws.send_json(frame | {'clientId': str(protocol.redial_document(expired)), 'redialChoice': expired})
+            self.assertEqual(await ws.receive_json(timeout=3), {'type': 'not_allowed'})
+
+        with (patch.object(server, 'google_headers', AsyncMock(return_value={})),
+              patch.object(live_session, 'ClientSession', side_effect=lambda *a, **k: HTTP(Upstream()))):
+            async with await sockets(endpoint) as ws:
+                await ws.send_json(frame)
+                ready = await event(ws, 'ready')
+                self.assertFalse(ready['ring'])
+                replacement = ready['callId']
+                self.assertNotEqual(replacement, call)
+                slot = server.active_calls[who['friend_id']]
+                async with await sockets(endpoint) as competing:
+                    await competing.send_json(frame | {'clientId': str(protocol.redial_document(another_choice)),
+                                                       'redialChoice': another_choice})
+                    self.assertEqual(await competing.receive_json(timeout=3), {'type': 'call_busy'})
+                await ws.send_json({'type': 'stop'})
+                await asyncio.wait_for(slot.released.wait(), 5)
+        self.assertEqual(self.notice_call_state(replacement)[::4], ('ended', 'hangup'))
+        self.assertEqual(self.db.admin('SELECT notice_receipt_expires_at FROM call.calls WHERE id=%s', (replacement,)),
+                         [(None,)])
+        # The same choice still opens its document. A fresh relay process has no previous socket
+        # state, so rejecting the start depends on the recorded ordinary call.
+        retry_doc = await open_document(choice)
+        self.assertEqual(retry_doc.status, 200)
+        self.assertIn(f'data-client-id="{client}"', await retry_doc.text())
+        from yarl import URL
+        child_code = '''
+import asyncio, json, sys
+from datetime import timedelta
+from unittest.mock import AsyncMock, Mock
+from aiohttp import web
+from aiohttp.test_utils import TestServer
+sys.path.insert(0, 'tools/vertex_live')
+import server
+from marong.web_notice_call_protocol import NoticeCallProtocol
+from marong.web_push_targets import NoticeReferences
+
+async def main():
+    dsn, auth_key, ref_key, installation_check = json.loads(sys.stdin.readline())
+    store = server.MemoryStore(dsn, notice_deadlines=True)
+    await store.open()
+    server.memory_store = store
+    server.NOTICE_CALL = NoticeCallProtocol(bytes.fromhex(auth_key), NoticeReferences(bytes.fromhex(ref_key), timedelta(days=1)))
+    server.AUTHENTICATION = 'session'
+    server.NOTICE_CHECK = installation_check
+    server.budget_status = AsyncMock(return_value='ok')
+    server.person_budget_blocked = AsyncMock(return_value=False)
+    store.daily_usage.blocked = AsyncMock(return_value=False)
+    server.LiveSession = Mock(side_effect=AssertionError('unexpected call startup'))
+    app = web.Application()
+    app.router.add_get('/live/web-notification', server.notice_live)
+    try:
+        async with TestServer(app) as site:
+            print(site.make_url('/live/web-notification'), flush=True)
+            await asyncio.to_thread(sys.stdin.readline)
+        server.LiveSession.assert_not_called()
+    finally:
+        await store.close()
+
+asyncio.run(main(), loop_factory=asyncio.SelectorEventLoop)
+'''
+        with subprocess.Popen([sys.executable, '-c', child_code], cwd=ROOT, stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True) as relay:
+            config = [self.db.admin_url.replace('postgres:@', 'marong_call@', 1), self.notice_key.hex(),
+                      self.reference_key.hex(), server.NOTICE_CHECK]
+            try:
+                relay.stdin.write(json.dumps(config) + '\n')
+                relay.stdin.flush()
+                endpoint_line = await asyncio.wait_for(asyncio.to_thread(relay.stdout.readline), 8)
+                self.assertTrue(endpoint_line.startswith('http://127.0.0.1:'))
+                async with await sockets(URL(endpoint_line.strip())) as ws:
+                    await ws.send_json(frame)
+                    self.assertEqual(await ws.receive_json(timeout=3), {'type': 'ring_unavailable'})
+            finally:
+                if relay.poll() is None:
+                    try:
+                        relay.stdin.write('\n')
+                        relay.stdin.flush()
+                        await asyncio.to_thread(relay.wait, 5)
+                    except (OSError, subprocess.TimeoutExpired):
+                        relay.terminate()
+            self.assertEqual(relay.returncode, 0)
+        self.assertEqual(self.db.admin('SELECT count(*) FROM call.calls WHERE caller_id=%s', (who['caller_id'],)), [(2,)])
+        self.assertEqual(self.db.admin(ring_query, (ring,)), answer_history)
+        self.assertEqual(self.notice_call_state(call), original)
+
+        revoke = await self.select('revoke')
+        await self.state(await self.request('DELETE', SUB, choice=revoke), 'revoked')
+        self.assertIsNone(await lookup())
+        self.assertEqual((await open_document(choice)).status, 403)
+        await self.register_fixture()
+        self.assertIsNone(await lookup())
+        self.assertEqual((await open_document(choice)).status, 403)
+
+    async def test_notice_receipt_keeps_locked_session_cutoff_across_renewal_and_result_retry(self):
+        server, _, _, who = await self.call_fixture()
+        await self.register_fixture()
+        from marong.app_session import find_session
+
+        original_until = self.now + timedelta(hours=3)
+        renewed_at = self.now + timedelta(hours=2)
+        self.db.admin('UPDATE marong.app_sessions SET last_seen_at=%s,expires_at=%s WHERE id=%s',
+                      (self.now - timedelta(hours=23), original_until, self.sid))
+        ring = self.ring(who, until=3600)
+        reference = self.references.seal('call', who['friend_id'], ring, self.now)
+        answer = await self.answer_body(reference)
+        checked, release = asyncio.Event(), asyncio.Event()
+        validation = server.validate_notice_installation
+
+        async def pause_after_subscription(*args):
+            verified = await validation(*args)
+            checked.set()
+            await release.wait()
+            return verified
+
+        with patch.object(server, 'validate_notice_installation', side_effect=pause_after_subscription):
+            first = asyncio.create_task(self.request('POST', ACCEPT, body=answer))
+            await asyncio.wait_for(checked.wait(), 2)
+            renewal = asyncio.create_task(find_session(self.store.pool, self.token, clock=lambda: renewed_at,
+                                                       age=timedelta(days=2)))
+            try:
+                async with asyncio.timeout(1.5):
+                    while not self.db.admin("""
+                        SELECT 1 FROM pg_stat_activity WHERE usename='marong' AND wait_event_type='Lock'
+                          AND query LIKE '%%UPDATE marong.app_sessions SET last_seen_at=%%'
+                    """):
+                        await asyncio.sleep(0.01)
+            finally:
+                release.set()
+            accepted = await first
+            self.assertTrue((await renewal)['renewed'])
+        self.assertEqual(accepted.status, 200)
+        call = (await accepted.json())['callId']
+        expiry = accepted.headers[RECEIPT_EXPIRES_HEADER]
+        self.assertEqual(datetime.fromisoformat(expiry), original_until)
+        self.assertEqual(self.db.admin('SELECT expires_at FROM marong.app_sessions WHERE id=%s', (self.sid,)),
+                         [(renewed_at + timedelta(days=2),)])
+
+        replay = await self.request('POST', ACCEPT, body=answer)
+        self.assertEqual((await replay.json())['callId'], call)
+        self.assertIn(RECEIPT_HEADER, replay.headers)
+        self.assertEqual(replay.headers[RECEIPT_EXPIRES_HEADER], expiry)
+        self.assertEqual(self.db.admin('SELECT notice_receipt_expires_at FROM call.calls WHERE id=%s', (call,)),
+                         [(original_until,)])
+        self.assertEqual(self.db.admin('SELECT count(*) FROM call.calls WHERE caller_id=%s', (who['caller_id'],)), [(1,)])
+
+    async def test_notice_receipt_uses_target_and_first_acceptance_bounds_and_rolls_back(self):
+        _, store, _, who = await self.call_fixture()
+        await self.register_fixture()
+        from call_memory import Principal
+        principal = Principal(who['caller_id'], who['friend_id'], 'Fixture', 0, unified=True)
+        self.db.admin('UPDATE marong.app_sessions SET expires_at=%s WHERE id=%s',
+                      (self.now + timedelta(days=5), self.sid))
+        for age in (timedelta(hours=2), timedelta(days=3)):
+            with self.subTest(age=age):
+                self.references.age = age
+                ring = self.ring(who, until=3600)
+                reference = self.references.seal('call', who['friend_id'], ring, self.now)
+                body = await self.answer_body(reference)
+                if age < timedelta(days=1):
+                    actual = self.now
+                    store.notice_clock = lambda: actual
+                    start_locked = store._start_locked
+
+                    async def pass_reference_boundary(*args, **kwargs):
+                        nonlocal actual
+                        inserted = await start_locked(*args, **kwargs)
+                        actual = self.now + age
+                        return inserted
+
+                    with patch.object(store, '_start_locked', side_effect=pass_reference_boundary):
+                        rejected = await self.request('POST', ACCEPT, body=body)
+                    await self.problem(rejected, 404, 'not_found')
+                    self.assertNotIn(RECEIPT_HEADER, rejected.headers)
+                    self.assertEqual(self.db.admin('SELECT count(*) FROM call.calls WHERE caller_id=%s',
+                                                   (who['caller_id'],)), [(0,)])
+                    self.assertEqual(self.db.admin('SELECT status,call_id,answered_at FROM marong.app_rings WHERE id=%s',
+                                                   (ring,)), [('ringing', None, None)])
+                    store.notice_clock = None
+                accepted = await self.request('POST', ACCEPT, body=body)
+                self.assertEqual(accepted.status, 200)
+                call = (await accepted.json())['callId']
+                (answered, stored), = self.db.admin("""
+                    SELECT r.answered_at,c.notice_receipt_expires_at FROM marong.app_rings r
+                    JOIN call.calls c ON c.id=r.call_id WHERE r.id=%s
+                """, (ring,))
+                expiry = min(self.now + age, answered + timedelta(days=1))
+                self.assertEqual(stored, expiry)
+                self.assertEqual(datetime.fromisoformat(accepted.headers[RECEIPT_EXPIRES_HEADER]), expiry)
+                if age < timedelta(days=1):
+                    self.db.admin('UPDATE call.calls SET notice_receipt_expires_at=NULL WHERE id=%s', (call,))
+                    old = await self.request('POST', ACCEPT, body=body)
+                    self.assertEqual((await old.json())['callId'], call)
+                    self.assertNotIn(RECEIPT_HEADER, old.headers)
+                (owner,), = self.db.admin('SELECT client_id FROM call.calls WHERE id=%s', (call,))
+                connection = (await store.attach_notice_call(principal, str(owner), call, ring, self.sid))[-1]
+                await store.confirm_notice_connection(principal, connection)
+                await store.finish_notice_connection(principal, connection, explicit=True)
 
     async def test_notice_first_connection_deadline_and_unanswered_preparation(self):
         from call_memory import NoticeRingState, Principal
@@ -1576,10 +1895,17 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
                          WHERE id=%s""", (accepted["callId"],))
         original_history = self.db.admin("SELECT status,call_id,answered_at FROM marong.app_rings WHERE id=%s", (ring,))
         original_call = self.notice_call_state(accepted['callId'])
-        expired = self.ring(who, until=-5)
+        expired = self.ring(who)
+        self.db.admin('UPDATE marong.app_rings SET answer_until=%s WHERE id=%s',
+                      (self.now - timedelta(seconds=1), expired))
         reference = self.references.seal("call", who["friend_id"], expired, self.now)
-        ident = installation_id(self.proof)
-        ordinary_client = str(protocol.document_client(self.sid, ident, reference, None))
+        lookup = await self.request('POST', RESOLVE, body={'targetRef': reference})
+        choice = lookup.headers['X-Marong-Ordinary-Choice']
+        form = {'targetRef': reference, 'installationProof': self.proof, 'navigation': uuid4().hex,
+                'ordinaryChoice': choice}
+        async with self.client.post('/chat/notice-call', data=form, headers=headers | {'Origin': ORIGIN}) as document:
+            self.assertEqual(document.status, 200)
+            ordinary_client = (await document.text()).split('data-client-id="', 1)[1].split('"', 1)[0]
         ordinary = {"type": "start_ordinary", "clientId": ordinary_client, "installationProof": self.proof,
                     "targetRef": reference}
         with (patch.object(server, "google_headers", AsyncMock(return_value={})),
@@ -1598,6 +1924,8 @@ class WebPushSubscriptionTests(unittest.IsolatedAsyncioTestCase):
                          [("ringing", None)])
         count = self.db.admin("SELECT count(*) FROM call.calls WHERE caller_id=%s", (who["caller_id"],))
         self.assertEqual(count, [(2,)])
+        lookup = await self.request('POST', RESOLVE, body={'targetRef': reference})
+        self.assertEqual(lookup.headers['X-Marong-Ordinary-Choice'], choice)
 
         # Recreate the relay's local state. The target and document are still valid, so rejection
         # has to come from the finished call row rather than an expired credential or an active slot.

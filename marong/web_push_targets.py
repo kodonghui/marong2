@@ -1,6 +1,6 @@
 """Sealed notification references and the read-only API-314 resolver (TASK-572)."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import re
 import secrets
 from uuid import UUID
@@ -36,6 +36,10 @@ class NoticeReferences:
         return encode(nonce + self._key.encrypt(nonce, tag + expires + target, associated))
 
     def open(self, reference, friend, now):
+        kind, target, _ = self.open_with_expiry(reference, friend, now)
+        return kind, target
+
+    def open_with_expiry(self, reference, friend, now):
         if not isinstance(reference, str) or not _REFERENCE.fullmatch(reference):
             raise SessionError("invalid_input")
         associated = b"marong:notice-target:v1\0" + friend.to_bytes(8, "big")
@@ -45,12 +49,13 @@ class NoticeReferences:
         except (InvalidTag, ValueError):
             raise SessionError("not_found") from None
         tag, milliseconds, target = content[:1], content[1:9], content[9:]
-        if int.from_bytes(milliseconds, "big") <= now.timestamp() * 1000:
+        expires = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=int.from_bytes(milliseconds, "big"))
+        if expires <= now:
             raise SessionError("not_found")
         if tag == _CALL_KIND and len(target) == 16:
-            return "call", UUID(bytes=target)
+            return "call", UUID(bytes=target), expires
         if tag in _MESSAGE_KINDS.values() and len(target) == 8:
-            return "message", int.from_bytes(target, "big")
+            return "message", int.from_bytes(target, "big"), expires
         raise SessionError("not_found")
 
 

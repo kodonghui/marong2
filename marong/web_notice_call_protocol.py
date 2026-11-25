@@ -1,6 +1,7 @@
 """Shared authentication and wire constants for API-315 and API-317."""
 
-from datetime import timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 import hmac
 import re
 import secrets
@@ -15,11 +16,22 @@ from .web_push_targets import NoticeReferences
 
 
 CALL_BRIDGE = "http://127.0.0.1:8792/internal/web-notification/accept"
+ENDED_PATH = "/internal/web-notification/ended"
+ENDED_BRIDGE = f"http://127.0.0.1:8792{ENDED_PATH}"
 INSTALLATION_CHECK_PATH = "/internal/web-notification/installation"
 BRIDGE_HEADER = "X-Marong-Call-Bridge"
+READ_BRIDGE_HEADER = "X-Marong-Call-Read-Bridge"
 ORDINARY_CHOICE_HEADER = "X-Marong-Ordinary-Choice"
+RECEIPT_HEADER = "X-Marong-Notice-Receipt"
+RECEIPT_EXPIRES_HEADER = "X-Marong-Notice-Receipt-Expires"
+REDIAL_HEADER = "X-Marong-Redial-Choice"
+CONSENT_HEADER = "X-Marong-Notice-Consent"
 SUBPROTOCOL = "marong-notified-v1"
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_MICROSECOND = timedelta(microseconds=1)
+REDIAL_AGE = timedelta(minutes=5)
+RECEIPT_AGE = timedelta(hours=24)
 
 
 def client_uuid(value):
@@ -40,12 +52,23 @@ def _notice_uuid(data):
     return UUID(bytes=bytes(raw))
 
 
+@dataclass(frozen=True)
+class NoticeReceipt:
+    call: UUID
+    owner: UUID
+    expires: datetime
+
+
 class NoticeCallProtocol:
     def __init__(self, challenge_key, references):
         self.bridge_secret = encode(hmac.digest(challenge_key, b"marong:notice-call:bridge:v1", "sha256"))
+        self.read_secret = encode(hmac.digest(challenge_key, b"marong:notice-call:read:v1", "sha256"))
         self._client_key = hmac.digest(challenge_key, b"marong:notice-call:client:v1", "sha256")
         self._document_key = hmac.digest(challenge_key, b"marong:notice-call:document:v1", "sha256")
         self._ordinary_key = hmac.digest(challenge_key, b"marong:notice-call:ordinary:v1", "sha256")
+        self._receipt_key = AESGCM(hmac.digest(challenge_key, b"marong:notice-call:receipt:v1", "sha256"))
+        self._redial_key = AESGCM(hmac.digest(challenge_key, b"marong:notice-call:redial:v1", "sha256"))
+        self._redial_document_key = hmac.digest(challenge_key, b"marong:notice-call:redial-document:v1", "sha256")
         # Only the locked API-315 check of a server-issued answer document may mint v2 tokens.
         self._secret = AESGCM(hmac.digest(challenge_key, b"marong:notice-call:token:v2", "sha256"))
         self.references = references
@@ -86,6 +109,44 @@ class NoticeCallProtocol:
     def ordinary_choice(self, sid, ident, reference):
         domain = b"choice\0" + sid.to_bytes(8, "big") + ident.bytes + reference.encode("ascii")
         return encode(hmac.digest(self._ordinary_key, domain, "sha256"))
+
+    @staticmethod
+    def receipt_scope(friend, sid, ident, reference, consent):
+        return friend.to_bytes(8, "big") + sid.to_bytes(8, "big") + ident.bytes + consent.encode("ascii") + reference.encode("ascii")
+
+    def receipt(self, scope, claim):
+        return self._seal_redial(self._receipt_key, scope, claim, claim.expires)
+
+    def redial_choice(self, scope, claim, now):
+        return self._seal_redial(self._redial_key, scope, claim, min(claim.expires, now + REDIAL_AGE))
+
+    @staticmethod
+    def _seal_redial(key, scope, claim, until):
+        nonce = secrets.token_bytes(12)
+        plain = (claim.call.bytes + claim.owner.bytes + ((claim.expires - _EPOCH) // _MICROSECOND).to_bytes(8, "big")
+                 + ((until - _EPOCH) // _MICROSECOND).to_bytes(8, "big"))
+        return encode(nonce + key.encrypt(nonce, plain, scope))
+
+    def check_redial(self, scope, token, now, *, choice=False):
+        if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{102}", token):
+            raise SessionError("not_allowed")
+        key = self._redial_key if choice else self._receipt_key
+        try:
+            raw = decode(token)
+            if encode(raw) != token:
+                raise ValueError
+            plain = key.decrypt(raw[:12], raw[12:], scope)
+            expires = _EPOCH + timedelta(microseconds=int.from_bytes(plain[32:40], "big"))
+            until = _EPOCH + timedelta(microseconds=int.from_bytes(plain[40:], "big"))
+        except (InvalidTag, ValueError, OverflowError):
+            raise SessionError("not_allowed") from None
+        if not now < until <= expires:
+            raise SessionError("not_allowed")
+        return NoticeReceipt(UUID(bytes=plain[:16]), UUID(bytes=plain[16:32]), expires)
+
+    def redial_document(self, choice):
+        # A new document for the same choice must use the same persistent call client.
+        return _notice_uuid(hmac.digest(self._redial_document_key, choice.encode("ascii"), "sha256"))
 
     @staticmethod
     def _aad(sid, ident, client):

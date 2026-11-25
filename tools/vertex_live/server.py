@@ -18,8 +18,9 @@ from marong.pet_app_settings import pet_voice_enabled
 from marong.unified_prompt import (ACCEPTED_FRIENDSHIPS, CHARACTER_PROFILE, PET_INTRO_COLUMNS, character_section, clean,
                                   common_prompt, marker_positions, particle)
 from marong.usage import configured_call_limit, effective_limits
-from marong.web_notice_call_protocol import (BRIDGE_HEADER, INSTALLATION_CHECK_PATH, SUBPROTOCOL, NoticeCallProtocol,
-                                             client_uuid, notice_client)
+from marong.web_notice_call_protocol import (BRIDGE_HEADER, CONSENT_HEADER, ENDED_PATH, INSTALLATION_CHECK_PATH,
+    READ_BRIDGE_HEADER, RECEIPT_EXPIRES_HEADER, RECEIPT_HEADER, SUBPROTOCOL, NoticeCallProtocol, NoticeReceipt,
+    client_uuid, notice_client)
 from marong.web_push_subscriptions import INSTALLATION_HEADER, installation_id
 from live_session import LiveSession, BUILD
 from call_cost import BLOCKED, budget_status, personal_budget_blocked
@@ -463,7 +464,9 @@ async def validate_notice_installation(session, proof, data):
                                  allow_redirects=False) as result:
                 if result.status == 204:
                     expires = result.headers.get('X-Marong-Subscription-Expires')
-                    return int(expires) if expires is not None else None
+                    consent = result.headers.get(CONSENT_HEADER, '')
+                    if re.fullmatch(r'[A-Za-z0-9_-]{43}', consent):
+                        return consent, int(expires) if expires is not None else None
                 if result.status == 403:
                     raise SessionError('not_allowed')
     except (ClientError, TimeoutError, ValueError):
@@ -488,7 +491,8 @@ async def notice_accept(req):
         authn = await notice_identity(req)
         person = authn['principal']
         now = datetime.now(timezone.utc)
-        kind, ring = NOTICE_CALL.references.open(data['targetRef'], person.friend_id, now)
+        reference = data['targetRef']
+        kind, ring, target_until = NOTICE_CALL.references.open_with_expiry(reference, person.friend_id, now)
         if kind != 'call':
             raise SessionError('not_found')
         sid = authn['session']
@@ -529,11 +533,25 @@ async def notice_accept(req):
                 raise SessionError('budget_exhausted')
             if await memory_store.daily_usage.blocked(person.friend_id):
                 raise SessionError('daily_limit')
-        validate = partial(validate_notice_installation, sid, req.headers[INSTALLATION_HEADER], data)
-        call, *_ = await memory_store.reserve_notice_ring(person, cid, chosen_voice(authn['voice']), BUILD, ring,
-                                                         session=sid, installation=ident, validate_installation=validate)
-        connect = NOTICE_CALL.issue(authn['session'], ident, client, call, ring, datetime.now(timezone.utc))
-        return web.json_response({'state': 'accepted', 'callId': call, 'connectToken': connect})
+        consent = None
+
+        async def validate():
+            nonlocal consent
+            consent, subscription_until = await validate_notice_installation(sid, req.headers[INSTALLATION_HEADER], data)
+            return subscription_until
+
+        call, _, _, saved = await memory_store.reserve_notice_ring(
+            person, cid, chosen_voice(authn['voice']), BUILD, ring, session=sid, installation=ident,
+            validate_installation=validate, target_until=target_until)
+        now = datetime.now(timezone.utc)
+        connect = NOTICE_CALL.issue(sid, ident, client, call, ring, now)
+        headers = {'Cache-Control': 'no-store'}
+        until = saved['receipt_until']
+        if until is not None and now < until:
+            scope = NOTICE_CALL.receipt_scope(person.friend_id, sid, ident, reference, consent)
+            headers[RECEIPT_HEADER] = NOTICE_CALL.receipt(scope, NoticeReceipt(uuid.UUID(call), uuid.UUID(cid), until))
+            headers[RECEIPT_EXPIRES_HEADER] = until.isoformat()
+        return web.json_response({'state': 'accepted', 'callId': call, 'connectToken': connect}, headers=headers)
     except NoticeRingState as error:
         if error.state in {'ring_expired', 'ring_answered', 'ring_unavailable'}:
             return web.json_response({'state': error.state})
@@ -547,6 +565,37 @@ async def notice_accept(req):
     except Exception as error:
         print('notice_accept_error', type(error).__name__, flush=True)
         return notice_failure('internal')
+
+
+async def notice_ended(req):
+    if (NOTICE_CALL is None or memory_store is None or req.remote not in {'127.0.0.1', '::1'}
+            or not hmac.compare_digest(req.headers.get(READ_BRIDGE_HEADER, ''), NOTICE_CALL.read_secret)):
+        raise web.HTTPNotFound()
+    try:
+        if req.content_type != 'application/json' or not 0 < (req.content_length or 0) <= 2048:
+            raise ValueError
+        data = await req.json()
+        if not isinstance(data, dict) or set(data) != {'friend', 'session', 'targetRef', 'consent', 'receipt', 'choice'}:
+            raise ValueError
+        friend, sid, reference, consent = (data[key] for key in ('friend', 'session', 'targetRef', 'consent'))
+        if (any(type(value) is not int or not 0 < value < 2**63 for value in (friend, sid))
+                or type(data['choice']) is not bool or not isinstance(consent, str)
+                or not re.fullmatch(r'[A-Za-z0-9_-]{43}', consent)):
+            raise ValueError
+        ident = installation_id(req.headers.get(INSTALLATION_HEADER))
+        now = datetime.now(timezone.utc)
+        kind, ring = NOTICE_CALL.references.open(reference, friend, now)
+        if kind != 'call':
+            raise ValueError
+        scope = NOTICE_CALL.receipt_scope(friend, sid, ident, reference, consent)
+        claim = NOTICE_CALL.check_redial(scope, data['receipt'], now, choice=data['choice'])
+        async with asyncio.timeout(2), memory_store.pool.connection() as conn:
+            ended = await memory_store.notice_ended(conn, friend, sid, ring, claim)
+        return web.Response(status=204 if ended else 404, headers={'Cache-Control': 'no-store'})
+    except (SessionError, ValueError, RecursionError):
+        raise web.HTTPNotFound() from None
+    except (psycopg.OperationalError, TimeoutError):
+        raise web.HTTPServiceUnavailable() from None
 
 
 async def notice_live(req):
@@ -592,7 +641,9 @@ async def notice_start(ws, authn):
         raise SessionError('invalid_input')
     mode = data.get('type')
     extra = 'connectToken' if mode == 'start_notified' else 'targetRef'
-    if mode not in ('start_notified', 'start_ordinary') or set(data) != {'type', 'clientId', 'installationProof', extra}:
+    fields = {'type', 'clientId', 'installationProof', extra}
+    if (mode not in ('start_notified', 'start_ordinary') or set(data) != fields
+            and not (mode == 'start_ordinary' and set(data) == fields | {'redialChoice'})):
         raise SessionError('invalid_input')
     proof = data['installationProof']
     ident = installation_id(proof)
@@ -611,12 +662,42 @@ async def notice_start(ws, authn):
         return cid, str(client), call, ring, {}
     reference = data[extra]
 
-    def verify_ordinary_document(checked_at):
+    def ordinary_target(checked_at):
         try:
             kind, target = NOTICE_CALL.references.open(reference, person.friend_id, checked_at)
         except SessionError as error:
             raise SessionError('not_allowed' if error.code == 'not_found' else error.code) from None
-        if kind != 'call' or not NOTICE_CALL.matches_document(sid, ident, reference, None, client):
+        if kind != 'call':
+            raise SessionError('not_allowed')
+        return target
+
+    if 'redialChoice' in data:
+        choice = data['redialChoice']
+        if (not isinstance(choice, str) or not re.fullmatch(r'[A-Za-z0-9_-]{102}', choice)
+                or client != NOTICE_CALL.redial_document(choice)):
+            raise SessionError('not_allowed')
+        ring = ordinary_target(now)
+
+        async def verify_redial():
+            consent, subscription_until = await validate_notice_installation(
+                sid, proof, {'targetRef': reference, 'clientId': str(client), 'redialChoice': choice})
+            scope = NOTICE_CALL.receipt_scope(person.friend_id, sid, ident, reference, consent)
+
+            def check():
+                now = datetime.now(timezone.utc)
+                ordinary_target(now)
+                if subscription_until is not None and subscription_until <= now.timestamp() * 1000:
+                    raise SessionError('not_allowed')
+                return NOTICE_CALL.check_redial(scope, choice, now, choice=True)
+
+            return check
+
+        return cid, str(client), None, ring, {'installation': ident, 'verify_document': None,
+                                            'verify_redial': verify_redial}
+
+    def verify_ordinary_document(checked_at):
+        target = ordinary_target(checked_at)
+        if not NOTICE_CALL.matches_document(sid, ident, reference, None, client):
             raise SessionError('not_allowed')
         return target
 
@@ -922,6 +1003,7 @@ app.router.add_get('/status',status)
 app.router.add_get('/live',live)
 app.router.add_get('/live/web-notification',notice_live)
 app.router.add_post('/internal/web-notification/accept',notice_accept)
+app.router.add_post(ENDED_PATH, notice_ended)
 app.router.add_get('/face/v1/{name}',face)
 app.router.add_get('/',static)
 app.router.add_get('/{file}',static)

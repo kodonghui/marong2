@@ -1080,6 +1080,8 @@ async function openNotice(reference) {
       if (subscription.status === 200 && subscription.data?.state === 'active'
           && webNotifications.openCall(reference, previousFocus)) { submitted = true; return; }
     }
+    const redial = response.status === 200 && response.data?.state === 'ring_answered'
+      && document.body.dataset.noticeCallEnabled === 'true' && response.redialChoice;
     const ringState = {
       ring_ready: ['약속 전화가 와 있어', '화면을 열기만 해서는 수락하지 않아.'],
       ring_expired: ['약속 전화 시간이 지났어', '더 이상 이 약속 전화를 받을 수 없어.'],
@@ -1087,13 +1089,15 @@ async function openNotice(reference) {
       ring_unavailable: ['지금은 이 전화를 받을 수 없어', '현재 확인한 상태로는 이 약속 전화를 연결할 수 없어.'],
     }[response.status === 200 ? response.data?.state : ''];
     if (ringState) {
-      show(...ringState, response.data.state === 'ring_unavailable');
-      if (response.data.state === 'ring_expired' && response.ordinaryChoice
-          && document.body.dataset.noticeCallEnabled === 'true') {
+      if (redial) show('통화가 끝났어', '기존 통화에 다시 연결할 수 없어. 원하면 새로 전화를 걸 수 있어.');
+      else show(...ringState, response.data.state === 'ring_unavailable');
+      if (redial || (response.data.state === 'ring_expired' && response.ordinaryChoice
+          && document.body.dataset.noticeCallEnabled === 'true')) {
         ordinary.hidden = false;
+        ordinary.textContent = redial ? '다시 걸기' : '일반 통화';
         ordinary.onclick = () => {
           if (submitted) return;
-          submitted = webNotifications.openCall(reference, previousFocus, response.ordinaryChoice);
+          submitted = webNotifications.openCall(reference, previousFocus, response.ordinaryChoice, redial || undefined);
           if (!submitted) void verify();
         };
       }

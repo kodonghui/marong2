@@ -10,9 +10,43 @@
   const handoffKey = 'marong.web-notifications.navigation';
   const callHandoffKey = 'marong.web-notifications.call-navigation';
   const chatFocusKey = 'marong.web-notifications.chat-focus';
+  const receiptPrefix = 'marong.web-notifications.receipt.';
   const referencePattern = /^[A-Za-z0-9_-]{48,768}$/;
+  const receiptPattern = /^[A-Za-z0-9_-]{102}$/;
   let reference = null;
   let refreshSettings;
+  let receiptGeneration = 0;
+
+  function cleanReceipts(all = false) {
+    if (all) receiptGeneration++;
+    if (!installed) return;
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (!key?.startsWith(receiptPrefix)) continue;
+        if (all || !readReceipt(key)) localStorage.removeItem(key);
+      }
+    } catch { /* browser storage can be unavailable */ }
+  }
+
+  function readReceipt(key) {
+    try {
+      const entry = JSON.parse(localStorage.getItem(key));
+      if (typeof entry?.receipt === 'string' && receiptPattern.test(entry.receipt)
+          && entry.until > Date.now()) return entry.receipt;
+    } catch { /* corrupted or unavailable browser storage */ }
+    return null;
+  }
+
+  async function receiptKey(target) {
+    if (!installed || !referencePattern.test(target)) return null;
+    try {
+      const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(target));
+      return receiptPrefix + Array.from(new Uint8Array(hash), n => n.toString(16).padStart(2, '0')).join('');
+    } catch { return null; }
+  }
+
+  cleanReceipts();
 
   if (supported) {
     navigator.serviceWorker.addEventListener?.('message', event => {
@@ -85,12 +119,12 @@
     }
   }
 
-  function openCall(reference, focus, ordinaryChoice) {
+  function openCall(reference, focus, ordinaryChoice, redialChoice) {
     const device = proof();
     if (!device || document.body.dataset.noticeCallEnabled !== 'true' || !referencePattern.test(reference)) return false;
     try {
       const navigation = crypto.randomUUID().replaceAll('-', '');
-      sessionStorage.setItem(callHandoffKey, JSON.stringify({reference, navigation, until: Date.now() + 60000}));
+      sessionStorage.setItem(callHandoffKey, JSON.stringify({reference, navigation, redialChoice, until: Date.now() + 60000}));
       if (focus) sessionStorage.setItem(chatFocusKey, focus);
       const form = document.createElement('form');
       form.hidden = true;
@@ -98,6 +132,7 @@
       form.method = 'post';
       const fields = {targetRef: reference, installationProof: device, navigation};
       if (ordinaryChoice) fields.ordinaryChoice = ordinaryChoice;
+      if (redialChoice) fields.redialChoice = redialChoice;
       for (const [name, value] of Object.entries(fields)) {
         const input = document.createElement('input');
         input.type = 'hidden';
@@ -120,7 +155,7 @@
       sessionStorage.removeItem(callHandoffKey);
       const saved = JSON.parse(raw);
       if (installed && saved && saved.until > Date.now() && referencePattern.test(saved.reference)
-          && (navigation === undefined || saved.navigation === navigation)) return saved.reference;
+          && (navigation === undefined || saved.navigation === navigation)) return saved;
     } catch { /* storage can be unavailable */ }
     return null;
   }
@@ -133,12 +168,20 @@
     } catch { /* storage can be unavailable */ }
   }
 
-  async function request(path, method = 'GET', body, choice, documentClient) {
+  async function request(path, method = 'GET', body, choice, documentClient, redialChoice) {
     const device = proof(true);
     if (!device) return {status: 0};
     const headers = {'X-Marong-Installation': device, Accept: 'application/json'};
     if (choice) headers['X-Marong-Choice'] = choice;
     if (documentClient) headers['X-Marong-Notice-Document'] = documentClient;
+    if (redialChoice) headers['X-Marong-Redial-Choice'] = redialChoice;
+    const generation = receiptGeneration;
+    const targetKey = (path === '/target/resolve' && !documentClient || path === '/call/accept')
+      ? await receiptKey(body?.targetRef) : null;
+    if (targetKey && path === '/target/resolve') {
+      const receipt = readReceipt(targetKey);
+      if (receipt) headers['X-Marong-Notice-Receipt'] = receipt;
+    }
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
@@ -148,8 +191,17 @@
     try {
       const reply = await fetch(api + path, options);
       const data = await reply.json().catch(() => null);
+      if (targetKey && path === '/call/accept' && reply.ok && data?.state === 'accepted'
+          && generation === receiptGeneration) {
+        const receipt = reply.headers.get('X-Marong-Notice-Receipt');
+        const until = Date.parse(reply.headers.get('X-Marong-Notice-Receipt-Expires'));
+        if (receipt && receiptPattern.test(receipt) && until > Date.now()) {
+          try { localStorage.setItem(targetKey, JSON.stringify({receipt, until})); } catch { /* storage is optional */ }
+        }
+      }
+      if (reply.ok && path === '/subscription' && (method === 'DELETE' || data?.state === 'revoked')) cleanReceipts(true);
       return {status: reply.status, data, wait: Number(reply.headers.get('Retry-After')) || 0,
-        ordinaryChoice: reply.headers.get('X-Marong-Ordinary-Choice')};
+        ordinaryChoice: reply.headers.get('X-Marong-Ordinary-Choice'), redialChoice: reply.headers.get('X-Marong-Redial-Choice')};
     } catch {
       return {status: 0};
     } finally {
@@ -310,5 +362,5 @@
   }
 
   window.MarongWebNotifications = {apple, installed, supported, proof, request, settings, capture,
-    preserve, preserveReference, pending, restore, clear, openCall, takeCall, restoreChatFocus};
+    preserve, preserveReference, pending, restore, clear, openCall, takeCall, restoreChatFocus, cleanReceipts};
 })();

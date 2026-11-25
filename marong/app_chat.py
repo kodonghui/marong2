@@ -35,8 +35,8 @@ from .google_calendar import LINK_MARK, command as google_command
 from .topics import KEY as TOPIC_KEY, NAME as PICTURE_NAME, SET_NAME, phrase as topic_phrase, picture_set
 from .web_push_subscriptions import CHOICE_HEADER, INSTALLATION_HEADER, PATH as WEB_NOTICE_PATH, installation_id, lock_installation
 from .web_push_targets import resolve_target, visible_message
-from .web_notice_call_protocol import (BRIDGE_HEADER, CALL_BRIDGE, INSTALLATION_CHECK_PATH, ORDINARY_CHOICE_HEADER,
-                                       client_uuid)
+from .web_notice_call_protocol import (BRIDGE_HEADER, CALL_BRIDGE, CONSENT_HEADER, ENDED_BRIDGE, INSTALLATION_CHECK_PATH,
+    ORDINARY_CHOICE_HEADER, READ_BRIDGE_HEADER, RECEIPT_EXPIRES_HEADER, RECEIPT_HEADER, REDIAL_HEADER, client_uuid)
 
 log = logging.getLogger("marong.app")
 DEFAULT_PORT = 8796
@@ -330,10 +330,12 @@ class AppChat:
             raise SessionError("invalid_input") from None
         values = dict(pairs)
         required = {"targetRef", "installationProof", "navigation"}
-        if (len(pairs) != len(values) or set(values) not in (required, required | {"ordinaryChoice"})
+        if (len(pairs) != len(values) or set(values) not in (required, required | {"ordinaryChoice"},
+                                                            required | {"redialChoice"})
                 or not re.fullmatch(r"[A-Za-z0-9_-]{48,768}", values["targetRef"])
                 or not re.fullmatch(r"[0-9a-f]{32}", values["navigation"])
-                or ("ordinaryChoice" in values and not re.fullmatch(r"[A-Za-z0-9_-]{43}", values["ordinaryChoice"]))):
+                or ("ordinaryChoice" in values and not re.fullmatch(r"[A-Za-z0-9_-]{43}", values["ordinaryChoice"]))
+                or ("redialChoice" in values and not re.fullmatch(r"[A-Za-z0-9_-]{102}", values["redialChoice"]))):
             raise SessionError("invalid_input")
         return values
 
@@ -372,13 +374,25 @@ class AppChat:
             protocol = self.web_push_call
             reference = form["targetRef"]
             choice = form.get("ordinaryChoice")
-            async with subscriptions.authenticated(req.cookies.get(COOKIE), ident, write=True) as (conn, session, _):
+            redial = form.get("redialChoice")
+            token = req.cookies.get(COOKIE)
+            if redial:
+                async with subscriptions.authenticated(token, ident) as (conn, session, now):
+                    scope, consent, _ = await self._redial_scope(conn, session, ident, reference, now)
+                    protocol.check_redial(scope, redial, now, choice=True)
+                if not await self._notice_ended(form["installationProof"], session, reference, consent, redial,
+                                                choice=True):
+                    raise SessionError("not_allowed")
+            async with subscriptions.authenticated(token, ident, write=True) as (conn, session, _):
                 await lock_installation(conn, ident)
                 now = subscriptions.now()
                 if session["expires_at"] <= now:
                     raise SessionError("login_required")
                 sid = session["id"]
-                if choice:
+                if redial:
+                    scope, _, _ = await self._redial_scope(conn, session, ident, reference, now)
+                    protocol.check_redial(scope, redial, now, choice=True)
+                elif choice:
                     if not hmac.compare_digest(choice, protocol.ordinary_choice(sid, ident, reference)):
                         raise SessionError("not_allowed")
                     consent = None
@@ -397,10 +411,13 @@ class AppChat:
                             return self._notice_call_failure("expired", 403)
                         raise
                 result = await resolve_target(conn, self.store, self.web_push_references, session, reference, now,
-                                              require_enabled_caller=bool(choice))
+                                              require_enabled_caller=bool(choice or redial))
                 if choice and result["state"] != "ring_expired":
                     return self._notice_call_failure("unavailable", 403)
-                call_client = protocol.document_client(sid, ident, reference, consent)
+                if redial and result["state"] != "ring_answered":
+                    raise SessionError("not_allowed")
+                call_client = (protocol.redial_document(redial) if redial
+                               else protocol.document_client(sid, ident, reference, consent))
         except SessionError as error:
             state, status = {
                 "login_required": ("login", 401), "not_allowed": ("denied", 403),
@@ -414,18 +431,19 @@ class AppChat:
             log.error("notice_call_page_error %s trace=%s", type(error).__name__, req["trace_id"])
             return self._notice_call_failure("offline", 500)
         state = result["state"]
-        if state == "ring_answered":
+        if state == "ring_answered" and not redial:
             return self._notice_call_failure("answered", 200)
         if state == "ring_unavailable":
             return self._notice_call_failure("unavailable", 200)
         if state == "ring_expired" and not choice:
             return self._notice_call_failure("expired", 200)
-        if state not in {"ring_ready", "ring_expired"}:
+        if state not in {"ring_ready", "ring_expired", "ring_answered"}:
             return self._notice_call_failure("denied", 404)
         # Opaque document identifiers only. Do not echo the reference or installation proof.
         data = self.files["notice-call.html"][0].replace(b"@NAVIGATION@", form["navigation"].encode("ascii"))
         data = data.replace(b"@CALL_CLIENT@", str(call_client).encode("ascii"))
-        data = data.replace(b"@PURPOSE@", b"ordinary" if choice else b"answer")
+        purpose = b"redial" if redial else b"ordinary" if choice else b"answer"
+        data = data.replace(b"@PURPOSE@", purpose)
         req["notice_call_document"] = True
         return web.Response(body=data, content_type="text/html", charset="utf-8")
 
@@ -482,6 +500,9 @@ class AppChat:
         reference = body["targetRef"]
         if not isinstance(reference, str) or not re.fullmatch(r"[A-Za-z0-9_-]{48,768}", reference):
             raise SessionError("invalid_input")
+        receipt = req.headers.get(RECEIPT_HEADER)
+        redial = req.headers.get(REDIAL_HEADER)
+        claim = None
         async with self.web_push_subscriptions.authenticated(token, ident) as (conn, session, now):
             protocol = self.web_push_call
             sid = session["id"]
@@ -494,18 +515,59 @@ class AppChat:
                 ordinary = protocol.matches_document(sid, ident, reference, None, client)
             result = await resolve_target(conn, self.store, self.web_push_references, session, reference, now,
                                           require_enabled_caller=ordinary)
-            if document is not None and not ordinary:
+            if redial is not None:
+                if (document is None or not re.fullmatch(r"[A-Za-z0-9_-]{102}", redial)
+                        or client != protocol.redial_document(redial) or result["state"] != "ring_answered"):
+                    raise SessionError("not_allowed")
+                scope, consent, _ = await self._redial_scope(conn, session, ident, reference, now)
+                protocol.check_redial(scope, redial, now, choice=True)
+            elif document is not None and not ordinary:
                 await self._check_notice_consent(conn, ident, sid, now, client, reference)
+            if protocol is not None and document is None and receipt and result["state"] == "ring_answered":
+                try:
+                    scope, consent, consent_until = await self._redial_scope(conn, session, ident, reference, now)
+                    claim = protocol.check_redial(scope, receipt, now)
+                except SessionError:
+                    pass  # The original read response remains available without a receipt.
             response = self._json(200, result)
             if protocol is not None and document is None and result["state"] == "ring_expired":
                 response.headers[ORDINARY_CHOICE_HEADER] = protocol.ordinary_choice(sid, ident, reference)
+        if redial is not None:
+            if not await self._notice_ended(req.headers[INSTALLATION_HEADER], session, reference, consent, redial,
+                                            choice=True):
+                raise SessionError("not_allowed")
+        elif claim is not None and await self._notice_ended(req.headers[INSTALLATION_HEADER], session, reference,
+                                                           consent, receipt):
+            now = self.web_push_subscriptions.now()
+            if (now < min(claim.expires, session["expires_at"])
+                    and (consent_until is None or now.timestamp() * 1000 < consent_until)):
+                response.headers[REDIAL_HEADER] = protocol.redial_choice(scope, claim, now)
         return response
 
-    async def _check_notice_consent(self, conn, ident, sid, now, client, reference):
+    async def _redial_scope(self, conn, session, ident, reference, now):
+        consent, expires = await self.web_push_subscriptions.active_consent(conn, ident, session["id"], now)
+        scope = self.web_push_call.receipt_scope(session["friend_id"], session["id"], ident, reference, consent)
+        return scope, consent, expires
+
+    async def _notice_ended(self, proof, session, reference, consent, receipt, *, choice=False):
+        # No app transaction is held across this read-only call.
+        headers = {READ_BRIDGE_HEADER: self.web_push_call.read_secret, INSTALLATION_HEADER: proof}
+        body = {"friend": session["friend_id"], "session": session["id"], "targetRef": reference,
+                "consent": consent, "receipt": receipt, "choice": choice}
+        try:
+            async with ClientSession(timeout=ClientTimeout(total=2)) as bridge:
+                async with bridge.post(ENDED_BRIDGE, headers=headers, json=body, allow_redirects=False) as response:
+                    return response.status == 204
+        except (ClientError, TimeoutError):
+            return False
+
+    async def _check_notice_consent(self, conn, ident, sid, now, client, reference, *, redial=None):
         consent, expires = await self.web_push_subscriptions.active_consent(conn, ident, sid, now)
-        if not self.web_push_call.matches_document(sid, ident, reference, consent, client):
+        matches = (client == self.web_push_call.redial_document(redial) if redial is not None
+                   else self.web_push_call.matches_document(sid, ident, reference, consent, client))
+        if not matches:
             raise SessionError("not_allowed")
-        return expires
+        return consent, expires
 
     async def notice_installation_check(self, req):
         # Only the loopback call server asks while it holds the session and installation locks.
@@ -513,17 +575,23 @@ class AppChat:
                 or not hmac.compare_digest(req.headers.get(BRIDGE_HEADER, ""), self.web_push_call.bridge_secret)):
             raise web.HTTPNotFound()
         body = await self._web_notice_body(req, 2048)
-        if (set(body) != {"session", "targetRef", "clientId"} or type(body["session"]) is not int
+        fields = {"session", "targetRef", "clientId"}
+        redial = body.get("redialChoice")
+        if (set(body) not in (fields, fields | {"redialChoice"}) or type(body["session"]) is not int
                 or not 0 < body["session"] < 2**63
+                or ("redialChoice" in body and (not isinstance(redial, str)
+                                               or not re.fullmatch(r"[A-Za-z0-9_-]{102}", redial)))
                 or not isinstance(body["targetRef"], str) or not re.fullmatch(r"[A-Za-z0-9_-]{48,768}", body["targetRef"])):
             raise SessionError("invalid_input")
         ident = installation_id(req.headers.get(INSTALLATION_HEADER))
         client = client_uuid(body["clientId"])
         subscriptions = self.web_push_subscriptions
         async with asyncio.timeout(2), subscriptions.pool.connection() as conn:
-            expires = await self._check_notice_consent(conn, ident, body["session"], subscriptions.now(), client,
-                                                       body["targetRef"])
-        headers = {"X-Marong-Subscription-Expires": str(expires)} if expires is not None else None
+            consent, expires = await self._check_notice_consent(conn, ident, body["session"], subscriptions.now(), client,
+                                                                body["targetRef"], redial=redial)
+        headers = {CONSENT_HEADER: consent, "Cache-Control": "no-store"}
+        if expires is not None:
+            headers["X-Marong-Subscription-Expires"] = str(expires)
         return web.Response(status=204, headers=headers)
 
     async def web_notice_reply_view(self, req):
@@ -569,10 +637,15 @@ class AppChat:
                                        allow_redirects=False) as response:
                     status, result = response.status, await response.json()
                     retry_after = response.headers.get("Retry-After")
+                    receipt = {name: response.headers[name] for name in (RECEIPT_HEADER, RECEIPT_EXPIRES_HEADER)
+                               if name in response.headers}
         except (ClientError, TimeoutError, ValueError):
             raise SessionError("db_unavailable") from None
         if status == 200 and isinstance(result, dict):
-            return self._json(200, result)
+            result_response = self._json(200, result)
+            if result.get("state") == "accepted" and len(receipt) == 2:
+                result_response.headers.update(receipt)
+            return result_response
         code = result.get("code") if isinstance(result, dict) else None
         if (status, code) not in WEB_CALL_ERRORS:
             raise SessionError("db_unavailable")

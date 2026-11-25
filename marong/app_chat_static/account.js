@@ -106,7 +106,10 @@
         'POST', installationHeaders());
       submit.textContent = buttonText;
       submit.disabled = name.disabled = false;
-      if (reply.status === 201) showDone(reply.body);
+      if (reply.status === 201) {
+        window.MarongWebNotifications?.cleanReceipts(true);
+        showDone(reply.body);
+      }
       else if (reply.body?.code === 'invalid_input') signal(error, '이름은 1~12자로 적어 줘');
       else inviteError(reply, () => form.requestSubmit());
     });
@@ -204,7 +207,11 @@
       submit.disabled = input.disabled = true;
       submit.textContent = '확인하는 중이야…';
       const reply = await request(api + '/login/code', {code: input.value}, 'POST', installationHeaders());
-      if (reply.status === 200) { continueToChat(); return; }
+      if (reply.status === 200) {
+        window.MarongWebNotifications?.cleanReceipts(true);
+        continueToChat();
+        return;
+      }
       submit.textContent = '들어가기';
       input.disabled = false;
       if (reply.body?.code === 'code_wrong') {
