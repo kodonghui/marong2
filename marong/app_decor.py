@@ -7,7 +7,7 @@ from aiohttp import web
 
 from .app_chat import Problem
 from .app_session import SessionError, one
-from .character.http import positive_id
+from .character.http import CharacterError, positive_id
 from .decor import CONTENT, ITEM_ID, KINDS, WEAR
 
 
@@ -157,14 +157,28 @@ class AppDecor:
 
     async def outfit(self, req):
         friend = await self.friend(req, write=True)
-        ident = positive_id(req.match_info["id"])
+        try:
+            ident = positive_id(req.match_info["id"])
+        except CharacterError:
+            raise Problem("invalid_input", [{"field": "id", "reason": "bad_format"}]) from None
         try:
             picks = await self.chat._body(req)
         except Problem:
-            raise Problem("invalid_input") from None
-        if picks.keys() != set(WEAR):
-            raise Problem("invalid_input")
-        ids = [self.item_key(picks[slot]) for slot in WEAR if picks[slot] is not None]
+            raise Problem("invalid_input", [{"field": "request", "reason": "bad_format"}]) from None
+        errors = []
+        if set(picks) - set(WEAR):
+            errors.append({"field": "request", "reason": "bad_format"})
+        ids = []
+        for slot in WEAR:
+            if slot not in picks:
+                errors.append({"field": slot, "reason": "required"})
+            elif picks[slot] is not None:
+                try:
+                    ids.append(self.item_key(picks[slot]))
+                except Problem:
+                    errors.append({"field": slot, "reason": "bad_format"})
+        if errors:
+            raise Problem("invalid_input", errors)
         async with self.store.pool.connection() as conn, conn.transaction():
             character = await one(conn, """
                 SELECT template,status FROM marong.characters WHERE id=%s AND friend_id=%s FOR UPDATE
@@ -176,9 +190,10 @@ class AppDecor:
             owned = await self.owned_items(conn, friend, ids)
             if set(ids) != owned.keys():
                 raise Problem("not_owned")
-            for slot, item in picks.items():
-                if item and owned[item]["slot"] != slot:
-                    raise Problem("invalid_input")
+            errors = [{"field": slot, "reason": "wrong_kind"} for slot in WEAR
+                      if picks[slot] and owned[picks[slot]]["slot"] != slot]
+            if errors:
+                raise Problem("invalid_input", errors)
             prior = await one(conn, "SELECT head,body,neck FROM marong.outfits WHERE character_id=%s", (ident,))
             if prior != picks:
                 await conn.execute("""

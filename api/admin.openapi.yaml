@@ -31,6 +31,40 @@ info:
 servers:
 - url: https://marong.corthex-hq.com
 paths:
+  /chat/admin/api/items/{itemId}/thumbnail:
+    get:
+      operationId: getAdminItemThumbnail
+      summary: 관리자 아이템 썸네일
+      description: SCR-186이 쓰는 관리자 전용 썸네일. 목록에서 아이템을 찾고 종류에 따라 thumb.webp 또는 sticker.webp만 내려요. SPEC-395의 Access 관리자만 허용하며 앱 로그인 쿠키는 보지 않아요(D188). 꾸미기 꺼짐, 없는 아이템 또는 파일은 404예요. 요청 값으로 파일 경로를 만들지 않아요.
+      security:
+      - cfAccess: []
+      x-corthex:
+        id: API-318
+        spec:
+        - SPEC-417
+        - SPEC-395
+      parameters:
+      - name: itemId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 썸네일 WebP, Cache-Control no-store
+          content:
+            image/webp:
+              schema:
+                type: string
+                contentMediaType: image/webp
+        '403':
+          description: Access 증명이 없거나 관리자가 아님 (not_allowed)
+        '404':
+          description: 꾸미기 꺼짐 또는 아이템이나 썸네일 없음 (not_found)
+        '500':
+          description: 내부 오류
+        '503':
+          description: 서비스 사용 불가
   /chat/admin/api/overview:
     get:
       operationId: getAdminOverview

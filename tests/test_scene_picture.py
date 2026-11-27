@@ -2,7 +2,9 @@
 
 import asyncio
 import base64
+import logging
 from datetime import timedelta
+from dataclasses import replace
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
@@ -21,6 +23,7 @@ from marong.app_chat import AppChat
 from marong.app_push import AppPush
 from marong.app_session import AppSessions, COOKIE
 from marong.diary import drawing_allowed_in, image_budget
+from marong.decor import DecorCatalog
 from marong.diary_models import ModelResult, parse_picture
 from marong.pet_app_settings import PetAppSettings
 from marong.scene_picture import ScenePictures, SceneResult, subject
@@ -67,6 +70,21 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
                 "model": "fixture", "size": size, "output_format": "webp", "deadline": 90, "estimate_errors": True,
             })
         self.assertEqual(model.await_count, 4)
+        # TC-554: include a synthetic scene description while capturing every application logger.
+        records = []
+        class Capture(logging.Handler):
+            def emit(self, record): records.append(record.getMessage())
+        handler = Capture()
+        root = logging.getLogger()
+        previous_level = root.level
+        root.addHandler(handler)
+        root.setLevel(logging.INFO)
+        try:
+            await art.draw("topic", PET, (), "시험장면지시 가나다 콩이", friend_name="가나다")
+        finally:
+            root.removeHandler(handler)
+            root.setLevel(previous_level)
+        self.assertFalse(any(marker in line for line in records for marker in ("시험장면지시", "가나다", "콩이", "Main character:")))
 
         for outcomes, expected, reason, cost in (
             (["refused"], "refused", "refused", ".025"),
@@ -80,6 +98,46 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
             result = await art.draw("topic", PET, (), "A basket sits in the snow.")
             self.assertEqual((result.outcome, result.reason, result.cost), (expected, reason, Decimal(cost)))
             self.assertEqual(model.await_count, len(outcomes))
+
+    async def test_tc554_scene_worker_logs_omit_prompt_and_names(self):
+        db = TestDB()
+        self.addCleanup(db.close)
+        db.apply_unified_prerequisites(); db.apply_unified(); db.apply_pet_app_prerequisites(); db.apply_pet_app()
+        store = UnifiedStore(db.app_url)
+        await store.open(wait=True)
+        self.addAsyncCleanup(store.close)
+        sessions = AppSessions(store.pool, secrets.token_bytes(32), contact_schedule=(2, 8, 22))
+        auth = await sessions.join((await sessions.create_invite("join"))[0], "합성친구이름", "웹")
+        friend = (await sessions.find_session(auth.token))["friend_id"]
+        character = db.admin("""
+            INSERT INTO marong.characters(friend_id,kind,template,name,traits,stage,status,ready_at)
+            VALUES (%s,'dog','dog_small','시험아이이름','{}','done','ready',now()) RETURNING id
+        """, (friend,))[0][0]
+        db.admin("UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s", (character, friend))
+        catalog = DecorCatalog()
+        item = catalog.items["berry-beanie"]
+        catalog.items[item.id] = replace(item, prompt="시험장면지시")
+        db.admin("INSERT INTO marong.decor_items(id,item_set,kind,slot,starter) VALUES (%s,'v1','hat','head',false)", (item.id,))
+        db.admin("""INSERT INTO marong.scene_pictures(friend_id,character_id,purpose,item_id,outfit)
+                    VALUES (%s,%s,'reaction',%s,ARRAY[%s])""", (friend, character, item.id, item.id))
+        model = AsyncMock(return_value=ModelResult(value=picture(), cost=Decimal("0")))
+        media = SimpleNamespace(read=AsyncMock(return_value=b"synthetic"))
+        art = ScenePictures(store, media, SimpleNamespace(edit_picture=model), "fixture", catalog=catalog)
+        worker = SceneWorker(store, art, SimpleNamespace(record=AsyncMock()))
+        job, = await worker.claim()
+        records = []
+        class Capture(logging.Handler):
+            def emit(self, record): records.append(record.getMessage())
+        handler = Capture(); root = logging.getLogger(); old = root.level
+        root.addHandler(handler); root.setLevel(logging.INFO)
+        try:
+            await worker.process(job)
+        finally:
+            root.removeHandler(handler); root.setLevel(old)
+        self.assertEqual(model.await_count, 1)
+        self.assertTrue(any("scene_finished" in line for line in records))
+        self.assertFalse(any(marker in line for line in records for marker in
+                             ("합성친구이름", "시험아이이름", "시험장면지시", "Main character:")))
 
     async def test_leases_usage_and_owner_only_picture_endpoint(self):
         db = TestDB()

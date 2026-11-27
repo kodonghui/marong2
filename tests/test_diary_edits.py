@@ -3,7 +3,8 @@
 import asyncio
 from collections import deque
 from decimal import Decimal
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import httpx
@@ -16,6 +17,9 @@ from test_diary_worker import DRAFT, picture
 from marong.access import AccessConfig, AccessVerifier
 from marong.app_chat import AppChat
 from marong.diary_models import ModelResult, parse_picture
+from marong.decor import DecorCatalog
+from marong.app_diary import AppDiary
+from marong.diary_decor import DiaryDecor
 from marong.discord_store import DiscordStore
 from pg import TestDB
 
@@ -61,6 +65,16 @@ async def check(http, chat, db, models):
         headers["Idempotency-Key"] = key or str(uuid4())
         return await http.post(PREFIX + day + "/" + action, headers=headers, json=data)
 
+    async def sticker_values():
+        # The edit API above uses synthetic Access; ownership routing was tested separately with sessions.
+        with patch.object(chat.profile, "who", new=AsyncMock(return_value={"friend_id": 2})):
+            response = await http.get(PREFIX + DAY + "/stickers")
+            assert response.status == 200, (response.status, await response.text())
+            return [{key: item[key] for key in ("itemId", "x", "y", "scale", "rotation")}
+                    for item in (await response.json())["stickers"]]
+
+    stickers_before = await sticker_values()
+    assert len(stickers_before) == 3
     good = {"revision": 1, "text": "군밤을 먹었어"}
     draw = {"revision": 1}
     for action, data in (("fixes", good), ("drawings", draw)):
@@ -99,6 +113,7 @@ async def check(http, chat, db, models):
     reply = await success.json()
     panel = reply["day"]["diary"]
     assert panel["revision"] == 2 and panel["fix"]["left"] == 4 and reply["sceneChanged"]
+    assert await sticker_values() == stickers_before
     assert "scene" not in panel and "hidden-scene-marker" not in str(reply)
     assert db.admin("SELECT source,scene FROM marong.diary_revisions r JOIN marong.diaries d "
                     "ON d.id=r.diary_id WHERE d.friend_id=2 AND d.diary_date='2026-11-17' ORDER BY r.revision") == [
@@ -137,6 +152,7 @@ async def check(http, chat, db, models):
     assert first["revision"] == 3 and first["redraw"]["last"]["result"] == "done"
     first_drawing = first["drawing"]["id"]
     assert first_drawing and first["redraw"]["left"] == 1
+    assert await sticker_values() == stickers_before
 
     models.scenes.append(ModelResult(value={"scene": "A woman holds a basket."}))
     bad_scene = await send("drawings", {**currently, "change": "배경을 바꿔 줘"})
@@ -180,8 +196,11 @@ async def run(db):
         access = AccessVerifier(AccessConfig(TEAM, AUD, frozenset({HK_EMAIL})), client)
         await store.open(wait=True)
         chat = AppChat(store, None, None, access, None, origin=ORIGIN, diary_models=models)
+        chat.decor.catalog = DecorCatalog()
         try:
-            async with TestClient(TestServer(chat.web_app())) as http:
+            app = chat.web_app()
+            DiaryDecor(AppDiary(chat)).register(app.router)
+            async with TestClient(TestServer(app)) as http:
                 await check(http, chat, db, models)
         finally:
             await chat.close()
@@ -192,7 +211,19 @@ if __name__ == "__main__":
     db = TestDB()
     try:
         prepare(db)
+        root = Path(__file__).resolve().parents[1]
+        db.apply_sql(root / "marong/call/migrations/007_call_cost.sql", root / "marong/migrations/019_persona.sql", root / "marong/migrations/020_unified.sql",
+                     root / "marong/call/migrations/008_unified.sql")
+        db.apply_pet_app_prerequisites()
+        db.apply_pet_app()
         fixtures(db)
+        catalog = DecorCatalog()
+        sticker = next(item.id for item in catalog.items.values() if item.kind == "sticker")
+        db.admin("INSERT INTO marong.decor_items(id,item_set,kind,slot,starter) VALUES (%s,'v1','sticker',NULL,false)", (sticker,))
+        db.admin("INSERT INTO marong.decor_owned(friend_id,item_id) VALUES (2,%s)", (sticker,))
+        db.admin("""INSERT INTO marong.diary_stickers(diary_id,friend_id,item_id,x,y,scale,rotation,z)
+            SELECT id,2,%s,100*z,250,100,0,z FROM marong.diaries CROSS JOIN generate_series(0,2) z
+            WHERE friend_id=2 AND diary_date='2026-11-17'""", (sticker,))
         asyncio.run(run(db))
     finally:
         db.close()
