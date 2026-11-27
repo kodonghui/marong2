@@ -214,6 +214,23 @@ class AdminChangesTest(unittest.IsolatedAsyncioTestCase):
         print(f"TC-706 300 x 3072 B, 5 requests, median {milliseconds:.1f} ms")
         self.assertLess(milliseconds, 500)
 
+    async def test_tc729_bug128_admin_html_prevents_edge_transform(self):
+        for path, _ in SCREENS:
+            with self.subTest(path=path):
+                response = await self.client.get(f"/chat/admin/{path}", headers=self.headers)
+                self.assertEqual((response.status, response.content_type), (200, "text/html"))
+                self.assertEqual(response.headers["Cache-Control"], "no-store, no-transform")
+        for path, headers, status in (("/chat/admin/unknown", self.headers, 404),
+                                      ("/chat/admin/", {"Accept": "text/html"}, 403)):
+            with self.subTest(path=path, status=status):
+                response = await self.client.get(path, headers=headers)
+                self.assertEqual((response.status, response.content_type), (status, "text/html"))
+                self.assertEqual(response.headers["Cache-Control"], "no-store, no-transform")
+        response = await self.client.get(CHANGES, headers=self.headers)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        response = await self.client.get("/chat/login")
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+
     async def test_tc710_changes_page_path(self):
         response = await self.client.get("/chat/admin/changes", headers=self.headers)
         self.assertEqual((response.status, response.content_type), (200, "text/html"))
