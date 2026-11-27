@@ -599,7 +599,7 @@ async function decorStateFixture(page, {many = false, character = false} = {}) {
     if (address === '/chat/api/shop') return shopStatus === 200 ? route.fulfill({json:{items:emptyShop ? [] : many ? [hat, {...hat,id:'red-hat',name:'빨간 모자'}, {...hat,id:'green-hat',name:'초록 모자'}, bg,newBg] : [hat,bg,newBg]}}) : route.fulfill({status:shopStatus,json:{code:'internal'}});
     if (address === '/chat/api/closet') return closetStatus!==200 ? route.fulfill({status:closetStatus,json:{code:'internal'}}) : route.fulfill({json:{characterId:character ? 9 : null, outfit:character ? {head:null,body:null,neck:null} : null, items:[bg,newBg,{id:'starter-paper',kind:'paper',name:'처음 속지',starter:true},{id:'starter-font',kind:'font',name:'처음 글꼴',starter:true}], diaryDecor:{background:{id:bg.id},paper:{id:'starter-paper'},font:{id:'starter-font'}}}});
     if (address.endsWith('/claim')) return route.fulfill({status:claimStatus, json:claimStatus===404 ? {code:'not_found'} : claimStatus===403 ? {code:'cross_site'} : claimStatus>=500 ? {code:'internal'} : {itemId:hat.id,owned:true}});
-    if (address.endsWith('/outfit')) return route.fulfill({status:wearStatus,json:wearStatus===200?{head:{id:hat.id},body:null,neck:null}:{code:'internal'}});
+    if (address.endsWith('/outfit')) return route.fulfill({status:wearStatus,json:wearStatus===200?{head:{id:hat.id},body:null,neck:null}:{code:wearStatus===400?'invalid_input':'internal',errors:wearStatus===400?[{field:'head',reason:'wrong_kind'}]:[]}});
     if (address === '/chat/diary/api/decor') { if (route.request().method()==='PUT') return route.fulfill({status:saveStatus,json:{code:saveStatus===409?'not_owned':saveStatus===400?'invalid_input':'internal',errors:validationErrors}}); return route.fulfill({json:{background:{id:bg.id},paper:{id:'starter-paper'},font:{id:'starter-font'}}}); }
     if (address === '/chat/diary/api/latest') return route.fulfill({json:{date:null}});
     if (address === '/chat/diary/decor.js') return route.fulfill({contentType:'application/javascript',body:await readFile(path.join(STATIC,'diary/decor.js'))});
@@ -895,7 +895,7 @@ test('D189 TC-546/553: sticker selection opens today and handles no diary or a f
   try {
     const page=await browser.newPage({viewport:{width:430,height:850}});
     const date='2026-11-21', item={id:'star-sticker',kind:'sticker',name:'별 스티커',owned:true,priceKrw:0,thumbUrl:'/chat/decor/v1/star-sticker/sticker.webp'};
-    let ready=true, full=false, noItems=false, saveStatus=200, saveCode='too_many_stickers', loadStatus=200, delayCloset=false, delaySave=false, releaseCloset, reachedCloset, releaseSave, reachedSave;
+    let ready=true, full=false, noItems=false, saveStatus=200, saveCode='too_many_stickers', saveErrors=[{field:'scale',index:0,reason:'out_of_range'},{field:'rotation',index:1,reason:'out_of_range'}], loadStatus=200, delayCloset=false, delaySave=false, releaseCloset, reachedCloset, releaseSave, reachedSave;
     const closetGate=new Promise(resolve=>{releaseCloset=resolve;});
     const closetStarted=new Promise(resolve=>{reachedCloset=resolve;});
     const saveGate=new Promise(resolve=>{releaseSave=resolve;});
@@ -912,7 +912,7 @@ test('D189 TC-546/553: sticker selection opens today and handles no diary or a f
       if (address==='/chat/diary/api/decor') return route.fulfill({json:{background:{id:'starter-background',imageUrl:null},paper:{id:'starter-paper',imageUrl:null},font:{id:'starter-font',fontUrl:null}}});
       if (address===`/chat/diary/api/days/${date}`) return route.fulfill({json:ready?{date,state:'ready',prev:null,next:null,diary:{title:'오늘 일기',body:'시험 일기',revision:1,weather:'sunny',drawing:{kind:'placeholder',id:null},busy:null,hidden:false,stampedAt:null,fix:{left:5,blocked:null},redraw:{left:2,blocked:null,last:null}}}:{date,state:'none',prev:null,next:null,diary:null}});
       if (address===`/chat/diary/api/days/${date}/stickers`) {
-        if (route.request().method()==='PUT' && saveStatus!==200) return route.fulfill({status:saveStatus,json:{code:saveStatus===409?saveCode:saveStatus===403?'cross_site':saveStatus===404?'not_found':saveStatus===400?'invalid_input':'internal'}});
+        if (route.request().method()==='PUT' && saveStatus!==200) return route.fulfill({status:saveStatus,json:{code:saveStatus===409?saveCode:saveStatus===403?'cross_site':saveStatus===404?'not_found':saveStatus===400?'invalid_input':'internal',errors:saveStatus===400?saveErrors:[]}});
         if (route.request().method()==='PUT' && delaySave) { reachedSave(); await saveGate; }
         if (route.request().method()==='GET' && loadStatus!==200) return route.fulfill({status:loadStatus,json:{code:'internal'}});
         const stickers=route.request().method()==='PUT'?route.request().postDataJSON().stickers.map(row=>({...row,imageUrl:item.thumbUrl})):
@@ -947,18 +947,36 @@ test('D189 TC-546/553: sticker selection opens today and handles no diary or a f
     saveStatus=403;
     await page.getByRole('button',{name:'다시 해 볼게'}).click();
     await page.getByText('이 화면에서 다시 해 줘',{exact:true}).waitFor({timeout:1500});
+    await page.getByRole('button',{name:'별 스티커',exact:true}).click();
     saveStatus=400;
+    await page.getByRole('button',{name:'다 했어'}).click();
+    await page.locator('#banner').getByText('다시 한번 확인해 줄래?',{exact:true}).waitFor({timeout:1500});
+    await page.getByText('크기는 50~200%로 골라 줘',{exact:true}).waitFor({timeout:1500});
+    assert.equal(await page.getByText('기울기는 -180~180도로 골라 줘',{exact:true}).count(),1);
+    assert.ok(await page.getByLabel('스티커 1 크기').getAttribute('aria-describedby'));
+    assert.ok(await page.getByLabel('스티커 2 기울기').getAttribute('aria-describedby'));
+    assert.equal(await page.getByLabel('스티커 1 기울기').getAttribute('aria-describedby'),null);
+    assert.equal(await page.getByText('2/10',{exact:true}).count(),1);
+    for (const width of [360,430]) {
+      await page.setViewportSize({width,height:850});
+      await page.waitForFunction(()=>document.documentElement.scrollWidth===innerWidth, null, {timeout:1500});
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
+    }
+    saveErrors=[{field:'x',index:1,reason:'out_of_range'},{field:'itemId',index:1,reason:'wrong_kind'}];
     await page.getByRole('button',{name:'다시 해 볼게'}).click();
-    await page.getByText('다시 한번 확인해 줄래?',{exact:true}).waitFor({timeout:1500});
+    await page.getByText('가로 위치는 0~1000으로 골라 줘',{exact:true}).waitFor({timeout:1500});
+    assert.equal(await page.getByText('스티커 아이템을 골라 줘',{exact:true}).count(),1);
+    assert.ok((await page.getByLabel('스티커 2 움직이기').getAttribute('aria-describedby')).includes('sticker-error-1-x'));
+    assert.equal(await page.getByLabel('스티커 1 크기').getAttribute('aria-describedby'),null);
     saveStatus=404;
     await page.getByRole('button',{name:'다시 해 볼게'}).click();
     await page.getByText('찾지 못했어',{exact:true}).waitFor({timeout:1500});
     assert.equal(await page.getByRole('link',{name:'내 마롱이로'}).getAttribute('href'),'/chat/me');
-    assert.equal(await page.getByText('1/10',{exact:true}).count(),1);
+    assert.equal(await page.getByText('2/10',{exact:true}).count(),1);
     saveStatus=500;
     await page.getByRole('button',{name:'다시 해 볼게'}).click();
     await page.getByText('잠깐 문제가 생겼어. 다시 해 볼래?').waitFor({timeout:1500});
-    assert.equal(await page.getByText('1/10',{exact:true}).count(),1);
+    assert.equal(await page.getByText('2/10',{exact:true}).count(),1);
     saveStatus=200; delaySave=true;
     await page.getByRole('button',{name:'다시 해 볼게'}).click();
     await saveStarted;
@@ -1018,12 +1036,12 @@ test('TC-546: closet wear errors roll back and expose approved recovery', {skip:
   try {
     const page=await browser.newPage({viewport:{width:430,height:850}});
     const item={id:'blue-hat',kind:'hat',slot:'head',name:'파란 모자',thumbUrl:'/chat/decor/v1/blue-hat/thumb.webp'};
-    let code='cross_site', status=403;
+    let code='cross_site', status=403, validationErrors=[{field:'head',reason:'wrong_kind'}];
     await page.route('**/*',async route=>{
       const address=new URL(route.request().url()).pathname;
       if(address==='/chat/api/profile') return route.fulfill({json:{character:{id:9,template:'dog_small',outfit:{head:null,body:null,neck:null}}}});
       if(address==='/chat/api/closet') return route.fulfill({json:{characterId:9,outfit:{head:null,body:null,neck:null},items:[item]}});
-      if(address.endsWith('/outfit')) return route.fulfill({status,json:status===200?{head:{id:item.id,layerUrl:'/chat/decor/v1/blue-hat/dog_small.png'},body:null,neck:null}:{code}});
+      if(address.endsWith('/outfit')) return route.fulfill({status,json:status===200?{head:{id:item.id,layerUrl:'/chat/decor/v1/blue-hat/dog_small.png'},body:null,neck:null}:{code,errors:status===400?validationErrors:[]}});
       if(address.startsWith('/chat/decor/') || address.includes('/images/')) return route.fulfill({contentType:'image/png',body:BLANK});
       const file=address==='/chat/closet'?'decor.html':path.basename(address);
       if(!['decor.html','decor.js','chat.css','unified.css','unified.js'].includes(file)) return route.fulfill({status:404});
@@ -1036,8 +1054,18 @@ test('TC-546: closet wear errors roll back and expose approved recovery', {skip:
     assert.equal(await choice.getAttribute('aria-pressed'),'false');
     status=400; code='invalid_input';
     await choice.click();
-    await page.getByText('다시 한번 확인해 줄래?',{exact:true}).waitFor({timeout:1500});
+    await page.getByText('머리 자리에 맞는 아이템을 골라 줘',{exact:true}).waitFor({timeout:1500});
+    assert.ok(await choice.getAttribute('aria-describedby'));
     assert.equal(await choice.getAttribute('aria-pressed'),'false');
+    validationErrors=[{field:'head',reason:'bad_format'},{field:'body',reason:'wrong_kind'}];
+    await choice.click();
+    await page.getByText('머리 아이템을 다시 골라 줘',{exact:true}).waitFor({timeout:1500});
+    assert.equal(await page.getByText('몸 자리에 맞는 아이템을 골라 줘',{exact:true}).count(),1);
+    for (const width of [360,430]) {
+      await page.setViewportSize({width,height:850});
+      await page.waitForFunction(()=>document.documentElement.scrollWidth===innerWidth, null, {timeout:1500});
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
+    }
     status=404; code='not_found';
     await choice.click();
     await page.getByText('찾지 못했어',{exact:true}).waitFor({timeout:1500});
@@ -1067,8 +1095,12 @@ test('TC-546: shop write and closet read errors can be retried', {skip:!chromium
     fixture.setClaimStatus(201);
     await page.getByRole('button',{name:'다시 해 볼게',exact:true}).click({timeout:1500});
     await page.getByRole('button',{name:'받았어',exact:true}).waitFor();
-    fixture.setWearStatus(500);
+    fixture.setWearStatus(400);
     await page.getByRole('link',{name:'아이템 보기'}).click();
+    await page.getByRole('button',{name:'입혀 볼래'}).click();
+    await page.getByText('머리 자리에 맞는 아이템을 골라 줘',{exact:true}).waitFor({timeout:1500});
+    assert.ok(await page.getByRole('button',{name:'입혀 볼래'}).getAttribute('aria-describedby'));
+    fixture.setWearStatus(500);
     await page.getByRole('button',{name:'입혀 볼래'}).click();
     await page.getByText('잠깐 문제가 생겼어. 다시 해 볼래?').waitFor({timeout:1500});
     assert.equal(await page.getByRole('button',{name:'다시 해 볼게',exact:true}).count(),1);

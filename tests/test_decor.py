@@ -381,7 +381,21 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             draft = await client.put(f"/chat/api/characters/{draft_id}/outfit", headers=member, json=picks)
             self.assertEqual((draft.status, (await draft.json())["code"]), (409, "not_ready"))
             misplaced = await client.put(outfit, headers=member, json={**picks, "head": "top-fixture"})
-            self.assertEqual((misplaced.status, (await misplaced.json())["code"]), (400, "invalid_input"))
+            misplaced_body = await misplaced.json()
+            self.assertEqual((misplaced.status, misplaced_body["code"]), (400, "invalid_input"))
+            self.assertEqual(misplaced_body["errors"], [{"field": "head", "reason": "wrong_kind"}])
+            missing_outfit = await client.put(outfit, headers=member, json={"head": "hat-fixture"})
+            self.assertEqual((await missing_outfit.json())["errors"], [{"field": "body", "reason": "required"}, {"field": "neck", "reason": "required"}])
+            invalid_outfit = await client.put(outfit, headers=member, json={**picks, "head": "!"})
+            self.assertEqual((await invalid_outfit.json())["errors"], [{"field": "head", "reason": "bad_format"}])
+            extra_outfit = await client.put(outfit, headers=member, json={**picks, "extra": True})
+            self.assertEqual((await extra_outfit.json())["errors"], [{"field": "request", "reason": "bad_format"}])
+            two_slots = await client.put(outfit, headers=member, json={"head": "top-fixture", "body": "hat-fixture", "neck": None})
+            self.assertEqual((await two_slots.json())["errors"], [{"field": "head", "reason": "wrong_kind"}, {"field": "body", "reason": "wrong_kind"}])
+            invalid_character = await client.put("/chat/api/characters/nope/outfit", headers=member, json=picks)
+            self.assertEqual((await invalid_character.json())["errors"], [{"field": "id", "reason": "bad_format"}])
+            malformed_outfit = await client.put(outfit, headers=member, json=[])
+            self.assertEqual((await malformed_outfit.json())["errors"], [{"field": "request", "reason": "bad_format"}])
             unowned = await client.put(outfit, headers=member, json={**picks, "head": "unknown-fixture"})
             self.assertEqual((unowned.status, (await unowned.json())["code"]), (409, "not_owned"))
             self.assertEqual((await client.put(outfit, headers=other, json=picks)).status, 404)
@@ -492,6 +506,8 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             sticker = {"itemId": "sticker-fixture", "x": 100, "y": 300, "scale": 85, "rotation": -10}
             missing = f"/chat/diary/api/days/{day - timedelta(days=1)}/stickers"
             invalid = "/chat/diary/api/days/2026-13-01/stickers"
+            invalid_date = await client.put(invalid, headers=member, json={"stickers": []})
+            self.assertEqual((await invalid_date.json())["errors"], [{"field": "date", "reason": "bad_format"}])
             self.assertEqual((await client.get(path)).status, 401)
             self.assertEqual((await client.put(path, headers={"Origin": ORIGIN}, json={"stickers": []})).status, 401)
             oversized_stickers = await client.put(path, headers=member, json={"stickers": [], "extra": "x" * 17000})
@@ -603,6 +619,27 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
                 with self.subTest(key=key):
                     response = await client.put(path, headers=member, json={"stickers": [{**sticker, key: value}]})
                     self.assertEqual(response.status, 400)
+                    self.assertEqual((await response.json())["errors"], [{"field": key, "index": 0, "reason": "out_of_range"}])
+            multiple = await client.put(path, headers=member, json={"stickers": [{**sticker, "x": 1001}, {**sticker, "scale": 49}]})
+            self.assertEqual((await multiple.json())["errors"], [{"field": "x", "index": 0, "reason": "out_of_range"}, {"field": "scale", "index": 1, "reason": "out_of_range"}])
+            wrong_sticker = await client.put(path, headers=member, json={"stickers": [{**sticker, "itemId": "hat-fixture"}]})
+            self.assertEqual((await wrong_sticker.json())["errors"], [{"field": "itemId", "index": 0, "reason": "wrong_kind"}])
+            bad_id = await client.put(path, headers=member, json={"stickers": [{**sticker, "itemId": "!"}]})
+            self.assertEqual((await bad_id.json())["errors"], [{"field": "itemId", "index": 0, "reason": "bad_format"}])
+            missing_scale = {key: value for key, value in sticker.items() if key != "scale"}
+            missing_entry = await client.put(path, headers=member, json={"stickers": [sticker, missing_scale]})
+            self.assertEqual((await missing_entry.json())["errors"], [{"field": "scale", "index": 1, "reason": "required"}])
+            malformed_list = await client.put(path, headers=member, json={"stickers": {}})
+            self.assertEqual((await malformed_list.json())["errors"], [{"field": "stickers", "reason": "bad_format"}])
+            missing_list = await client.put(path, headers=member, json={})
+            self.assertEqual((await missing_list.json())["errors"], [{"field": "stickers", "reason": "required"}])
+            malformed_entry = await client.put(path, headers=member, json={"stickers": [sticker, None]})
+            self.assertEqual((await malformed_entry.json())["errors"], [{"field": "stickers", "index": 1, "reason": "bad_format"}])
+            wrong_type = await client.put(path, headers=member, json={"stickers": [{**sticker, "x": True}]})
+            self.assertEqual((await wrong_type.json())["errors"], [{"field": "x", "index": 0, "reason": "bad_format"}])
+            many_errors = await client.put(path, headers=member, json={"stickers": [{} for _ in range(10)]})
+            self.assertEqual(len((await many_errors.json())["errors"]), 10)
+            self.assertEqual([{key: item[key] for key in sticker} for item in (await (await client.get(path, headers=member)).json())["stickers"]], trio)
             db.admin("UPDATE marong.diaries SET hidden=true WHERE id=%s", (diary,))
             self.assertEqual((await client.put(path, headers=member, json={"stickers": trio[:2]})).status, 200)
             hidden_items = (await (await client.get(path, headers=member)).json())["stickers"]
@@ -661,6 +698,20 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await client.get(endpoint, headers=member)).status, 404)
             self.assertEqual((await client.get("/chat/admin/api/items", headers=admin)).status, 404)
             self.assertEqual((await client.post("/chat/admin/api/items/hat-fixture/list", headers=admin)).status, 404)
+
+
+class StickerValidationTests(unittest.TestCase):
+    def test_d190_sticker_validation_identifies_fields(self):
+        from marong.diary_decor import DiaryDecor
+        from marong.app_decor import AppDecor
+        from marong.app_chat import Problem
+
+        service = DiaryDecor.__new__(DiaryDecor)
+        service.decor = SimpleNamespace(item_key=AppDecor.item_key)
+        with self.assertRaises(Problem) as error:
+            service.input_sticker({"itemId": "sticker-fixture", "x": 1001, "y": 300, "scale": 49, "rotation": 0})
+        self.assertEqual(error.exception.errors, [{"field": "x", "index": 0, "reason": "out_of_range"},
+                                                   {"field": "scale", "index": 0, "reason": "out_of_range"}])
 
 
 if __name__ == "__main__":

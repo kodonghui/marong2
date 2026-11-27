@@ -22,9 +22,13 @@ class DiaryDecor:
         try:
             data = await self.chat._body(req)
         except Problem:
-            raise Problem("invalid_input") from None
-        if data.keys() != keys:
-            raise Problem("invalid_input")
+            raise Problem("invalid_input", [{"field": "body", "reason": "bad_format"}]) from None
+        errors = []
+        if set(data) - set(keys):
+            errors.append({"field": "body", "reason": "bad_format"})
+        errors.extend({"field": key, "reason": "required"} for key in keys if key not in data)
+        if errors:
+            raise Problem("invalid_input", errors)
         return data
 
     async def settings(self, req):
@@ -86,23 +90,39 @@ class DiaryDecor:
                 visible.append({**entry, "imageUrl": url})
         return self.chat._json(200, {"date": day.isoformat(), "stickers": visible})
 
-    def input_sticker(self, data):
-        if not isinstance(data, dict) or data.keys() != {"itemId", *STICKER_FIELDS}:
-            raise Problem("invalid_input")
-        self.decor.item_key(data["itemId"])
+    def input_sticker(self, data, index=0):
+        if not isinstance(data, dict):
+            raise Problem("invalid_input", [{"field": "stickers", "index": index, "reason": "bad_format"}])
+        errors = []
+        if set(data) - {"itemId", *STICKER_FIELDS}:
+            errors.append({"field": "stickers", "index": index, "reason": "bad_format"})
+        if "itemId" not in data or data["itemId"] is None:
+            errors.append({"field": "itemId", "index": index, "reason": "required"})
+        else:
+            try:
+                self.decor.item_key(data["itemId"])
+            except Problem:
+                errors.append({"field": "itemId", "index": index, "reason": "bad_format"})
         for key, (low, high) in STICKER_FIELDS.items():
-            if type(data[key]) is not int or not low <= data[key] <= high:
-                raise Problem("invalid_input")
+            if key not in data or data[key] is None:
+                errors.append({"field": key, "index": index, "reason": "required"})
+            elif type(data[key]) is not int:
+                errors.append({"field": key, "index": index, "reason": "bad_format"})
+            elif not low <= data[key] <= high:
+                errors.append({"field": key, "index": index, "reason": "out_of_range"})
+        if errors:
+            raise Problem("invalid_input", errors[:10])
         return data
 
     @staticmethod
-    def date(req):
+    def date(req, *, details=False):
         from .app_diary import _date
 
         try:
             return _date(req.match_info["date"], "date")
         except Problem:
-            raise Problem("invalid_input") from None
+            errors = [{"field": "date", "reason": "bad_format"}] if details else []
+            raise Problem("invalid_input", errors) from None
 
     async def stickers(self, req):
         friend = await self.decor.friend(req)
@@ -118,13 +138,20 @@ class DiaryDecor:
 
     async def set_stickers(self, req):
         friend = await self.decor.friend(req, write=True)
-        day = self.date(req)
+        day = self.date(req, details=True)
         body = await self.body(req, {"stickers"})
         if not isinstance(body["stickers"], list):
-            raise Problem("invalid_input")
+            raise Problem("invalid_input", [{"field": "stickers", "reason": "bad_format"}])
         if len(body["stickers"]) > 10:
             raise Problem("too_many_stickers")
-        updates = [self.input_sticker(entry) for entry in body["stickers"]]
+        updates, errors = [], []
+        for index, entry in enumerate(body["stickers"]):
+            try:
+                updates.append(self.input_sticker(entry, index))
+            except Problem as error:
+                errors.extend(error.errors)
+        if errors:
+            raise Problem("invalid_input", errors[:10])
         async with self.store.pool.connection() as conn, conn.transaction():
             diary = await one(conn, """
                 SELECT id,state FROM marong.diaries WHERE friend_id=%s AND diary_date=%s FOR UPDATE
@@ -135,8 +162,10 @@ class DiaryDecor:
             owned = await self.decor.owned_items(conn, friend, list(ids))
             if owned.keys() != ids:
                 raise Problem("not_owned")
-            if any(item["kind"] != "sticker" for item in owned.values()):
-                raise Problem("invalid_input")
+            errors = [{"field": "itemId", "index": index, "reason": "wrong_kind"}
+                      for index, entry in enumerate(updates) if owned[entry["itemId"]]["kind"] != "sticker"]
+            if errors:
+                raise Problem("invalid_input", errors[:10])
             current = await self.sticker_rows(conn, diary["id"], friend)
             if current != updates:
                 await conn.execute("""

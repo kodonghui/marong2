@@ -32,6 +32,26 @@
     signal(error, codes[reply.body?.code] || '잠깐 문제가 생겼어. 다시 해 볼래?', reply);
   }
 
+  function wearFieldErrors(reply, detailControl = null, detailSlot = null) {
+    if (reply.status !== 400 || !Array.isArray(reply.body?.errors)) return;
+    for (const entry of reply.body.errors.slice(0, 10)) {
+      if (!entry || typeof entry !== 'object') continue;
+      if (!Object.prototype.hasOwnProperty.call(slots, entry.field) || !['required', 'bad_format', 'wrong_kind'].includes(entry.reason)) continue;
+      const group = detailControl && detailSlot === entry.field ? detailControl.parentElement
+        : [...target.querySelectorAll('.decor-wear-group')].find(element => element.dataset.slot === entry.field);
+      if (!group) continue;
+      const id = 'outfit-error-' + entry.field;
+      let note = group.querySelector('#' + id);
+      if (!note) { note = node('span', '', 'caption'); note.id = id; group.append(note); }
+      const rule = entry.reason === 'bad_format' ? slots[entry.field] + ' 아이템을 다시 골라 줘'
+        : entry.reason === 'required' ? slots[entry.field] + ' 자리는 고르거나 비워 둬야 해'
+        : slots[entry.field] + ' 자리에 맞는 아이템을 골라 줘';
+      note.replaceChildren(node('span', '다시 한번 확인해 줄래?'), node('br'), node('span', rule));
+      const controls = detailControl ? [detailControl] : group.querySelectorAll('.decor-wear-item');
+      for (const control of controls) { control.setAttribute('aria-invalid', 'true'); control.setAttribute('aria-describedby', id); }
+    }
+  }
+
   function face(outfit, item) {
     const pet = profile.character;
     const frame = node('div', '', 'decor-face');
@@ -68,6 +88,10 @@
       if (detail && item.owned) {
         if (item.slot && profile.character) {
           const wear = button('입혀 볼래', async () => {
+            for (const note of wear.parentElement.querySelectorAll('[id^="outfit-error-"]')) note.remove();
+            wear.removeAttribute('aria-invalid');
+            wear.removeAttribute('aria-describedby');
+            signal(error);
             wear.disabled = true;
             const picks = Object.fromEntries(['head', 'body', 'neck'].map(slot => [slot,
               slot === item.slot ? item.id : profile.character.outfit?.[slot]?.id || null]));
@@ -81,6 +105,7 @@
             } else {
               wear.disabled = false;
               problem(result);
+              wearFieldErrors(result, wear, item.slot);
               if (result.status === 0 || result.status >= 500) error.append(' ', button('다시 해 볼게', () => wear.click(), 'btnt'));
             }
           }, 'btn2');
@@ -188,7 +213,10 @@
       return;
     }
     for (const [slot, label] of Object.entries(slots)) {
-      target.append(node('h2', label));
+      const group = node('div', '', 'decor-wear-group stack');
+      group.dataset.slot = slot;
+      group.append(node('h2', label));
+      target.append(group);
       for (const item of wearable.filter(candidate => candidate.slot === slot)) {
         const selected = inventory.outfit?.[slot]?.id === item.id;
         const choice = button(item.name, () => {
@@ -207,7 +235,7 @@
           spinner.setAttribute('aria-hidden', 'true');
           choice.append(spinner);
         }
-        target.append(choice);
+        group.append(choice);
       }
     }
   }
@@ -230,6 +258,7 @@
         if (result.status === 409 && result.body?.code === 'not_owned') signal(error, '아직 안 받은 거야', result);
         else {
           problem(result);
+          wearFieldErrors(result);
           if (result.status === 0 || result.status >= 500) {
             error.append(' ', button('다시 해 볼게', () => {
               const choice = [...target.querySelectorAll('.decor-wear-item')].find(item => item.dataset.itemId === job.itemId);

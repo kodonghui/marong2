@@ -99,6 +99,7 @@ export async function api(path, options = {}) {
       error.code = body?.code || "network";
       error.status = response.status;
       error.trace = body?.traceId;
+      error.errors = Array.isArray(body?.errors) ? body.errors : [];
       error.retryAfter = Number(response.headers.get("Retry-After")) || 1;
       throw error;
     }
@@ -314,6 +315,7 @@ async function openStickers() {
 
 function renderStickerEditor(paper) {
   const panel = element("section", "sticker-editor");
+  const fieldTargets = [];
   const label = element("h2", "", "스티커 붙이기");
   const count = element("p", "caption", `${editingStickers.length}/10`);
   panel.append(label, count);
@@ -357,11 +359,54 @@ function renderStickerEditor(paper) {
     rotation.type = "range"; rotation.min = "-180"; rotation.max = "180"; rotation.value = sticker.rotation;
     rotation.setAttribute("aria-label", "스티커 " + (index + 1) + " 기울기");
     rotation.addEventListener("input", () => { sticker.rotation = Number(rotation.value); styleSticker(control, sticker); });
-    tools.append(size, rotation, button("떼기", () => {
+    const sizeField = element("div", "sticker-control-field");
+    const rotationField = element("div", "sticker-control-field");
+    sizeField.append(size);
+    rotationField.append(rotation);
+    tools.append(sizeField, rotationField, button("떼기", () => {
       editingStickers.splice(index, 1);
       draw();
     }, "text-button"));
+    fieldTargets[index] = {tools, control, size, rotation};
     panel.append(tools);
+  }
+  function clearFieldErrors() {
+    panel.querySelectorAll(".sticker-field-error").forEach(note => note.remove());
+    for (const {control, size, rotation} of fieldTargets.filter(Boolean)) {
+      for (const input of [control, size, rotation]) { input.removeAttribute("aria-invalid"); input.removeAttribute("aria-describedby"); }
+    }
+  }
+  function showFieldErrors(errors) {
+    const names = {x: "가로 위치", y: "세로 위치", scale: "크기", rotation: "기울기", itemId: "스티커"};
+    const ranges = {x: "가로 위치는 0~1000으로 골라 줘", y: "세로 위치는 0~1000으로 골라 줘",
+      scale: "크기는 50~200%로 골라 줘", rotation: "기울기는 -180~180도로 골라 줘"};
+    for (const entry of errors.slice(0, 10)) {
+      if (!entry || typeof entry !== "object") continue;
+      if (!["required", "bad_format", "out_of_range", "wrong_kind"].includes(entry.reason)) continue;
+      if (entry.field === "stickers" && entry.index == null) {
+        const rule = entry.reason === "required" ? "스티커 목록을 보내야 해" : "스티커 목록 형식을 확인해 줘";
+        const note = element("p", "caption sticker-field-error", "다시 한번 확인해 줄래? " + rule);
+        label.after(note);
+        continue;
+      }
+      if (!Number.isInteger(entry.index) || entry.index < 0 || entry.index >= fieldTargets.length) continue;
+      const fields = fieldTargets[entry.index];
+      if (!fields || (!Object.prototype.hasOwnProperty.call(names, entry.field) && entry.field !== "stickers")) continue;
+      const name = names[entry.field] || "스티커 정보";
+      const rule = entry.reason === "out_of_range" ? ranges[entry.field]
+        : entry.reason === "wrong_kind" ? "스티커 아이템을 골라 줘"
+        : entry.field === "itemId" ? "스티커를 다시 골라 줘"
+        : entry.reason === "required" ? name + " 값을 골라 줘"
+        : entry.field === "stickers" ? "스티커 정보를 확인해 줘" : name + "는 숫자로 골라 줘";
+      if (!rule) continue;
+      const input = entry.field === "scale" ? fields.size : entry.field === "rotation" ? fields.rotation : fields.control;
+      const note = element("span", "caption sticker-field-error");
+      note.id = `sticker-error-${entry.index}-${entry.field}`;
+      note.append(element("span", "", "다시 한번 확인해 줄래?"), document.createElement("br"), element("span", "", rule));
+      if (input === fields.control) fields.tools.prepend(note); else input.after(note);
+      input.setAttribute("aria-invalid", "true");
+      input.setAttribute("aria-describedby", [input.getAttribute("aria-describedby"), note.id].filter(Boolean).join(" "));
+    }
   }
   function close() {
     editingStickers = null;
@@ -374,6 +419,7 @@ function renderStickerEditor(paper) {
         window.confirm("안 남기고 나갈까?")) close();
   }, "text-button");
   const save = button("다 했어", async () => {
+    clearFieldErrors();
     save.disabled = true;
     cancel.disabled = true;
     save.textContent = "붙이는 중이야…";
@@ -390,6 +436,7 @@ function renderStickerEditor(paper) {
         : error.code === "not_owned" ? "아직 안 받은 거야"
         : error.code === "cross_site" ? "이 화면에서 다시 해 줘"
         : error.code === "invalid_input" ? "다시 한번 확인해 줄래?" : RETRY);
+      if (error.code === "invalid_input") showFieldErrors(error.errors);
       if (error.code === "not_found") {
         const home = element("a", "text-button", "내 마롱이로");
         home.href = "/chat/me";
