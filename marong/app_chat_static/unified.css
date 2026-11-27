@@ -236,3 +236,5 @@
 @media (min-width: 1024px) {
   .changes-skeleton .s-row {height: 54px}
 }
+
+.loading-placeholder {min-height: 120px; background: var(--raised); border-radius: 12px}

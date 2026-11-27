@@ -325,7 +325,7 @@ test('TC-543: show item validation, change listing, and recover after a forbidde
     const blue = page.getByRole('row').filter({hasText: '파란 모자'});
     assert.equal(await blue.getByText('blue-cap', {exact: true}).count(), 1);
     assert.equal(await blue.getByText('hat', {exact: true}).count(), 1);
-    assert.equal(await blue.locator('img').getAttribute('src'), '/chat/decor/v1/blue-cap/thumb.webp');
+    assert.equal(await blue.locator('img').getAttribute('src'), '/chat/admin/api/items/blue-cap/thumbnail');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     for (const label of ['썸네일', 'id', '종류', '이름', '상태', '받은 사람 수', '버튼']) {
       assert.equal(await page.getByRole('columnheader', {name: label, exact: true}).count(), 1);
@@ -430,5 +430,30 @@ test('BUG-115 TC-543: validation failure shows missing items on the row', {skip:
     await row.getByRole('button', {name: '올리기'}).click();
     await row.getByText(/license/).waitFor();
     assert.equal(await row.getByRole('button', {name: '올리기'}).count(), 0);
+  } finally { await browser.close(); }
+});
+
+
+test('TC-543: loading shows a grey placeholder until the items arrive', {skip: !chromium}, async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    await page.route('**/*', async route => {
+      const address = new URL(route.request().url()).pathname;
+      if (address === '/chat/admin/api/items') { await pending; return route.fulfill({json: {set: 'v1', items: []}}); }
+      const file = address === '/chat/admin/items' ? 'admin-items.html' : path.basename(address);
+      if (!['admin-items.html', 'admin-items.js', 'chat.css', 'unified.css', 'unified.js'].includes(file)) return route.fulfill({status: 404});
+      const type = file.endsWith('.css') ? 'text/css' : file.endsWith('.js') ? 'application/javascript' : 'text/html';
+      return route.fulfill({contentType: type + '; charset=utf-8', body: await readFile(path.join(STATIC, file))});
+    });
+    await page.goto(BASE + '/chat/admin/items');
+    assert.equal(await page.locator('#item-admin').getAttribute('aria-busy'), 'true');
+    assert.equal(await page.locator('#item-list .loading-placeholder').isVisible(), true);
+    assert.notEqual(await page.locator('.loading-placeholder').evaluate(el => getComputedStyle(el).backgroundColor), 'rgba(0, 0, 0, 0)');
+    release();
+    await page.locator('#item-admin[aria-busy="false"]').waitFor();
+    assert.equal(await page.locator('.loading-placeholder').count(), 0);
   } finally { await browser.close(); }
 });

@@ -354,6 +354,19 @@ class AppAdmin:
                 "name": str(item.name or "")[:20], "state": row["state"] if row else "new",
                 "starter": item.starter is True, "owners": row["owners"] if row else 0, "missing": missing}
 
+    async def decor_thumbnail(self, req):
+        await self.require_admin(req)
+        catalog = self.chat.decor.require_catalog()
+        item = catalog.items.get(req.match_info["itemId"])
+        name = "sticker.webp" if item and item.kind == "sticker" else "thumb.webp"
+        path = item.files.get(name) if item else None
+        if path is None or not await asyncio.to_thread(path.is_file):
+            raise Problem("not_found")
+        req["cache"] = "no-store"
+        response = web.FileResponse(path)
+        response.content_type = "image/webp"
+        return response
+
     async def decor_items(self, req):
         catalog = self.chat.decor.require_catalog()
         await self.require_admin(req)
@@ -578,6 +591,7 @@ class AppAdmin:
         router.add_get(ADMIN_PATH + "/api/changes", self.changes)
         router.add_get(ADMIN_PATH + "/api/image-costs", self.image_costs)
         router.add_get(ADMIN_PATH + "/api/items", self.decor_items)
+        router.add_get(ADMIN_PATH + "/api/items/{itemId}/thumbnail", self.decor_thumbnail)
         router.add_post(ADMIN_PATH + "/api/items/{itemId}/{action:list|unlist}", self.set_decor_listing)
         router.add_get(ADMIN_PATH + "/api/invites", self.list_invites)
         router.add_post(ADMIN_PATH + "/api/invites", self.create_invite)

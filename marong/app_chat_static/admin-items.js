@@ -15,7 +15,7 @@
   function render(item, itemSet) {
     const card = node('tr');
     const thumbnail = node('img');
-    thumbnail.src = '/chat/decor/' + encodeURIComponent(itemSet) + '/' + encodeURIComponent(item.id) + '/' + (item.kind === 'sticker' ? 'sticker.webp' : 'thumb.webp');
+    thumbnail.src = api + '/' + encodeURIComponent(item.id) + '/thumbnail';
     thumbnail.alt = '';
     thumbnail.width = 48;
     thumbnail.height = 48;
