@@ -1,6 +1,7 @@
 # BUG-118 운영 통화 지시문 반영 누락
 
-- 상태 `open` · 심각도 S3 · 우선순위 P1 · 유형 배포 검증 · 원인 11·12단계
+- 상태 `verified` · 심각도 S3 · 우선순위 P1 · 유형 배포 검증 · 원인 11·12단계
+- 배포 절차는 `5f89fd5`에 병합했다. 2026-11-24 03:53:25 KST에 반영했고 03:58:28 KST에 운영 지시문 해시가 `main`과 같음을 확인했다. [TC-645 운영 결과](runs/2026-11-24-call-memory-deployment-gate.md#사용자-런타임과-버스를-지정한-재반영)
 - 발견 운영, 2026-11-24 KST. 기준 SPEC-387, TASK-398~401, TC-475·476.
 - 운영 웹 통화 폴더 및 현재 비활성인 디스코드 중계 사본의 `call_instruction.md` SHA256은 `a8ea9de577861edde03dd2e00bb70f23544dbf24d459e6969dfbc9ec3d8d4e73`로 `a2dc9a0`과 같다. 기준 `main` SHA256은 `119bd8baf8e682054162cac29007875ecb65aa29d994268e33a139a88bab1800`이다. 운영 파일에는 ‘통화에서 이어 듣기’를 포함한 세 곳의 변경이 누락됐다.
 
@@ -8,4 +9,4 @@
 
 TC-645, 운영 읽기와 로컬 계약 검사. 서비스의 실제 작업 폴더에서 파일 해시를 확인하고 Git 원본과 대조한다. TC-475·476은 저장소 지시문을 확인했으며, 최근 통화 서버 배포의 검증 대상은 지시문을 포함하지 않았다. 다음 반영에서 병합 커밋의 지시문을 실제 웹 통화 작업 폴더에 원자적으로 교체하고 해시를 대조한다. 디스코드 중계는 비활성 상태를 유지하고, 재가동 시 같은 원본과 대조한다. 지시문 자체는 다음 연결 때 다시 읽힌다. [운영 절차](../../tools/vertex_live/OPERATIONS.md#통화-기억-배포-검증)
 
-`git diff --unified=0 a2dc9a0 origin/main -- tools/vertex_live/call_instruction.md`에서 차이 3곳을 확인했다. 로컬 `test_instruction.py`에서 지시문 조립과 다음 연결의 파일 갱신을 확인했다. 운영 해시 일치 검증은 반영 뒤에 남아 있다.
+`git diff --unified=0 a2dc9a0 origin/main -- tools/vertex_live/call_instruction.md`에서 차이 3곳을 확인했다. 로컬 `test_instruction.py`에서 지시문 조립과 다음 연결의 파일 갱신을 확인했다. 운영 지시문 해시는 반영 후 `119bd8baf8e682054162cac29007875ecb65aa29d994268e33a139a88bab1800`이다.
