@@ -101,6 +101,43 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
         for item in catalog.items.values():
             with self.subTest(item=item.id):
                 self.assertEqual(catalog.check(item), [])
+                if item.kind == "font":
+                    self.assertEqual(catalog.licenses[item.license_id]["license"], "OFL-1.1")
+                    ofl = (catalog.root / item.id / "OFL.txt").read_text(encoding="utf-8-sig")
+                    self.assertIn("SIL OPEN FONT LICENSE", ofl)
+                    self.assertIn("1.1", ofl)
+                if item.slot:
+                    self.assertTrue(item.prompt.isascii() and item.prompt.strip())
+
+    async def test_tc539_real_application_starts_twice_without_reseeding_duplicates(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        assets(folder.name)
+        root = Path(folder.name) / "v1"
+        manifest = root / "items.json"
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        duplicate = dict(data["items"][0], id="hat-second", name="hat-second", license="hat-second")
+        data["items"].append(duplicate)
+        shutil.copytree(root / "hat-fixture", root / "hat-second")
+        manifest.write_text(json.dumps(data), encoding="utf-8")
+        with (root / "licenses.csv").open("a", encoding="utf-8", newline="") as file:
+            csv.writer(file).writerow(("hat-second", "hat-second", "*", "synthetic", "fixture", "CC0-1.0", "fixture", "2026-11-21"))
+        db = TestDB()
+        self.addCleanup(db.close)
+        db.apply_unified_prerequisites()
+        db.apply_unified()
+        db.apply_pet_app_prerequisites()
+        db.apply_pet_app()
+        for attempt in range(2):
+            child = await asyncio.create_subprocess_exec(
+                sys.executable, str(ROOT / "tests/support/decor_start_child.py"), db.app_url, folder.name,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            output, errors = await asyncio.wait_for(child.communicate(), 60)
+            self.assertEqual(child.returncode, 0, errors.decode(errors="replace")[-3000:])
+            self.assertIn(b"listed=7 new=1", output)
+            self.assertIn(b"decor_seed_skip", errors)
+            self.assertEqual(db.admin("SELECT count(*) FROM marong.decor_items WHERE state='listed'"), [(7,)])
+            self.assertEqual(db.admin("SELECT count(*) FROM marong.decor_items WHERE id='bad-fixture'"), [(0,)])
 
     async def test_reaction_respects_daily_cap_and_precedes_a_topic(self):
         now = datetime(2026, 11, 22, 12, tzinfo=KST)
@@ -254,7 +291,15 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await client.get(image.replace("/v1/", "/v2/"), headers=member)).status, 404)
             self.assertEqual((await client.get("/chat/decor/v1/hat-fixture/%2e%2e%2fitems.json",
                                                headers=member)).status, 404)
+            self.assertEqual((await client.get("/chat/decor/v1/hat-fixture/../items.json", headers=member)).status, 404)
             self.assertEqual((await client.get("/chat/admin/api/items", headers=member)).status, 403)
+            for action in ("list", "unlist"):
+                denied = await client.post(f"/chat/admin/api/items/hat-fixture/{action}", headers=member)
+                self.assertEqual((denied.status, (await denied.json())["code"]), (403, "not_allowed"))
+                invalid = await client.post(f"/chat/admin/api/items/Bad_ID/{action}", headers=admin)
+                self.assertEqual((invalid.status, (await invalid.json())["code"]), (400, "invalid_input"))
+            absent = await client.post("/chat/admin/api/items/absent-fixture/unlist", headers=admin)
+            self.assertEqual((absent.status, (await absent.json())["code"]), (404, "not_found"))
             rejected = await client.post("/chat/admin/api/items/bad-fixture/list", headers=admin)
             self.assertEqual((rejected.status, (await rejected.json())["missing"]),
                              (409, ["price", "license", "file:sticker.webp"]))
@@ -270,7 +315,13 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(sorted(response.status for response in claims), [200, 201])
             self.assertEqual(db.admin("SELECT count(*) FROM marong.decor_owned WHERE friend_id=%s AND item_id='hat-fixture'", (friend,)), [(1,)])
             self.assertEqual((await client.post(path, headers=member)).status, 200)
-            self.assertEqual((await client.post("/chat/admin/api/items/hat-fixture/unlist", headers=admin)).status, 200)
+            admin_items = (await (await client.get("/chat/admin/api/items", headers=admin)).json())["items"]
+            hat_state = next(item for item in admin_items if item["id"] == "hat-fixture")
+            self.assertEqual((hat_state["state"], hat_state["owners"], hat_state["missing"]), ("listed", 1, []))
+            invalid_state = next(item for item in admin_items if item["id"] == "bad-fixture")
+            self.assertIn("license", invalid_state["missing"])
+            unlisted = await client.post("/chat/admin/api/items/hat-fixture/unlist", headers=admin)
+            self.assertEqual((unlisted.status, (await unlisted.json())["state"]), (200, "unlisted"))
             self.assertEqual((await client.post(path, headers=member)).status, 404)
             listed = await client.post("/chat/admin/api/items/hat-fixture/list", headers=admin)
             self.assertEqual((listed.status, (await listed.json())["state"]), (200, "listed"))
@@ -294,13 +345,24 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             closet = await (await client.get("/chat/api/closet", headers=member)).json()
             self.assertEqual(closet["characterId"], character)
             self.assertEqual(closet["outfit"]["head"]["id"], "hat-fixture")
+            hat_only = {"head": "hat-fixture", "body": None, "neck": None}
+            self.assertEqual((await client.put(outfit, headers=member, json=hat_only)).status, 200)
+            hat_closet = await (await client.get("/chat/api/closet", headers=member)).json()
+            self.assertEqual(hat_closet["characterId"], character)
+            self.assertEqual(hat_closet["outfit"]["head"]["id"], "hat-fixture")
+            self.assertIsNone(hat_closet["outfit"]["body"])
+            self.assertIsNone(hat_closet["outfit"]["neck"])
+            self.assertEqual((await client.put(outfit, headers=member, json=picks)).status, 200)
             profile = await (await client.get("/chat/api/profile", headers=member)).json()
             self.assertEqual(profile["character"]["outfit"]["head"]["id"], "hat-fixture")
+            self.assertEqual(profile["character"]["outfit"]["head"]["layerUrl"], image)
+            self.assertEqual((await client.get(image, headers=member)).status, 200)
             self.assertNotIn("hat-fixture", [item["id"] for item in (await (await client.get("/chat/api/shop", headers=member)).json())["items"]])
             self.assertIn("hat-fixture", [row["id"] for row in closet["items"]])
             starter_closet = await (await client.get("/chat/api/closet", headers=other)).json()
             self.assertIsNone(starter_closet["outfit"])
             self.assertEqual({row["kind"] for row in starter_closet["items"]}, {"background", "paper", "font"})
+            self.assertTrue(all(item["owned"] and item["starter"] for item in starter_closet["items"]))
             self.assertEqual({kind: starter_closet["diaryDecor"][kind]["id"] for kind in ("background", "paper", "font")},
                              {kind: "starter-" + kind for kind in ("background", "paper", "font")})
             draft_id = db.admin("INSERT INTO marong.characters(friend_id,kind) VALUES (%s,'dog') RETURNING id", (friend,))[0][0]
@@ -464,6 +526,24 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([response.status for response in saved], [200, 200])
             result = await (await client.get(path, headers=member)).json()
             self.assertIn([row["x"] for row in result["stickers"]], [list(range(10, 20)), list(range(20, 30))])
+            # TC-544: same-kind listing order and concurrent claim of a different item.
+            catalog.items["hat-second"] = replace(catalog.items["hat-fixture"], id="hat-second", starter=False)
+            db.admin("INSERT INTO marong.decor_items(id,item_set,kind,slot,starter,listed_at) VALUES ('hat-second','v1','hat','head',false,now() + interval '1 minute')")
+            await client.post("/chat/admin/api/items/hat-fixture/list", headers=admin)
+            hats = [item["id"] for item in (await (await client.get("/chat/api/shop", headers=member)).json())["items"] if item["kind"] == "hat"]
+            self.assertEqual(hats, ["hat-fixture", "hat-second"])
+            second_claims = await asyncio.gather(*(client.post("/chat/api/shop/hat-second/claim", headers=member) for _ in range(2)))
+            self.assertEqual(sorted(response.status for response in second_claims), [200, 201])
+            self.assertEqual(db.admin("SELECT count(*) FROM marong.decor_owned WHERE friend_id=%s AND item_id='hat-second'", (friend,)), [(1,)])
+            self.assertEqual((await client.get("/chat/api/shop")).status, 401)
+            self.assertEqual((await client.get("/chat/api/closet")).status, 401)
+            self.assertEqual((await client.post("/chat/api/shop/hat-second/claim", headers={"Origin": ORIGIN})).status, 401)
+            self.assertEqual(db.admin("""
+                SELECT table_name, column_name FROM information_schema.columns
+                WHERE table_schema IN ('marong','call')
+                  AND (table_name ~* '(^|_)(payments?|orders?|gacha)(_|$)'
+                    OR column_name ~* '(^|_)(payments?|orders?|gacha)(_|$)')
+            """), [])
             chat.decor.catalog = None
             for endpoint in (image, "/chat/api/shop", "/chat/api/closet", "/chat/diary/api/decor", path):
                 self.assertEqual((await client.get(endpoint, headers=member)).status, 404)
