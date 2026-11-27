@@ -214,7 +214,7 @@ class AdminChangesTest(unittest.IsolatedAsyncioTestCase):
         print(f"TC-706 300 x 3072 B, 5 requests, median {milliseconds:.1f} ms")
         self.assertLess(milliseconds, 500)
 
-    async def test_tc729_bug128_admin_html_prevents_edge_transform(self):
+    async def test_tc741_bug128_admin_html_prevents_edge_transform(self):
         for path, _ in SCREENS:
             with self.subTest(path=path):
                 response = await self.client.get(f"/chat/admin/{path}", headers=self.headers)
