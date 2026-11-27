@@ -6,6 +6,7 @@ const path = require('node:path');
 const {test} = require('node:test');
 const {performance} = require('node:perf_hooks');
 const {createHash} = require('node:crypto');
+const {execFileSync} = require('node:child_process');
 const {startCallSite} = require('./support/call-site.cjs');
 
 let chromium;
@@ -13,6 +14,9 @@ try { ({chromium} = require('playwright')); } catch {}
 
 const BASE = 'http://127.0.0.1:41798';
 const STATIC = path.join(__dirname, '..', '..', '..', 'marong', 'app_chat_static');
+const REPO = path.join(STATIC, '..', '..');
+// First parent of the decor package's main merge (PR #93, 5947911).
+const TC551_BEFORE_DECOR = 'c5c891883ae22fcbccf034634f97692a6db23666';
 const BLANK = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aLhcAAAAASUVORK5CYII=', 'base64');
 
 test('TC-548: call portrait layers draw in order and a missing asset leaves the rest visible', {skip: !chromium}, async () => {
@@ -159,6 +163,9 @@ test('TC-535/551/553: diary writer and sticker editing at 360 and 430 px', {skip
     const base = '/chat/diary/api/days/' + date;
     let saved = [];
     let styleMode = 'off';
+    let beforePackage = true;
+    const baselineFiles = new Map(['index.html','diary.js','tokens.css','diary.css','sheets.js','Gaegu-Regular.woff2'].map(file => [file,
+      execFileSync('git', ['show', `${TC551_BEFORE_DECOR}:marong/app_chat_static/diary/${file}`], {cwd: REPO, maxBuffer: 1024 * 1024})]));
     await page.route('**/*', async route => {
       const url = new URL(route.request().url());
       assert.equal(url.origin, BASE);
@@ -205,7 +212,7 @@ test('TC-535/551/553: diary writer and sticker editing at 360 and 430 px', {skip
           font: {fontUrl: '/chat/decor/v1/poorstory-font/font.woff2'}}});
       }
       if (address === '/chat/diary/Gaegu-Regular.woff2') {
-        return route.fulfill({contentType: 'font/woff2', body: await readFile(path.join(STATIC, 'diary', 'Gaegu-Regular.woff2'))});
+        return route.fulfill({contentType: 'font/woff2', body: beforePackage ? baselineFiles.get('Gaegu-Regular.woff2') : await readFile(path.join(STATIC, 'diary', 'Gaegu-Regular.woff2'))});
       }
       if (address.endsWith('/font.woff2')) {
         const font = path.join(STATIC, '..', 'decor', 'v1', 'poorstory-font', 'font.woff2');
@@ -224,7 +231,7 @@ test('TC-535/551/553: diary writer and sticker editing at 360 and 430 px', {skip
         return route.fulfill({status: 404});
       }
       const type = file.endsWith('.css') ? 'text/css' : file.endsWith('.js') ? 'application/javascript' : 'text/html';
-      return route.fulfill({contentType: type + '; charset=utf-8', body: await readFile(path.join(STATIC, 'diary', file))});
+      return route.fulfill({contentType: type + '; charset=utf-8', body: beforePackage ? baselineFiles.get(file) : await readFile(path.join(STATIC, 'diary', file))});
     });
     await page.clock.setFixedTime(new Date('2026-11-21T03:00:00Z'));
     const started = performance.now();
@@ -233,13 +240,27 @@ test('TC-535/551/553: diary writer and sticker editing at 360 and 430 px', {skip
     t.diagnostic('First diary content in routed Chromium: ' + Math.round(performance.now() - started) + ' ms');
     await page.evaluate(() => document.fonts.ready);
     const baseline = await page.locator('.paper').screenshot({animations: 'disabled'});
+    const baselinePage = await page.screenshot({fullPage:true,animations:'disabled'});
+    const digest = data => createHash('sha256').update(data).digest('hex');
+    t.diagnostic('TC-551 pre-package main: ' + TC551_BEFORE_DECOR);
+    beforePackage = false;
+    await page.reload();
+    await page.getByRole('heading', {name: '콩이 일기'}).waitFor();
+    await page.evaluate(() => document.fonts.ready);
+    const disabled = await page.locator('.paper').screenshot({animations: 'disabled'});
+    assert.equal(digest(disabled), digest(baseline), 'the disabled feature matches the pre-package main diary card');
+    const disabledPage = await page.screenshot({fullPage:true,animations:'disabled'});
+    assert.equal(digest(disabledPage), digest(baselinePage), 'the disabled full page matches the pre-package main');
     styleMode = 'starter';
     await page.reload();
     await page.getByRole('button', {name: '스티커', exact: true}).waitFor();
     await page.evaluate(() => document.fonts.ready);
     const starter = await page.locator('.paper').screenshot({animations: 'disabled'});
-    const digest = data => createHash('sha256').update(data).digest('hex');
-    assert.equal(digest(starter), digest(baseline), 'the diary card with starter decor matches the disabled feature');
+    assert.equal(digest(starter), digest(baseline), 'the diary card with starter decor matches the pre-package main');
+    // SCR-113 expressly adds these two actions; remove only those approved additions for the full-page comparison.
+    await page.getByRole('button',{name:'스티커',exact:true}).evaluate(el=>el.remove());
+    await page.getByRole('link',{name:'꾸미기',exact:true}).evaluate(el=>el.remove());
+    assert.equal(digest(await page.screenshot({fullPage:true,animations:'disabled'})), digest(baselinePage), 'the starter full page matches the pre-package main apart from the two added actions');
     await page.goto(BASE + '/chat/diary/decor');
     await page.getByRole('button',{name:'처음 모습으로'}).click();
     await page.getByRole('button',{name:'이걸로 할래'}).click();
@@ -249,6 +270,9 @@ test('TC-535/551/553: diary writer and sticker editing at 360 and 430 px', {skip
     await page.locator('#banner').evaluate(el => { el.hidden = true; });
     const savedDefaults = await page.locator('.paper').screenshot({animations:'disabled'});
     assert.equal(digest(savedDefaults), digest(baseline), 'saving starter decor preserves the original diary card');
+    await page.getByRole('button',{name:'스티커',exact:true}).evaluate(el=>el.remove());
+    await page.getByRole('link',{name:'꾸미기',exact:true}).evaluate(el=>el.remove());
+    assert.equal(digest(await page.screenshot({fullPage:true,animations:'disabled'})), digest(baselinePage), 'the saved starter full page matches the pre-package main apart from the two added actions');
     await page.goto(BASE + '/chat/diary/decor');
     await page.getByLabel('배경',{exact:true}).selectOption('blue-background');
     await page.getByLabel('속지',{exact:true}).selectOption('ivory-paper');

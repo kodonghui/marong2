@@ -161,7 +161,8 @@ svg { width: var(--size-icon); height: var(--size-icon); fill: none; stroke: cur
 .diary-writer { display: flex; align-items: center; gap: var(--space-sm); }
 .diary-writer img { width: 2.5rem; height: 2.5rem; object-fit: contain; }
 #day { background-image: var(--book-background, none); background-size: cover; }
-.paper { position: relative; background-image: var(--paper-background, none); background-size: cover; }
+.paper { background-image: var(--paper-background, none); background-size: cover; }
+.paper.has-stickers { position: relative; }
 .diary-sticker { position: absolute; width: 3rem; height: 3rem; object-fit: contain;
   transform: translate(-50%, -50%) rotate(var(--sticker-angle, 0deg)) scale(var(--sticker-size, 1));
   pointer-events: none; }

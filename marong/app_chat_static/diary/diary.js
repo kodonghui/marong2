@@ -584,6 +584,7 @@ function drawPicture(diary) {
 
 function drawReady(diary) {
   const paper = element("article", "paper");
+  if (editingStickers || stickers?.length) paper.classList.add("has-stickers");
   paintDecor(paper, view, bookStyle);
   if (diary.hidden) {
     const strip = element("div", "paper-note", "숨긴 일기야. 넘기기와 달력에는 안 보여");
