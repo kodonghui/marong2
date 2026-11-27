@@ -1195,3 +1195,52 @@ test('TC-551: empty diary uses the example and save stays disabled while pending
     assert.equal(await save.isDisabled(),false);
   } finally { if(release) release(); await browser.close(); }
 });
+
+for (const failure of ['500', 'network', 'disabled']) {
+  test(`BUG-137: sticker entry handles decor ${failure} before recovery`, {skip:!chromium}, async () => {
+    const browser=await chromium.launch();
+    try {
+      const page=await browser.newPage({viewport:{width:360,height:780}});
+      const date='2026-11-21', item={id:'star-sticker',kind:'sticker',name:'별 스티커',thumbUrl:'/chat/decor/v1/star-sticker/sticker.webp'};
+      let attempts=0, stickerReads=0;
+      await page.route('**/*',async route=>{
+        const address=new URL(route.request().url()).pathname;
+        if(address==='/chat/diary/api/decor') {
+          attempts++;
+          if (failure==='disabled') return route.fulfill({status:404,json:{code:'not_found'}});
+          if (attempts===1 && failure==='network') return route.abort('failed');
+          if (attempts===1) return route.fulfill({status:500,json:{code:'internal'}});
+          return route.fulfill({json:{background:{id:'starter-background',imageUrl:null},paper:{id:'starter-paper',imageUrl:null},font:{id:'starter-font',fontUrl:null}}});
+        }
+        if(address===`/chat/diary/api/days/${date}`) return route.fulfill({json:{date,state:'ready',prev:null,next:null,diary:{title:'오늘 일기',body:'시험 일기',revision:1,weather:'sunny',drawing:{kind:'placeholder',id:null},busy:null,hidden:false,stampedAt:null,fix:{left:5,blocked:null},redraw:{left:2,blocked:null,last:null}}}});
+        if(address===`/chat/diary/api/days/${date}/stickers`) { stickerReads++; return route.fulfill({json:{date,stickers:[]}}); }
+        if(address==='/chat/api/closet') return route.fulfill({json:{items:[item]}});
+        if(address.startsWith('/chat/decor/') || address.startsWith('/face/')) return route.fulfill({contentType:'image/png',body:BLANK});
+        const file=address===`/chat/diary/${date}`?'index.html':path.basename(address);
+        if(!['index.html','diary.js','decor.js','tokens.css','diary.css','sheets.js','Gaegu-Regular.woff2'].includes(file)) return route.fulfill({status:404});
+        const type=file.endsWith('.css')?'text/css':file.endsWith('.js')?'application/javascript':file.endsWith('.woff2')?'font/woff2':'text/html';
+        return route.fulfill({contentType:type,body:await readFile(path.join(STATIC,'diary',file))});
+      });
+      const disabledReply=failure==='disabled'?page.waitForResponse(response=>response.url().endsWith('/chat/diary/api/decor') && response.status()===404):null;
+      await page.goto(BASE+'/chat/diary/'+date+'#sticker=star-sticker');
+      if(failure==='disabled') {
+        await disabledReply;
+        await page.getByRole('heading',{name:'오늘 일기'}).waitFor();
+        await page.waitForFunction(()=>document.querySelector('#day').getAttribute('aria-busy')==='false');
+        assert.equal(await page.getByRole('button',{name:'다시 해 볼게'}).count(),0);
+        assert.equal(await page.getByRole('heading',{name:'스티커 붙이기'}).count(),0);
+        assert.equal(attempts,1);
+        assert.equal(stickerReads,0);
+      } else {
+        await page.getByRole('button',{name:'다시 해 볼게'}).waitFor({timeout:2000});
+        assert.equal(attempts,1);
+        await page.getByRole('button',{name:'다시 해 볼게'}).click();
+        await page.getByRole('heading',{name:'스티커 붙이기'}).waitFor({timeout:2000});
+        assert.equal(attempts,2);
+        assert.equal(stickerReads,1);
+        assert.equal(await page.getByText('1/10',{exact:true}).count(),1);
+        assert.equal(await page.locator('.sticker-movable').count(),1);
+      }
+    } finally { await browser.close(); }
+  });
+}

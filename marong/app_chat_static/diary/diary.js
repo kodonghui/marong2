@@ -279,9 +279,10 @@ async function loadDecor(forDate, id) {
     if ((location.hash === "#stickers" || requestedSticker()) && !editingStickers) {
       await openStickers();
     } else draw();
-  } catch {
-    if (id === loadId && bookStyle === undefined) bookStyle = null;
-    if (id === loadId && stickerLoading) stickerLoadFailed();
+  } catch (error) {
+    if (id !== loadId || date !== forDate) return;
+    if (bookStyle === undefined && error.status === 404) bookStyle = null;
+    else if (stickerLoading) stickerLoadFailed();
   } finally {
     if (id === loadId && stickerLoading) { stickerLoading = false; draw(); }
   }
