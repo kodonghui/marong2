@@ -692,14 +692,14 @@ test('TC-656 items show the decor-off notice only for 404', options, async t => 
         await page.screenshot({path: path.join(process.env.MARONG_ADMIN_SCREENSHOTS, 'decor-off.png')});
       }
 
-      for (const status of [403, 500, 503]) {
+      for (const status of [500, 503]) {
         state['/items'] = status;
         await visit('/items');
-        assert.match(await screen.locator('#item-error').innerText(), /아이템을 불러오지 못했어요.*0123456789abcdef/s);
-        assert.equal(await screen.getByRole('button', {name: '다시 보기'}).count(), 1);
+        assert.match(await screen.locator('#item-error').innerText(), /잠깐 문제가 생겼어요\. 다시 해 볼까요\?.*0123456789abcdef/s);
+        assert.equal(await screen.getByRole('button', {name: '다시 해 볼게요'}).count(), 1);
       }
       state['/items'] = {...items, items: []};
-      await screen.getByRole('button', {name: '다시 보기'}).click();
+      await screen.getByRole('button', {name: '다시 해 볼게요'}).click();
       await screen.getByText('아이템 목록 폴더가 비어 있어요(marong/decor/v1/items.json)').waitFor();
       assert.equal(await screen.locator('#item-error').isVisible(), false);
       state['/items'] = items;
@@ -724,12 +724,12 @@ test('TC-658 a non-Problem 404 also shows the decor-off notice', options, async 
 test('TC-656 items keep retry for a failed request and for a request over 10 seconds', options, async t => {
   const {page, visit, errors} = await open(t, {width: 360, height: 820});
   const screen = page.locator('#item-admin');
-  const retry = screen.getByRole('button', {name: '다시 보기'});
+  const retry = screen.getByRole('button', {name: '다시 해 볼게요'});
   const endpoint = '**/chat/admin/api/items';
   await page.clock.install({time: new Date(date)});
   await page.route(endpoint, route => route.abort(), {times: 1});
   await visit('/items');
-  assert.equal(await screen.locator('#item-error').innerText(), '아이템을 불러오지 못했어요');
+  assert.equal(await screen.locator('#item-error').innerText(), '잠깐 문제가 생겼어요. 다시 해 볼까요?');
 
   let stalled;
   const requestStarted = new Promise(resolve => { stalled = resolve; });
@@ -743,7 +743,7 @@ test('TC-656 items keep retry for a failed request and for a request over 10 sec
   } finally {
     await route.abort();
   }
-  assert.equal(await screen.locator('#item-error').innerText(), '아이템을 불러오지 못했어요');
+  assert.equal(await screen.locator('#item-error').innerText(), '잠깐 문제가 생겼어요. 다시 해 볼까요?');
   await retry.click();
   await screen.getByRole('row').filter({hasText: name}).waitFor();
   assert.equal(await screen.locator('#item-error').isVisible(), false);

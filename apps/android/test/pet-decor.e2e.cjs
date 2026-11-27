@@ -332,17 +332,103 @@ test('TC-543: show item validation, change listing, and recover after a forbidde
     }
     const broken = page.getByRole('row').filter({hasText: '검사 중 모자'});
     await broken.getByText('확인할 항목 layer:dog_long').waitFor();
-    assert.equal(await broken.getByRole('button', {name: '올리기'}).isDisabled(), true);
+    assert.equal(await broken.getByRole('button', {name: '올리기'}).count(), 0);
     await blue.getByRole('button', {name: '올리기'}).click();
     await blue.getByRole('button', {name: '내리기'}).waitFor();
 
     permitted = false;
     await page.reload();
-    await page.getByText('아이템을 불러오지 못했어요').waitFor();
-    permitted = true;
-    await page.getByRole('button', {name: '다시 보기'}).click();
-    await blue.getByRole('button', {name: '내리기'}).waitFor();
+    await page.getByText('관리자만 볼 수 있어요').waitFor();
   } finally {
     await browser.close();
   }
+});
+
+async function itemAdminFixture(page, denied = false) {
+  const items = [
+    {id: 'green-cap', kind: 'hat', name: '초록 모자', state: 'listed', owners: 2, missing: [], starter: false},
+    {id: 'blue-cap', kind: 'hat', name: '파란 모자', state: 'unlisted', owners: 1, missing: [], starter: false},
+    {id: 'broken-cap', kind: 'hat', name: '검사 중 모자', state: 'new', owners: 0, missing: ['layer:dog_long'], starter: false},
+  ];
+  let writes = 0;
+  await page.route('**/*', async route => {
+    const address = new URL(route.request().url()).pathname;
+    if (address === '/chat/admin/api/items') return denied
+      ? route.fulfill({status: 403, json: {code: 'not_allowed'}})
+      : route.fulfill({json: {items, set: 'v1'}});
+    if (address === '/chat/admin/api/items/blue-cap/list') return route.fulfill({status: 409, json: {code: 'item_invalid', missing: ['license']}});
+    if (address === '/chat/admin/api/items/green-cap/unlist') {
+      writes++; items[0].state = 'unlisted'; return route.fulfill({json: items[0]});
+    }
+    const file = address === '/chat/admin/items' ? 'admin-items.html' : path.basename(address);
+    if (!['admin-items.html', 'admin-items.js', 'chat.css', 'unified.css', 'unified.js'].includes(file)) return route.fulfill({status: 404});
+    const type = file.endsWith('.css') ? 'text/css' : file.endsWith('.js') ? 'application/javascript' : 'text/html';
+    let content = await readFile(path.join(STATIC, file), 'utf8');
+    if (file === 'admin-items.html') content = content.replace('<!-- admin-tabs -->', '<nav class="admin-tabs"><a href="/chat/admin/items">아이템</a></nav>');
+    return route.fulfill({contentType: type + '; charset=utf-8', body: content});
+  });
+  await page.goto(BASE + '/chat/admin/items');
+  if (denied) await page.getByText('관리자만 볼 수 있어요').waitFor({timeout: 1500});
+  else await page.locator('#item-admin[aria-busy="false"]').waitFor();
+  return () => writes;
+}
+
+test('BUG-115 TC-543: state filter shows only matching items', {skip: !chromium}, async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage(); await itemAdminFixture(page);
+    for (const [label, expected] of [['새것', ['검사 중 모자']], ['올림', ['초록 모자']], ['내림', ['파란 모자']], ['전체', ['초록 모자', '파란 모자', '검사 중 모자']]]) {
+      await page.getByRole('button', {name: label, exact: true}).click({timeout: 1500});
+      assert.deepEqual(await page.locator('tbody tr td:nth-child(4)').allTextContents(), expected);
+    }
+  } finally { await browser.close(); }
+});
+
+test('BUG-115 TC-543: unlisting requires confirmation', {skip: !chromium}, async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage(); const writes = await itemAdminFixture(page);
+    const row = page.getByRole('row').filter({hasText: '초록 모자'});
+    await row.getByRole('button', {name: '내리기'}).click();
+    assert.equal(writes(), 0);
+    assert.equal(await row.getByText('상점에서 내릴까요? 받은 사람은 계속 써요').count(), 1);
+    await row.getByRole('button', {name: '취소'}).click();
+    assert.equal(writes(), 0);
+    await row.getByRole('button', {name: '내리기'}).click();
+    await row.getByRole('button', {name: '확인'}).click();
+    await row.getByRole('button', {name: '올리기'}).waitFor();
+    assert.equal(writes(), 1);
+  } finally { await browser.close(); }
+});
+
+test('BUG-115 TC-543: invalid item has no listing button', {skip: !chromium}, async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage(); await itemAdminFixture(page);
+    const row = page.getByRole('row').filter({hasText: '검사 중 모자'});
+    assert.equal(await row.getByText(/layer:dog_long/).count(), 1);
+    assert.equal(await row.getByRole('button', {name: '올리기'}).count(), 0);
+  } finally { await browser.close(); }
+});
+
+test('BUG-115 TC-543: forbidden hides tabs and shows admin-only state', {skip: !chromium}, async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage(); await itemAdminFixture(page, true);
+    assert.equal(await page.getByText('관리자만 볼 수 있어요').count(), 1);
+    assert.equal(await page.locator('.admin-tabs:visible').count(), 0);
+    assert.equal(await page.getByRole('button', {name: '다시 보기'}).count(), 0);
+  } finally { await browser.close(); }
+});
+
+
+test('BUG-115 TC-543: validation failure shows missing items on the row', {skip: !chromium}, async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage(); await itemAdminFixture(page);
+    const row = page.getByRole('row').filter({hasText: '파란 모자'});
+    await row.getByRole('button', {name: '올리기'}).click();
+    await row.getByText(/license/).waitFor();
+    assert.equal(await row.getByRole('button', {name: '올리기'}).count(), 0);
+  } finally { await browser.close(); }
 });
