@@ -9,17 +9,17 @@
 
 시험 데이터는 합성 데이터만 써요. 사람은 '시험친구 가'·'시험친구 나'·'시험친구 다'이고, 이름이 같은 두 친구가 필요한 시험은 '시험친구 가'를 두 `friendId`(7, 9)에 둬요. 통화 비용은 `tools/vertex_live/test_call_cost.py`처럼 지어낸 통화·토큰·단가 행으로, 앱 버전은 PR #101 계약의 API-267 예시(`behind`, `empty`)와 그것을 늘린 가짜 응답으로 만들어요. 운영 DB의 값, 실제 친구 이름, 대화, 실제 이메일은 넣지 않아요.
 
-## Gate와 상태: 체크포인트 제안
+## Gate와 상태: 체크포인트 승인
 
-Gate 열은 아직 승인되지 않은 제안이에요. REQ-570·571·572·574~582의 Must와 이를 지키는 승인 SPEC·API 권한 및 오류를 포함한 TC를 `gate`로 제안해요. TC-638은 기존 아이템 기능의 Must REQ-527~529와 REQ-570을 포함하고, 꾸미기 켜진 시험 환경을 사용해요. TC-640·641은 REQ-585가 Should이므로 `non-gate`이며 360px Must인 REQ-581은 TC-637이 따로 검사해요. REQ-583(Could)의 TC-635·636과 REQ-586·587(Should)에 특화된 TC-653·655~658도 `non-gate`로 제안해요. TC-654·659는 Should 기능의 경계도 다루지만 REQ-572 Must인 개요 숫자와 연결되어 `gate`로 제안해요. TC-639는 Must의 운영 반영 확인을 포함해 `gate`로 제안하고 TC-657은 기능 변경 3의 Should 전용 운영 확인으로 `non-gate`예요. SPEC 하나에 여러 우선순위가 섞이면 해당 TC의 Must 부분이 있는지 기준으로 삼았어요.
+Gate 열은 2026-11-27 체크포인트에서 승인된 지정이에요([D164](../10-wbs/README.md#결정), PR #140 `c0fced1`). REQ-570·571·572·574~582의 Must와 이를 지키는 승인 SPEC·API 권한 및 오류를 포함한 TC를 `gate`로 지정해요. TC-638은 기존 아이템 기능의 Must REQ-527~529와 REQ-570을 포함하고, 꾸미기 켜진 시험 환경을 사용해요. TC-640·641은 REQ-585가 Should이므로 `non-gate`이며 360px Must인 REQ-581은 TC-637이 따로 검사해요. REQ-583(Could)의 TC-635·636과 REQ-586·587(Should)에 특화된 TC-653·655~658도 `non-gate`로 지정해요. TC-654·659는 Should 기능의 경계도 다루지만 REQ-572 Must인 개요 숫자와 연결되어 `gate`로 지정해요. TC-639는 Must의 운영 반영 확인을 포함해 `gate`로 지정하고 TC-657은 기능 변경 3의 Should 전용 운영 확인으로 `non-gate`예요. SPEC 하나에 여러 우선순위가 섞이면 해당 TC의 Must 부분이 있는지 기준으로 삼았어요.
 
-Status는 `pass`, `fail`, `blocked`, `not run`, `waived` 중 하나예요. 과거 커밋에서 통과한 사례는 원래 결과를 Run evidence에 보존했고, 그것만으로 최신 릴리스 커밋의 통과를 주장하지 않아요. 최신 기준 `9811ad9` 시험의 대응 범위와 미확인 부분, 잠정 집계는 [QA 확인 기록](runs/2026-11-27-admin-review.md#릴리스-게이트-제안과-잠정-집계)에 있어요. `waived`는 사용자님의 개별 결정 없이 쓰지 않아요.
+Status는 `pass`, `fail`, `blocked`, `not run`, `waived` 중 하나예요. 과거 커밋에서 통과한 사례는 원래 결과를 Run evidence에 보존했고, 그것만으로 최신 릴리스 커밋의 통과를 주장하지 않아요. 최신 기준 `9811ad9` 시험의 대응 범위와 미확인 부분, 잠정 집계는 [QA 확인 기록](runs/2026-11-27-admin-review.md#릴리스-게이트-지정과-잠정-집계)에 있어요. `waived`는 사용자님의 개별 결정 없이 쓰지 않아요.
 
-체크포인트 질문: 위 TC별 gate 제안을 승인할까요? 승인된 요구사항·SPEC에서 기능을 빼거나 뜻을 바꾸는 제안은 없고, gate 지정은 요구사항의 우선순위를 바꾸지 않아요. 다만 TC-639·657의 미확인 부분과 BUG-115를 없애거나 면제한 뜻은 아니에요.
+체크포인트 답: gate 21건·non-gate 9건을 승인했어요(D164). 승인된 요구사항·SPEC의 기능과 우선순위는 바뀌지 않아요. TC-639·657의 미확인 부분과 BUG-115는 그대로 남고, 면제·PR 병합·운영 배포·실사용자 릴리스는 승인 범위에 없어요.
 
 ## ① 틀과 경로(TASK-492)
 
-| ID | Case | From | Runs as | Data | Steps | Expected | Gate 제안 | Status | Run evidence |
+| ID | Case | From | Runs as | Data | Steps | Expected | Gate | Status | Run evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | TC-620 | 화면 경로 여덟이 같은 틀과 탭 줄을 줌 | SPEC-450, REQ-570, REQ-571 | api(`tests/test_admin.py`) | 관리자 JWT | `/chat/admin/`, `/members`, `/members/7`, `/invites`, `/app`, `/costs`, `/items`, `/changes`를 차례로 GET | 모두 200 HTML이고 탭 일곱(`<a href>`)이 있음(D173 4-9). 지금 화면의 탭에만 `aria-current="page"`. 응답 헤더에 CSP `script-src 'self'`가 그대로 | gate | pass | 기능 변경 4 전(경로 일곱·탭 여섯) 통과 · `d6912a7`, WSL Python 3.12·임시 PostgreSQL. 일곱 경로 200, 탭 여섯·선택 하나·CSP 확인. 여덟 경로·탭 일곱은 아직 돌리지 않았어요(TASK-542). |
 | TC-621 | 관리자 아님·모르는 경로·끝 `/` | SPEC-450, 공통 규칙 1 | api(`tests/test_admin.py`) | 증명 없는 요청, 다른 이메일 JWT, 관리자 JWT | 증명 없이 일곱 경로 → 다른 이메일로 일곱 경로 → 관리자로 `/chat/admin/foo`, `/chat/admin/members/abc`, `/chat/admin/members/0` → `/chat/admin/members/` | 처음 둘은 모두 403(401이 아님). 모르는 경로와 숫자가 아닌·0인 `friendId`는 404. 끝 `/`는 301로 `/chat/admin/members` | gate | pass | 통과 · `d6912a7`, WSL Python 3.12·임시 PostgreSQL. 증명 없음·관리자가 아닌 증명 각 일곱 경로 403, 모르는 경로와 잘못된 ID 404, 끝 / 301과 질의 유지. |
@@ -27,7 +27,7 @@ Status는 `pass`, `fail`, `blocked`, `not run`, `waived` 중 하나예요. 과�
 
 ## ② 개요 API(TASK-491)
 
-| ID | Case | From | Runs as | Data | Steps | Expected | Gate 제안 | Status | Run evidence |
+| ID | Case | From | Runs as | Data | Steps | Expected | Gate | Status | Run evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | TC-622 | 개요의 숫자와 주의 항목 다섯 | SPEC-451, REQ-572, REQ-573, API-280#200 | api(`tests/test_admin.py`) | 회원 3, 프로필 없는 친구 1, 오늘 단위 합 420(한국 시각 04:00 뒤 행만), 통화 합 121.40·예산 150, 캐릭터 그림 17/20달러, 가짜 앱 함수(최신 0.3.3을 30시간 전에 올림, 0.3.2 폰 1·0.3.3 폰 1), 23시간 뒤 만료되는 열린 링크 1 | API-280 | 숫자가 그대로(`spentUsd` `"121.40"`, `percent` 80, `state` `warn`, `images.budgetPercent` 85, `app.devices` 2, `behind` 1). `attention`이 `call_budget`(80), `image_budget`(85), `app_behind`(1), `invite_expiring`(1), `unlinked_friend`(1) 차례. `Cache-Control: no-store` | gate | pass | 통과 · `95a68be`, WSL Python 3.12·임시 PostgreSQL. 회원 3명, 잇지 않은 친구 1명, 420단위, 통화 $121.40/80%, 그림 85%, 주의 항목 5개 확인. |
 | TC-623 | 손볼 일 없음, 한 부분 실패, 차례 읽기 | SPEC-451, API-280#200 | api(`tests/test_admin.py`) | (가) 문턱 아래 자료 (나) 통화 함수가 2초 걸리게 함 (다) 앱 함수가 없음(앱 업데이트 TASK-480 전) (라) 그림 함수가 예외 (마) 초대 링크 만료 수 쿼리가 2초 걸림 (바) 다섯 부분이 모두 2초 걸림 (사) 시험이 풀의 연결 넷을 먼저 잡아 둠 | 각각 API-280, 로그 읽기 | (가) `attention` 빈 목록 (나) 200이고 `callMonth` null, 다른 부분은 값, 로그 `admin_overview part=call result=failed` 한 줄 (다) `app` null (라) `images` null (마) `invite_expiring` 줄만 빠지고 로그 `part=invites` (바) 8초 안에 200이고 네 칸 null과 `invite_expiring` 없음, 로그 다섯 줄, 요청 동안 개요가 한 번에 쓴 연결은 하나(풀 사용 수를 셈) (사) 2초 뒤 503 `db_unavailable`. (가)\~(바)는 503이 아님 | gate | pass | 통과 · `95a68be`, WSL Python 3.12·임시 PostgreSQL. 부분 실패와 다섯 부분 순차 실행, 연결 1개, 8초 안 200, 풀 4개 점유 때 503 확인. |
@@ -36,7 +36,7 @@ Status는 `pass`, `fail`, `blocked`, `not run`, `waived` 중 하나예요. 과�
 
 ## ③ 화면(TASK-493\~497)
 
-| ID | Case | From | Runs as | Data | Steps | Expected | Gate 제안 | Status | Run evidence |
+| ID | Case | From | Runs as | Data | Steps | Expected | Gate | Status | Run evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | TC-626 | 개요 화면 | SPEC-451, REQ-572, REQ-573, SCR-169 | e2e(`apps/android/test/admin.e2e.cjs`) | 가짜 API-280: TC-622 응답, 빈 `attention`, `callMonth` null, `app` null, `app.latest` null, `image_budget` `danger` | 화면을 엶 → 주의 항목 줄을 누름 → 카드를 누름 → 탭을 30초 숨겼다 보임 → 61초 숨겼다 보임(가짜 시계) | 08의 SCR-169#attention·#calm·#card-unknown·#no-release 문구 그대로. 그림 `danger` 문구는 종류를 말하지 않음. 줄과 카드는 `target` 경로로 감. 30초는 다시 읽지 않고 61초는 API-280을 한 번 다시 읽음(공통#stale). 360·430px, 낮·밤 | gate | pass | 통과 · `d6912a7`, Chromium 합성 응답. 주의 항목·카드 다섯, 부분 실패·버전 없음·오류 재시도와 30초/61초 다시 읽기 확인. |
 | TC-627 | 회원 목록 | SPEC-452, REQ-574, SCR-200 | e2e(`admin.e2e.cjs`) | 가짜 API-236: 무제한·기본·직접 회원 셋, 프로필 없는 친구 하나, 빈 목록, 500 | 화면을 엶 → 줄을 누름 → '잇기 링크 만들기'를 누름 | 줄 셋과 아래 그룹 한 줄. 한도 문구가 usage-limit 08과 한 글자도 다르지 않음. 줄은 `/chat/admin/members/{friendId}`, 잇기는 `/chat/admin/invites?kind=link&friend={friendId}`. 빈 목록 '아직 가입한 사람이 없어요', 500은 공통#error | gate | pass | 통과 · `d6912a7`, Chromium 합성 응답. 세 한도 유형, 회원 링크·잇기 링크·빈 목록·500 확인. |
@@ -47,14 +47,14 @@ Status는 `pass`, `fail`, `blocked`, `not run`, `waived` 중 하나예요. 과�
 
 ## ④ 통화 월 예산 함수(TASK-490)
 
-| ID | Case | From | Runs as | Data | Steps | Expected | Gate 제안 | Status | Run evidence |
+| ID | Case | From | Runs as | Data | Steps | Expected | Gate | Status | Run evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | TC-631 | 함수의 합이 통화 서버의 합과 같음 | SPEC-457, REQ-579 | api(`tests/test_admin.py`) | TC-498과 같은 합성 통화(10,000·1,000 토큰, 단가 3·6), 검색·정리 비용 행, 지난달 행 하나, `monthly_budget_usd` 행 있음·없음 | 이번 UTC 달 범위로 `call.month_budget` → 같은 DB로 `call_cost.MonthlyCost.report(at, fresh=True)` → 예산 행을 지우고 다시 함수 | `spent_usd`가 `report(at, fresh=True)`의 `total`과 같음(소수 넷째 자리까지). 지난달 행은 들어가지 않음. 예산은 행이 있으면 그 값, 없으면 150 | gate | pass | 통과 · `95a68be`, WSL Python 3.12·임시 PostgreSQL. 통화 서버와 합 $2.8780 일치. 예산 175·기본 150 확인. |
 | TC-632 | 함수의 권한과 다시 적용 | SPEC-457, 05 표 문서 3절 | api(`tests/test_admin.py`) | TC-631의 DB | 011을 한 번 더 적용 → `marong` 역할로 함수 실행 → `marong` 역할로 `call.live_usage` 읽기 → `marong_call` 역할로 함수 실행 → `PUBLIC` 실행 권한 확인 → `pg_proc`의 두 함수(`call.month_budget`, `call.friend_month_usd`) 설정 → `marong` 역할 세션에서 `pg_temp`에 가로채기를 만듦: 부르면 `RAISE EXCEPTION`하는 함수, 그 함수를 CHECK에 쓰는 도메인 `pg_temp.timestamptz`, 같은 이름의 임시 표 `live_usage`·`settings`(다른 숫자) → 같은 세션에서 두 함수 실행 | 다시 적용해도 오류 없음. `marong`은 실행되고 표 읽기는 권한 오류(지금 그대로). `marong_call`과 `PUBLIC`은 `call.month_budget` 실행 권한이 없음. 두 함수의 `proconfig`가 `search_path=pg_catalog, pg_temp`이고 `call.month_budget`의 `prosqlbody`가 비어 있지 않음(`BEGIN ATOMIC`). 가로채기를 만든 세션에서도 두 함수의 값이 만들기 전과 같고 가로채기 함수가 돌지 않음(오류 없음) | gate | pass | 통과 · `95a68be`·`5c6bd05`와 `03d083b` 다음 커밋, WSL Python 3.12·임시 PostgreSQL 16. 011 재실행, 역할 권한·PUBLIC 차단, 두 함수 설정, 정적으로 바인딩된 본문을 확인. 같은 `marong` 세션에 임시 표 `live_usage`·`settings`(값 99), 값 제약 임시 도메인, 이어서 `RAISE EXCEPTION 'intercepted'`만 하는 `pg_temp.intercept(timestamptz)`와 그 함수를 CHECK에 쓰는 `pg_temp.timestamptz`를 만들었어요. PostgreSQL은 둘 다 거절하지 않고 만들었어요. 같은 세션에서 맨 이름 `timestamptz` 캐스트는 `RaiseException: intercepted`로 막혀 덫이 살아 있음을 확인했고, 두 함수는 만들기 전과 같은 값을 오류 없이 냈어요. 개요와 DB 시험 6개 통과(14.778초). |
 
 ## ⑤ 공통 규칙과 화면 폭(TASK-492·496)
 
-| ID | Case | From | Runs as | Data | Steps | Expected | Gate 제안 | Status | Run evidence |
+| ID | Case | From | Runs as | Data | Steps | Expected | Gate | Status | Run evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | TC-634 | 사람이 쓴 글은 글자 그대로 | 공통 규칙 8, SPEC-456, REQ-580 | e2e(`admin.e2e.cjs`)와 api | 가짜 API-267 릴리스 노트 `<img src=x onerror=alert(1)>`, 친구 이름 `<b>가</b>`, 가짜 API-240 메모 `<script>x()</script>`, 300자 노트 | 앱 버전·초대 링크·회원 화면을 엶 → 콘솔·대화 상자·네트워크 기록 → `admin.js`에서 `innerHTML` 찾기 | 글자 그대로 보이고 `x` 요청·실행·대화 상자 없음. 300자 노트는 줄바꿈해 모두 보임. `git grep -n innerHTML marong/app_chat_static/admin*.js`가 0줄. 응답 헤더의 CSP가 TC-620과 같음 | gate | pass | 방어 시험 통과 · `d6912a7`, Chromium과 임시 PostgreSQL. 비실행 마크업을 넣어 문자 그대로 남는지 확인. 300자 줄바꿈, 관리자 스크립트의 `innerHTML` 0줄과 CSP 확인. |
 | TC-637 | 360·430px에서 가로로 넘치지 않음 | REQ-581, REQ-571, SPEC-450 | e2e(`admin.e2e.cjs`) | 화면 일곱의 가장 긴 상태(SCR-169#attention, SCR-201#normal과 폰 20대, SCR-202#all, SCR-203#device-open과 300자 노트, SCR-204#normal), 이름 12자, 메모 40자 | 360·430px, 낮·밤으로 각각 엶 → `document.documentElement.scrollWidth` → 탭 줄 옆으로 밀기 → 누르는 칸 크기 | 페이지 `scrollWidth`가 화면 폭 이하. 탭 줄만 안에서 밀림. 누르는 칸은 44px 이상. 화면마다 스크린샷을 남김. PR에 붙이는 스크린샷은 합성 데이터('시험친구 가'·'시험친구 나')로 찍은 이것뿐이에요 | gate | pass | 통과 · `d6912a7`, Chromium 낮·밤, 360·430px, 일곱 화면 28개 배치. 가로 넘침 0, 터치 대상 높이 44px 이상, 합성 캡처 28장. |
@@ -64,14 +64,14 @@ Status는 `pass`, `fail`, `blocked`, `not run`, `waived` 중 하나예요. 과�
 
 ## ⑥ 초대 링크 거두기(TASK-498, D137)
 
-| ID | Case | From | Runs as | Data | Steps | Expected | Gate 제안 | Status | Run evidence |
+| ID | Case | From | Runs as | Data | Steps | Expected | Gate | Status | Run evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | TC-635 | 거두기 API | SPEC-455, REQ-583, API-281#200, API-281#403, API-281#404, API-281#409, API-281#500, API-281#503 | api(`tests/test_admin.py`) | 열린·쓴·기간 지난 링크, 다른 Origin, 없는 번호, 시험 시계(`sessions.now()`) | 열린 링크 거두기 → 같은 요청 다시 → 시험 시계를 만료 뒤로 옮겨 같은 요청 또 → 그 토큰으로 가입 → 쓴·기간 지난 링크 거두기 → 다른 Origin → `abc`·없는 번호 → UPDATE가 예외 → DB를 내림 → 가입과 거두기를 시험 잠금으로 동시에 | 200 `state: revoked`, 다시도 200이고 `revokedAt`이 처음 값, 만료 뒤에도 200(409가 아님), 가입은 지금의 거둔 링크 오류. 쓴·지난 링크 409 `invite_closed`이고 행이 그대로. 다른 Origin 403 `cross_site`. 404 `not_found`. 500, 503. 동시에는 하나만 성공. 로그 `admin_invite_revoke invite=<id> result=…`만(메모·이름 없음) | non-gate | pass | 통과 · `d6912a7`, WSL Python 3.12·임시 PostgreSQL. 응답 200·403·404·409·500·503, 같은 시각 유지, 가입과 거두기 중 하나 성공. 503은 테스트 풀을 닫아 확인. |
 | TC-636 | 거두기 화면 | SPEC-455, REQ-583, SCR-202 | e2e(`admin.e2e.cjs`) | 가짜 API-281(200, 409) | '거두기' → '그만두기' → '거두기' → '거두기' 확인 → 409 응답 | '그만두기'는 요청 0번. 확인 뒤 1번이고 #revoked-now(띠 '링크를 거뒀어요', 줄이 '거둠'). 409는 #invite-closed 문구 | non-gate | pass | 통과 · `d6912a7`, Chromium 합성 응답. 취소 요청 0번, 확인 1번, 거둠 띠와 409의 목록 다시 읽기 확인. |
 
 ## ⑦ 반영 뒤(TASK-500)
 
-| ID | Case | From | Runs as | Data | Steps | Expected | Gate 제안 | Status | Run evidence |
+| ID | Case | From | Runs as | Data | Steps | Expected | Gate | Status | Run evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | TC-639 | 반영한 서버에서 화면 걷기와 동희님 확인 | SPEC-450\~458, REQ-570\~583, REQ-585 | server와 device | 운영 서버(읽기만) | GPT: 동희님 Access로 화면 경로 일곱 GET, 증명 없이 일곱 GET, API-280의 각 부분이 null인지만 확인, 로그 5분. 그다음 브라우저(Aside CLI, D65)로 화면 일곱을 360·430px와 1280px로 걸으며 가로 넘침과 오류만 봄(1280px는 넓은 배치인지도, D140 2-12). 운영 화면의 스크린샷과 화면 글은 저장소·PR·GitHub 댓글에 올리지 않음(친구 이름, 초대 메모, 마롱이 이름, 폰 순번, 알림 상태, 마지막 보고·사용 시각, 티켓 수가 보이고, GitHub 첨부 주소는 댓글을 지워도 남음). 스크린샷은 Orca 항목 댓글로 동희님께만 전하고, PR에는 상태 코드·null 여부와 '가로 넘침 없음/있음'만 적음. 동희님: 아이폰과 노트북에서 화면 여섯을 열어 봄(노트북에서는 넓은 배치) | 200 일곱, 403 일곱, `callMonth`·`images`·`app`·`usageToday`가 null이 아님(앱 업데이트 TASK-480 반영 전이면 `app`만 null), 로그에 오류 없음, 운영 화면에 가로 넘침 없음, 1280px는 넓은 배치(스크린샷은 Orca 항목에만). 동희님 말을 그 자리와 때와 함께 기록 | gate | blocked | 운영에서 인증 세션과 전체 화면 폭 확인 대기, 기준 `9811ad9`. 아래 기존 증거는 일부만 확인한 결과예요. **서버 비인증 확인** · 2026-11-24 03:32:36 KST, `ad7226b2c0d91a9e2561b77e97c1df6f66b46a5d`(DB·API 병합 `46b4835501330f291362bf9ddbc1a1b366cc4944`). 앱 서비스 active·health 200, 300초 ERROR 0건, 운영 파일 SHA256 8/8 일치. 외부 비로그인 302 Access 이동, 앱 서버 비인증 화면 7개와 개요 API 403. 011 확인에서 두 함수의 `search_path`가 `pg_catalog, pg_temp`, 새 함수는 PUBLIC 실행 불가·marong 실행 가능. Postgres 읽기에서 이번 UTC 달 1행과 두 값의 non-null 확인. 관리자 인증 GET 일곱의 상태 코드와 API-280 부분별 null 여부, 360·430·1280px 화면 점검 결과는 확인 대기. **사용자 기기 확인** · 2026-11-24 15:16:02 KST, 마롱이 항목 3(e1499·e1502). 아이템을 제외한 관리 화면은 아이폰과 노트북에서 “둘 다 괜찮음”이라고 답했어요. BUG-124 수정 직후 아이템 화면에는 불러오기 오류가 표시됐어요. 꾸미기 비활성 안내는 후속 기능 변경 3의 TC-657에서 다뤄요. 글 대화 관리 링크를 묻자 “아니, 즐겨찾기로 쓸게”라고 답했어요. |
 
@@ -79,7 +79,7 @@ Status는 `pass`, `fail`, `blocked`, `not run`, `waived` 중 하나예요. 과�
 
 2026-11-24 체크포인트를 통과했어요(D147\~D149·D160\~D163, 모두 추천안). TC-658은 질문 2의 덧붙임(D149: 다른 이유의 404가 '꺼짐'으로 보일 수 있는 경우), TC-659는 질문 3의 덧붙임(D160: 뒤처짐을 세는 네 곳이 같은 값)이에요.
 
-| ID | Case | From | Runs as | Data | Steps | Expected | Gate 제안 | Status | Run evidence |
+| ID | Case | From | Runs as | Data | Steps | Expected | Gate | Status | Run evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | TC-653 | API-267의 앱 지워진 폰 | SPEC-460, SPEC-438(바뀜), REQ-587, API-267#200 | api(`tests/test_app_update_push.py`) | 시험친구 가(`friendId` 7)의 폰 둘(폰 1 0.3.2, 폰 2 0.2.4), 최신 0.3.3, 시험 시계 | 폰 2에 `drop_fid`(FCM `gone`과 같은 경로) → API-267 → 폰 2로 기기 보고(API-105) → API-267 | 처음: 폰 1 `behind: true`·`removedAt: null`, 폰 2 `behind: false`·`removedAt`이 지운 시각(ISO 8601 UTC). 다시 보고한 뒤: 폰 2 `removedAt: null`·`behind: true`. 모든 폰 줄이 계약 0.3.0 `AdminAppDevice`의 칸 아홉이고 설치 ID·FID가 없음. 업데이트 메시지 대상(`app_update_targets`)에 폰 2가 없음(지금 그대로) | non-gate | pass | 통과 · `8ade8fa` · WSL Python 3.12와 pgserver. 필수 필드 9개, 기기 재보고 및 발송 대상 제외를 확인했어요. |
 | TC-654 | 개요의 폰 수와 뒤처짐에서 앱 지워진 폰 빼기 | SPEC-460, SPEC-451, 명세 3.2·3.3, REQ-587, REQ-572, REQ-573, API-280#200 | api(`tests/test_admin.py`) | TC-653의 폰 둘, 최신을 30시간 전에 올림 | API-280 → 폰 1에도 `drop_fid` → API-280 | 처음: `app.devices` 1, `app.behind` 1, `attention`에 `app_behind`(`value` 1). 둘 다 지운 뒤: `app.devices` 0, `app.behind` 0, `app_behind` 줄 없음. 응답 모양은 계약 그대로 | gate | pass | 통과 · `8ade8fa` · WSL Python 3.12와 pgserver. 앱 지워짐에 따라 개요 집계가 1에서 0으로 바뀌는 것을 확인했어요. |
