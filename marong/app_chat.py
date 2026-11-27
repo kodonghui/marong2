@@ -248,6 +248,9 @@ class AppChat:
         if req.get("session_refresh") and res.status < 400:
             self._set_session_cookie(res, req["session_refresh"])
         res.headers.update(HEADERS)
+        # Prevent edge HTML rewriting on the administrator pages, including error pages.
+        if req.path.startswith("/chat/admin/") and res.content_type == "text/html":
+            res.headers["Cache-Control"] = "no-store, no-transform"
         if req.get("cache") and res.status == 200:  # a picture of a picture set never changes (API-140)
             res.headers["Cache-Control"] = req["cache"]
         return res
