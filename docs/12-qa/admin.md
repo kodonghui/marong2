@@ -11,11 +11,11 @@
 
 ## Gate와 상태: 체크포인트 승인
 
-Gate 열은 2026-11-27 체크포인트에서 승인된 Must 기준에 따른 지정이에요([D164](../10-wbs/README.md#결정), PR #140 `c0fced1`). 한 TC가 Must 부분을 검사하면 전체를 gate로 두며, 각 TC의 대조는 [전수 대조표](runs/2026-11-27-admin-review.md#tc-우선순위-전수-대조)에 있어요. 리뷰로 TC-655(REQ-577)와 TC-653(REQ-580)을 정정했고, 이어 전수 대조에서 TC-636(REQ-576), TC-640(REQ-581), TC-656(REQ-571·581), TC-657(REQ-572·577), TC-658(REQ-438)의 Must 검사도 gate로 정정했어요. TC-635의 거두기 API는 REQ-583 Could, TC-641의 노트북 칸 배치는 REQ-585 Should라 non-gate예요. SPEC 자체에는 우선순위가 없으므로 그 TC가 실제로 검사하는 항목에 연결되는 REQ의 우선순위를 썼어요.
+Gate 열은 2026-11-27 체크포인트에서 승인된 Must 기준에 따른 지정이에요([D164](../10-wbs/README.md#결정), PR #140 `c0fced1`). 한 TC가 Must 부분 또는 CORTHEX 12단계의 릴리스 경로·S1급 위험(접근·권한, 금전, 삭제·백업 등)을 검사하면 전체를 gate로 두며, 각 TC의 대조는 [전수 대조표](runs/2026-11-27-admin-review.md#tc-우선순위-전수-대조)에 있어요. 리뷰로 TC-655(REQ-577)와 TC-653(REQ-580)을 정정했고, 이어 전수 대조에서 TC-636(REQ-576), TC-640(REQ-581), TC-656(REQ-571·581), TC-657(REQ-572·577), TC-658(REQ-438)의 Must 검사도 gate로 정정했어요. TC-635의 거두기 기능은 REQ-583 Could이지만 REQ-438의 관리자 접근 통제와 거둔 링크의 가입 차단을 검사하므로 gate예요. TC-641의 노트북 칸 배치는 REQ-585 Should이며 별도 접근·손실 등 gate 검사가 없어 non-gate예요. SPEC 자체에는 우선순위가 없으므로 그 TC가 실제로 검사하는 항목에 연결되는 REQ의 우선순위를 썼어요.
 
 Status는 `pass`, `fail`, `blocked`, `not run`, `waived` 중 하나예요. 과거 커밋에서 통과한 사례는 원래 결과를 Run evidence에 보존했고, 그것만으로 최신 릴리스 커밋의 통과를 주장하지 않아요. 최신 기준 `9811ad9` 시험의 대응 범위와 미확인 부분, 잠정 집계는 [QA 확인 기록](runs/2026-11-27-admin-review.md#릴리스-게이트-지정과-잠정-집계)에 있어요. `waived`는 사용자님의 개별 결정 없이 쓰지 않아요.
 
-체크포인트 답: gate 21건·non-gate 9건을 승인했고, 리뷰 및 전수 대조에서 Must 검사를 정정해 gate 28건·non-gate 2건이에요(D164). 승인된 요구사항·SPEC의 기능과 우선순위는 바뀌지 않아요. TC-639·657의 미확인 부분과 BUG-115는 그대로 남고, 면제·PR 병합·운영 배포·실사용자 릴리스는 승인 범위에 없어요.
+체크포인트 답: gate 21건·non-gate 9건을 승인했고, 리뷰 및 전수 대조에서 Must 검사를 정정해 gate 29건·non-gate 1건이에요(D164). 승인된 요구사항·SPEC의 기능과 우선순위는 바뀌지 않아요. TC-639·657의 미확인 부분과 BUG-115는 그대로 남고, 면제·PR 병합·운영 배포·실사용자 릴리스는 승인 범위에 없어요.
 
 ## ① 틀과 경로(TASK-492)
 
@@ -66,7 +66,7 @@ Status는 `pass`, `fail`, `blocked`, `not run`, `waived` 중 하나예요. 과�
 
 | ID | Case | From | Runs as | Data | Steps | Expected | Gate | Status | Run evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| TC-635 | 거두기 API | SPEC-455, REQ-583, API-281#200, API-281#403, API-281#404, API-281#409, API-281#500, API-281#503 | api(`tests/test_admin.py`) | 열린·쓴·기간 지난 링크, 다른 Origin, 없는 번호, 시험 시계(`sessions.now()`) | 열린 링크 거두기 → 같은 요청 다시 → 시험 시계를 만료 뒤로 옮겨 같은 요청 또 → 그 토큰으로 가입 → 쓴·기간 지난 링크 거두기 → 다른 Origin → `abc`·없는 번호 → UPDATE가 예외 → DB를 내림 → 가입과 거두기를 시험 잠금으로 동시에 | 200 `state: revoked`, 다시도 200이고 `revokedAt`이 처음 값, 만료 뒤에도 200(409가 아님), 가입은 지금의 거둔 링크 오류. 쓴·지난 링크 409 `invite_closed`이고 행이 그대로. 다른 Origin 403 `cross_site`. 404 `not_found`. 500, 503. 동시에는 하나만 성공. 로그 `admin_invite_revoke invite=<id> result=…`만(메모·이름 없음) | non-gate | pass | 통과 · `d6912a7`, WSL Python 3.12·임시 PostgreSQL. 응답 200·403·404·409·500·503, 같은 시각 유지, 가입과 거두기 중 하나 성공. 503은 테스트 풀을 닫아 확인. |
+| TC-635 | 거두기 API | SPEC-455, REQ-583, REQ-438, API-281#200, API-281#403, API-281#404, API-281#409, API-281#500, API-281#503 | api(`tests/test_admin.py`) | 관리자 증명 없는 요청, 열린·쓴·기간 지난 링크, 다른 Origin, 없는 번호, 시험 시계(`sessions.now()`) | 관리자 증명 없이 거두기 → 열린 링크 거두기 → 같은 요청 다시 → 시험 시계를 만료 뒤로 옮겨 같은 요청 또 → 그 토큰으로 가입 → 쓴·기간 지난 링크 거두기 → 다른 Origin → `abc`·없는 번호 → UPDATE가 예외 → DB를 내림 → 가입과 거두기를 시험 잠금으로 동시에 | 증명 없으면 403 `not_allowed`. 200 `state: revoked`, 다시도 200이고 `revokedAt`이 처음 값, 만료 뒤에도 200(409가 아님), 가입은 지금의 거둔 링크 오류. 쓴·지난 링크 409 `invite_closed`이고 행이 그대로. 다른 Origin 403 `cross_site`. 404 `not_found`. 500, 503. 동시에는 하나만 성공. 로그 `admin_invite_revoke invite=<id> result=…`만(메모·이름 없음) | gate | pass | 통과 · `d6912a7`, WSL Python 3.12·임시 PostgreSQL. 관리자 증명 없음 403 `not_allowed`, 다른 Origin 403 `cross_site`을 포함해 응답 200·403·404·409·500·503, 같은 시각 유지, 가입과 거두기 중 하나 성공. 503은 테스트 풀을 닫아 확인. |
 | TC-636 | 거두기 화면 | SPEC-455, REQ-583, SCR-202, REQ-576 | e2e(`admin.e2e.cjs`) | 가짜 API-281(200, 409) | '거두기' → '그만두기' → '거두기' → '거두기' 확인 → 409 응답 | '그만두기'는 요청 0번. 확인 뒤 1번이고 #revoked-now(띠 '링크를 거뒀어요', 줄이 '거둠'). 409는 #invite-closed 문구 | gate | pass | 통과 · `d6912a7`, Chromium 합성 응답. 취소 요청 0번, 확인 1번, 거둠 띠와 409의 목록 다시 읽기 확인. |
 
 ## ⑦ 반영 뒤(TASK-500)
