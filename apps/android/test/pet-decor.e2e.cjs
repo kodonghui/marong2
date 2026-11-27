@@ -21,16 +21,32 @@ test('TC-548: call portrait layers draw in order and a missing asset leaves the 
     const page = await browser.newPage({viewport: {width: 360, height: 780}, isMobile: true});
     const source = id => '/chat/decor/v1/' + id + '/dog_small.png';
     const body = source('blue-top'), neck = source('lost-scarf'), head = source('berry-beanie');
+    let missingNeck = true, decorOn = true;
     await page.route('**/chat/api/profile', route => route.fulfill({json: {
-      botName: '콩이', character: {id: 9, outfit: {body: {layerUrl: body}, neck: {layerUrl: neck}, head: {layerUrl: head}}},
+      botName: '콩이', character: {id: 9, outfit: decorOn ? {body: {layerUrl: body}, neck: {layerUrl: neck}, head: {layerUrl: head}} : {body:null, neck:null, head:null}},
     }}));
-    await page.route('**/chat/decor/**', route => new URL(route.request().url()).pathname === neck
+    await page.route('**/chat/decor/**', route => missingNeck && new URL(route.request().url()).pathname === neck
       ? route.fulfill({status: 404}) : route.fulfill({contentType: 'image/png', body: BLANK}));
     await page.goto(site.url);
     await page.locator(`.outfit-layer[src="${head}"]`).waitFor();
     await page.waitForFunction(() => document.querySelectorAll('.outfit-layer').length === 2);
     const layers = await page.locator('.outfit-layer').evaluateAll(images => images.map(image => image.getAttribute('src')));
     assert.deepEqual(layers, [body, head]);
+    assert.equal(await page.locator('#face').isVisible(), true);
+    missingNeck = false;
+    await page.reload();
+    await page.waitForFunction(() => document.querySelectorAll('.outfit-layer').length === 3);
+    assert.deepEqual(await page.locator('.outfit-layer').evaluateAll(images => images.map(image => image.getAttribute('src'))), [body, neck, head]);
+    assert.deepEqual(await page.locator('.outfit-layer').evaluateAll(images => images.map(image => image.alt)), ['', '', '']);
+    const sizes = await page.locator('#face, .outfit-layer').evaluateAll(images => images.map(image => {const box=image.getBoundingClientRect(); return [box.width,box.height]}));
+    assert.ok(sizes.every(size => Math.abs(size[0]-sizes[0][0])<1 && Math.abs(size[1]-sizes[0][1])<1));
+    await page.evaluate(() => { waiting = true; });
+    await page.waitForFunction(() => document.getElementById('face').getAttribute('src').includes('/surprised'));
+    assert.deepEqual(await page.locator('.outfit-layer').evaluateAll(images => images.map(image => image.getAttribute('src'))), [body, neck, head]);
+    decorOn = false;
+    const profileLoaded = page.waitForResponse(response => response.url().endsWith('/chat/api/profile'));
+    await page.reload(); await profileLoaded;
+    await page.waitForFunction(() => document.querySelectorAll('.outfit-layer').length === 0);
     assert.equal(await page.locator('#face').isVisible(), true);
   } finally {
     await browser.close();
@@ -49,7 +65,7 @@ test('TC-546/548: claim an item, wear it, and display its layer at 360 px', {ski
     const outfit = {head: null, body: null, neck: null};
     const character = {id: 9, name: '콩이', kind: 'dog', template: 'dog_small', outfit};
     const layer = '/chat/decor/v1/berry-beanie/dog_small.png';
-    let picked, rejectWear = false;
+    let picked, rejectWear = null;
     await page.route('**/*', async route => {
       const url = new URL(route.request().url());
       assert.equal(url.origin, BASE);
@@ -64,7 +80,7 @@ test('TC-546/548: claim an item, wear it, and display its layer at 360 px', {ski
         return route.fulfill({status: 201, json: {itemId: hat.id, owned: true}});
       }
       if (address.endsWith('/outfit')) {
-        if (rejectWear) return route.fulfill({status: 409, json: {code: 'not_owned'}});
+        if (rejectWear) return route.fulfill({status: 409, json: {code: rejectWear}});
         picked = route.request().postDataJSON();
         outfit.head = picked.head ? {id: hat.id, name: hat.name, layerUrl: layer} : null;
         return route.fulfill({json: outfit});
@@ -83,6 +99,7 @@ test('TC-546/548: claim an item, wear it, and display its layer at 360 px', {ski
     await page.clock.setFixedTime(new Date('2026-11-21T03:00:00Z'));
     await page.goto(BASE + '/chat/shop');
     await page.getByText('0원', {exact: true}).waitFor();
+    assert.doesNotMatch(await page.locator('body').innerText(), /무료|할인|결제/);
     for (const label of ['입는 것', '일기장', '스티커']) {
       assert.equal(await page.getByRole('button', {name: label, exact: true}).count(), 1);
     }
@@ -97,6 +114,10 @@ test('TC-546/548: claim an item, wear it, and display its layer at 360 px', {ski
     await page.getByRole('link', {name: '아이템 보기'}).click();
     await page.locator(`.decor-layer[src="${layer}"]`).waitFor();
     await page.getByRole('button', {name: '받기', exact: true}).click();
+    rejectWear = 'not_ready';
+    await page.getByRole('button', {name: '입혀 볼래'}).click({timeout: 1500});
+    await page.getByText('아직 다 만들지 못한 캐릭터야').waitFor();
+    rejectWear = null;
     await page.getByRole('button', {name: '입혀 볼래'}).click({timeout: 1500});
     await page.waitForURL(BASE + '/chat/closet');
     await page.getByText('콩이가 딸기 털모자 입었어!', {exact: true}).waitFor();
@@ -110,12 +131,12 @@ test('TC-546/548: claim an item, wear it, and display its layer at 360 px', {ski
     await page.locator(`.decor-layer[src="${layer}"]`).waitFor();
     await page.waitForFunction(() => document.querySelector('[aria-pressed="true"]') !== null);
     assert.deepEqual(picked, {head: hat.id, body: null, neck: null});
-    rejectWear = true;
+    rejectWear = 'not_owned';
     await page.getByRole('button', {name: '딸기 털모자', exact: true}).click();
     await page.getByText('아직 안 받은 거야').waitFor();
     assert.equal(await page.getByRole('button', {name: '딸기 털모자', exact: true}).getAttribute('aria-pressed'), 'true');
     assert.equal(await page.locator(`.decor-layer[src="${layer}"]`).count(), 1);
-    rejectWear = false;
+    rejectWear = null;
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 360);
     await page.clock.setFixedTime(new Date('2026-11-21T13:00:00Z'));
     await page.reload();
@@ -387,7 +408,7 @@ test('TC-543: show item validation, change listing, and recover after a forbidde
   }
 });
 
-async function itemAdminFixture(page, denied = false) {
+async function itemAdminFixture(page, denied = false, csp = false) {
   const items = [
     {id: 'green-cap', kind: 'hat', name: '초록 모자', state: 'listed', owners: 2, missing: [], starter: false},
     {id: 'blue-cap', kind: 'hat', name: '파란 모자', state: 'unlisted', owners: 1, missing: [], starter: false},
@@ -408,7 +429,8 @@ async function itemAdminFixture(page, denied = false) {
     const type = file.endsWith('.css') ? 'text/css' : file.endsWith('.js') ? 'application/javascript' : 'text/html';
     let content = await readFile(path.join(STATIC, file), 'utf8');
     if (file === 'admin-items.html') content = content.replace('<!-- admin-tabs -->', '<nav class="admin-tabs"><a href="/chat/admin/items">아이템</a></nav>');
-    return route.fulfill({contentType: type + '; charset=utf-8', body: content});
+    return route.fulfill({contentType: type + '; charset=utf-8', body: content,
+      headers: csp && file === 'admin-items.html' ? {'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'"} : {}});
   });
   await page.goto(BASE + '/chat/admin/items');
   if (denied) await page.getByText('관리자만 볼 수 있어요').waitFor({timeout: 1500});
@@ -535,5 +557,286 @@ test('TC-551: slow or missing font keeps the current preview font', {skip: !chro
     release();
     await page.getByText('글꼴 받는 중…').waitFor({state:'hidden'});
     assert.equal(await paper.evaluate(el => el.style.getPropertyValue('--font-diary')), current);
+  } finally { await browser.close(); }
+});
+
+async function decorStateFixture(page, {many = false, character = false} = {}) {
+  const hat = {id:'blue-hat', kind:'hat', slot:'head', name:'파란 모자', priceKrw:0, owned:false, thumbUrl:'/chat/decor/v1/blue-hat/thumb.webp'};
+  const bg = {id:'starter-background', kind:'background', name:'기본 배경', priceKrw:0, owned:true, starter:true, thumbUrl:'/chat/decor/v1/starter-background/thumb.webp'};
+  const newBg = {id:'green-background',kind:'background',name:'초록 배경',owned:true,starter:false,thumbUrl:'/chat/decor/v1/green-background/thumb.webp'};
+  let claimStatus = 201, saveStatus = 200, shopStatus = 200, emptyShop = false;
+  await page.route('**/*', async route => {
+    const address = new URL(route.request().url()).pathname;
+    if (address === '/chat/api/profile') return route.fulfill({json:{character:character ? {id:9,template:'dog_small',outfit:{head:null,body:null,neck:null}} : null}});
+    if (address === '/chat/api/shop') return shopStatus === 200 ? route.fulfill({json:{items:emptyShop ? [] : many ? [hat, {...hat,id:'red-hat',name:'빨간 모자'}, {...hat,id:'green-hat',name:'초록 모자'}, bg,newBg] : [hat,bg,newBg]}}) : route.fulfill({status:shopStatus,json:{code:'internal'}});
+    if (address === '/chat/api/closet') return route.fulfill({json:{characterId:character ? 9 : null, outfit:character ? {head:null,body:null,neck:null} : null, items:[bg,newBg,{id:'starter-paper',kind:'paper',name:'처음 속지',starter:true},{id:'starter-font',kind:'font',name:'처음 글꼴',starter:true}], diaryDecor:{background:{id:bg.id},paper:{id:'starter-paper'},font:{id:'starter-font'}}}});
+    if (address.endsWith('/claim')) return route.fulfill({status:claimStatus, json:claimStatus===404 ? {code:'not_found'} : claimStatus===403 ? {code:'cross_site'} : {itemId:hat.id,owned:true}});
+    if (address === '/chat/diary/api/decor') { if (route.request().method()==='PUT') return route.fulfill({status:saveStatus,json:{code:saveStatus===409?'not_owned':saveStatus===400?'invalid_input':'internal'}}); return route.fulfill({json:{background:{id:bg.id},paper:{id:'starter-paper'},font:{id:'starter-font'}}}); }
+    if (address === '/chat/diary/api/latest') return route.fulfill({json:{date:null}});
+    if (address === '/chat/diary/decor.js') return route.fulfill({contentType:'application/javascript',body:await readFile(path.join(STATIC,'diary/decor.js'))});
+
+    if (address.startsWith('/chat/decor/') || address.startsWith('/face/')) return route.fulfill({contentType:'image/png',body:BLANK});
+    const file = ['/chat/shop','/chat/closet','/chat/diary/decor'].includes(address) ? 'decor.html' : path.basename(address);
+    if (!['decor.html','decor.js','chat.css','unified.css','unified.js'].includes(file)) return route.fulfill({status:404});
+    const type = file.endsWith('.css') ? 'text/css' : file.endsWith('.js') ? 'application/javascript' : 'text/html';
+    return route.fulfill({contentType:type+'; charset=utf-8',body:await readFile(path.join(STATIC,file))});
+  });
+  return {setClaimStatus: status => {claimStatus=status;}, setSaveStatus: status => {saveStatus=status;}, setShopStatus: status => {shopStatus=status;}, setEmptyShop: value => {emptyShop=value;}};
+}
+
+test('TC-546: removed shop item disappears and explains why', {skip:!chromium}, async () => {
+  const browser=await chromium.launch();
+  try {
+    const page=await browser.newPage({viewport:{width:430,height:800}});
+    const fixture=await decorStateFixture(page); fixture.setClaimStatus(404);
+    await page.goto(BASE+'/chat/shop');
+    await page.getByText('파란 모자',{exact:true}).waitFor();
+    await page.getByRole('button',{name:'받기',exact:true}).click();
+    await page.getByText('방금 상점에서 내려간 아이템이야',{exact:true}).waitFor();
+    assert.equal(await page.getByText('방금 상점에서 내려간 아이템이야',{exact:true}).count(),1);
+    assert.equal(await page.getByText('파란 모자',{exact:true}).count(),0);
+  } finally { await browser.close(); }
+});
+
+test('TC-546: default Marong sees approved detail and closet states', {skip:!chromium}, async () => {
+  const browser=await chromium.launch();
+  try {
+    const page=await browser.newPage({viewport:{width:430,height:800}});
+    await decorStateFixture(page);
+    await page.goto(BASE+'/chat/shop');
+    await page.getByRole('link',{name:'아이템 보기'}).click();
+    await page.getByText('반려동물 캐릭터에 입힐 수 있어',{exact:true}).waitFor();
+    assert.equal(await page.getByText('반려동물 캐릭터에 입힐 수 있어',{exact:true}).count(),1);
+    await page.goto(BASE+'/chat/closet');
+    await page.getByText('반려동물 캐릭터를 만들면 옷을 입힐 수 있어',{exact:true}).waitFor({timeout:1500});
+    assert.equal(await page.getByRole('link',{name:'캐릭터 만들기'}).count(),1);
+    await page.getByRole('button',{name:'일기장',exact:true}).click();
+    assert.equal(await page.getByText('기본 배경',{exact:true}).count(),1);
+    assert.equal(await page.getByText('쓰는 중',{exact:true}).count(),3);
+  } finally { await browser.close(); }
+});
+
+
+test('TC-546: shop cards fit three columns at 360 and 430 pixels', {skip:!chromium}, async () => {
+  const browser=await chromium.launch();
+  try {
+    const page=await browser.newPage(); await decorStateFixture(page,{many:true});
+    for (const width of [360,430]) for (const [time,theme] of [['2026-11-21T03:00:00Z','chestnut'],['2026-11-21T13:00:00Z','night']]) {
+      await page.setViewportSize({width,height:800});
+      await page.clock.setFixedTime(new Date(time));
+      await page.goto(BASE+'/chat/shop');
+      await page.getByText('파란 모자',{exact:true}).waitFor();
+      assert.equal(await page.locator('html').getAttribute('data-theme'),theme);
+      const cards=page.locator('#decor-content .card');
+      assert.equal(await cards.count(),3);
+      const boxes=await cards.evaluateAll(nodes=>nodes.map(n=>{const b=n.getBoundingClientRect();return {x:b.x,y:b.y,right:b.right,overflow:n.scrollWidth>n.clientWidth}}));
+      assert.ok(boxes.every(box=>Math.abs(box.y-boxes[0].y)<1 && !box.overflow));
+      assert.ok(boxes[0].x < boxes[1].x && boxes[1].x < boxes[2].x);
+      assert.ok(boxes[2].right <= width);
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
+    }
+  } finally { await browser.close(); }
+});
+
+
+test('TC-546: choosing a diary background in the closet preselects it', {skip:!chromium}, async () => {
+  const browser=await chromium.launch();
+  try {
+    const page=await browser.newPage(); await decorStateFixture(page);
+    await page.goto(BASE+'/chat/closet');
+    await page.getByRole('button',{name:'일기장',exact:true}).click();
+    await page.getByRole('link',{name:'초록 배경'}).click({timeout:1500});
+    await page.waitForURL(/\/chat\/diary\/decor/);
+    assert.equal(await page.getByLabel('배경',{exact:true}).inputValue(), 'green-background');
+  } finally { await browser.close(); }
+});
+
+test('TC-546: decor switch hides shop and closet menu links', {skip:!chromium}, async () => {
+  const {startChatSite} = require('./support/chat-site.cjs');
+  const site=await startChatSite(); const browser=await chromium.launch();
+  try {
+    const page=await browser.newPage({viewport:{width:360,height:780}});
+    let enabled=false;
+    await page.route('**/chat/api/profile', route => route.fulfill({json:{botName:'시험 마롱이',character:null,features:{decor:enabled,friends:false}}}));
+    await page.goto(site.url+'/chat/');
+    await page.waitForFunction(()=>!document.getElementById('menu-profile').hidden);
+    assert.equal(await page.locator('#menu-shop').evaluate(el=>el.hidden),true);
+    assert.equal(await page.locator('#menu-closet').evaluate(el=>el.hidden),true);
+    enabled=true;
+    await page.reload();
+    await page.waitForFunction(()=>!document.getElementById('menu-profile').hidden);
+    assert.equal(await page.locator('#menu-shop').evaluate(el=>el.hidden),false);
+    assert.equal(await page.locator('#menu-closet').evaluate(el=>el.hidden),false);
+  } finally { await browser.close(); await site.close(); }
+});
+
+test('TC-548: chat header and message faces keep ordered decorative layers', {skip:!chromium}, async () => {
+  const {startChatSite}=require('./support/chat-site.cjs'); const site=await startChatSite();
+  const browser=await chromium.launch();
+  try {
+    const page=await browser.newPage({viewport:{width:360,height:780}});
+    const paths=['blue-top','soft-scarf','blue-hat'].map(id=>'/chat/decor/v1/'+id+'/dog_small.png');
+    let enabled=true;
+    site.state.messages=[{id:1,from:'marong',text:'합성 대화',at:'2026-11-26T09:00:00+09:00',via:'app',kind:'chat'}];
+    await page.route('**/chat/api/profile',route=>route.fulfill({json:{botName:'시험 아이',features:{decor:enabled,friends:false},character:{id:9,faceUrl:'/face/v1/01-neutral.webp',outfit:enabled?{body:{layerUrl:paths[0]},neck:{layerUrl:paths[1]},head:{layerUrl:paths[2]}}:{body:null,neck:null,head:null}}}}));
+    await page.route('**/chat/decor/**',route=>route.fulfill({contentType:'image/png',body:BLANK}));
+    await page.goto(site.url+'/chat/');
+    await page.locator('#header-pet-face .face-layer').first().waitFor();
+    await page.locator('.message.marong .face .face-layer').first().waitFor();
+    for (const face of [page.locator('#header-pet-face'), page.locator('.message.marong .face').first()]) {
+      assert.deepEqual(await face.locator('.face-layer').evaluateAll(nodes=>nodes.map(n=>n.getAttribute('src'))),paths);
+      assert.deepEqual(await face.locator('.face-layer').evaluateAll(nodes=>nodes.map(n=>n.alt)),['','','']);
+      const sizes=await face.locator('img').evaluateAll(nodes=>nodes.map(n=>{const b=n.getBoundingClientRect();return [b.width,b.height]}));
+      assert.ok(sizes.every(size=>size[0]===sizes[0][0] && size[1]===sizes[0][1]));
+    }
+    enabled=false; await page.reload();
+    await page.waitForFunction(()=>!document.getElementById('menu-profile').hidden);
+    assert.equal(await page.locator('.face-layer').count(),0);
+    assert.equal(await page.locator('#header-pet-face img').count(),1);
+  } finally { await browser.close(); await site.close(); }
+});
+
+
+test('TC-551: save errors preserve selection and offer approved recovery', {skip:!chromium}, async () => {
+  const browser=await chromium.launch();
+  try {
+    const page=await browser.newPage(); const fixture=await decorStateFixture(page);
+    for (const [status,message] of [[400,'다시 한번 확인해 줄래?'],[409,'아직 안 받은 거야'],[500,'잠깐 문제가 생겼어. 다시 해 볼래?']]) {
+      fixture.setSaveStatus(status);
+      await page.goto(BASE+'/chat/diary/decor');
+      await page.getByLabel('배경',{exact:true}).selectOption('green-background');
+      await page.getByRole('button',{name:'이걸로 할래'}).click();
+      await page.getByText(message,{exact:true}).waitFor({timeout:1500});
+      assert.equal(await page.getByLabel('배경',{exact:true}).inputValue(),'green-background');
+      if (status===500) assert.equal(await page.getByRole('button',{name:'다시 해 볼게',exact:true}).count(),1);
+    }
+  } finally { await browser.close(); }
+});
+
+
+test('TC-546: shop read error offers retry and recovers', {skip:!chromium}, async () => {
+  const browser=await chromium.launch();
+  try {
+    const page=await browser.newPage(); const fixture=await decorStateFixture(page); fixture.setShopStatus(500);
+    await page.goto(BASE+'/chat/shop');
+    await page.getByText('잠깐 문제가 생겼어. 다시 해 볼래?',{exact:true}).waitFor();
+    const retry=page.getByRole('button',{name:'다시 해 볼게',exact:true});
+    assert.equal(await retry.count(),1);
+    fixture.setShopStatus(200); await retry.click();
+    await page.getByText('파란 모자',{exact:true}).waitFor();
+  } finally { await browser.close(); }
+});
+
+
+test('TC-546: diary decor detail previews the chosen background', {skip:!chromium}, async () => {
+  const browser=await chromium.launch();
+  try {
+    const page=await browser.newPage(); await decorStateFixture(page);
+    await page.goto(BASE+'/chat/shop');
+    await page.getByRole('button',{name:'일기장',exact:true}).click();
+    const item=page.locator('.card').filter({hasText:'초록 배경'});
+    await item.getByRole('link',{name:'아이템 보기'}).click();
+    await page.locator('.decor-book-preview-frame[style*="green-background/bg.webp"]').waitFor({timeout:1500});
+  } finally { await browser.close(); }
+});
+
+test('TC-546: shop and closet show loading placeholders until their lists arrive', {skip:!chromium}, async () => {
+  const browser=await chromium.launch();
+  try {
+    for (const pageName of ['shop','closet']) {
+      const page=await browser.newPage({viewport:{width:360,height:780}});
+      let release; const gate=new Promise(resolve=>{release=resolve});
+      await page.route('**/*',async route=>{
+        const address=new URL(route.request().url()).pathname;
+        if (address==='/chat/api/profile') return route.fulfill({json:{character:null}});
+        if (address==='/chat/api/'+pageName) {await gate; return route.fulfill({json:{items:[],characterId:null,outfit:null}});}
+        const file=address==='/chat/'+pageName?'decor.html':path.basename(address);
+        if (!['decor.html','decor.js','unified.js','unified.css','chat.css'].includes(file)) return route.fulfill({status:404});
+        const type=file.endsWith('.css')?'text/css':file.endsWith('.js')?'application/javascript':'text/html';
+        return route.fulfill({contentType:type+'; charset=utf-8',body:await readFile(path.join(STATIC,file))});
+      });
+      await page.goto(BASE+'/chat/'+pageName);
+      assert.equal(await page.locator('#decor-screen').getAttribute('aria-busy'),'true');
+      assert.equal(await page.locator('.decor-loading-card').count(),6);
+      if (pageName==='closet') assert.equal(await page.locator('.decor-loading-face').count(),1);
+      release(); await page.locator('#decor-screen[aria-busy="false"]').waitFor();
+      assert.equal(await page.locator('.decor-loading-card').count(),0);
+      await page.close();
+    }
+  } finally { await browser.close(); }
+});
+
+
+test('TC-546: empty shop and empty wear closet show approved guidance', {skip:!chromium}, async () => {
+  const browser=await chromium.launch();
+  try {
+    const page=await browser.newPage(); const fixture=await decorStateFixture(page,{character:true});
+    fixture.setEmptyShop(true);
+    await page.goto(BASE+'/chat/shop');
+    await page.getByText('아직 상점에 아무것도 없어. 곧 들어올 거야',{exact:true}).waitFor();
+    await page.goto(BASE+'/chat/closet');
+    await page.getByText('아직 입힐 게 없어. 상점에서 받아 볼래?',{exact:true}).waitFor();
+    assert.equal(await page.getByRole('link',{name:'상점 가기'}).count(),1);
+  } finally { await browser.close(); }
+});
+
+test('TC-546: wear saves queue one by one while other items remain usable', {skip:!chromium}, async () => {
+  const browser=await chromium.launch();
+  try {
+    const page=await browser.newPage(); let release, started;
+    const gate=new Promise(resolve=>{release=resolve}); const firstStarted=new Promise(resolve=>{started=resolve});
+    const items=[{id:'blue-hat',kind:'hat',slot:'head',name:'파란 모자',thumbUrl:'/chat/decor/v1/blue-hat/thumb.webp'},
+      {id:'red-top',kind:'top',slot:'body',name:'빨간 옷',thumbUrl:'/chat/decor/v1/red-top/thumb.webp'},
+      {id:'green-hat',kind:'hat',slot:'head',name:'초록 모자',thumbUrl:'/chat/decor/v1/green-hat/thumb.webp'}];
+    const sent=[]; let active=0,maxActive=0;
+    await page.route('**/*',async route=>{
+      const address=new URL(route.request().url()).pathname;
+      if (address==='/chat/api/profile') return route.fulfill({json:{character:{id:9,template:'dog_small'}}});
+      if (address==='/chat/api/closet') return route.fulfill({json:{items,characterId:9,outfit:{head:null,body:null,neck:null}}});
+      if (address.endsWith('/outfit')) {
+        active++; maxActive=Math.max(maxActive,active); const data=route.request().postDataJSON(); sent.push(data);
+        if (sent.length===1) {started(); await gate;}
+        active--; return route.fulfill({json:Object.fromEntries(Object.entries(data).map(([slot,id])=>[slot,id?{id,layerUrl:'/chat/decor/v1/'+id+'/dog_small.png'}:null]))});
+      }
+      if (address.startsWith('/chat/decor/') || address.includes('/images/')) return route.fulfill({contentType:'image/png',body:BLANK});
+      const file=address==='/chat/closet'?'decor.html':path.basename(address);
+      if (!['decor.html','decor.js','unified.js','unified.css','chat.css'].includes(file)) return route.fulfill({status:404});
+      const type=file.endsWith('.css')?'text/css':file.endsWith('.js')?'application/javascript':'text/html';
+      return route.fulfill({contentType:type+'; charset=utf-8',body:await readFile(path.join(STATIC,file))});
+    });
+    await page.goto(BASE+'/chat/closet');
+    await page.getByRole('button',{name:'파란 모자',exact:true}).click(); await firstStarted;
+    assert.equal(await page.getByRole('button',{name:'파란 모자',exact:true}).locator('.decor-wear-spinner').isVisible(),true);
+    await page.getByRole('button',{name:'빨간 옷',exact:true}).click();
+    assert.equal(sent.length,1);
+    release(); await page.waitForFunction(()=>!document.querySelector('.decor-wear-spinner'));
+    assert.deepEqual(sent,[{head:'blue-hat',body:null,neck:null},{head:'blue-hat',body:'red-top',neck:null}]);
+    assert.equal(maxActive,1);
+    await page.getByRole('button',{name:'초록 모자',exact:true}).click();
+    await page.waitForFunction(()=>!document.querySelector('.decor-wear-spinner'));
+    assert.equal((sent.at(-1)).head,'green-hat');
+    assert.equal(await page.getByRole('button',{name:'파란 모자',exact:true}).getAttribute('aria-pressed'),'false');
+    assert.equal(await page.getByRole('button',{name:'초록 모자',exact:true}).getAttribute('aria-pressed'),'true');
+  } finally { await browser.close(); }
+});
+
+
+test('TC-546: cross-site claim refusal shows approved guidance', {skip:!chromium}, async () => {
+  const browser=await chromium.launch();
+  try {
+    const page=await browser.newPage(); const fixture=await decorStateFixture(page); fixture.setClaimStatus(403);
+    await page.goto(BASE+'/chat/shop');
+    await page.getByRole('button',{name:'받기',exact:true}).click();
+    await page.getByText('이 화면에서 다시 해 줘',{exact:true}).waitFor({timeout:1500});
+  } finally { await browser.close(); }
+});
+
+
+test('TC-543: item table stays within viewport under production style CSP', {skip:!chromium}, async () => {
+  const browser=await chromium.launch();
+  try {
+    const page=await browser.newPage({viewport:{width:360,height:780}}); await itemAdminFixture(page,false,true);
+    assert.equal(await page.locator('#item-list').evaluate(el=>getComputedStyle(el).overflowX),'auto');
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),360);
   } finally { await browser.close(); }
 });

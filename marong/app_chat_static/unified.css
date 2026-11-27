@@ -61,6 +61,7 @@
   border-bottom: 1px solid var(--line);
 }
 .admin-tabs {display: flex; overflow-x: auto; white-space: nowrap; scrollbar-width: thin}
+.admin-item-list {overflow-x: auto}
 .admin-tabs a {
   display: flex; align-items: center; min-height: 44px; padding-inline: 12px;
   color: var(--text); text-decoration: none;
@@ -124,7 +125,7 @@
 .unified .picture-choice[aria-pressed="true"] {border: 2px solid var(--accent)}
 .unified .character-tabs, .unified .character-expressions {display: grid; gap: 4px; width: 100%}
 .unified .character-tabs {grid-template-columns: repeat(2, minmax(0, 1fr))}
-.unified .character-tabs [aria-selected="true"] {background: var(--accent); color: var(--on-accent)}
+.unified .character-tabs [aria-selected="true"], .unified .character-tabs [aria-pressed="true"] {background: var(--accent); color: var(--on-accent)}
 .unified .intro-choices {display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; gap: 8px}
 .unified .intro-chip[aria-pressed="true"] {border-color: var(--accent)}
 .unified .intro-loading {background: var(--line)}
@@ -240,3 +241,14 @@
 .loading-placeholder {min-height: 120px; background: var(--raised); border-radius: 12px}
 
 .unified .decor-wear-item[aria-pressed="true"] {border: 2px solid var(--accent)}
+
+.unified .decor-shop-grid {display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px}
+.unified .decor-shop-grid .card {min-width: 0; padding: 8px; overflow-wrap: anywhere}
+.unified .decor-shop-grid .decor-thumb {width: 100%; max-width: 96px; height: auto; aspect-ratio: 1; object-fit: contain}
+
+.unified .decor-loading-card {min-height: 140px; border-radius: 12px; background: var(--raised)}
+.unified .decor-loading-face {width: 96px; height: 96px; border-radius: 50%; background: var(--raised); margin: 0 auto 12px}
+
+.unified .decor-wear-spinner {display: inline-block; width: 12px; height: 12px; margin-inline-start: 6px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%}
+@media (prefers-reduced-motion: no-preference) { .unified .decor-wear-spinner {animation: decor-wear-spin 1s linear infinite} }
+@keyframes decor-wear-spin {to {transform: rotate(360deg)}}

@@ -29,7 +29,7 @@ from marong.character.graphics import TEMPLATE_IDS
 from marong.decor import DecorCatalog
 from marong.decor_reactions import DecorReactions
 from marong.diary import KST
-from marong.unified_delivery import AppProactive
+from marong.unified_delivery import AppProactive, UnifiedDelivery
 from marong.unified_store import UnifiedStore
 from pg import TestDB
 from run_app import RoomLocks
@@ -146,9 +146,12 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
                     quiet_for=timedelta(hours=10), sent_ago=None, failures=0)
         row = dict(id=3, friend_id=1, active=True, item_id="hat-fixture", name="콩이", attempts=0)
         outbox = SimpleNamespace(push=None, say=AsyncMock(return_value=True))
-        store = SimpleNamespace(proactive_rooms=AsyncMock(return_value=[room]), proactive_count=AsyncMock(return_value=1),
+        sent_today = {"count": 1}
+        async def count_delivery(*args):
+            sent_today["count"] += 1
+        store = SimpleNamespace(proactive_rooms=AsyncMock(return_value=[room]), proactive_count=AsyncMock(side_effect=lambda *_: sent_today["count"]),
                                 hello_count=AsyncMock(return_value=0), topic_answers=AsyncMock(return_value=[]),
-                                claim_slot=AsyncMock(return_value=True), record_delivery=AsyncMock())
+                                claim_slot=AsyncMock(return_value=True), record_delivery=AsyncMock(side_effect=count_delivery))
         agent = SimpleNamespace(proactive_allowed=AsyncMock(return_value=True), proactive_message=AsyncMock(return_value=None))
         topics = SimpleNamespace(today=AsyncMock(return_value=SimpleNamespace(at=now)), choose=AsyncMock())
         settings = SimpleNamespace(proactive_hours=(8,22), proactive_per_day=2, proactive_daily_max=1)
@@ -164,10 +167,12 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
         reactions.defer.assert_awaited_once_with(row, now.replace(hour=15))
         outbox.say.assert_not_awaited()
 
-        store.proactive_count.return_value = 0
+        sent_today["count"] = 0
         self.assertEqual(await loop.step(now), 1)
+        self.assertEqual(sent_today["count"], 1)
         self.assertEqual(outbox.say.await_args.args, (1, "나 털모자 생겼어! 어때?"))
-        self.assertEqual(outbox.say.await_args.kwargs["meta"]["scene"], "fixture-scene")
+        meta = outbox.say.await_args.kwargs["meta"]
+        self.assertEqual((meta["proactive"], meta["reaction"], meta["scene"]), (True, "hat-fixture", "fixture-scene"))
         reactions.finish.assert_awaited_once_with(row, "sent", "fixture-scene")
         store.record_delivery.assert_awaited_once()
         topics.choose.assert_not_awaited()
@@ -270,16 +275,18 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
                 (client.post, "/chat/admin/api/items/hat-fixture/list", admin),
                 (client.post, "/chat/admin/api/items/hat-fixture/unlist", admin),
             )
-            before_cross_site = tuple(db.admin("SELECT count(*) FROM marong." + name)[0][0] for name in
-                                      ("decor_owned", "outfits", "outfit_firsts", "diary_decor", "diary_stickers"))
+            protected_tables = ("friend_profiles", "characters", "decor_items", "decor_owned", "outfits", "outfit_firsts", "diary_decor", "diary_stickers")
+            def protected_snapshot():
+                return tuple(db.admin("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text), '[]'::jsonb) FROM marong." + name + " t")[0][0]
+                             for name in protected_tables)
+            before_cross_site = protected_snapshot()
             for method, path, session in writes:
                 without_origin = {key: value for key, value in session.items() if key != "Origin"}
                 for headers in (without_origin, {**session, "Origin": "https://other.invalid"}):
                     with self.subTest(path=path, origin=headers.get("Origin")):
                         error = await method(path, headers=headers, json={})
                         self.assertEqual((error.status, (await error.json())["code"]), (403, "cross_site"))
-            self.assertEqual(tuple(db.admin("SELECT count(*) FROM marong." + name)[0][0] for name in
-                                   ("decor_owned", "outfits", "outfit_firsts", "diary_decor", "diary_stickers")), before_cross_site)
+            self.assertEqual(protected_snapshot(), before_cross_site)
             self.assertEqual((await client.get(image)).status, 401)
             response = await client.get(image, headers=member)
             self.assertEqual((response.status, response.content_type), (200, "image/png"))
@@ -342,6 +349,11 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             await client.put(outfit, headers=member, json=picks)
             self.assertEqual(db.admin("SELECT item_id,state FROM marong.outfit_firsts ORDER BY id"),
                              [("hat-fixture", "waiting"), ("top-fixture", "skipped")])
+            self.assertEqual(db.admin("SELECT extract(epoch FROM next_at-worn_at) FROM marong.outfit_firsts WHERE character_id=%s AND item_id='hat-fixture'", (character,)), [(180,)])
+            self.assertEqual((await client.put(outfit, json=picks, headers={"Origin": ORIGIN})).status, 401)
+            self.assertEqual((await client.put("/chat/api/characters/999999999/outfit", headers=other, json=picks)).status, 404)
+            oversized = await client.put(outfit, headers=member, json={**picks, "extra": "x" * 17000})
+            self.assertEqual(oversized.status, 413)
             closet = await (await client.get("/chat/api/closet", headers=member)).json()
             self.assertEqual(closet["characterId"], character)
             self.assertEqual(closet["outfit"]["head"]["id"], "hat-fixture")
@@ -373,17 +385,33 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             unowned = await client.put(outfit, headers=member, json={**picks, "head": "unknown-fixture"})
             self.assertEqual((unowned.status, (await unowned.json())["code"]), (409, "not_owned"))
             self.assertEqual((await client.put(outfit, headers=other, json=picks)).status, 404)
+            reactions = DecorReactions(store, None, chat.usage, catalog, None)
+            self.assertEqual(await reactions.due(friend), [])
             db.admin("UPDATE marong.outfit_firsts SET next_at=now() WHERE state='waiting'")
             expression = BytesIO()
             Image.new("RGBA", (1024, 1024), "#e6ac87").save(expression, "PNG")
+            failed_scene = SimpleNamespace(wait_for_topic=AsyncMock(return_value=None))
             reactions = DecorReactions(store, SimpleNamespace(read=AsyncMock(return_value=expression.getvalue())),
-                                       chat.usage, catalog, None)
+                                       chat.usage, catalog, failed_scene)
             due, = await reactions.due(friend)
             self.assertTrue(due["active"])
             scene = await reactions.scene(due)
+            failed_scene.wait_for_topic.assert_awaited_once()
             await reactions.finish(due, "sent", scene)
+            self.assertEqual(db.admin("SELECT format,width,height FROM marong.scene_pictures WHERE id=%s", (scene,)), [("png", 1024, 1024)])
             self.assertEqual(db.admin("SELECT fallback,state,cost_usd FROM marong.scene_pictures WHERE id=%s", (scene,)),
                              [(True, "done", 0)])
+            delivery = UnifiedDelivery(store, AppPush(store), "session", lambda: None)
+            before_count = await store.proactive_count(timedelta(days=1))
+            outcome = await delivery.say(friend, "나 털모자 생겼어! 어때?", kind="proactive", notify=False,
+                meta={"proactive": True, "reaction": "hat-fixture", "scene": str(scene)}, key="synthetic-reaction")
+            self.assertEqual(outcome, "later")
+            self.assertEqual(await store.proactive_count(timedelta(days=1)), before_count + 1)
+            delivered = db.admin("SELECT content,meta FROM marong.messages WHERE kakao_id='synthetic-reaction'")
+            self.assertEqual(len(delivered), 1)
+            self.assertEqual(delivered[0][0], "나 털모자 생겼어! 어때?")
+            self.assertEqual({key: delivered[0][1][key] for key in ("proactive", "reaction", "scene")},
+                             {"proactive": True, "reaction": "hat-fixture", "scene": str(scene)})
             db.admin("UPDATE marong.outfit_firsts SET state='waiting', finished_at=NULL, next_at=now() WHERE item_id='top-fixture'")
             delayed, = await reactions.due(friend)
             await reactions.defer(delayed, sessions.now() - timedelta(seconds=1))
@@ -414,6 +442,10 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
                 catalog.items[ident] = replace(original, id=ident, starter=False, name=ident)
                 db.admin("INSERT INTO marong.decor_items(id,item_set,kind,slot,starter) VALUES (%s,'v1',%s,NULL,false)", (ident, kind))
                 self.assertEqual((await client.post(f"/chat/api/shop/{ident}/claim", headers=other)).status, 201)
+            self.assertEqual((await client.get("/chat/diary/api/decor")).status, 401)
+            self.assertEqual((await client.put("/chat/diary/api/decor", headers={"Origin": ORIGIN}, json=style)).status, 401)
+            oversized_style = await client.put("/chat/diary/api/decor", headers=member, json={**style, "extra": "x" * 17000})
+            self.assertEqual(oversized_style.status, 413)
             initial_style = await (await client.get("/chat/diary/api/decor", headers=other)).json()
             self.assertEqual({kind: initial_style[kind]["id"] for kind in ("background", "paper", "font")},
                              {kind: "starter-" + kind for kind in ("background", "paper", "font")})
@@ -432,6 +464,13 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             wrong_kind = await client.put(style_path, headers=other, json={**style, "fontId": "starter-background"})
             self.assertEqual((wrong_kind.status, (await wrong_kind.json())["code"]), (400, "invalid_input"))
             self.assertEqual((await client.post("/chat/api/shop/sticker-fixture/claim", headers=member)).status, 201)
+            sticker_ids = ["sticker-fixture"]
+            for index in range(1, 12):
+                ident = f"sticker-extra-{index:02}"
+                catalog.items[ident] = replace(catalog.items["sticker-fixture"], id=ident, starter=False)
+                db.admin("INSERT INTO marong.decor_items(id,item_set,kind,slot,starter) VALUES (%s,'v1','sticker',NULL,false)", (ident,))
+                self.assertEqual((await client.post(f"/chat/api/shop/{ident}/claim", headers=member)).status, 201)
+                sticker_ids.append(ident)
             day = sessions.now().astimezone(KST).date() - timedelta(days=1)
             diary = db.admin("""
                 INSERT INTO marong.diaries(friend_id,diary_date) VALUES (%s,%s) RETURNING id
@@ -445,25 +484,50 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             sticker = {"itemId": "sticker-fixture", "x": 100, "y": 300, "scale": 85, "rotation": -10}
             missing = f"/chat/diary/api/days/{day - timedelta(days=1)}/stickers"
             invalid = "/chat/diary/api/days/2026-13-01/stickers"
+            self.assertEqual((await client.get(path)).status, 401)
+            self.assertEqual((await client.put(path, headers={"Origin": ORIGIN}, json={"stickers": []})).status, 401)
+            oversized_stickers = await client.put(path, headers=member, json={"stickers": [], "extra": "x" * 17000})
+            self.assertEqual(oversized_stickers.status, 413)
             for method, params in ((client.get, {}), (client.put, {"json": {"stickers": [sticker]}})):
                 self.assertEqual((await method(missing, headers=member, **params)).status, 404)
                 error = await method(invalid, headers=member, **params)
                 self.assertEqual((error.status, (await error.json())["code"]), (400, "invalid_input"))
+            # Give both synthetic accounts distinct characters, outfits, diary days, stickers and scenes.
+            other_friend = (await sessions.find_session(joined.token))["friend_id"]
+            other_character = db.admin("""
+                INSERT INTO marong.characters(friend_id,kind,status,stage,ready_at,template,name,traits)
+                VALUES (%s,'dog','ready','done',now(),'dog_small','시험아이둘','{}') RETURNING id
+            """, (other_friend,))[0][0]
+            db.admin("UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s", (other_character, other_friend))
+            self.assertEqual((await client.post("/chat/admin/api/items/hat-fixture/list", headers=admin)).status, 200)
+            self.assertEqual((await client.post("/chat/api/shop/hat-fixture/claim", headers=other)).status, 201)
+            self.assertEqual((await client.post("/chat/api/shop/sticker-fixture/claim", headers=other)).status, 201)
+            other_outfit = f"/chat/api/characters/{other_character}/outfit"
+            self.assertEqual((await client.put(other_outfit, headers=other, json={"head":"hat-fixture", "body":None, "neck":None})).status, 200)
+            other_day = day - timedelta(days=2)
+            other_diary = db.admin("INSERT INTO marong.diaries(friend_id,diary_date) VALUES (%s,%s) RETURNING id", (other_friend, other_day))[0][0]
+            db.admin("INSERT INTO marong.diary_revisions(diary_id,revision,source,title,weather,body) VALUES (%s,1,'weather','합성 일기','sunny',repeat('나',60))", (other_diary,))
+            db.admin("UPDATE marong.diaries SET state='ready',ready_at=now(),revision=1 WHERE id=%s", (other_diary,))
+            other_stickers = f"/chat/diary/api/days/{other_day}/stickers"
+            self.assertEqual((await client.put(path, headers=member, json={"stickers":[sticker]})).status, 200)
+            self.assertEqual((await client.put(other_stickers, headers=other, json={"stickers":[sticker]})).status, 200)
+            other_scene = db.admin("""
+                INSERT INTO marong.scene_pictures(friend_id,character_id,purpose,topic,state,finished_at,format,width,height,image)
+                SELECT %s,%s,'topic','v1/fixture','done',now(),format,width,height,image
+                FROM marong.scene_pictures WHERE id=%s RETURNING id
+            """, (other_friend, other_character, scene))[0][0]
             # TC-554: compare every cross-account response with the same absent-resource path.
             intro = {"personality": ["활발함"], "likes": "시험사생활가", "dislikes": "시험사생활나", "ownerCall": "시험호칭"}
             intro_path = f"/chat/api/characters/{character}/intro"
             self.assertEqual((await client.put(intro_path, headers=member, json=intro)).status, 200)
+            self.assertEqual((await client.put(f"/chat/api/characters/{other_character}/intro", headers=other, json=intro)).status, 200)
             absent_id = 999999999
             absent_intro = f"/chat/api/characters/{absent_id}/intro"
             absent_outfit = f"/chat/api/characters/{absent_id}/outfit"
             scene_path = f"/chat/api/scenes/{scene}"
             absent_scene = f"/chat/api/scenes/{uuid4()}"
-            snapshots = lambda: (
-                db.admin("SELECT personality,likes,dislikes,owner_call,intro_at FROM marong.characters WHERE id=%s", (character,)),
-                db.admin("SELECT * FROM marong.outfits WHERE character_id=%s", (character,)),
-                db.admin("SELECT * FROM marong.diary_stickers WHERE diary_id=%s ORDER BY id", (diary,)),
-                db.admin("SELECT state,image FROM marong.scene_pictures WHERE id=%s", (scene,)),
-            )
+            snapshots = lambda: tuple(db.admin("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text), '[]'::jsonb) FROM marong." + name + " t")[0][0]
+                                      for name in ("characters", "friend_profiles", "decor_owned", "outfits", "outfit_firsts", "diaries", "diary_revisions", "diary_decor", "diary_stickers", "scene_pictures"))
             before = snapshots()
             captured = []
             class Capture(logging.Handler):
@@ -477,6 +541,9 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await client.put(intro_path, headers=member, json=intro)).status, 200)
                 self.assertEqual((await client.get(intro_path, headers=member)).status, 200)
                 self.assertEqual((await client.get(scene_path, headers=member)).status, 200)
+                self.assertEqual((await client.put(f"/chat/api/characters/{other_character}/intro", headers=other, json=intro)).status, 200)
+                self.assertEqual((await client.get(f"/chat/api/characters/{other_character}/intro", headers=other)).status, 200)
+                self.assertEqual((await client.get(f"/chat/api/scenes/{other_scene}", headers=other)).status, 200)
                 cases = (
                     (client.get, intro_path, absent_intro, {}),
                     (client.put, intro_path, absent_intro, {"json": intro}),
@@ -492,18 +559,33 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual((actual.status, nonexistent.status), (404, 404))
                         def without_trace(body): return {key: value for key, value in body.items() if key != "traceId"}
                         self.assertEqual(without_trace(await actual.json()), without_trace(await nonexistent.json()))
+                reverse_cases = (
+                    (client.get, f"/chat/api/characters/{other_character}/intro", absent_intro, {}),
+                    (client.put, f"/chat/api/characters/{other_character}/intro", absent_intro, {"json": intro}),
+                    (client.put, other_outfit, absent_outfit, {"json": picks}),
+                    (client.get, other_stickers, missing, {}),
+                    (client.put, other_stickers, missing, {"json": {"stickers": [sticker]}}),
+                    (client.get, f"/chat/api/scenes/{other_scene}", absent_scene, {}),
+                )
+                for method, foreign, absent, params in reverse_cases:
+                    actual = await method(foreign, headers=member, **params)
+                    nonexistent = await method(absent, headers=member, **params)
+                    self.assertEqual((actual.status, nonexistent.status), (404, 404))
+                    self.assertEqual(without_trace(await actual.json()), without_trace(await nonexistent.json()))
                 self.assertEqual(snapshots(), before)
             finally:
                 root_logger.removeHandler(handler)
                 root_logger.setLevel(old_level)
             self.assertFalse(any(marker in line for line in captured for marker in
-                                 ("콩이", "시험사생활가", "시험사생활나", "시험호칭", "Main character:")))
+                                 ("콩이", "시험아이둘", "시험사생활가", "시험사생활나", "시험호칭", "Main character:")))
             origin_mismatch = {**member, "Origin": "https://other.invalid"}
             self.assertEqual((await client.put(path, headers=origin_mismatch, json={"stickers": [sticker]})).status, 403)
-            self.assertEqual((await client.put(path, headers=member, json={"stickers": [sticker] * 11})).status, 409)
+            eleven = [{**sticker, "itemId": ident} for ident in sticker_ids[:11]]
+            too_many = await client.put(path, headers=member, json={"stickers": eleven})
+            self.assertEqual((too_many.status, (await too_many.json())["code"]), (409, "too_many_stickers"))
             unowned_sticker = await client.put(path, headers=member, json={"stickers": [{**sticker, "itemId": "bad-fixture"}]})
             self.assertEqual((unowned_sticker.status, (await unowned_sticker.json())["code"]), (409, "not_owned"))
-            trio = [{**sticker, "x": value} for value in (100, 200, 300)]
+            trio = [{**sticker, "itemId": ident, "x": value} for ident, value in zip(sticker_ids[:3], (100, 200, 300))]
             self.assertEqual((await client.put(path, headers=member, json={"stickers": trio})).status, 200)
             read_back = await (await client.get(path, headers=member)).json()
             self.assertEqual([{key: item[key] for key in sticker} for item in read_back["stickers"]], trio)
@@ -514,8 +596,9 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
                     response = await client.put(path, headers=member, json={"stickers": [{**sticker, key: value}]})
                     self.assertEqual(response.status, 400)
             db.admin("UPDATE marong.diaries SET hidden=true WHERE id=%s", (diary,))
-            self.assertEqual((await client.put(path, headers=member, json={"stickers": [sticker]})).status, 200)
-            self.assertEqual((await (await client.get(path, headers=member)).json())["stickers"][0]["x"], 100)
+            self.assertEqual((await client.put(path, headers=member, json={"stickers": trio[:2]})).status, 200)
+            hidden_items = (await (await client.get(path, headers=member)).json())["stickers"]
+            self.assertEqual([{key: item[key] for key in sticker} for item in hidden_items], trio[:2])
             await client.put(path, headers=member, json={"stickers": []})
             self.assertEqual(db.admin("SELECT count(*) FROM marong.diary_stickers WHERE diary_id=%s AND removed_at IS NULL",
                                       (diary,)), [(0,)])
@@ -544,7 +627,28 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
                   AND (table_name ~* '(^|_)(payments?|orders?|gacha)(_|$)'
                     OR column_name ~* '(^|_)(payments?|orders?|gacha)(_|$)')
             """), [])
+            # TC-555: repeat cross-site writes with populated target rows and compare every domain value.
+            writes_with_rows = (
+                (client.put, intro_path, member, intro),
+                (client.post, "/chat/api/shop/hat-fixture/claim", member, {}),
+                (client.put, outfit, member, picks),
+                (client.put, "/chat/diary/api/decor", member, style),
+                (client.put, path, member, {"stickers": [sticker]}),
+                (client.post, "/chat/admin/api/items/hat-fixture/list", admin, {}),
+                (client.post, "/chat/admin/api/items/hat-fixture/unlist", admin, {}),
+            )
+            full_before = protected_snapshot()
+            for method, endpoint, session, payload in writes_with_rows:
+                for origin in (None, "https://other.invalid"):
+                    headers = {key: value for key, value in session.items() if key != "Origin"}
+                    if origin is not None:
+                        headers["Origin"] = origin
+                    response = await method(endpoint, headers=headers, json=payload)
+                    self.assertEqual((response.status, (await response.json())["code"]), (403, "cross_site"))
+            self.assertEqual(protected_snapshot(), full_before)
             chat.decor.catalog = None
+            disabled_profile = await (await client.get("/chat/api/profile", headers=member)).json()
+            self.assertEqual(disabled_profile["character"]["outfit"], {"head": None, "body": None, "neck": None})
             for endpoint in (image, "/chat/api/shop", "/chat/api/closet", "/chat/diary/api/decor", path):
                 self.assertEqual((await client.get(endpoint, headers=member)).status, 404)
             self.assertEqual((await client.get("/chat/admin/api/items", headers=admin)).status, 404)
