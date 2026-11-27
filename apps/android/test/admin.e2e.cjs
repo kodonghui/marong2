@@ -52,7 +52,7 @@ const invite = {id: 1, kind: 'join', note: '시험 메모', state: 'open', creat
   expiresAt: '2026-11-28T05:00:00Z', usedAt: null, revokedAt: null, usedBy: null};
 const inviteRows = [invite, {...invite, id: 2, state: 'used', usedAt: date, usedBy: {name, friendId: 7}},
   {...invite, id: 3, state: 'expired'}, {...invite, id: 4, state: 'revoked', revokedAt: date}];
-const items = {set: 'fixture', items: [{id: 'fixture-item', name, starter: false, state: 'listed',
+const items = {set: 'fixture', items: [{id: 'fixture-item', kind: 'hat', name, starter: false, state: 'listed',
   missing: [], owners: 3}]};
 const fixture = {'/overview': overview, '/members': members, '/app-versions': versions,
   '/invites': {invites: inviteRows}, '/image-costs': costs, '/items': items};
@@ -700,11 +700,11 @@ test('TC-656 items show the decor-off notice only for 404', options, async t => 
       }
       state['/items'] = {...items, items: []};
       await screen.getByRole('button', {name: '다시 보기'}).click();
-      await screen.getByText('등록할 아이템이 없어요').waitFor();
+      await screen.getByText('아이템 목록 폴더가 비어 있어요(marong/decor/v1/items.json)').waitFor();
       assert.equal(await screen.locator('#item-error').isVisible(), false);
       state['/items'] = items;
       await visit('/items');
-      assert.equal(await screen.getByRole('heading', {name}).count(), 1);
+      assert.equal(await screen.getByRole('row').filter({hasText: name}).count(), 1);
     }
   }
   assert.deepEqual(errors, []);
@@ -745,7 +745,7 @@ test('TC-656 items keep retry for a failed request and for a request over 10 sec
   }
   assert.equal(await screen.locator('#item-error').innerText(), '아이템을 불러오지 못했어요');
   await retry.click();
-  await screen.getByRole('heading', {name}).waitFor();
+  await screen.getByRole('row').filter({hasText: name}).waitFor();
   assert.equal(await screen.locator('#item-error').isVisible(), false);
   assert.deepEqual(errors, []);
 });

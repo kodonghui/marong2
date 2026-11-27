@@ -299,9 +299,9 @@ test('TC-543: show item validation, change listing, and recover after a forbidde
   try {
     const page = await browser.newPage({viewport: {width: 360, height: 780}, isMobile: true});
     const items = [
-      {id: 'green-cap', name: '초록 모자', state: 'listed', owners: 2, missing: []},
-      {id: 'blue-cap', name: '파란 모자', state: 'unlisted', owners: 1, missing: []},
-      {id: 'broken-cap', name: '검사 중 모자', state: 'new', owners: 0, missing: ['layer:dog_long']},
+      {id: 'green-cap', kind: 'hat', name: '초록 모자', state: 'listed', owners: 2, missing: []},
+      {id: 'blue-cap', kind: 'hat', name: '파란 모자', state: 'unlisted', owners: 1, missing: []},
+      {id: 'broken-cap', kind: 'hat', name: '검사 중 모자', state: 'new', owners: 0, missing: ['layer:dog_long']},
     ];
     let permitted = true;
     await page.route('**/*', async route => {
@@ -322,8 +322,15 @@ test('TC-543: show item validation, change listing, and recover after a forbidde
       return route.fulfill({contentType: type + '; charset=utf-8', body: await readFile(path.join(STATIC, file))});
     });
     await page.goto(BASE + '/chat/admin/items');
-    const blue = page.locator('li').filter({hasText: '파란 모자'});
-    const broken = page.locator('li').filter({hasText: '검사 중 모자'});
+    const blue = page.getByRole('row').filter({hasText: '파란 모자'});
+    assert.equal(await blue.getByText('blue-cap', {exact: true}).count(), 1);
+    assert.equal(await blue.getByText('hat', {exact: true}).count(), 1);
+    assert.equal(await blue.locator('img').getAttribute('src'), '/chat/decor/v1/blue-cap/thumb.webp');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    for (const label of ['썸네일', 'id', '종류', '이름', '상태', '받은 사람 수', '버튼']) {
+      assert.equal(await page.getByRole('columnheader', {name: label, exact: true}).count(), 1);
+    }
+    const broken = page.getByRole('row').filter({hasText: '검사 중 모자'});
     await broken.getByText('확인할 항목 layer:dog_long').waitFor();
     assert.equal(await broken.getByRole('button', {name: '올리기'}).isDisabled(), true);
     await blue.getByRole('button', {name: '올리기'}).click();
