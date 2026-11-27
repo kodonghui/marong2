@@ -17,7 +17,7 @@ const DRAWING = '38a6277f-ab8e-4fc5-ae08-f83ebe169017';
 const BODY = '오늘은 군밤을 먹고 이야기했다. 따뜻한 바람이 불었다. 이름도 모르는 작은 열매를 보았다. 다음에는 다른 길을 걸어 보고 싶다.';
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; " +
   "object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
-const FILETYPES = { 'diary.js': 'text/javascript', 'sheets.js': 'text/javascript', 'diary.css': 'text/css',
+const FILETYPES = { 'diary.js': 'text/javascript', 'decor.js': 'text/javascript', 'sheets.js': 'text/javascript', 'diary.css': 'text/css',
   'tokens.css': 'text/css', 'Gaegu-Regular.woff2': 'font/woff2' };
 
 function day(overrides = {}) {
@@ -91,6 +91,7 @@ describe('TC-172 diary page in Chromium with local fixtures', { timeout: 20000 }
         return route.continue();
       }
       calls.push([method, dir, req.postDataJSON(), req.headers()['idempotency-key']]);
+      if (dir === '/decor') return respond(route, {code:'not_found'}, 404);
       if (dir === '/latest') return respond(route, state.visible);
       if (dir === '/days') return respond(route, { days: [{ date: DATE, weather: 'sunny', stamped: true }] });
       if (dir === '/hidden') return respond(route, { items: state.hidden, nextBefore: null });

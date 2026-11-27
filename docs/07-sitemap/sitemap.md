@@ -209,6 +209,8 @@ flowchart TD
 
 점선 칸은 이미 있는 화면이에요. 아이 소개(SCR-180)의 부모는 내 마롱이(SCR-165), 일기장 꾸미기와 스티커(SCR-184·185)의 부모는 일기장 한 날(SCR-113), 관리자 아이템(SCR-186)의 부모는 관리자 개요(SCR-169)예요.
 
+D189에 따라 SCR-182·183에서 받은 스티커를 고르면 오늘 한국 날짜의 SCR-185로도 들어가요.
+
 ### 목록
 
 | ID | 이름 | 경로 | 누가 보나 | 흐름 | 용어 |
@@ -218,7 +220,7 @@ flowchart TD
 | SCR-182 | 아이템 보기 | `/chat/shop#item` | 로그인한 사람(초대 링크로 가입) | FL-189, FL-190 | CTX-030, TERM-212, TERM-218 |
 | SCR-183 | 보관함 | `/chat/closet` | 로그인한 사람(초대 링크로 가입) | FL-189, FL-190, FL-191 | CTX-030, TERM-213\~215, TERM-218 |
 | SCR-184 | 일기장 꾸미기 | `/chat/diary/decor` | 로그인한 사람(초대 링크로 가입) | FL-191 | CTX-030, CTX-007, TERM-213\~215 |
-| SCR-185 | 스티커 붙이기 | `/chat/diary/:date#stickers` | 로그인한 사람(자기 일기만) | FL-191 | CTX-030, CTX-007, TERM-216 |
+| SCR-185 | 스티커 붙이기 | `/chat/diary/:date#stickers`, 상점·보관함에서는 오늘 날짜 `/chat/diary/:date#sticker=:itemId`(D189) | 로그인한 사람(자기 일기만) | FL-191 | CTX-030, CTX-007, TERM-216 |
 | SCR-186 | 관리자 아이템 | `/chat/admin/items` | 동희님(Cloudflare Access), 썸네일 API-318도 관리자 확인(D188) | FL-192 | CTX-030, TERM-212 |
 
 화면이 없는 용어: TERM-211 참조 이미지(서버가 그림 모델에 보냄), TERM-210 장면 그림은 있는 화면(글 대화 SCR-107, 통화 중 SCR-002, 일기장 SCR-113)에 그림으로 보여요.

@@ -456,13 +456,21 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((read_style["background"]["id"], read_style["font"]["id"]), ("extra-background", "extra-font"))
             self.assertEqual(db.admin("SELECT count(*) FROM marong.diary_decor WHERE friend_id=%s", ((await sessions.find_session(joined.token))["friend_id"],)), [(1,)])
             self.assertEqual((await client.put("/chat/diary/api/decor", headers=member, json=style)).status, 200)
-            self.assertEqual((await client.put("/chat/diary/api/decor", headers=member, json={"fontId": "starter-font"})).status, 400)
+            missing_style = await client.put("/chat/diary/api/decor", headers=member, json={"fontId": "starter-font"})
+            self.assertEqual(missing_style.status, 400)
+            self.assertEqual((await missing_style.json())["errors"], [{"field": "backgroundId", "reason": "required"}, {"field": "paperId", "reason": "required"}])
             self.assertEqual(db.admin("SELECT count(*) FROM marong.diary_decor WHERE friend_id=%s", (friend,)), [(1,)])
             style_path = "/chat/diary/api/decor"
             no_ownership = await client.put(style_path, headers=other, json={**style, "fontId": "unknown-fixture"})
             self.assertEqual((no_ownership.status, (await no_ownership.json())["code"]), (409, "not_owned"))
             wrong_kind = await client.put(style_path, headers=other, json={**style, "fontId": "starter-background"})
-            self.assertEqual((wrong_kind.status, (await wrong_kind.json())["code"]), (400, "invalid_input"))
+            self.assertEqual(wrong_kind.status, 400)
+            wrong_body = await wrong_kind.json()
+            self.assertEqual(wrong_body["code"], "invalid_input")
+            self.assertEqual(wrong_body["errors"], [{"field": "fontId", "reason": "wrong_kind"}])
+            bad_style = await client.put(style_path, headers=other, json={**style, "backgroundId": "!"})
+            self.assertEqual(bad_style.status, 400)
+            self.assertEqual((await bad_style.json())["errors"], [{"field": "backgroundId", "reason": "bad_format"}])
             self.assertEqual((await client.post("/chat/api/shop/sticker-fixture/claim", headers=member)).status, 201)
             sticker_ids = ["sticker-fixture"]
             for index in range(1, 12):

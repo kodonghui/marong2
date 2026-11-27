@@ -33,14 +33,32 @@ class DiaryDecor:
 
     async def set_style(self, req):
         friend = await self.decor.friend(req, write=True)
-        body = await self.body(req, STYLE_FIELDS.keys())
-        ids = {STYLE_FIELDS[key]: self.decor.item_key(value) for key, value in body.items()}
+        try:
+            body = await self.chat._body(req)
+        except Problem:
+            raise Problem("invalid_input", [{"field": "body", "reason": "bad_format"}]) from None
+        errors = []
+        if set(body) - STYLE_FIELDS.keys():
+            errors.append({"field": "body", "reason": "bad_format"})
+        ids = {}
+        for field, kind in STYLE_FIELDS.items():
+            if field not in body or body[field] is None:
+                errors.append({"field": field, "reason": "required"})
+                continue
+            try:
+                ids[kind] = self.decor.item_key(body[field])
+            except Problem:
+                errors.append({"field": field, "reason": "bad_format"})
+        if errors:
+            raise Problem("invalid_input", errors)
         async with self.store.pool.connection() as conn, conn.transaction():
             owned = await self.decor.owned_items(conn, friend, list(ids.values()))
             if owned.keys() != set(ids.values()):
                 raise Problem("not_owned")
-            if any(owned[value]["kind"] != kind for kind, value in ids.items()):
-                raise Problem("invalid_input")
+            errors = [{"field": field, "reason": "wrong_kind"}
+                      for field, kind in STYLE_FIELDS.items() if owned[ids[kind]]["kind"] != kind]
+            if errors:
+                raise Problem("invalid_input", errors)
             await conn.execute("""
                 INSERT INTO marong.diary_decor(friend_id,background_id,paper_id,font_id) VALUES (%s,%s,%s,%s)
                 ON CONFLICT (friend_id) DO UPDATE SET background_id=excluded.background_id,

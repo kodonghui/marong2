@@ -13,8 +13,20 @@
   let inventory, profile, tab = 'wear', shopTab = 'wear', diaryStyle, diaryExample;
   let wearConfirmed, wearPending = [], wearBusy = false, wearCurrent = null;
 
+  function stickerLink(item) {
+    const parts = new Intl.DateTimeFormat('en-CA', {timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit'}).formatToParts(new Date());
+    const get = type => parts.find(part => part.type === type).value;
+    return '/chat/diary/' + [get('year'), get('month'), get('day')].join('-') + '#sticker=' + encodeURIComponent(item.id);
+  }
+
   function problem(reply) {
     if (reply.status === 401) { location.replace('/chat/login'); return; }
+    if (reply.status === 400) { signal(error, '다시 한번 확인해 줄래?', reply); return; }
+    if (reply.status === 404) {
+      signal(error);
+      target.replaceChildren(node('p', '찾지 못했어'), link('내 마롱이로', '/chat/me', 'btn2'));
+      return;
+    }
     const codes = {cross_site: '이 화면에서 다시 해 줘', not_found: '지금은 받을 수 없는 아이템이야', not_owned: diary ? '아직 안 받은 거야' : '보관함에 없는 아이템이야',
                    not_ready: '캐릭터를 먼저 완성해 줘'};
     signal(error, codes[reply.body?.code] || '잠깐 문제가 생겼어. 다시 해 볼래?', reply);
@@ -45,7 +57,8 @@
     const thumb = node('img', '', 'decor-thumb');
     thumb.alt = '';
     thumb.src = item.thumbUrl;
-    const name = !shop && ['background', 'paper', 'font'].includes(item.kind)
+    const name = !shop && item.kind === 'sticker' ? link(item.name, stickerLink(item), 'btnt')
+      : !shop && ['background', 'paper', 'font'].includes(item.kind)
       ? link(item.name, '/chat/diary/decor#' + encodeURIComponent(item.id), 'btnt') : node('h2', item.name);
     card.append(thumb, name);
     if (shop) {
@@ -65,10 +78,15 @@
             } else if (result.status === 409 && result.body?.code === 'not_ready') {
               wear.disabled = false;
               signal(error, '아직 다 만들지 못한 캐릭터야', result);
-            } else { wear.disabled = false; problem(result); }
+            } else {
+              wear.disabled = false;
+              problem(result);
+              if (result.status === 0 || result.status >= 500) error.append(' ', button('다시 해 볼게', () => wear.click(), 'btnt'));
+            }
           }, 'btn2');
           card.append(wear);
         } else if (['background', 'paper', 'font'].includes(item.kind)) card.append(link('일기장에 쓰기', '/chat/diary/decor#' + encodeURIComponent(item.id), 'btn2'));
+        else if (item.kind === 'sticker') card.append(link('일기장에 쓰기', stickerLink(item), 'btn2'));
         return card;
       }
       const claim = button(item.owned ? '받았어' : '받기', async () => {
@@ -85,6 +103,7 @@
         } else {
           problem(result);
           claim.disabled = false;
+          if (result.status === 0 || result.status >= 500) error.append(' ', button('다시 해 볼게', () => claim.click(), 'btnt'));
         }
       }, 'btn2');
       claim.disabled = item.owned;
@@ -181,6 +200,7 @@
           render();
           void flushWear();
         }, 'btn2 decor-wear-item');
+        choice.dataset.itemId = item.id;
         choice.setAttribute('aria-pressed', String(selected));
         if (wearCurrent === item.id || wearPending.some(job => job.itemId === item.id)) {
           const spinner = node('span', '', 'decor-wear-spinner');
@@ -208,7 +228,15 @@
         wearBusy = false;
         render();
         if (result.status === 409 && result.body?.code === 'not_owned') signal(error, '아직 안 받은 거야', result);
-        else problem(result);
+        else {
+          problem(result);
+          if (result.status === 0 || result.status >= 500) {
+            error.append(' ', button('다시 해 볼게', () => {
+              const choice = [...target.querySelectorAll('.decor-wear-item')].find(item => item.dataset.itemId === job.itemId);
+              choice?.click();
+            }, 'btnt'));
+          }
+        }
         return;
       }
       wearConfirmed = result.body;
@@ -233,10 +261,15 @@
       }
       const requested = location.hash.slice(1);
       select.value = inventory.items.some(item => item.id === requested && item.kind === kind) ? requested : diaryStyle[kind].id;
-      select.addEventListener('change', paint);
+      const validation = node('span', '', 'caption');
+      validation.id = 'diary-decor-error-' + kind;
+      select.setAttribute('aria-describedby', validation.id);
+      validation.hidden = true;
+      select.addEventListener('change', () => { validation.hidden = true; select.removeAttribute('aria-invalid'); paint(); });
       wrap.append(select);
+      wrap.append(validation);
       target.append(wrap);
-      return [kind, select];
+      return [kind, select, validation];
     });
     async function paint() {
       const previousFont = preview.querySelector('.decor-paper-preview')?.style.getPropertyValue('--font-diary');
@@ -273,6 +306,7 @@
     const save = button('이걸로 할래', async () => {
       retry.hidden = true;
       signal(error);
+      for (const [, control, validation] of controls) { validation.hidden = true; control.removeAttribute('aria-invalid'); }
       if (controls.some(([, control]) => !control.value)) return;
       save.disabled = true;
       const body = Object.fromEntries(controls.map(([key, control]) => [key + 'Id', control.value]));
@@ -283,7 +317,18 @@
       }
       else {
         save.disabled = false;
-        if (reply.status === 400) signal(error, '다시 한번 확인해 줄래?', reply);
+        if (reply.status === 400) {
+          signal(error, '다시 한번 확인해 줄래?', reply);
+          for (const entry of reply.body?.errors || []) {
+            const found = controls.find(([kind]) => entry.field === kind + 'Id');
+            if (!found || !['required', 'bad_format', 'wrong_kind'].includes(entry.reason)) continue;
+            const [kind, control, validation] = found;
+            const rule = entry.reason === 'bad_format' ? kinds[kind] + ' 아이템 ID 형식을 확인해 줘' : kinds[kind] + ' 아이템을 골라 줘';
+            validation.replaceChildren(node('span', '다시 한번 확인해 줄래?'), node('br'), node('span', rule));
+            validation.hidden = false;
+            control.setAttribute('aria-invalid', 'true');
+          }
+        }
         else if (reply.status === 403 && reply.body?.code === 'cross_site') signal(error, '이 화면에서 다시 해 줘', reply);
         else {
           problem(reply);
@@ -315,31 +360,34 @@
   function loadFailure(reply) {
     target.replaceChildren();
     problem(reply);
-    if (reply.status !== 401) {
+    if (reply.status !== 401 && reply.status !== 404) {
       const retry = button('다시 해 볼게', () => { retry.disabled = true; void load(); }, 'btn2');
       target.append(retry);
     }
   }
 
   async function load() {
-    if (!inventory && !diary) {
+    if (!inventory) {
       const holder = node('div');
       holder.setAttribute('aria-hidden', 'true');
-      if (!shop) holder.append(node('div', '', 'decor-loading-face'));
-      const grid = node('div', '', 'decor-shop-grid');
-      for (let i = 0; i < 6; i++) grid.append(node('div', '', 'decor-loading-card'));
-      holder.append(grid);
+      if (diary) {
+        holder.append(node('div', '', 'decor-loading-card decor-loading-preview'), node('div', '', 'decor-loading-card'));
+      } else {
+        if (!shop) holder.append(node('div', '', 'decor-loading-face'));
+        const grid = node('div', '', 'decor-shop-grid');
+        for (let i = 0; i < 6; i++) grid.append(node('div', '', 'decor-loading-card'));
+        holder.append(grid);
+      }
       target.replaceChildren(holder);
     }
     const [list, me, decor] = await Promise.all([request(shop ? '/chat/api/shop' : '/chat/api/closet'),
       request('/chat/api/profile'), diary ? request('/chat/diary/api/decor') : null]);
-    screen.setAttribute('aria-busy', 'false');
-    if (list.status !== 200 || me.status !== 200) { loadFailure(list.status !== 200 ? list : me); return; }
+    if (list.status !== 200 || me.status !== 200) { screen.setAttribute('aria-busy', 'false'); loadFailure(list.status !== 200 ? list : me); return; }
     inventory = list.body;
     if (!shop && !diary) wearConfirmed = inventory.outfit;
     profile = me.body;
     if (diary) {
-      if (decor.status !== 200) { loadFailure(decor); return; }
+      if (decor.status !== 200) { screen.setAttribute('aria-busy', 'false'); loadFailure(decor); return; }
       diaryStyle = decor.body;
       diaryExample = null;
       const recent = await request('/chat/diary/api/latest');
@@ -348,6 +396,7 @@
         if (day.status === 200) diaryExample = day.body.diary;
       }
     }
+    screen.setAttribute('aria-busy', 'false');
     render();
   }
   window.addEventListener('hashchange', () => { if (inventory) render(); });

@@ -46,6 +46,12 @@ let lastTrouble = null;
 let loadedState = "loading";
 let bookStyle, stickers = [], editingStickers = null;
 let stickerInventory = [];
+let stickerLoading = false;
+
+function requestedSticker() {
+  if (!location.hash.startsWith('#sticker=')) return null;
+  try { return decodeURIComponent(location.hash.slice('#sticker='.length)); } catch { return null; }
+}
 
 export function element(tag, cls, value) {
   const node = document.createElement(tag);
@@ -120,6 +126,11 @@ function announce(message) {
 function showBanner(message = "") {
   banner.textContent = message;
   banner.hidden = !message;
+}
+
+function stickerLoadFailed(retry = () => void loadDecor(date, loadId)) {
+  showBanner(RETRY);
+  banner.append(" ", button("다시 해 볼게", () => { showBanner(); retry(); }, "text-button"));
 }
 
 function loadAgain() {
@@ -212,6 +223,7 @@ async function load(reset) {
     day = null;
     stickers = [];
     editingStickers = null;
+    stickerLoading = false;
     weatherOpen = false;
     busySince = 0;
     expectedRedraw = false;
@@ -254,6 +266,7 @@ async function load(reset) {
 }
 
 async function loadDecor(forDate, id) {
+  if (location.hash === "#stickers" || requestedSticker()) { stickerLoading = true; draw(); }
   try {
     const decor = bookStyle === undefined ? await api("/decor") : bookStyle;
     if (id !== loadId || date !== forDate) return;
@@ -262,17 +275,22 @@ async function loadDecor(forDate, id) {
     const values = await api(`/days/${forDate}/stickers`);
     if (id !== loadId || date !== forDate) return;
     stickers = values.stickers;
-    if (location.hash === "#stickers" && !editingStickers) {
+    if ((location.hash === "#stickers" || requestedSticker()) && !editingStickers) {
       await openStickers();
     } else draw();
   } catch {
     if (id === loadId && bookStyle === undefined) bookStyle = null;
+    if (id === loadId && stickerLoading) stickerLoadFailed();
+  } finally {
+    if (id === loadId && stickerLoading) { stickerLoading = false; draw(); }
   }
 }
 
 async function openStickers() {
   if (!bookStyle || !day?.diary || editingStickers) return;
   const current = date;
+  stickerLoading = true;
+  draw();
   try {
     const reply = await fetch("/chat/api/closet", {cache: "no-store"});
     if (!reply.ok) throw new Error("closet");
@@ -280,10 +298,17 @@ async function openStickers() {
     if (date !== current) return;
     stickerInventory = body.items.filter(item => item.kind === "sticker" && imageSource(item.thumbUrl));
     editingStickers = stickers.map(sticker => ({...sticker}));
+    const selected = stickerInventory.find(item => item.id === requestedSticker());
+    if (selected && editingStickers.length < 10) {
+      editingStickers.push({itemId: selected.id, imageUrl: selected.thumbUrl, x: 500, y: 500, scale: 100, rotation: 0});
+    }
+    stickerLoading = false;
     history.replaceState(history.state, "", location.pathname + "#stickers");
     draw();
   } catch {
-    showBanner("스티커를 불러오지 못했어");
+    stickerLoading = false;
+    draw();
+    stickerLoadFailed(() => void openStickers());
   }
 }
 
@@ -357,11 +382,20 @@ function renderStickerEditor(paper) {
         body: {stickers: payload(editingStickers)}});
       stickers = result.stickers;
       close();
-    } catch {
+    } catch (error) {
       save.disabled = false;
       cancel.disabled = false;
       save.textContent = "다시 해 볼게";
-      showBanner("스티커를 저장하지 못했어");
+      showBanner(error.code === "too_many_stickers" ? "한 장에 10개까지야"
+        : error.code === "not_owned" ? "아직 안 받은 거야"
+        : error.code === "cross_site" ? "이 화면에서 다시 해 줘"
+        : error.code === "invalid_input" ? "다시 한번 확인해 줄래?" : RETRY);
+      if (error.code === "not_found") {
+        const home = element("a", "text-button", "내 마롱이로");
+        home.href = "/chat/me";
+        banner.replaceChildren(element("span", "", "찾지 못했어"), " ", home);
+        banner.hidden = false;
+      }
     }
   });
   panel.append(save, cancel);
@@ -453,7 +487,7 @@ function drawPicture(diary) {
   const caption = element("figcaption");
   const status = element("div");
   const busy = diary.busy === "redraw";
-  const alt = `${diary.writer?.name || "마롱이"}의 '${diary.title}' 그림`;
+  const alt = diary.writer?.name ? `${diary.writer.name}의 '${diary.title}' 그림` : `마롱이가 그린 '${diary.title}' 그림`;
 
   function picture(reload = false) {
     status.replaceChildren();
@@ -626,8 +660,13 @@ function draw() {
   calendar.disabled = locked;
   more.disabled = locked;
   view.dataset.state = loadedState;
-  view.setAttribute("aria-busy", String(loadedState === "loading"));
-  if (day?.diary) drawReady(day.diary);
+  view.setAttribute("aria-busy", String(loadedState === "loading" || stickerLoading));
+  if (stickerLoading) {
+    const placeholder = element("article", "paper loading");
+    placeholder.setAttribute("aria-hidden", "true");
+    for (const cls of ["wide", "picture-frame", "manuscript"]) placeholder.append(element("div", `shape ${cls}`));
+    view.replaceChildren(placeholder);
+  } else if (day?.diary) drawReady(day.diary);
   else if (loadedState === "loading") {
     const placeholder = element("article", "paper loading");
     placeholder.setAttribute("aria-hidden", "true");
@@ -647,6 +686,10 @@ function draw() {
     drawEmpty("06-sad", RETRY, button("다시 해 볼게", () => void load(false)), lastTrouble?.trace);
   } else if (loadedState === "reconnecting") {
     drawEmpty("13-concerned", CONNECTION);
+  } else if (requestedSticker() && EMPTY[loadedState]) {
+    drawEmpty("01-neutral", "오늘 일기가 생기면 붙일 수 있어요", button("일기장으로 가기", () => navigate("")));
+  } else if (location.hash === "#stickers" && EMPTY[loadedState]) {
+    drawEmpty("01-neutral", "아직 일기가 없는 날이야", button("일기장으로", () => navigate("")));
   } else if (EMPTY[loadedState]) {
     let action;
     if (loadedState === "none") action = button("가장 최근 일기 보기", () => navigate(""));

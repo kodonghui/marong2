@@ -342,7 +342,7 @@ paths:
     put:
       operationId: putDiaryDecor
       summary: 일기장 꾸밈 바꾸기
-      description: 배경·속지·글꼴을 한 번에 바꿔요(TBL-180). 셋 다 보관함에 있는 그 종류 아이템이어야 해요. 모든 날의 일기장에 같이 보여요.
+      description: 배경·속지·글꼴을 한 번에 바꿔요(TBL-180). 셋 다 보관함에 있는 그 종류 아이템이어야 해요. 모든 날의 일기장에 같이 보여요. D189에 따라 400의 errors에 해당 칸 backgroundId·paperId·fontId와 규칙 코드 required·bad_format·wrong_kind를 담아요. 본문 전체 형식 오류는 field body·bad_format이에요.
       x-corthex:
         id: API-259
         spec:

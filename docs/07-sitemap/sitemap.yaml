@@ -108,6 +108,7 @@
     - id: SCR-185
       name: 스티커 붙이기
       path: '/chat/diary/:date#stickers'
+      # D189: 상점 상세·보관함에서 고른 스티커는 오늘 한국 날짜의 /chat/diary/:date#sticker=:itemId로 진입해요.
       access: 로그인한 사람(초대 링크로 가입, 자기 일기만)
       status: active
       flows: [FL-191]
