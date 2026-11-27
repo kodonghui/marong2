@@ -672,6 +672,20 @@ test('TC-659 overview, app versions and member details agree on phones behind', 
   assert.deepEqual(errors, []);
 });
 
+test('TC-543 opens the item tab and displays an isolated thumbnail', options, async t => {
+  const {page, state, visit, seen} = await open(t);
+  state['/items/fixture-item/thumbnail'] = {contentType: 'image/webp', body: fs.readFileSync(
+    path.join(__dirname, '../../../marong/decor/v1/starter-background/thumb.webp'))};
+  await visit('/');
+  await page.getByRole('link', {name: '아이템', exact: true}).first().click();
+  await page.waitForURL('**/chat/admin/items');
+  const image = page.getByRole('row').filter({hasText: name}).locator('img');
+  await image.waitFor();
+  await page.waitForFunction(() => document.querySelector('#item-list img')?.naturalWidth > 0);
+  assert.equal(await image.getAttribute('src'), '/chat/admin/api/items/fixture-item/thumbnail');
+  assert.ok(seen.some(([method, url]) => method === 'GET' && url === '/items/fixture-item/thumbnail'));
+});
+
 test('TC-656 items show the decor-off notice only for 404', options, async t => {
   const {page, state, visit, seen, errors} = await open(t);
   const screen = page.locator('#item-admin');
