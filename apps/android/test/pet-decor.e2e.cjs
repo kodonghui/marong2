@@ -44,16 +44,18 @@ test('TC-546/548: claim an item, wear it, and display its layer at 360 px', {ski
     const page = await browser.newPage({viewport: {width: 360, height: 780}, isMobile: true});
     const hat = {id: 'berry-beanie', kind: 'hat', slot: 'head', name: '딸기 털모자',
                  priceKrw: 0, thumbUrl: '/chat/decor/v1/berry-beanie/thumb.webp', owned: false};
+    const background = {id: 'starter-background', kind: 'background', name: '기본 배경', priceKrw: 0, thumbUrl: '/chat/decor/v1/starter-background/thumb.webp', owned: true, starter: true};
+    const stickerItem = {id: 'star-sticker', kind: 'sticker', name: '별 스티커', priceKrw: 0, thumbUrl: '/chat/decor/v1/star-sticker/sticker.webp', owned: false};
     const outfit = {head: null, body: null, neck: null};
     const character = {id: 9, name: '콩이', kind: 'dog', template: 'dog_small', outfit};
     const layer = '/chat/decor/v1/berry-beanie/dog_small.png';
-    let picked;
+    let picked, rejectWear = false;
     await page.route('**/*', async route => {
       const url = new URL(route.request().url());
       assert.equal(url.origin, BASE);
       const address = url.pathname;
       if (address === '/chat/api/profile') return route.fulfill({json: {character}});
-      if (address === '/chat/api/shop') return route.fulfill({json: {items: [hat]}});
+      if (address === '/chat/api/shop') return route.fulfill({json: {items: [hat, background, stickerItem]}});
       if (address === '/chat/api/closet') {
         return route.fulfill({json: {characterId: 9, outfit, items: hat.owned ? [hat] : []}});
       }
@@ -62,6 +64,7 @@ test('TC-546/548: claim an item, wear it, and display its layer at 360 px', {ski
         return route.fulfill({status: 201, json: {itemId: hat.id, owned: true}});
       }
       if (address.endsWith('/outfit')) {
+        if (rejectWear) return route.fulfill({status: 409, json: {code: 'not_owned'}});
         picked = route.request().postDataJSON();
         outfit.head = picked.head ? {id: hat.id, name: hat.name, layerUrl: layer} : null;
         return route.fulfill({json: outfit});
@@ -80,17 +83,39 @@ test('TC-546/548: claim an item, wear it, and display its layer at 360 px', {ski
     await page.clock.setFixedTime(new Date('2026-11-21T03:00:00Z'));
     await page.goto(BASE + '/chat/shop');
     await page.getByText('0원', {exact: true}).waitFor();
+    for (const label of ['입는 것', '일기장', '스티커']) {
+      assert.equal(await page.getByRole('button', {name: label, exact: true}).count(), 1);
+    }
+    await page.getByRole('button', {name: '일기장', exact: true}).click();
+    assert.equal(await page.getByText('기본 배경', {exact: true}).count(), 1);
+    assert.equal(await page.getByText('기본', {exact: true}).count(), 1);
+    assert.equal(await page.getByText('딸기 털모자', {exact: true}).count(), 0);
+    await page.getByRole('button', {name: '스티커', exact: true}).click();
+    assert.equal(await page.getByText('별 스티커', {exact: true}).count(), 1);
+    assert.equal(await page.getByText('기본 배경', {exact: true}).count(), 0);
+    await page.getByRole('button', {name: '입는 것', exact: true}).click();
     await page.getByRole('link', {name: '아이템 보기'}).click();
     await page.locator(`.decor-layer[src="${layer}"]`).waitFor();
     await page.getByRole('button', {name: '받기', exact: true}).click();
-    const received = page.getByRole('button', {name: '받았어'});
-    await received.waitFor();
-    assert.equal(await received.isDisabled(), true);
-    await page.getByRole('link', {name: '보관함'}).click();
-    await page.getByLabel('머리').selectOption(hat.id);
-    await page.getByRole('button', {name: '이렇게 입을래'}).click();
-    await page.locator(`.decor-layer[src="${layer}"]`).waitFor();
+    await page.getByRole('button', {name: '입혀 볼래'}).click({timeout: 1500});
+    await page.waitForURL(BASE + '/chat/closet');
+    await page.getByText('콩이가 딸기 털모자 입었어!', {exact: true}).waitFor();
     assert.deepEqual(picked, {head: hat.id, body: null, neck: null});
+    const ownedHat = page.getByRole('button', {name: '딸기 털모자', exact: true});
+    assert.equal(await ownedHat.count(), 1);
+    await ownedHat.click();
+    await page.waitForFunction(() => !document.querySelector('.decor-layer'));
+    assert.deepEqual(picked, {head: null, body: null, neck: null});
+    await page.getByRole('button', {name: '딸기 털모자', exact: true}).click();
+    await page.locator(`.decor-layer[src="${layer}"]`).waitFor();
+    await page.waitForFunction(() => document.querySelector('[aria-pressed="true"]') !== null);
+    assert.deepEqual(picked, {head: hat.id, body: null, neck: null});
+    rejectWear = true;
+    await page.getByRole('button', {name: '딸기 털모자', exact: true}).click();
+    await page.getByText('아직 안 받은 거야').waitFor();
+    assert.equal(await page.getByRole('button', {name: '딸기 털모자', exact: true}).getAttribute('aria-pressed'), 'true');
+    assert.equal(await page.locator(`.decor-layer[src="${layer}"]`).count(), 1);
+    rejectWear = false;
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 360);
     await page.clock.setFixedTime(new Date('2026-11-21T13:00:00Z'));
     await page.reload();
@@ -212,6 +237,16 @@ test('TC-535/551/553: diary writer and sticker editing at 360 and 430 px', {skip
     await page.mouse.move(board.x - 20, bounds.y + bounds.height / 2, {steps: 4});
     await page.mouse.up();
     assert.equal(await sticker.evaluate(element => element.style.left), '0%');
+    const handle = sticker.locator('.sticker-handle');
+    const handleBox = await handle.boundingBox();
+    await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(handleBox.x + handleBox.width / 2 + 18, handleBox.y + handleBox.height / 2 + 18, {steps: 4});
+    await page.mouse.up();
+    assert.ok(Number(await sticker.evaluate(el => el.style.getPropertyValue('--sticker-size'))) > 1);
+    const angle = page.getByLabel('스티커 1 기울기');
+    await angle.fill('45');
+    assert.equal(await sticker.evaluate(el => el.style.getPropertyValue('--sticker-angle')), '45deg');
     await page.getByRole('button', {name: '별', exact: true}).click();
     page.once('dialog', async dialog => {
       assert.equal(dialog.message(), '안 남기고 나갈까?');
@@ -223,7 +258,15 @@ test('TC-535/551/553: diary writer and sticker editing at 360 and 430 px', {skip
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 360);
 
     await page.setViewportSize({width: 430, height: 850});
+    await page.emulateMedia({reducedMotion: 'reduce'});
     await page.getByRole('button', {name: '스티커', exact: true}).click();
+    for (let i = 0; i < 9; i++) await page.getByRole('button', {name: '별', exact: true}).click();
+    assert.equal(await page.getByText('10/10', {exact: true}).count(), 1);
+    assert.equal(await page.getByText('한 장에 10개까지야').count(), 1);
+    assert.equal(await page.getByRole('button', {name: '별', exact: true}).isDisabled(), true);
+    for (let i = 0; i < 9; i++) await page.getByRole('button', {name: '떼기', exact: true}).last().click();
+    assert.equal(await page.getByText('1/10', {exact: true}).count(), 1);
+    assert.equal(await sticker.evaluate(element => getComputedStyle(element).animationName), 'none');
     await sticker.scrollIntoViewIfNeeded();
     const touchBounds = await sticker.boundingBox();
     const x = touchBounds.x + touchBounds.width / 2;
@@ -455,5 +498,42 @@ test('TC-543: loading shows a grey placeholder until the items arrive', {skip: !
     release();
     await page.locator('#item-admin[aria-busy="false"]').waitFor();
     assert.equal(await page.locator('.loading-placeholder').count(), 0);
+  } finally { await browser.close(); }
+});
+
+test('TC-551: slow or missing font keeps the current preview font', {skip: !chromium}, async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage({viewport: {width: 360, height: 780}});
+    const initial = ['background', 'paper'].map(kind => ({id: 'starter-' + kind, kind, name: '처음 ' + kind, starter: true}));
+    const fonts = ['current-font', 'slow-font'].map(id => ({id, kind: 'font', name: id, starter: false, thumbUrl: `/chat/decor/v1/${id}/thumb.webp`}));
+    let release, requested;
+    const waiting = new Promise(resolve => { release = resolve; });
+    const started = new Promise(resolve => { requested = resolve; });
+    await page.route('**/*', async route => {
+      const address = new URL(route.request().url()).pathname;
+      if (address === '/chat/api/profile') return route.fulfill({json: {character: null}});
+      if (address === '/chat/api/closet') return route.fulfill({json: {items: [...initial, ...fonts]}});
+      if (address === '/chat/diary/api/latest') return route.fulfill({json: {date: null}});
+      if (address === '/chat/diary/api/decor') return route.fulfill({json: {background: {id:'starter-background'}, paper: {id:'starter-paper'}, font: {id:'current-font'}}});
+      if (address === '/chat/decor/v1/current-font/font.woff2') return route.fulfill({contentType:'font/woff2', body: await readFile(path.join(STATIC, 'diary/Gaegu-Regular.woff2'))});
+      if (address === '/chat/decor/v1/slow-font/font.woff2') { requested(); await waiting; return route.fulfill({status:404}); }
+      const files = {'/chat/diary/decor':'decor.html', '/chat/diary/decor.js':'diary/decor.js', '/chat/decor.js':'decor.js', '/chat/unified.js':'unified.js', '/chat/chat.css':'chat.css', '/chat/unified.css':'unified.css'};
+      const file = files[address];
+      if (!file) return route.fulfill({status:404});
+      const type = file.endsWith('.css') ? 'text/css' : file.endsWith('.js') ? 'application/javascript' : 'text/html';
+      return route.fulfill({contentType:type+'; charset=utf-8', body:await readFile(path.join(STATIC,file))});
+    });
+    await page.goto(BASE+'/chat/diary/decor');
+    const paper = page.locator('.decor-paper-preview');
+    await page.waitForFunction(() => !!document.querySelector('.decor-paper-preview')?.style.getPropertyValue('--font-diary'));
+    const current = await paper.evaluate(el => el.style.getPropertyValue('--font-diary'));
+    await page.getByLabel('글꼴', {exact:true}).selectOption('slow-font');
+    await started;
+    assert.equal(await page.getByText('글꼴 받는 중…').isVisible(), true);
+    assert.equal(await paper.evaluate(el => el.style.getPropertyValue('--font-diary')), current);
+    release();
+    await page.getByText('글꼴 받는 중…').waitFor({state:'hidden'});
+    assert.equal(await paper.evaluate(el => el.style.getPropertyValue('--font-diary')), current);
   } finally { await browser.close(); }
 });

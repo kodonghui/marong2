@@ -238,3 +238,5 @@
 }
 
 .loading-placeholder {min-height: 120px; background: var(--raised); border-radius: 12px}
+
+.unified .decor-wear-item[aria-pressed="true"] {border: 2px solid var(--accent)}
