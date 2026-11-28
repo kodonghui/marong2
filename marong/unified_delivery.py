@@ -210,7 +210,7 @@ class AppProactive(PrivateProactive):
                                               queue=wait and choice.kind != "call")
             if wait and choice.kind != "call":
                 return await self.scenes.wait_for_topic(job)
-            return job["id"] if job and job["state"] == "done" else None
+            return await self.scenes.confirm_topic(job)
         except Exception as error:
             log.warning("scene_topic_error friend=%s error=%s", room["friend_id"], type(error).__name__)
             return None

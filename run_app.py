@@ -236,7 +236,8 @@ async def serve(settings, credentials, options, secret, authentication, home, st
         scenes = None
         if home == "app" and pet_settings.scene_pictures and chat.characters.media is not None:
             pictures = ScenePictures(store, chat.characters.media, diary_models, pet_settings.scene_model,
-                                     catalog=chat.decor.catalog)
+                                     catalog=chat.decor.catalog,
+                                     default_wear=pet_settings.default_wear and pet_settings.decor)
             chat.diary_scenes = pictures
             scenes = SceneWorker(store, pictures, chat.usage, default_wear=pet_settings.default_wear and pet_settings.decor)
             jobs["scenes"] = scenes.run

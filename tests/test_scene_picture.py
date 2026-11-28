@@ -211,7 +211,7 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         db.admin('UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s',(pet,friend))
         db.admin("INSERT INTO marong.outfits(character_id,head) VALUES (%s,'berry-beanie')",(pet,))
         topics=picture_set(); key=f"{topics.set}/{next(iter(topics.by_name))}"
-        job=db.admin("INSERT INTO marong.scene_pictures(friend_id,character_id,purpose,topic,outfit) VALUES (%s,%s,'topic',%s,%s) RETURNING id",(friend,pet,key,['berry-beanie']))[0][0]
+        job=db.admin("INSERT INTO marong.scene_pictures(friend_id,character_id,purpose,topic,outfit,drawn_outfit) VALUES (%s,%s,'topic',%s,%s,%s::jsonb) RETURNING id",(friend,pet,key,['berry-beanie'],'{\"version\":1}'))[0][0]
         worker.pictures.media=SimpleNamespace(read=AsyncMock(return_value=b'fixture'))
         async def draw(*args, **kwargs):
             db.admin("UPDATE marong.decor_items SET state='unlisted',unlisted_at=now() WHERE id='berry-beanie'")
@@ -329,6 +329,43 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await reactions.scene(row),legacy)
         model.assert_not_awaited()
 
+    async def test_bug143_legacy_queued_pet_job_keeps_original_behavior_when_enabled(self):
+        from marong.topics import picture_set
+        db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+        pet=db.admin("""INSERT INTO marong.characters(friend_id,kind,status,stage,ready_at,template,name,traits)
+            VALUES (%s,'dog','ready','done',now(),'dog_small','시험','{}') RETURNING id""",(friend,))[0][0]
+        db.admin('UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s',(pet,friend))
+        db.admin("INSERT INTO marong.outfits(character_id,head) VALUES (%s,'berry-beanie')",(pet,))
+        db.admin("UPDATE marong.decor_items SET state='unlisted',unlisted_at=now() WHERE id='berry-beanie'")
+        topics=picture_set(); key=f"{topics.set}/{next(iter(topics.by_name))}"
+        legacy=db.admin("INSERT INTO marong.scene_pictures(friend_id,character_id,purpose,topic,outfit) VALUES (%s,%s,'topic',%s,%s) RETURNING id",(friend,pet,key,['berry-beanie']))[0][0]
+        worker.pictures.media=SimpleNamespace(read=AsyncMock(return_value=b'fixture'))
+        self.assertEqual(await worker.step(),1)
+        self.assertIn(catalog.items['berry-beanie'].prompt,model.await_args.args[0])
+        self.assertEqual(db.admin('SELECT state,drawn_outfit FROM marong.scene_pictures WHERE id=%s',(legacy,)), [('done',None)])
+        self.assertEqual(await worker.wait_for_topic({'id':legacy,'state':'done'}),legacy)
+        self.assertEqual(model.await_count,1)
+
+    async def test_bug143_new_pending_job_stays_checked_after_switch_off(self):
+        db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+        pet=db.admin("""INSERT INTO marong.characters(friend_id,kind,status,stage,ready_at,template,name,traits)
+            VALUES (%s,'dog','ready','done',now(),'dog_small','시험','{}') RETURNING id""",(friend,))[0][0]
+        db.admin('UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s',(pet,friend))
+        db.admin("INSERT INTO marong.outfits(character_id,head,body) VALUES (%s,'berry-beanie','oat-sweater')",(pet,))
+        db.admin("INSERT INTO marong.outfit_firsts(friend_id,character_id,item_id,next_at) VALUES (%s,%s,'oat-sweater',now())",(friend,pet))
+        row=next(row for row in await reactions.due(friend) if row['character_id']==pet)
+        job=await reactions.reaction_job(row)
+        self.assertEqual(db.admin('SELECT drawn_outfit FROM marong.scene_pictures WHERE id=%s',(job['id'],)),[({'version':1},)])
+        worker.default_wear=False
+        worker.pictures.media=SimpleNamespace(read=AsyncMock(return_value=b'fixture'))
+        db.admin("UPDATE marong.decor_items SET state='unlisted',unlisted_at=now() WHERE id='berry-beanie'")
+        self.assertEqual(await worker.step(),1)
+        self.assertNotIn(catalog.items['berry-beanie'].prompt,model.await_args.args[0])
+        recorded=db.admin('SELECT drawn_outfit FROM marong.scene_pictures WHERE id=%s',(job['id'],))[0][0]
+        self.assertEqual([item['id'] for item in recorded],['oat-sweater'])
+        self.assertEqual(await worker.wait_for_topic({'id':job['id'],'state':'done'}),job['id'])
+        self.assertEqual(model.await_count,1)
+
     async def test_bug144_call_topic_checks_recorded_snapshot_without_waiting(self):
         from marong.unified_delivery import AppProactive
         db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
@@ -360,6 +397,8 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         db.admin("INSERT INTO marong.decor_owned(friend_id,item_id) VALUES (%s,'berry-beanie')",(friend,))
         image=Image.open(pet_path).convert('RGBA'); point=image.getchannel('A').getbbox()[:2]
         image.putpixel(point,(123,45,67,255)); image.save(pet_path)
+        self.assertIsNone(await loop._topic_scene({'friend_id':friend},choice,wait=False))
+        worker.topic_job.return_value={'id':result,'state':'drawing'}
         self.assertIsNone(await loop._topic_scene({'friend_id':friend},choice,wait=False))
         self.assertEqual(model.await_count,0)
 

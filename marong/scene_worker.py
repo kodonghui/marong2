@@ -42,9 +42,10 @@ class SceneWorker:
             if job or not queue:
                 return job
             return await (await conn.execute("""
-                INSERT INTO marong.scene_pictures(friend_id,character_id,topic,not_before,purpose,outfit)
-                VALUES (%s,%s,%s,%s,'topic',%s) RETURNING id,state
-            """, (*params, [profile[key] for key in ("body", "neck", "head") if profile[key]]))).fetchone()
+                INSERT INTO marong.scene_pictures(friend_id,character_id,topic,not_before,purpose,outfit,drawn_outfit)
+                VALUES (%s,%s,%s,%s,'topic',%s,%s) RETURNING id,state
+            """, (*params, [profile[key] for key in ("body", "neck", "head") if profile[key]],
+                  Jsonb({'version': 1}) if self.default_wear else None))).fetchone()
 
     async def wait_for_topic(self, job):
         if not job:
@@ -55,7 +56,11 @@ class SceneWorker:
             job = await self.store._one("SELECT id,state FROM marong.scene_pictures WHERE id=%s", (job["id"],))
             if job is None:
                 return None
-        if job["state"] != "done":
+        return await self.confirm_topic(job)
+
+    async def confirm_topic(self, job):
+        """Validate a completed scene without waiting for queued work."""
+        if not job or job['state'] != 'done':
             return None
         active = await self.store._one("""
             SELECT s.id,s.friend_id,s.character_id,s.drawn_outfit,c.template FROM marong.scene_pictures s
@@ -65,6 +70,8 @@ class SceneWorker:
         """, (job["id"],))
         if not active:
             return None
+        if active['drawn_outfit'] is None and active['character_id'] is not None:
+            return active['id']
         catalog = self.pictures.catalog if self.pictures else None
         template = active['template'] if active['character_id'] is not None else 'marong'
         if not await valid_fixed_outfit_snapshot(self.store, catalog, active['friend_id'], active['drawn_outfit'], template):
@@ -133,7 +140,16 @@ class SceneWorker:
         topic = topics.get(job["topic"]) if topics and job["purpose"] == "topic" else None
         result = None
         drawn_outfit = None
-        if character or (job['character_id'] is None and self.default_wear and job['purpose'] == 'reaction'):
+        if character and job['drawn_outfit'] is None:
+            outfit = self.pictures.outfit_prompts(job['outfit'])
+            if topic:
+                result = await self.pictures.draw('topic', character, outfit, topic.scene)
+            elif job['purpose'] == 'reaction':
+                item = self.pictures.catalog.items.get(job['item_id']) if self.pictures.catalog else None
+                if item and item.prompt:
+                    scene = f"The pet character proudly shows off the new {item.prompt}, looking at the viewer."
+                    result = await self.pictures.draw('reaction', character, outfit, scene)
+        elif character or (job['character_id'] is None and self.default_wear and job['purpose'] == 'reaction'):
             catalog = self.pictures.catalog
             template = character['template'] if character is not None else 'marong'
             by_slot = character if character is not None else await self.store._one(

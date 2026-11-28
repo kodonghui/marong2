@@ -70,7 +70,8 @@ class DecorReactions:
                 SELECT count(*) FROM skipped""")
             self._stale_drained = True
         rows = await self.store._all("""
-            SELECT r.id,r.friend_id,r.character_id,r.item_id,r.attempts,coalesce(c.template,'marong') AS template,
+            SELECT r.id,r.friend_id,r.character_id,r.item_id,r.attempts,r.scene_job_id,j.drawn_outfit,
+                   coalesce(c.template,'marong') AS template,
                    coalesce(c.name,p.bot_name) AS name,
                    CASE WHEN r.character_id IS NULL THEN mo.body ELSE o.body END AS body,
                    CASE WHEN r.character_id IS NULL THEN mo.neck ELSE o.neck END AS neck,
@@ -82,13 +83,16 @@ class DecorReactions:
             LEFT JOIN marong.friend_profiles p ON p.friend_id=r.friend_id
             LEFT JOIN marong.outfits o ON o.character_id=c.id
             LEFT JOIN marong.marong_outfits mo ON mo.friend_id=r.friend_id AND r.character_id IS NULL
+            LEFT JOIN marong.scene_pictures j ON j.id=r.scene_job_id
             WHERE r.state='waiting' AND r.next_at<=now() AND (%s::bigint IS NULL OR r.friend_id=%s)
             ORDER BY r.next_at,r.id LIMIT 40
         """, (friend, friend))
         result = []
         for row in rows:
             row = dict(row)
-            if not row['active']:
+            legacy_pet = row['character_id'] is not None and (not self.default_wear or
+                         (row['scene_job_id'] is not None and row['drawn_outfit'] is None))
+            if not row['active'] or legacy_pet:
                 result.append(row)
                 continue
             snapshot = await available_outfit_snapshot(self.store, self.catalog, row['friend_id'], row, row['template'])
@@ -125,16 +129,50 @@ class DecorReactions:
             if first['scene_job_id']:
                 cursor = await conn.execute('SELECT id,state FROM marong.scene_pictures WHERE id=%s', (first['scene_job_id'],))
                 return await cursor.fetchone()
-            cursor = await conn.execute("""INSERT INTO marong.scene_pictures(friend_id,character_id,purpose,item_id,outfit)
-                VALUES (%s,%s,'reaction',%s,%s) RETURNING id,state""",
-                (row['friend_id'], row['character_id'], row['item_id'], selections))
+            marker = Jsonb({'version': 1}) if self.default_wear else None
+            cursor = await conn.execute("""INSERT INTO marong.scene_pictures(friend_id,character_id,purpose,item_id,outfit,drawn_outfit)
+                VALUES (%s,%s,'reaction',%s,%s,%s) RETURNING id,state""",
+                (row['friend_id'], row['character_id'], row['item_id'], selections, marker))
             job = await cursor.fetchone()
             if after_insert:
                 after_insert()
             await conn.execute('UPDATE marong.outfit_firsts SET scene_job_id=%s WHERE id=%s', (job['id'], row['id']))
             return job
 
+    async def legacy_pet_scene(self, row):
+        """Keep pre-existing pet behavior while the default-wear switch is off."""
+        selections = [row[slot] for slot in ('body', 'neck', 'head') if row[slot]]
+        if self.scenes:
+            job = await self.reaction_job(row)
+            if not job:
+                return None
+            result = await self.scenes.wait_for_topic(job)
+            if result:
+                return result
+        try:
+            async with self.store.pool.connection() as conn:
+                expression = await self.media.read(conn, row['character_id'], 'excited')
+            key = row['template'] + '.png'
+            paths = [self.catalog.items[ident].files[key] for ident in selections
+                     if ident in self.catalog.items and key in self.catalog.items[ident].files]
+            data, width, height = await asyncio.to_thread(composite, expression, paths)
+        except (CharacterError, OSError, ValueError, TypeError) as error:
+            log.warning('reaction_composite_error character=%s error=%s', row['character_id'], type(error).__name__)
+            return None
+        async with self.store.pool.connection() as conn, conn.transaction():
+            cursor = await conn.execute("""INSERT INTO marong.scene_pictures(friend_id,character_id,purpose,item_id,outfit,
+                state,finished_at,fallback,format,width,height,image)
+                VALUES (%s,%s,'reaction',%s,%s,'done',now(),true,'png',%s,%s,%s) RETURNING id""",
+                (row['friend_id'], row['character_id'], row['item_id'], selections, width, height, data))
+            done = await cursor.fetchone()
+            await self.usage.record(row['friend_id'], conn=conn, images=1)
+        return done['id']
+
     async def scene(self, row):
+        if row['character_id'] is not None and (not self.default_wear or
+                (row.get('scene_job_id') is not None and row.get('drawn_outfit') is None)):
+            return await self.legacy_pet_scene(row)
+
         async def current_snapshot():
             if row['character_id'] is None:
                 sql = 'SELECT body,neck,head FROM marong.marong_outfits WHERE friend_id=%s'

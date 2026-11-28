@@ -60,12 +60,13 @@ def scene_prompt(purpose, character, outfit, scene, *, look=None, friend_name=No
 
 
 class ScenePictures:
-    def __init__(self, store, media, models, model, *, catalog=None):
+    def __init__(self, store, media, models, model, *, catalog=None, default_wear=False):
         self.store = store
         self.media = media
         self.models = models
         self.model = model
         self.catalog = catalog
+        self.default_wear = default_wear
 
     def outfit_prompts(self, ids):
         if not self.catalog:
@@ -81,6 +82,10 @@ class ScenePictures:
         """, (row["character_id"], row["friend_id"]))
         if character is None:
             return ModelResult(outcome="error", error="references")
+        if not self.default_wear:
+            outfit = self.outfit_prompts([character[slot] for slot in ('body', 'neck', 'head') if character[slot]])
+            result = await self.draw('diary', character, outfit, scene, look=look, weather=weather, friend_name=friend_name)
+            return result.measurement or ModelResult(outcome='error', error='references')
         snapshot = await available_outfit_snapshot(self.store, self.catalog, row['friend_id'], character, character['template'])
         outfit = self.outfit_prompts([layer['id'] for layer in snapshot])
         result = await self.draw("diary", character, outfit, scene, look=look, weather=weather, friend_name=friend_name)

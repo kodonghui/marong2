@@ -99,7 +99,7 @@ async def probe():
 class SwitchOffMainComparison(unittest.TestCase):
     def test_bug143_switch_off_matches_main(self):
         with tempfile.TemporaryDirectory(prefix='marong-main-') as directory:
-            proc = subprocess.Popen(['git','archive','origin/main'], cwd=ROOT, stdout=subprocess.PIPE)
+            proc = subprocess.Popen(['git','archive','0cf4e09fb72d6a15edf70dbd79884c3d5b7cbe94'], cwd=ROOT, stdout=subprocess.PIPE)
             with proc.stdout as stream:
                 with tarfile.open(fileobj=stream, mode='r|*') as archive:
                     archive.extractall(directory, filter='data')
