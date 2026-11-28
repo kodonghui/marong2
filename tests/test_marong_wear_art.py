@@ -35,7 +35,9 @@ class ArtHelperTest(unittest.TestCase):
                 if self.calls % 2:
                     raise draw_marong_wear.httpx.ConnectError('fixture')
                 return Response()
-        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'OPENAI_API_KEY':'fixture','MARONG_WEAR_IMAGE_MODEL':'fixture'}), \
+        prices = json.loads((draw_marong_wear.ROOT / 'marong/pet/prices.json').read_text())['models']
+        model = next(name for name, entry in prices.items() if entry['kind'] == 'image')
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'OPENAI_API_KEY':'fixture','MARONG_WEAR_IMAGE_MODEL':model}), \
                 patch.object(draw_marong_wear.httpx,'Client',Client), patch.object(sys,'argv',['draw','--out',folder]):
             self.assertEqual(draw_marong_wear.main(),0)
             self.assertEqual(json.loads((Path(folder)/'usage.json').read_text())['calls'],8)
