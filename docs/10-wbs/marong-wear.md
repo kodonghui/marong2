@@ -2,7 +2,7 @@
 
 2026-11-28 작성(Claude, 항목 253). 입력: 도메인 [pet-app.md 9절](../01-domain/pet-app.md#9-기능-변경-1-기본-마롱이에게-입히기2026-11-28-d192)(D192), 요구사항 REQ-690\~697과 [기능 변경 목록 1](../02-prd/pet-app.md#기본-마롱이-입히기-기능-변경-목록-1), 흐름 FL-189·190·192, 명세 SPEC-570\~574와 [3.14](../04-functional-spec/pet-app.md#314-기본-마롱이-차림spec-570574-기능-변경-1), 표 [마이그레이션 025](../../marong/migrations/025_marong_outfit.sql)(TBL-190, TBL-176·179 바꿈), 계약 API-330(`api/pet-app.openapi.yaml`)과 API-216의 `marongOutfit`(`api/unified.openapi.yaml`), 화면 [pet-app.md 12절](../08-screens/pet-app.md#12-기능-변경-1-기본-마롱이에게-입히기2026-11-28-d192-제안), 목업 [marong-wear-mockup.md](../../design/marong-wear-mockup.md).
 
-상태: 2026-11-28 10 단계 체크포인트 통과(D193, 오랑이 답 '추천안 모두 승인', 요청 `msg_d615ed1cdc0e`). 시작 조건은 셋이에요: ① 사용자님이 목업을 확인함(M1\~M3) ② 도메인 질문 1\~4와 기능 변경 목록 1의 줄마다 답이 옴 ③ 이 설계 PR이 `main`에 합쳐짐. 셋이 되면 마롱이가 구현 작업자를 따로 시작해요. 답에 따라 아래 TASK를 고치거나 빼요(질문 2가 ③이면 TASK-605가 없고, 질문 4가 ②이면 TASK-606이 없어요).
+상태: 2026-11-28 10 단계 체크포인트 통과(D193, 오랑이 답 '추천안 모두 승인', 요청 `msg_d615ed1cdc0e`). 시작 조건은 셋이에요: ① 사용자님이 목업을 확인함(M1\~M3, D194 모두 추천대로) ② 도메인 질문 1\~4(D194 모두 추천대로)와 기능 변경 목록 1(D193)의 답 ③ 이 설계 PR이 `main`에 합쳐짐. ①②는 됐고 ③만 남았어요. 셋이 되면 마롱이가 구현 작업자를 따로 시작해요.
 
 ## GPT 인계
 
@@ -34,7 +34,7 @@ node tools/vertex_live/test_fallback.cjs        # 통화 화면 시험 묶음(TC
 
 | TASK | 할 일 | 명세 | 고치는 곳 | 앞 작업 | Owner | 일(날) | 끝 조건 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| TASK-600 | 착용 아이템 10개의 `marong.png`(1024 투명)를 3.14 자동 맞춤으로 만들고, 사용자님이 M2에서 고른 아이템만 그림 방식 B로 다시 그려 같은 상자에 맞춤. `items.json`의 `files`에 `marong.png`를 더하고, 목록 검사(3.9)에 여섯 번째 틀 `marong`의 자리 상자를 더함. 레이어를 만드는 도구는 `tools/` 아래 새 파일(제품 쪽), 상자 값은 3.14 그대로 | SPEC-574, 3.14 | `marong/decor/v1/`, `marong/decor.py`, `tools/` 새 도구 | 없음 | GPT | 1 | TC-760, TC-541(그대로 통과, 48개). 다시 그린 아이템과 비용을 PR에 적음 |
+| TASK-600 | 착용 아이템 10개의 `marong.png`(1024 투명)를 3.14 자동 맞춤으로 만들고, 옷 4개(`oat-sweater`·`blue-raincoat`·`forest-vest`·`apricot-apron`)만 그림 방식 B로 다시 그려 같은 상자에 맞춤(D194 M2). 모자 4개·목도리 2개는 자동 맞춤 그대로. `items.json`의 `files`에 `marong.png`를 더하고, 목록 검사(3.9)에 여섯 번째 틀 `marong`의 자리 상자를 더함. 레이어를 만드는 도구는 `tools/` 아래 새 파일(제품 쪽), 상자 값은 3.14 그대로 | SPEC-574, 3.14 | `marong/decor/v1/`, `marong/decor.py`, `tools/` 새 도구 | 없음 | GPT | 1 | TC-760, TC-541(그대로 통과, 48개). 다시 그린 아이템과 비용을 PR에 적음 |
 | TASK-601 | 마이그레이션 025와 시험 DB 순서(`tests/pg.py`에 025 적용 함수) | TBL-190, TBL-176·179 바꿈 | `marong/migrations/025_marong_outfit.sql`(초안 그대로 쓰거나 고친 점을 PR에), `tests/pg.py`, 새 `tests/test_marong_outfit_schema.py` | 없음 | GPT | 0.5 | TC-770 |
 | TASK-602 | 스위치 `MARONG_DEFAULT_WEAR`, API-330, 보관함 API-254의 기본 마롱이 `outfit`, 프로필 API-216의 `marongOutfit`·`features.defaultWear`. 차림 읽기 함수 하나가 캐릭터와 기본 마롱이를 갈라 읽음 | SPEC-570, 571 | `marong/pet_app_settings.py`, `marong/app_decor.py`, `marong/app_profile.py` | TASK-600, TASK-601 | GPT | 1 | TC-761, TC-762, TC-763. API-330이 나열한 응답마다 시험 통과 |
 | TASK-603 | 앱 화면: 글 대화 머리말·말풍선·입력 중 얼굴(SCR-107), 내 마롱이의 얼굴·'꾸미기' 줄·캐릭터 목록(SCR-165), 아이템 보기 미리 보기와 '입혀 볼래'(SCR-182), 보관함 입히기(SCR-183)에 기본 마롱이 차림. 스위치가 꺼지면 지금 #default-marong 그대로 | SPEC-571, 08 12절 | `marong/app_chat_static/chat.js`·`decor.js`·`unified.js`(와 css) | TASK-602 | GPT | 1 | TC-764, TC-765, TC-546(스위치 0에서 그대로 통과) |
