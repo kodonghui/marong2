@@ -17,7 +17,7 @@
   path: /
   access: 허용된 Google 계정(통화하는 친구)
   status: active
-  flows: [FL-001, FL-002, FL-006, FL-007, FL-008, FL-009, FL-121, FL-148, FL-177, FL-179]
+  flows: [FL-001, FL-002, FL-006, FL-007, FL-008, FL-009, FL-121, FL-148, FL-177, FL-179, FL-190]
   terms: [CTX-002, CTX-006, CTX-021, CTX-029, TERM-001, TERM-003, TERM-014, TERM-018, TERM-167, TERM-178, TERM-190, TERM-199, TERM-224]
   children:
     - id: SCR-002
@@ -25,7 +25,7 @@
       path: /call
       access: 허용된 Google 계정(통화하는 친구)
       status: active
-      flows: [FL-002, FL-003, FL-004, FL-005, FL-006, FL-007, FL-009, FL-142, FL-178]
+      flows: [FL-002, FL-003, FL-004, FL-005, FL-006, FL-007, FL-009, FL-142, FL-178, FL-190]
       terms: [CTX-002, CTX-003, CTX-020, TERM-001, TERM-002, TERM-009, TERM-010, TERM-011, TERM-012, TERM-017, TERM-018, TERM-019, TERM-080, TERM-083, TERM-179, TERM-197]
       # 선 전화·그림 화두(CTX-020, 2026-11-16): 새 화면은 없고 있는 화면의 상태만 늘어요(08단계 docs/08-screens/call-first.md).
       # 통화 중(SCR-002)에 선 전화 그림 카드가 떠요(FL-142). 앱 화면은 그 문서에 있어요: 벨 화면 SCR-110과 전화 알림 SCR-111(docs/app-ring.md)은
@@ -256,7 +256,7 @@
   path: /chat/me
   access: 로그인한 사람(초대 링크로 가입)
   status: active
-  flows: [FL-171, FL-173, FL-174, FL-177, FL-179]
+  flows: [FL-171, FL-173, FL-174, FL-177, FL-179, FL-190]
   terms: [CTX-027, CTX-029, TERM-175, TERM-177, TERM-178, TERM-179, TERM-182, TERM-183, TERM-186, TERM-190, TERM-191, TERM-192, TERM-199]
   children:
     - id: SCR-167
@@ -326,6 +326,7 @@
 # 값은 모두 0원이고 결제 화면은 없어요. 아이템 보기(SCR-182)는 상점 위에 아래에서 올라오는 칸이에요(일기장 SCR-114~118과 같은 방식). 설정값 MARONG_DECOR=0이면 이 화면들의 메뉴 줄이 없어요.
 # 장면 그림(CTX-031)은 화면이 따로 없어요: 글 대화(SCR-107)의 화두 메시지와 통화 중(SCR-002)의 화두 카드에 그림으로 보여요(FL-187, FL-190). 일기 장면 그림은 일기장 한 날(SCR-113)에 보여요(FL-188).
 # without a screen: TERM-211(참조 이미지, 서버가 그림 모델에 보냄), TERM-212(아이템 받기, 상점의 버튼 동작)
+# 기능 변경 1(2026-11-28, D192, 제안): 기본 마롱이도 입어요. 새 화면·경로는 없어요. 상점·보관함·내 마롱이·글 대화·통화 화면에서 기본 마롱이 얼굴에 차림이 겹치고(FL-190, SCR-001·002·165에 FL-190을 더함), 상태는 docs/08-screens/pet-app.md 12절.
 - id: SCR-181
   name: 상점
   path: /chat/shop

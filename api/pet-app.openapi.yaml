@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: 마롱이 반려동물 캐릭터(통합 앱) API
-  version: 0.1.0-draft
+  version: 0.2.0-draft
   description: |-
     통합 앱의 아이 소개(SCR-180), 상점(SCR-181), 아이템 보기(SCR-182), 보관함(SCR-183), 일기장 꾸미기(SCR-184), 스티커(SCR-185), 관리자 아이템(SCR-186) 화면과 글 대화·통화 화면의 장면 그림이 앱 서버(TERM-194)와 주고받는 계약이에요. 원본은 이 파일이고 코드는 이 파일을 따라가요(06 단계). 통합 앱 계약([unified.openapi.yaml](unified.openapi.yaml))과 같은 서버·같은 `/chat/` 아래이고 로그인·Origin·오류 모양·관리자 확인 규칙을 그대로 써요.
 
@@ -30,7 +30,14 @@ info:
     5. 스티커(API-261)는 그 날 스티커 전체를 보내는 PUT이에요. 배열 순서가 겹치는 순서(앞이 아래)예요. 빈 배열이면 모두 떼요.
     6. 상점은 지금 모든 값이 0원이에요(D113). `priceKrw`는 정수이고 지금은 늘 0이에요. 결제·충전 API는 없어요.
 
-    Open: 기본 마롱이의 차림(질문 A)은 답이 온 뒤 API를 더해요. 추억 모드(D121)는 답 대기예요.
+    Open: 추억 모드(D121)는 답 대기예요.
+
+    기능 변경 1(2026-11-28, D192, 제안·체크포인트 전): 기본 마롱이도 입어요. 이 설명(description)의 승인된 글 "Open: 기본 마롱이의 차림(질문 A)은 답이 온 뒤 API를 더해요."는 그 답으로 닫혀요(02 기능 변경 목록 1-14).
+    1. 새 API-330 `PUT /chat/api/marong/outfit`(SPEC-570): API-255와 같은 본문·응답·오류이고 캐릭터 id와 `not_ready`가 없어요.
+    2. 보관함(API-254): `characterId`가 null이면 `outfit`은 기본 마롱이 차림이에요(두 스위치가 켜져 있을 때). 꺼져 있으면 지금처럼 null이에요.
+    3. 프로필(API-216): 선택 칸 `marongOutfit`과 `features.defaultWear`가 생겨요(통합 앱 계약에 같은 PR로 더함).
+    4. 착용 아이템의 레이어 파일에 `marong.png`가 늘어요(API-257은 목록에 적힌 파일만 주는 규칙 그대로). 올리기(API-264)의 `missing`에 `layer:marong`이 나올 수 있어요.
+    5. `MARONG_DEFAULT_WEAR=0`이면 API-330은 404 `not_found`예요.
 servers:
 - url: https://marong.corthex-hq.com
   description: 앱 서버. 터널이 /chat/ 아래를 앱 서버로 보내요. /chat/admin/ 아래만 Cloudflare Access 뒤예요
@@ -195,7 +202,7 @@ paths:
     get:
       operationId: getCloset
       summary: 보관함
-      description: 보관함(SCR-183)이 불러요. 받은 아이템과 처음 아이템, 쓰는 캐릭터의 차림(기본 마롱이면 null), 일기장 꾸밈을 줘요. 내린 아이템도 받은 것이면 보여요.
+      description: 보관함(SCR-183)이 불러요. 받은 아이템과 처음 아이템, 쓰는 캐릭터의 차림, 일기장 꾸밈을 줘요. 기본 마롱이면 기본 마롱이 차림이고, MARONG_DEFAULT_WEAR가 꺼져 있으면 null이에요(기능 변경 1, SPEC-571). 내린 아이템도 받은 것이면 보여요.
       x-corthex:
         id: API-254
         spec:
@@ -263,6 +270,64 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/NotOwnedOrNotReady'
+        '413':
+          $ref: '#/components/responses/TooLarge'
+        '500':
+          $ref: '#/components/responses/Internal'
+        '503':
+          $ref: '#/components/responses/DbUnavailable'
+  /chat/api/marong/outfit:
+    put:
+      operationId: putMarongOutfit
+      summary: 기본 마롱이 차림 바꾸기
+      description: 기능 변경 1(2026-11-28, D192). 친구의 기본 마롱이 차림 세 자리(머리·몸·목)를 한 번에 바꿔요(TBL-190). 아이템은 보관함에 있고 자리가 맞아야 해요. 처음 입는 아이템이면 반응 선톡을 3분 뒤로 잡아요(SPEC-572). 여러 자리를 한 번에 처음 입히면 머리→몸→목 순서의 앞 하나만 반응해요. 지금 반려동물 캐릭터를 쓰고 있어도 바꿀 수 있어요. 응답은 입은 모습이고 레이어는 `marong.png`예요. 400의 errors는 API-255와 같아요(D190). MARONG_DECOR나 MARONG_DEFAULT_WEAR가 꺼져 있으면 404예요.
+      x-corthex:
+        id: API-330
+        spec:
+        - SPEC-570
+        - SPEC-571
+        - SPEC-572
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OutfitSet'
+            examples:
+              hat:
+                value:
+                  head: berry-beanie
+                  body: null
+                  neck: null
+      responses:
+        '200':
+          description: 바뀐 기본 마롱이 차림
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WornOutfit'
+              examples:
+                hat:
+                  value:
+                    head:
+                      id: berry-beanie
+                      name: 딸기 털모자
+                      layerUrl: /chat/decor/v1/berry-beanie/marong.png
+                    body: null
+                    neck: null
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/LoginRequired'
+        '403':
+          $ref: '#/components/responses/CrossSite'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/NotOwned'
         '413':
           $ref: '#/components/responses/TooLarge'
         '500':
@@ -829,6 +894,12 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
+    NotOwned:
+      description: 보관함에 없는 아이템(not_owned). 기본 마롱이 차림(API-330)에는 캐릭터가 없어서 not_ready가 없어요
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
     StickerConflict:
       description: 스티커 11개 이상(too_many_stickers) 또는 보관함에 없는 스티커(not_owned)
       content:
@@ -1187,11 +1258,12 @@ components:
             format: int64
             minimum: 1
           - type: 'null'
-          description: 쓰는 캐릭터. null이면 기본 마롱이(차림 없음)
+          description: 쓰는 캐릭터. null이면 기본 마롱이
         outfit:
           oneOf:
           - $ref: '#/components/schemas/WornOutfit'
           - type: 'null'
+          description: 쓰는 캐릭터의 차림. 기본 마롱이면 기본 마롱이 차림(SPEC-571)이고, MARONG_DEFAULT_WEAR가 꺼져 있으면 null
         diaryDecor:
           $ref: '#/components/schemas/DiaryDecorView'
     DiaryDecorSet:

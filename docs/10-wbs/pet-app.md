@@ -83,6 +83,7 @@ for f in tools/vertex_live/test_*.py; do .venv/bin/python "$f" || exit 1; done  
 | 예비 | Single Day | Copyright 2015 DXKorea Inc. | 없음 |
 
 - 열린 질문: 질문 A(기본 마롱이도 입을까)는 체크포인트를 건너뛰어 기본값 '반려동물 캐릭터만'으로 진행해요(명세 6절). 추억 모드(D121)는 답이 오면 SPEC 430번, TASK 445번부터 더해요. 운영 서버의 지금 `MARONG_DIARY_IMAGE_BUDGET_USD` 값은 [확인 안 함]이고 반영 ④에서 `unlimited`로 둬요.
+  - 2026-11-28 답(D192): '기본 마롱이도 입음'. 작업은 이 패키지가 아니라 [marong-wear.md](marong-wear.md)예요(기능 변경 1, 체크포인트 전).
 
 ## 11단계 진행
 

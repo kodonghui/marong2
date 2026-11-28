@@ -12,9 +12,14 @@
           "level": "info",
           "message": "docs/01-domain/pet-app.md: 바뀌는 맥락 CTX-030·031, TERM-210~218. 결정 D110~D117·D119·D120. 용어 검사 통과",
           "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1(기본 마롱이에게 입히기, D192, 2026-11-28, 설계 PR claude/marong-wear-design, 기준 main 5c2575f, 체크포인트 전): 9절 제안. CTX-030·009·031·007·001·002 바뀜, TERM-218·TERM-112 정의 바꿈 제안, 새 용어 없음. DDD 질문 1~4는 사용자님",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-21T08:07:22+00:00"
+      "updated": "2026-11-28T06:30:00+00:00"
     },
     "02-prd": {
       "state": "in_progress",
@@ -25,9 +30,14 @@
           "level": "info",
           "message": "docs/02-prd/pet-app.md: REQ-500~546·550~552(547~549는 추억 모드 D121 답 뒤로 남김). pet.md·call-first.md의 바뀌는 REQ 표시. 용어 검사 통과",
           "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1(D192, 체크포인트 전): REQ-690~697 제안, 기능 변경 목록 1(1-1~1-20, 1-1은 D192로 답함). 용어 검사 통과",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-21T08:07:22+00:00"
+      "updated": "2026-11-28T06:30:00+00:00"
     },
     "03-user-flow": {
       "state": "in_progress",
@@ -48,9 +58,14 @@
           "level": "info",
           "message": "관리 페이지 기능 변경 3 체크포인트(2026-11-24, D148, 승인한 사람 사용자님, 오랑이 답 msg_2d55f701abb0): FL-192의 꺼짐 분기(목록 3-3)가 '바꿈'으로 승인됨. 바뀌기 전 글은 docs/02-prd/admin.md의 기능 변경 목록 3에 따옴표로 남음(변경 기록). 이 part의 단계 상태는 그대로",
           "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1(D192, 체크포인트 전): FL-189·190을 기본 마롱이까지 넓히고 그림 문법 손봄(diagram-check main 22·26건 → 0건), FL-192 선 이름 '6가지'(목록 1-20)",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-24T07:07:45+00:00"
+      "updated": "2026-11-28T06:30:00+00:00"
     },
     "04-functional-spec": {
       "state": "in_progress",
@@ -71,9 +86,14 @@
           "level": "info",
           "message": "관리 페이지 기능 변경 3 체크포인트(2026-11-24, D148, 승인한 사람 사용자님, 오랑이 답 msg_2d55f701abb0): 1절 5의 MARONG_DECOR=0 줄에 더한 관리 페이지 아이템 화면 안내(목록 3-4)가 '바꿈'으로 승인됨. 바뀌기 전 글은 docs/02-prd/admin.md의 기능 변경 목록 3에 따옴표로 남음(변경 기록). 이 part의 단계 상태는 그대로",
           "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1(D192, 체크포인트 전): SPEC-570~574, 3.14(마롱이 자리 상자, 그림 방식), 스위치 MARONG_DEFAULT_WEAR. 용어 검사 통과",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-24T07:07:45+00:00"
+      "updated": "2026-11-28T06:30:00+00:00"
     },
     "05-erd": {
       "state": "in_progress",
@@ -84,9 +104,14 @@
           "level": "info",
           "message": "marong/migrations/022_pet_app.sql: TBL-175~181(새 표 7개)과 characters·friend_profiles·diaries·topic_sends·app_rings 칸. 2026-11-21 버리는 pgserver에서 020·021(통화 008~010) 뒤 022 두 번 적용, 거절 21가지·목소리 백필·권한 통과. 운영 DB에는 넣지 않음. 설명 docs/05-erd/pet-app.md",
           "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1(D192, 체크포인트 전): marong/migrations/025_marong_outfit.sql(TBL-190 marong_outfits, TBL-176·179 character_id 비울 수 있음). 2026-11-28 pgserver에서 두 번 적용과 거절 11가지 확인. 운영 DB에는 넣지 않음",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-21T08:07:22+00:00"
+      "updated": "2026-11-28T06:30:00+00:00"
     },
     "06-api": {
       "state": "in_progress",
@@ -97,9 +122,14 @@
           "level": "info",
           "message": "api/pet-app.openapi.yaml: API-250~266(256 비움). unified·diary 계약의 바뀌는 API 표시. OpenAPI 검사 통과",
           "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1(D192, 체크포인트 전): API-330 PUT /chat/api/marong/outfit, Closet outfit 뜻 바뀜, 프로필 marongOutfit·features.defaultWear. pet-app·unified 계약 OpenAPI 검사 통과",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-21T08:07:22+00:00"
+      "updated": "2026-11-28T06:30:00+00:00"
     },
     "07-sitemap": {
       "state": "in_progress",
@@ -110,9 +140,14 @@
           "level": "info",
           "message": "SCR-180~186 더함(sitemap.yaml·sitemap.md). sitemap.yaml 읽기 통과",
           "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1(D192, 체크포인트 전): 새 화면·경로 없음. SCR-001·002·165의 흐름에 FL-190을 더함",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-21T08:07:22+00:00"
+      "updated": "2026-11-28T06:30:00+00:00"
     },
     "08-screen-states": {
       "state": "in_progress",
@@ -133,9 +168,14 @@
           "level": "info",
           "message": "관리 페이지 기능 변경 3 체크포인트(2026-11-24, D148, 승인한 사람 사용자님, 오랑이 답 msg_2d55f701abb0): SCR-186 상태 표의 #decor-off와 #error에서 API-263 404를 뺀 것(목록 3-1). 문서 머리에 변경 기록 한 줄을 더함가 '바꿈'으로 승인됨. 바뀌기 전 글은 docs/02-prd/admin.md의 기능 변경 목록 3에 따옴표로 남음(변경 기록). 이 part의 단계 상태는 그대로",
           "at": "2026-11-24"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1(D192, 체크포인트 전): docs/08-screens/pet-app.md 12절. SCR-182·183#default-marong은 스위치 0일 때만(목록 1-15·1-16)",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-24T07:07:45+00:00"
+      "updated": "2026-11-28T06:30:00+00:00"
     },
     "09-mockup": {
       "state": "in_progress",
@@ -146,9 +186,14 @@
           "level": "info",
           "message": "design/pet-app-mockup.html·css·md: 얼린 토큰(D67) 위 목업. 캔버스 https://claude.ai/artifact/SvoMoaLwcvq5XoBQxT2uVd(비공개)",
           "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1(D192, 사용자님 확인 전): 목업 https://claude.ai/artifact/AyzwChfUqjEUCccgPEfn7A 대지 13장(360px 낮·밤, 입기 전·후, 상점 미리 보기, 보관함 입히기), 기록 design/marong-wear-mockup.md(그림 방식 비교). 새 토큰 없음",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-21T08:07:22+00:00"
+      "updated": "2026-11-28T06:30:00+00:00"
     },
     "10-wbs": {
       "state": "in_progress",
@@ -159,9 +204,14 @@
           "level": "info",
           "message": "docs/10-wbs/pet-app.md: GPT 인계 절, TASK-420~444(Owner GPT, PR 4개 ①→②→③→④). README에 D110~D120·머지 규칙, 작업 패키지·ID 범위·겹치는 파일 줄 더함",
           "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1(D192, 체크포인트 전): docs/10-wbs/marong-wear.md TASK-600~607, 시작 조건은 목업 확인·질문 답·PR 병합",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-21T08:07:22+00:00"
+      "updated": "2026-11-28T06:30:00+00:00"
     },
     "12-qa": {
       "state": "in_progress",
@@ -172,9 +222,14 @@
           "level": "info",
           "message": "docs/12-qa/pet-app.md: TC-510~560(자동과 반영 뒤 사람 확인 TC-537·558~560). 실행은 구현 뒤 GPT",
           "at": "2026-11-21"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1(D192, 체크포인트 전): docs/12-qa/marong-wear.md TC-760~770",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-21T08:07:22+00:00"
+      "updated": "2026-11-28T06:30:00+00:00"
     }
   }
 }

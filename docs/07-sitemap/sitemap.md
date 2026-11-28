@@ -33,8 +33,8 @@ flowchart TD
 
 | ID | 이름 | 경로 | 누가 보나 | 흐름 | 용어 |
 | --- | --- | --- | --- | --- | --- |
-| SCR-001 | 통화 홈 | `/` | 통화하는 친구 | FL-001, FL-002, FL-006, FL-007, FL-008, FL-009, FL-121, FL-148, FL-177, FL-179 | CTX-002, CTX-006, CTX-021, CTX-029, TERM-001, TERM-003, TERM-014, TERM-018, TERM-167, TERM-178, TERM-190, TERM-199, TERM-224 |
-| SCR-002 | 통화 중 | `/call` | 통화하는 친구 | FL-002, FL-003, FL-004, FL-005, FL-006, FL-007, FL-009, FL-142, FL-178 | CTX-002, CTX-003, CTX-020, TERM-001, TERM-002, TERM-009\~012, TERM-017\~019, TERM-080, TERM-083, TERM-179, TERM-197 |
+| SCR-001 | 통화 홈 | `/` | 통화하는 친구 | FL-001, FL-002, FL-006, FL-007, FL-008, FL-009, FL-121, FL-148, FL-177, FL-179, FL-190 | CTX-002, CTX-006, CTX-021, CTX-029, TERM-001, TERM-003, TERM-014, TERM-018, TERM-167, TERM-178, TERM-190, TERM-199, TERM-224 |
+| SCR-002 | 통화 중 | `/call` | 통화하는 친구 | FL-002, FL-003, FL-004, FL-005, FL-006, FL-007, FL-009, FL-142, FL-178, FL-190 | CTX-002, CTX-003, CTX-020, TERM-001, TERM-002, TERM-009\~012, TERM-017\~019, TERM-080, TERM-083, TERM-179, TERM-197 |
 | SCR-003 | 지난 통화 | `/calls` | 통화하는 친구 | FL-008 | CTX-004, TERM-001, TERM-006 |
 | SCR-004 | 통화 상세 | `/calls/:id` | 통화하는 친구(자기 통화만) | FL-007, FL-008 | CTX-004, TERM-001, TERM-005\~007, TERM-015 |
 | SCR-005 | 마롱이 기억 | `/memories` | 통화하는 친구(자기 기억만) | FL-008 | CTX-004, TERM-007 |
@@ -136,7 +136,7 @@ flowchart TD
 | --- | --- | --- | --- | --- | --- |
 | SCR-163 | 가입 | `/chat/join/:token` | 누구나(초대 링크를 가진 사람, 로그인 전) | FL-169, FL-170, FL-171 | CTX-026, TERM-173\~175, TERM-178 |
 | SCR-164 | 로그인 | `/chat/login` | 누구나(로그인 전) | FL-171 | CTX-026, TERM-173\~175 |
-| SCR-165 | 내 마롱이 | `/chat/me` | 로그인한 사람(초대 링크로 가입) | FL-171, FL-173, FL-174, FL-177, FL-179 | CTX-027, CTX-029, TERM-175, TERM-177\~179, TERM-182, TERM-183, TERM-186, TERM-190\~192, TERM-199 |
+| SCR-165 | 내 마롱이 | `/chat/me` | 로그인한 사람(초대 링크로 가입) | FL-171, FL-173, FL-174, FL-177, FL-179, FL-190 | CTX-027, CTX-029, TERM-175, TERM-177\~179, TERM-182, TERM-183, TERM-186, TERM-190\~192, TERM-199 |
 | SCR-167 | 목소리 고르기 | `/chat/me/voice` | 로그인한 사람(초대 링크로 가입) | FL-174 | CTX-027, TERM-183, TERM-184 |
 | SCR-170 | 캐릭터 만들기(사진) | `/chat/character/new` | 로그인한 사람(초대 링크로 가입) | FL-172 | CTX-027, TERM-179, TERM-110, TERM-150, TERM-151 |
 | SCR-171 | 특징표 고치기 | `/chat/character/:id/traits` | 로그인한 사람(자기 캐릭터만) | FL-172 | CTX-027, TERM-105, TERM-111, TERM-185 |
