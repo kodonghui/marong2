@@ -6,7 +6,7 @@ import logging
 from aiohttp import web
 
 from .app_chat import Problem
-from .app_session import SessionError, one
+from .app_session import COOKIE, SessionError, one
 from .character.http import CharacterError, positive_id
 from .decor import CONTENT, ITEM_ID, KINDS, WEAR
 
@@ -161,7 +161,17 @@ class AppDecor:
     async def marong_outfit(self, req):
         if not (self.chat.pet_app_settings.decor and self.chat.pet_app_settings.default_wear):
             raise Problem("not_found")
-        friend = await self.friend(req, write=True)
+        self.require_catalog()
+        self.chat._require_app_origin(req)
+        token = req.cookies.get(COOKIE)
+        who = await self.chat.sessions.find_session(token) if self.chat.sessions else None
+        if not who or not who.get('room_key'):
+            raise Problem('login_required')
+        if who.get('renewed'):
+            req['session_refresh'] = token
+        if who['profile_id'] is None:
+            await self.chat.sessions.ensure_profile(who['friend_id'])
+        friend = who['friend_id']
         try:
             picks = await self.chat._body(req)
         except Problem:

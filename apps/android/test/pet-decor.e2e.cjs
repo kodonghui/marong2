@@ -92,13 +92,13 @@ test('TC-765: default shop preview and wear error', {skip:!chromium}, async()=>{
     const page=await browser.newPage({viewport:{width:360,height:780}});
     const hat={id:'berry-beanie',kind:'hat',slot:'head',name:'털모자',owned:true,priceKrw:0,thumbUrl:'/chat/decor/v1/berry-beanie/thumb.webp'};
     const outfit={head:null,body:null,neck:null};
-    let reject=true, picked;
+    let reject=409, picked;
     await page.route('**/*',async route=>{
       const address=new URL(route.request().url()).pathname;
       if(address==='/chat/api/profile') return route.fulfill({json:{botName:'마롱이',character:null,features:{defaultWear:true},marongOutfit:outfit}});
       if(address==='/chat/api/shop') return route.fulfill({json:{items:[hat]}});
       if(address==='/chat/api/closet') return route.fulfill({json:{items:[hat],characterId:null,outfit}});
-      if(address==='/chat/api/marong/outfit') {picked=route.request().postDataJSON();return reject?route.fulfill({status:409,json:{code:'not_owned'}}):route.fulfill({json:outfit});}
+      if(address==='/chat/api/marong/outfit') {picked=route.request().postDataJSON();return reject?route.fulfill({status:reject,json:{code:reject===409?'not_owned':'internal'}}):route.fulfill({json:outfit});}
       if(address.startsWith('/face/') || address.startsWith('/chat/decor/')) return route.fulfill({contentType:'image/png',body:BLANK});
       const file=['/chat/shop','/chat/closet'].includes(address)?'decor.html':path.basename(address);
       if(!['decor.html','decor.js','chat.css','unified.css','unified.js'].includes(file)) return route.fulfill({status:404});
@@ -109,7 +109,10 @@ test('TC-765: default shop preview and wear error', {skip:!chromium}, async()=>{
     await page.locator('.decor-layer[src$="/marong.png"]').waitFor();
     await page.getByRole('button',{name:'입혀 볼래'}).click();
     await page.getByText('아직 안 받은 거야').waitFor();
-    reject=false;
+    reject=500;
+    await page.getByRole('button',{name:'입혀 볼래'}).click();
+    await page.getByText('잠깐 문제가 생겼어. 다시 해 볼래?').waitFor();
+    reject=0;
     await page.getByRole('button',{name:'입혀 볼래'}).click();
     await page.waitForURL(BASE+'/chat/closet');
     assert.deepEqual(picked,{head:'berry-beanie',body:null,neck:null});

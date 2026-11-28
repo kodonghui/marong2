@@ -92,6 +92,12 @@ def assets(root):
 
 
 class DecorTests(unittest.IsolatedAsyncioTestCase):
+    def test_tc763_default_wear_requires_both_flags(self):
+        from marong.pet_app_settings import PetAppSettings
+        for env, expected in (({},False), ({'MARONG_DEFAULT_WEAR':'1'},False),
+                              ({'MARONG_DECOR':'1'},False), ({'MARONG_DECOR':'1','MARONG_DEFAULT_WEAR':'1'},True)):
+            self.assertEqual(PetAppSettings.from_env(env).default_wear, expected)
+
     async def test_tc773_shared_reaction_job_and_atomic_crash(self):
         db = TestDB()
         self.addCleanup(db.close)
@@ -170,6 +176,11 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await response.json())['head']['layerUrl'], '/chat/decor/v1/hat-fixture/marong.png')
             self.assertEqual((await client.put(outfit, headers=ah, json=hat)).status, 200)
             self.assertEqual(db.admin('SELECT count(*) FROM marong.outfit_firsts WHERE friend_id=%s', (a,)), [(1,)])
+            chat.authentication = 'access'
+            chat.access = SimpleNamespace(check=AsyncMock(return_value=('ok', 'a'*64)))
+            self.assertEqual((await client.put(outfit, headers={**ah, 'Cf-Access-Jwt-Assertion':'fixture'}, json=hat)).status, 200)
+            self.assertEqual((await client.put(outfit, headers={'Origin': ORIGIN, 'Cf-Access-Jwt-Assertion':'fixture'}, json=hat)).status, 401)
+            chat.authentication = 'session'
             self.assertEqual((await client.put(outfit, headers=ah, json={'head': None, 'body': None, 'neck': None})).status, 200)
             self.assertEqual((await client.put(outfit, headers=ah, json=hat)).status, 200)
             self.assertEqual(db.admin('SELECT count(*) FROM marong.outfit_firsts WHERE friend_id=%s', (a,)), [(1,)])

@@ -138,6 +138,34 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((await reactions.due(friend))[0]['active'])
         self.assertIsNone(await worker.wait_for_topic({'id':job['id'],'state':'done'}))
 
+    async def test_tc767_reaction_sent_through_proactive_with_one_message(self):
+        from marong.decor_reactions import DecorReactions
+        from marong.unified_delivery import AppProactive, UnifiedDelivery
+        db=TestDB(); self.addCleanup(db.close)
+        db.apply_unified_prerequisites(); db.apply_unified(); db.apply_pet_app_prerequisites(); db.apply_pet_app(); db.apply_marong_outfit()
+        store=UnifiedStore(db.app_url); await store.open(wait=True); self.addAsyncCleanup(store.close)
+        sessions=AppSessions(store.pool,secrets.token_bytes(32),contact_schedule=(2,8,22))
+        auth=await sessions.join((await sessions.create_invite('join'))[0],'시험친구','웹')
+        friend=(await sessions.find_session(auth.token))['friend_id']
+        db.admin("INSERT INTO marong.decor_items(id,kind,slot) VALUES ('berry-beanie','hat','head')")
+        db.admin("INSERT INTO marong.marong_outfits(friend_id,head) VALUES (%s,'berry-beanie')",(friend,))
+        db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'berry-beanie',now())",(friend,))
+        catalog=DecorCatalog(); usage=SimpleNamespace(record=AsyncMock())
+        scenes=SimpleNamespace(wait_for_topic=AsyncMock(return_value=None))
+        reactions=DecorReactions(store,None,usage,catalog,scenes,default_wear=True)
+        delivery=UnifiedDelivery(store,SimpleNamespace(enabled=False),'session',lambda:None)
+        loop=AppProactive(SimpleNamespace(),store,SimpleNamespace(proactive_message=AsyncMock(return_value=None)),RoomLocks(),delivery,reactions=reactions)
+        loop.reaction_friends={friend}; loop.still_current=AsyncMock(return_value=True)
+        store.record_delivery=AsyncMock()
+        result=await loop.priority({'friend_id':friend},None)
+        self.assertTrue(result['ok'])
+        message=db.admin("SELECT meta->>'reaction',meta->>'scene' FROM marong.messages WHERE kakao_id LIKE %s", ('app-reaction:%',))
+        first=db.admin('SELECT state,scene_picture_id FROM marong.outfit_firsts')
+        self.assertEqual(len(message),1)
+        self.assertEqual((message[0][0],first[0][0],message[0][1]),('berry-beanie','sent',str(first[0][1])))
+        self.assertEqual(await loop.priority({'friend_id':friend},None),None)
+        self.assertEqual(db.admin("SELECT count(*) FROM marong.messages WHERE kakao_id LIKE %s", ('app-reaction:%',)),[(1,)])
+
     async def test_tc772_disabled_drains_default_reactions(self):
         from marong.decor_reactions import DecorReactions, drain_default_wear
         db = TestDB()
