@@ -30,7 +30,7 @@ class AppDecor:
         catalog = self.require_catalog()
         valid = []
         for item in catalog.items.values():
-            if await asyncio.to_thread(catalog.check, item, require_marong=self.chat.pet_app_settings.default_wear):
+            if await asyncio.to_thread(catalog.check, item):
                 log.info("decor_seed_skip item=%s", item.id)
             else:
                 valid.append((item.id, catalog.set, item.kind, item.slot, item.starter))
@@ -76,8 +76,16 @@ class AppDecor:
             WHERE d.item_set=%s AND (CASE WHEN %s THEN d.starter OR o.item_id IS NOT NULL ELSE d.state='listed' END)
             ORDER BY array_position(%s::text[],d.kind),d.listed_at,d.id
         """, (friend, self.catalog.set, closet, list(KINDS)))
-        return [self.item_view(self.catalog.items[row["id"]], row["owned"])
-                for row in rows if row["id"] in self.catalog.items]
+        items = [(self.catalog.items[row['id']], row['owned']) for row in rows if row['id'] in self.catalog.items]
+        def views():
+            result = []
+            for item, owned in items:
+                view = self.item_view(item, owned)
+                if item.slot and self.chat.pet_app_settings.decor and self.chat.pet_app_settings.default_wear:
+                    view['marongWearable'] = self.catalog.marong_layer_issue(item) is None
+                result.append(view)
+            return result
+        return await asyncio.to_thread(views)
 
     async def shop(self, req):
         friend = await self.friend(req)
@@ -104,6 +112,8 @@ class AppDecor:
         outfit = dict.fromkeys(WEAR)
         for slot in WEAR:
             item = self.catalog.items.get(row[slot]) if self.catalog and row else None
+            if item and template == 'marong' and self.catalog.marong_layer_issue(item):
+                continue
             layer = self.catalog.url(item, f"{template}.png") if item else None
             if layer:
                 outfit[slot] = {"id": item.id, "name": item.name, "layerUrl": layer}
@@ -115,7 +125,7 @@ class AppDecor:
         sql = ("SELECT head,body,neck FROM marong.marong_outfits WHERE friend_id=%s" if template == "marong"
                else "SELECT head,body,neck FROM marong.outfits WHERE character_id=%s")
         row = await self.store._one(sql, (character,))
-        return self.outfit_view(row, template)
+        return await asyncio.to_thread(self.outfit_view, row, template)
 
     async def closet(self, req):
         friend = await self.friend(req)
@@ -198,6 +208,10 @@ class AppDecor:
                       if picks[slot] and owned[picks[slot]]["slot"] != slot]
             if errors:
                 raise Problem("invalid_input", errors)
+            for ident in ids:
+                issue = await asyncio.to_thread(self.catalog.marong_layer_issue, self.catalog.items[ident])
+                if issue:
+                    raise Problem('item_invalid', missing=[f'{issue}:marong'])
             prior = await one(conn, "SELECT head,body,neck FROM marong.marong_outfits WHERE friend_id=%s", (friend,))
             if prior != picks:
                 await conn.execute("""INSERT INTO marong.marong_outfits(friend_id,head,body,neck) VALUES (%s,%s,%s,%s)
@@ -213,7 +227,7 @@ class AppDecor:
                         ON CONFLICT (friend_id,item_id) WHERE character_id IS NULL DO NOTHING RETURNING id""",
                         (friend, item, 'skipped' if reaction else 'waiting', reaction))
                     reaction = reaction or added is not None
-        return self.chat._json(200, self.outfit_view(picks, 'marong'))
+        return self.chat._json(200, await asyncio.to_thread(self.outfit_view, picks, 'marong'))
 
     async def outfit(self, req):
         friend = await self.friend(req, write=True)

@@ -19,6 +19,55 @@ const REPO = path.join(STATIC, '..', '..');
 const TC551_BEFORE_DECOR = 'c5c891883ae22fcbccf034634f97692a6db23666';
 const BLANK = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aLhcAAAAASUVORK5CYII=', 'base64');
 
+test('TC-760 D196: missing default layer hides only default wear controls', {skip:!chromium}, async()=>{
+  const browser=await chromium.launch();
+  try {
+    const page=await browser.newPage({viewport:{width:360,height:780}});
+    const item={id:'missing-hat',kind:'hat',slot:'head',name:'시험 모자',priceKrw:0,owned:false,
+      marongWearable:false,thumbUrl:'/chat/decor/v1/missing-hat/thumb.webp'};
+    const outfit={head:null,body:null,neck:null};
+    let character=null, writes=0, missingImageRequests=0;
+    await page.route('**/*',async route=>{
+      const address=new URL(route.request().url()).pathname;
+      if(address==='/chat/api/profile') return route.fulfill({json:{botName:'마롱이',character,features:{defaultWear:true},marongOutfit:outfit}});
+      if(address==='/chat/api/shop') return route.fulfill({json:{items:[item]}});
+      if(address==='/chat/api/closet') return route.fulfill({json:{items:[item],characterId:character?.id||null,outfit}});
+      if(address.endsWith('/claim')) {item.owned=true;return route.fulfill({status:201,json:{itemId:item.id,owned:true}});}
+      if(address.endsWith('/outfit')) {writes++; return route.fulfill({json:{...outfit,head:{id:item.id,name:item.name,layerUrl:'/chat/decor/v1/missing-hat/dog_small.png'}}});}
+      if(address.startsWith('/chat/decor/') || address.startsWith('/face/')) {if(address.endsWith('/marong.png')) missingImageRequests++;return route.fulfill({contentType:'image/png',body:BLANK});}
+      const file=['/chat/shop','/chat/closet'].includes(address)?'decor.html':path.basename(address);
+      if(!['decor.html','decor.js','chat.css','unified.css','unified.js'].includes(file)) return route.fulfill({status:404});
+      return route.fulfill({contentType:file.endsWith('.css')?'text/css':file.endsWith('.js')?'application/javascript':'text/html',body:await readFile(path.join(STATIC,file))});
+    });
+    const notice='이 옷은 아직 마롱이한테 맞는 모양이 없어.';
+    await page.goto(BASE+'/chat/shop#missing-hat');
+    await page.getByText(notice,{exact:true}).waitFor({timeout:3000});
+    assert.equal(await page.getByRole('button',{name:'입혀 볼래'}).count(),0);
+    assert.equal(missingImageRequests,0);
+    await page.getByRole('button',{name:'받기',exact:true}).click();
+    await page.getByText(notice,{exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'입혀 볼래'}).count(),0);
+    await page.goto(BASE+'/chat/closet');
+    await page.getByText(notice,{exact:true}).waitFor({timeout:3000});
+    assert.equal(await page.getByRole('button',{name:'시험 모자'}).count(),0);
+    assert.equal(writes,0);
+    character={id:9,name:'시험',template:'dog_small',outfit};
+    await page.reload();
+    await page.getByRole('button',{name:'시험 모자'}).click();
+    await page.waitForFunction(()=>document.querySelector('.decor-wear-item')?.getAttribute('aria-pressed')==='true');
+    assert.equal(writes,1);
+    character=null;
+    for(const width of [360,430]) for(const hour of [3,15]) {
+      await page.setViewportSize({width,height:780});
+      await page.clock.setFixedTime(new Date(`2026-11-28T${String(hour).padStart(2,'0')}:00:00Z`));
+      await page.goto(BASE+'/chat/closet');
+      await page.getByText(notice,{exact:true}).waitFor();
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
+      assert.equal(await page.locator('html').getAttribute('data-theme'),hour===3?'chestnut':'night');
+    }
+  } finally {await browser.close();}
+});
+
 test('TC-764: chat shows default outfit on header, messages and typing', {skip:!chromium}, async()=>{
   const {startChatSite}=require('./support/chat-site.cjs');
   const site=await startChatSite(), browser=await chromium.launch();

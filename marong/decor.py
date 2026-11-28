@@ -92,7 +92,7 @@ class DecorCatalog:
     def url(self, item, key):
         return f"/chat/decor/{self.set}/{item.id}/{key}" if key in item.files else None
 
-    def check(self, item, *, require_marong=True):
+    def check(self, item, *, require_marong=False):
         missing = []
         if item.kind not in KINDS:
             return ["kind"]
@@ -134,6 +134,10 @@ class DecorCatalog:
             if path is None or not self._asset(path, key):
                 missing.append("file:" + key)
         return missing
+
+    def marong_layer_issue(self, item):
+        path = item.files.get('marong.png')
+        return self._layer_issue(path, 'marong', item.slot) if path else 'layer'
 
     @staticmethod
     def _asset(path, key):

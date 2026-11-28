@@ -12,6 +12,8 @@
   const slots = {head: '머리', body: '몸', neck: '목'};
   let inventory, profile, tab = 'wear', shopTab = 'wear', diaryStyle, diaryExample;
   let wearConfirmed, wearPending = [], wearBusy = false, wearCurrent = null;
+  const unavailable = item => !profile.character && profile.features?.defaultWear && item.slot && item.marongWearable === false;
+  const unavailableText = '이 옷은 아직 마롱이한테 맞는 모양이 없어.';
 
   function stickerLink(item) {
     const parts = new Intl.DateTimeFormat('en-CA', {timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit'}).formatToParts(new Date());
@@ -63,7 +65,7 @@
     for (const slot of ['body', 'neck', 'head']) {
       const layer = node('img', '', 'decor-layer');
       layer.alt = '';
-      const source = item?.slot === slot ? item.thumbUrl.replace(/thumb\.webp$/, (pet?.template || 'marong') + '.png') : outfit?.[slot]?.layerUrl;
+      const source = item?.slot === slot && !unavailable(item) ? item.thumbUrl.replace(/thumb\.webp$/, (pet?.template || 'marong') + '.png') : outfit?.[slot]?.layerUrl;
       if (!source) continue;
       layer.src = source;
       layer.addEventListener('error', () => layer.remove(), {once: true});
@@ -85,7 +87,9 @@
       card.append(node('p', '0원', 'caption'));
       if (item.starter) card.append(node('p', '기본', 'caption'));
       if (!detail) card.append(link('아이템 보기', '#' + item.id, 'btnt'));
+      if (detail && unavailable(item)) card.append(node('p', unavailableText, 'caption'));
       if (detail && item.owned) {
+        if (unavailable(item)) return card;
         if (item.slot && (profile.character || profile.features?.defaultWear)) {
           const wear = button('입혀 볼래', async () => {
             for (const note of wear.parentElement.querySelectorAll('[id^="outfit-error-"]')) note.remove();
@@ -105,6 +109,9 @@
             } else if (result.status === 409 && result.body?.code === 'not_owned') {
               wear.disabled = false;
               signal(error, '아직 안 받은 거야', result);
+            } else if (result.status === 409 && result.body?.code === 'item_invalid') {
+              wear.disabled = false;
+              signal(error, unavailableText, result);
             } else {
               wear.disabled = false;
               problem(result);
@@ -225,6 +232,10 @@
       group.append(node('h2', label));
       target.append(group);
       for (const item of wearable.filter(candidate => candidate.slot === slot)) {
+        if (unavailable(item)) {
+          group.append(node('p', item.name), node('p', unavailableText, 'caption'));
+          continue;
+        }
         const selected = inventory.outfit?.[slot]?.id === item.id;
         const choice = button(item.name, () => {
           const next = {...inventory.outfit};
@@ -263,6 +274,7 @@
         wearBusy = false;
         render();
         if (result.status === 409 && result.body?.code === 'not_owned') signal(error, '아직 안 받은 거야', result);
+        else if (result.status === 409 && result.body?.code === 'item_invalid') signal(error, unavailableText, result);
         else {
           problem(result);
           wearFieldErrors(result);
