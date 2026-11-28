@@ -100,8 +100,9 @@ class SwitchOffMainComparison(unittest.TestCase):
     def test_bug143_switch_off_matches_main(self):
         with tempfile.TemporaryDirectory(prefix='marong-main-') as directory:
             proc = subprocess.Popen(['git','archive','origin/main'], cwd=ROOT, stdout=subprocess.PIPE)
-            with tarfile.open(fileobj=proc.stdout, mode='r|*') as archive:
-                archive.extractall(directory, filter='data')
+            with proc.stdout as stream:
+                with tarfile.open(fileobj=stream, mode='r|*') as archive:
+                    archive.extractall(directory, filter='data')
             self.assertEqual(proc.wait(),0)
             results = []
             for version in (directory, str(ROOT)):

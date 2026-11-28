@@ -68,7 +68,7 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         decor = AppDecor(SimpleNamespace(store=store)); decor.catalog = catalog
         model = AsyncMock(return_value=ModelResult(value=picture(), cost=Decimal('.02')))
         usage = SimpleNamespace(record=AsyncMock())
-        art = ScenePictures(store,None,SimpleNamespace(edit_picture=model),'fixture',catalog=catalog)
+        art = ScenePictures(store,None,SimpleNamespace(edit_picture=model),'fixture',catalog=catalog,default_wear=True)
         worker = SceneWorker(store,art,usage,default_wear=True)
         reactions = DecorReactions(store,None,usage,catalog,worker,default_wear=True)
         return db, store, friend, catalog, path, decor, model, worker, reactions
@@ -212,7 +212,6 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         db.admin("INSERT INTO marong.outfits(character_id,head) VALUES (%s,'berry-beanie')",(pet,))
         topics=picture_set(); key=f"{topics.set}/{next(iter(topics.by_name))}"
         job=db.admin("INSERT INTO marong.scene_pictures(friend_id,character_id,purpose,topic,outfit) VALUES (%s,%s,'topic',%s,%s) RETURNING id",(friend,pet,key,['berry-beanie']))[0][0]
-        worker.default_wear=False
         worker.pictures.media=SimpleNamespace(read=AsyncMock(return_value=b'fixture'))
         async def draw(*args, **kwargs):
             db.admin("UPDATE marong.decor_items SET state='unlisted',unlisted_at=now() WHERE id='berry-beanie'")
@@ -224,7 +223,7 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         db.admin("UPDATE marong.decor_items SET state='listed',unlisted_at=NULL WHERE id='berry-beanie'")
         legacy=db.admin("""INSERT INTO marong.scene_pictures(friend_id,character_id,purpose,topic,state,
             finished_at,format,width,height,image) VALUES (%s,%s,'topic',%s,'done',now(),'png',1,1,'\\x01') RETURNING id""",(friend,pet,key))[0][0]
-        self.assertIsNone(await worker.wait_for_topic({'id':legacy,'state':'done'}))
+        self.assertEqual(await worker.wait_for_topic({'id':legacy,'state':'done'}),legacy)
 
     async def test_bug142_fixed_snapshot_checks_ownership_per_friend(self):
         from marong.decor import valid_fixed_outfit_snapshot
@@ -248,8 +247,9 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
                 db.admin("INSERT INTO marong.outfit_firsts(friend_id,character_id,item_id,next_at) VALUES (%s,%s,'oat-sweater',now())",(friend,pet))
                 expression=(Path(__file__).resolve().parents[1]/'marong/call/static/face/v1/05-excited.webp').read_bytes()
                 media=SimpleNamespace(read=AsyncMock(return_value=expression))
-                worker.pictures.media=media; reactions=DecorReactions(store,media,SimpleNamespace(record=AsyncMock()),catalog,worker)
-                row,=await reactions.due(friend); job=await reactions.reaction_job(row)
+                worker.pictures.media=media; reactions=DecorReactions(store,media,SimpleNamespace(record=AsyncMock()),catalog,worker,default_wear=True)
+                row=next(row for row in await reactions.due(friend) if row['character_id']==pet)
+                job=await reactions.reaction_job(row)
                 async def draw(*args, **kwargs):
                     if action=='change_selection':
                         db.admin('UPDATE marong.outfits SET head=NULL WHERE character_id=%s',(pet,))
@@ -298,7 +298,6 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
                     db.admin('UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s',(pet,friend))
                     db.admin("INSERT INTO marong.outfits(character_id,head,body) VALUES (%s,'berry-beanie','oat-sweater')",(pet,))
                     db.admin("INSERT INTO marong.outfit_firsts(friend_id,character_id,item_id,next_at) VALUES (%s,%s,'oat-sweater',now())",(friend,pet))
-                    worker.default_wear=False; reactions.default_wear=False
                     worker.pictures.media=SimpleNamespace(read=AsyncMock(return_value=b'fixture'))
                 else:
                     db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'oat-sweater',now())",(friend,))
@@ -313,6 +312,20 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
                 saved=db.admin('SELECT drawn_outfit FROM marong.scene_pictures WHERE id=%s',(job['id'],))[0][0]
                 self.assertEqual([layer['id'] for layer in saved],['oat-sweater'])
                 self.assertEqual(await reactions.scene(row),job['id'])
+
+    async def test_bug143_legacy_pet_reaction_reuses_completed_scene_when_enabled(self):
+        db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+        pet=db.admin("""INSERT INTO marong.characters(friend_id,kind,status,stage,ready_at,template,name,traits)
+            VALUES (%s,'dog','ready','done',now(),'dog_small','시험','{}') RETURNING id""",(friend,))[0][0]
+        db.admin('UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s',(pet,friend))
+        db.admin("INSERT INTO marong.outfits(character_id,head) VALUES (%s,'berry-beanie')",(pet,))
+        legacy=db.admin("""INSERT INTO marong.scene_pictures(friend_id,character_id,purpose,item_id,state,
+            finished_at,format,width,height,image) VALUES (%s,%s,'reaction','berry-beanie','done',now(),'png',1,1,'\\x01') RETURNING id""",(friend,pet))[0][0]
+        db.admin("INSERT INTO marong.outfit_firsts(friend_id,character_id,item_id,next_at,scene_job_id) VALUES (%s,%s,'berry-beanie',now(),%s)",(friend,pet,legacy))
+        row=next(row for row in await reactions.due(friend) if row['character_id']==pet)
+        reactions.media=SimpleNamespace(read=AsyncMock(return_value=(Path(__file__).resolve().parents[1]/'marong/call/static/face/v1/05-excited.webp').read_bytes()))
+        self.assertEqual(await reactions.scene(row),legacy)
+        model.assert_not_awaited()
 
     async def test_bug144_call_topic_checks_recorded_snapshot_without_waiting(self):
         from marong.unified_delivery import AppProactive
@@ -336,6 +349,7 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         db.admin('UPDATE marong.scene_pictures SET drawn_outfit=NULL WHERE id=%s',(result,))
         self.assertEqual(await loop._topic_scene({'friend_id':friend},choice,wait=False),result)
         db.admin('UPDATE marong.scene_pictures SET drawn_outfit=%s::jsonb WHERE id=%s',(json.dumps(snapshot),result))
+        worker.default_wear=False  # A recorded snapshot remains checked even after switching off.
         db.admin("UPDATE marong.decor_items SET state='unlisted',unlisted_at=now() WHERE id='berry-beanie'")
         self.assertIsNone(await loop._topic_scene({'friend_id':friend},choice,wait=False))
         db.admin("UPDATE marong.decor_items SET state='listed',unlisted_at=NULL WHERE id='berry-beanie'")

@@ -655,10 +655,7 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             reactions = DecorReactions(store, SimpleNamespace(read=AsyncMock(return_value=expression.getvalue())),
                                        chat.usage, catalog, failed_scene)
             due, = await reactions.due(friend)
-            self.assertFalse(due["active"])  # D198: an unlisted reaction item is not drawable.
-            self.assertEqual((await client.post("/chat/admin/api/items/hat-fixture/list", headers=admin)).status, 200)
-            due, = await reactions.due(friend)
-            self.assertTrue(due["active"])
+            self.assertTrue(due["active"])  # Switch 0 keeps the old unlisted-item behavior.
             scene = await reactions.scene(due)
             failed_scene.wait_for_topic.assert_awaited_once()
             await reactions.finish(due, "sent", scene)
