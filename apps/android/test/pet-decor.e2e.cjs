@@ -612,14 +612,14 @@ test('TC-551: slow or missing font keeps the current preview font', {skip: !chro
   } finally { await browser.close(); }
 });
 
-async function decorStateFixture(page, {many = false, character = false} = {}) {
+async function decorStateFixture(page, {many = false, character = false, characterEnabled = true} = {}) {
   const hat = {id:'blue-hat', kind:'hat', slot:'head', name:'파란 모자', priceKrw:0, owned:false, thumbUrl:'/chat/decor/v1/blue-hat/thumb.webp'};
   const bg = {id:'starter-background', kind:'background', name:'기본 배경', priceKrw:0, owned:true, starter:true, thumbUrl:'/chat/decor/v1/starter-background/thumb.webp'};
   const newBg = {id:'green-background',kind:'background',name:'초록 배경',owned:true,starter:false,thumbUrl:'/chat/decor/v1/green-background/thumb.webp'};
   let claimStatus = 201, saveStatus = 200, shopStatus = 200, closetStatus = 200, wearStatus = 200, emptyShop = false, validationErrors = [];
   await page.route('**/*', async route => {
     const address = new URL(route.request().url()).pathname;
-    if (address === '/chat/api/profile') return route.fulfill({json:{character:character ? {id:9,template:'dog_small',outfit:{head:null,body:null,neck:null}} : null}});
+    if (address === '/chat/api/profile') return route.fulfill({json:{features:{character:characterEnabled},character:character ? {id:9,template:'dog_small',outfit:{head:null,body:null,neck:null}} : null}});
     if (address === '/chat/api/shop') return shopStatus === 200 ? route.fulfill({json:{items:emptyShop ? [] : many ? [hat, {...hat,id:'red-hat',name:'빨간 모자'}, {...hat,id:'green-hat',name:'초록 모자'}, bg,newBg] : [hat,bg,newBg]}}) : route.fulfill({status:shopStatus,json:{code:'internal'}});
     if (address === '/chat/api/closet') return closetStatus!==200 ? route.fulfill({status:closetStatus,json:{code:'internal'}}) : route.fulfill({json:{characterId:character ? 9 : null, outfit:character ? {head:null,body:null,neck:null} : null, items:[bg,newBg,{id:'starter-paper',kind:'paper',name:'처음 속지',starter:true},{id:'starter-font',kind:'font',name:'처음 글꼴',starter:true}], diaryDecor:{background:{id:bg.id},paper:{id:'starter-paper'},font:{id:'starter-font'}}}});
     if (address.endsWith('/claim')) return route.fulfill({status:claimStatus, json:claimStatus===404 ? {code:'not_found'} : claimStatus===403 ? {code:'cross_site'} : claimStatus>=500 ? {code:'internal'} : {itemId:hat.id,owned:true}});
@@ -689,6 +689,17 @@ test('TC-546: default Marong sees approved detail and closet states', {skip:!chr
   } finally { await browser.close(); }
 });
 
+
+test('character switch off hides the unavailable creation link in the closet', {skip:!chromium}, async () => {
+  const browser=await chromium.launch();
+  try {
+    const page=await browser.newPage();
+    await decorStateFixture(page,{characterEnabled:false});
+    await page.goto(BASE+'/chat/closet');
+    await page.getByText('반려동물 캐릭터를 만들면 옷을 입힐 수 있어',{exact:true}).waitFor();
+    assert.equal(await page.getByRole('link',{name:'캐릭터 만들기'}).count(),0);
+  } finally { await browser.close(); }
+});
 
 test('TC-546: shop cards fit three columns at 360 and 430 pixels', {skip:!chromium}, async () => {
   const browser=await chromium.launch();
