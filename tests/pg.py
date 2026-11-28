@@ -61,6 +61,9 @@ class TestDB:
     def apply_pet_app(self) -> None:
         self.apply_sql(ROOT / "marong" / "migrations" / "022_pet_app.sql")
 
+    def apply_marong_outfit(self) -> None:
+        self.apply_sql(ROOT / "marong" / "migrations" / "025_marong_outfit.sql")
+
     def apply_admin(self) -> None:
         self.apply_sql(ROOT / "marong" / "call" / "migrations" / "011_admin_month.sql")
 

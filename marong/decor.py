@@ -1,7 +1,10 @@
 """Read the versioned decor catalog and validate its repository assets."""
 
 from dataclasses import dataclass
+import asyncio
 import csv
+import hashlib
+from io import BytesIO
 import json
 import logging
 from math import ceil, floor
@@ -22,6 +25,8 @@ FILE_NAME = re.compile(r"[A-Za-z0-9_-]{1,40}\.(?:png|webp|woff2)\Z")
 KINDS = ("hat", "top", "scarf", "background", "paper", "font", "sticker")
 SLOTS = {"hat": "head", "top": "body", "scarf": "neck"}
 WEAR = ("head", "body", "neck")
+MARONG_SLOTS = {"head": (0.30, 0.17, 0.70, 0.398), "neck": (0.31, 0.49, 0.69, 0.63),
+                "body": (0.29, 0.50, 0.71, 0.772)}
 CONTENT = {".webp": "image/webp", ".png": "image/png", ".woff2": "font/woff2"}
 PAPER_STYLES = {"manuscript"}
 
@@ -38,6 +43,41 @@ class Item:
     files: dict[str, Path]
     license_id: str
     paper_style: str | None
+
+
+async def available_outfit_snapshot(store, catalog, friend, row, template="marong"):
+    """Capture the valid, listed layers owned by this friend."""
+    if not catalog:
+        return []
+    snapshot = await asyncio.to_thread(catalog.outfit_snapshot, row, template)
+    if not snapshot:
+        return []
+    ids = [layer['id'] for layer in snapshot]
+    rows = await store._all("""SELECT d.id FROM marong.decor_items d
+        LEFT JOIN marong.decor_owned o ON o.item_id=d.id AND o.friend_id=%s
+        WHERE d.id=ANY(%s) AND d.item_set=%s AND d.state='listed'
+          AND (d.starter OR o.item_id IS NOT NULL)""", (friend, ids, catalog.set))
+    available = {item['id'] for item in rows}
+    return [layer for layer in snapshot if layer['id'] in available]
+
+
+async def valid_fixed_outfit_snapshot(store, catalog, friend, snapshot, template="marong"):
+    """Validate a captured outfit without comparing it to the friend's current selection."""
+    if not isinstance(snapshot, list):
+        return False
+    if not snapshot:
+        return True
+    if not catalog:
+        return False
+    row = dict.fromkeys(WEAR)
+    for layer in snapshot:
+        if not isinstance(layer, dict) or layer.keys() != {'slot', 'id', 'sha256'}:
+            return False
+        slot = layer['slot']
+        if slot not in row or row[slot] is not None:
+            return False
+        row[slot] = layer['id']
+    return await available_outfit_snapshot(store, catalog, friend, row, template) == snapshot
 
 
 class DecorCatalog:
@@ -133,6 +173,35 @@ class DecorCatalog:
                 missing.append("file:" + key)
         return missing
 
+    def outfit_snapshot(self, row, template="marong"):
+        """Capture valid layers and hashes from the same bytes used to validate them."""
+        if template not in (*TEMPLATE_IDS, 'marong'):
+            return []
+        result = []
+        for slot in ('body', 'neck', 'head'):
+            item = self.items.get(row[slot]) if row and row[slot] else None
+            path = item.files.get(f'{template}.png') if item and item.slot == slot else None
+            try:
+                data = path.read_bytes() if path else None
+                if data and not self._layer_issue(BytesIO(data), template, slot):
+                    result.append({'slot': slot, 'id': item.id, 'sha256': hashlib.sha256(data).hexdigest()})
+            except OSError:
+                continue
+        return result
+
+    def marong_outfit_snapshot(self, row):
+        return self.outfit_snapshot(row, 'marong')
+
+    def valid_marong_outfit(self, row):
+        result = dict.fromkeys(WEAR)
+        for layer in self.marong_outfit_snapshot(row):
+            result[layer['slot']] = layer['id']
+        return result
+
+    def marong_layer_issue(self, item):
+        path = item.files.get('marong.png')
+        return self._layer_issue(path, 'marong', item.slot) if path else 'layer'
+
     @staticmethod
     def _asset(path, key):
         try:
@@ -152,11 +221,11 @@ class DecorCatalog:
 
     def _layer_issue(self, path, template, slot):
         try:
-            slots = json.loads((self.templates / f"{template}.json").read_text(encoding="utf-8"))["slots"]
+            slots = MARONG_SLOTS if template == "marong" else json.loads((self.templates / f"{template}.json").read_text(encoding="utf-8"))["slots"]
             left, top, right, bottom = slots[slot]
             box = (floor(left * 1024), floor(top * 1024), ceil(right * 1024), ceil(bottom * 1024))
             with Image.open(path, formats=("PNG",)) as image:
-                if image.size != (1024, 1024):
+                if image.size != (1024, 1024) or (template == "marong" and image.mode != "RGBA"):
                     return "layer"
                 ink = image.convert("RGBA").getchannel("A").point(lambda value: 255 if value else 0)
                 total = ink.histogram()[255]

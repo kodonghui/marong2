@@ -26,7 +26,7 @@ from marong.app_chat import AppChat
 from marong.app_push import AppPush
 from marong.app_session import AppSessions, COOKIE
 from marong.character.graphics import TEMPLATE_IDS
-from marong.decor import DecorCatalog
+from marong.decor import DecorCatalog, MARONG_SLOTS
 from marong.decor_reactions import DecorReactions
 from marong.diary import KST
 from marong.unified_delivery import AppProactive, UnifiedDelivery
@@ -54,9 +54,10 @@ def assets(root):
             thumb.save(output / "thumb.webp", "WEBP")
             files["thumb.webp"] = "thumb.webp"
         if slot:
-            for template in TEMPLATE_IDS:
+            for template in (*TEMPLATE_IDS, "marong"):
                 boxes = ROOT / "design" / "pet" / "templates" / f"{template}.json"
-                left, top, right, bottom = json.loads(boxes.read_text(encoding="utf-8"))["slots"][slot]
+                left, top, right, bottom = (MARONG_SLOTS if template == "marong" else
+                                            json.loads(boxes.read_text(encoding="utf-8"))["slots"])[slot]
                 layer = Image.new("RGBA", (1024, 1024))
                 ImageDraw.Draw(layer).rectangle((left * 1024 + 4, top * 1024 + 4, right * 1024 - 4, bottom * 1024 - 4),
                                                 fill="#654321")
@@ -91,6 +92,245 @@ def assets(root):
 
 
 class DecorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_tc760_missing_marong_layer_does_not_block_pet_or_listing(self):
+        folder = tempfile.TemporaryDirectory(); self.addCleanup(folder.cleanup); assets(folder.name)
+        catalog = DecorCatalog(folder.name)
+        original = catalog.items['hat-fixture']
+        catalog.items['hat-fixture'] = replace(original, files={k:v for k,v in original.files.items() if k != 'marong.png'})
+        db = TestDB(); self.addCleanup(db.close)
+        db.apply_unified_prerequisites(); db.apply_unified(); db.apply_pet_app_prerequisites(); db.apply_pet_app(); db.apply_marong_outfit()
+        store = UnifiedStore(db.app_url); await store.open(wait=True); self.addAsyncCleanup(store.close)
+        sessions = AppSessions(store.pool,secrets.token_bytes(32),contact_schedule=(2,8,22))
+        auth = await sessions.join((await sessions.create_invite('join'))[0], '시험친구','웹')
+        friend = (await sessions.find_session(auth.token))['friend_id']
+        member = {'Cookie':f'{COOKIE}={auth.token}','Origin':ORIGIN}
+        access = SimpleNamespace(check=AsyncMock(return_value=('ok','a'*64)))
+        chat = AppChat(store,SimpleNamespace(friend_cards=None),RoomLocks(),access,AppPush(store),origin=ORIGIN,
+                       sessions=sessions,authentication='session',admin_email_hash='a'*64)
+        chat.decor.catalog = catalog
+        chat.pet_app_settings = replace(chat.pet_app_settings,decor=True,default_wear=True)
+        chat.profile.features['defaultWear'] = True
+        await chat.decor.seed()
+        async with TestClient(TestServer(chat.web_app())) as client:
+            shop = (await (await client.get('/chat/api/shop',headers=member)).json())['items']
+            self.assertFalse(next(i for i in shop if i['id']=='hat-fixture')['marongWearable'])
+            self.assertTrue(next(i for i in shop if i['id']=='top-fixture')['marongWearable'])
+            self.assertEqual((await client.post('/chat/admin/api/items/hat-fixture/list',headers={'Origin':ORIGIN,'Cf-Access-Jwt-Assertion':'fixture'})).status,200)
+            self.assertEqual((await client.post('/chat/api/shop/hat-fixture/claim',headers=member)).status,201)
+            closet = await (await client.get('/chat/api/closet',headers=member)).json()
+            self.assertFalse(next(i for i in closet['items'] if i['id']=='hat-fixture')['marongWearable'])
+            picks={'head':'hat-fixture','body':None,'neck':None}
+            invalid = await client.put('/chat/api/marong/outfit',headers=member,json=picks)
+            invalid_body = await invalid.json()
+            self.assertEqual((invalid.status,invalid_body['code'],invalid_body['missing']),(409,'item_invalid',['layer:marong']))
+            catalog.items['hat-fixture'] = replace(original,files={**original.files,'marong.png':Path(folder.name)/'not-on-disk.png'})
+            absent = await client.put('/chat/api/marong/outfit',headers=member,json=picks)
+            self.assertEqual((absent.status,(await absent.json())['missing']),(409,['layer:marong']))
+            invalid_layer = Path(folder.name) / 'invalid.png'
+            invalid_art = Image.new('RGBA',(1024,1024))
+            ImageDraw.Draw(invalid_art).rectangle((10,10,50,50),fill='#abcdef')
+            invalid_art.save(invalid_layer)
+            catalog.items['hat-fixture'] = replace(original,files={**original.files,'marong.png':invalid_layer})
+            invalid_box = await client.put('/chat/api/marong/outfit',headers=member,json=picks)
+            self.assertEqual((invalid_box.status,(await invalid_box.json())['missing']),(409,['layer_box:marong']))
+            self.assertEqual(db.admin('SELECT count(*) FROM marong.marong_outfits'),[(0,)])
+            self.assertEqual(db.admin('SELECT count(*) FROM marong.outfit_firsts'),[(0,)])
+            pet = db.admin("""INSERT INTO marong.characters(friend_id,kind,status,stage,ready_at,template,name,traits)
+                VALUES (%s,'dog','ready','done',now(),'dog_small','시험','{}') RETURNING id""", (friend,))[0][0]
+            self.assertEqual((await client.put(f'/chat/api/characters/{pet}/outfit',headers=member,json=picks)).status,200)
+            catalog.items['hat-fixture'] = original
+            self.assertEqual((await client.put('/chat/api/marong/outfit',headers=member,json=picks)).status,200)
+            catalog.items['hat-fixture'] = replace(original,files={k:v for k,v in original.files.items() if k != 'marong.png'})
+            db.admin('UPDATE marong.friend_profiles SET character_id=NULL WHERE friend_id=%s',(friend,))
+            self.assertIsNone((await (await client.get('/chat/api/closet',headers=member)).json())['outfit']['head'])
+            self.assertIsNone((await (await client.get('/chat/api/profile',headers=member)).json())['marongOutfit']['head'])
+
+    async def test_bug139_switch_off_seeds_all_existing_items_and_shop(self):
+        """BUG-139 / SPEC-575: an absent default layer must not hide existing pet items."""
+        db = TestDB()
+        self.addCleanup(db.close)
+        db.apply_unified_prerequisites(); db.apply_unified(); db.apply_pet_app_prerequisites(); db.apply_pet_app(); db.apply_marong_outfit()
+        store = UnifiedStore(db.app_url)
+        await store.open(wait=True)
+        self.addAsyncCleanup(store.close)
+        sessions = AppSessions(store.pool, secrets.token_bytes(32), contact_schedule=(2, 8, 22))
+        auth = await sessions.join((await sessions.create_invite('join'))[0], '시험친구', '웹')
+        headers = {'Cookie': f'{COOKIE}={auth.token}', 'Origin': ORIGIN}
+        chat = AppChat(store, SimpleNamespace(friend_cards=None), RoomLocks(), None, AppPush(store),
+                       origin=ORIGIN, sessions=sessions, authentication='session')
+        chat.decor.catalog = DecorCatalog()
+        chat.pet_app_settings = replace(chat.pet_app_settings, decor=True, default_wear=False)
+        hat = chat.decor.catalog.items['berry-beanie']
+        missing_pet_layer = replace(hat, files={name:path for name,path in hat.files.items() if name != 'cat.png'})
+        self.assertEqual(chat.decor.catalog.check(missing_pet_layer), ['layer:cat'])
+        for ident in ('oat-sweater','blue-raincoat','forest-vest','apricot-apron'):
+            item = chat.decor.catalog.items[ident]
+            chat.decor.catalog.items[ident] = replace(item, files={name:path for name,path in item.files.items() if name != 'marong.png'})
+            self.assertEqual(chat.decor.catalog.check(chat.decor.catalog.items[ident]), [])
+            self.assertEqual(chat.decor.catalog.marong_layer_issue(chat.decor.catalog.items[ident]), 'layer')
+        await chat.decor.seed()
+        await chat.decor.seed()
+        self.assertEqual(db.admin('SELECT count(*) FROM marong.decor_items'), [(48,)])
+        async with TestClient(TestServer(chat.web_app())) as client:
+            shop = (await (await client.get('/chat/api/shop', headers=headers)).json())['items']
+            self.assertEqual(len(shop), 48)
+            self.assertTrue({'oat-sweater','blue-raincoat','forest-vest','apricot-apron'} <= {item['id'] for item in shop})
+            self.assertEqual((await client.post('/chat/api/shop/oat-sweater/claim', headers=headers)).status, 201)
+
+    def test_tc763_default_wear_requires_both_flags(self):
+        from marong.pet_app_settings import PetAppSettings
+        for env, expected in (({},False), ({'MARONG_DEFAULT_WEAR':'1'},False),
+                              ({'MARONG_DECOR':'1'},False), ({'MARONG_DECOR':'1','MARONG_DEFAULT_WEAR':'1'},True)):
+            self.assertEqual(PetAppSettings.from_env(env).default_wear, expected)
+
+    async def test_tc773_shared_reaction_job_and_atomic_crash(self):
+        db = TestDB()
+        self.addCleanup(db.close)
+        db.apply_unified_prerequisites(); db.apply_unified(); db.apply_pet_app_prerequisites(); db.apply_pet_app(); db.apply_marong_outfit()
+        friend = db.admin("INSERT INTO marong.friends(name) VALUES ('fixture') RETURNING id")[0][0]
+        pet = db.admin("INSERT INTO marong.characters(friend_id,kind) VALUES (%s,'dog') RETURNING id", (friend,))[0][0]
+        db.admin("INSERT INTO marong.decor_items(id,kind,slot) VALUES ('fixture-hat','hat','head')")
+        first = db.admin("INSERT INTO marong.outfit_firsts(friend_id,character_id,item_id,next_at) VALUES (%s,%s,'fixture-hat',now()) RETURNING id", (friend,pet))[0][0]
+        store = UnifiedStore(db.app_url)
+        await store.open(wait=True)
+        self.addAsyncCleanup(store.close)
+        scenes = SimpleNamespace(wait_for_topic=AsyncMock(return_value=None))
+        reactions = DecorReactions(store, None, None, None, scenes)
+        row = {'id':first, 'friend_id':friend, 'character_id':pet, 'item_id':'fixture-hat', 'head':'fixture-hat', 'neck':None, 'body':None}
+        with self.assertRaises(RuntimeError):
+            await reactions.reaction_job(row, after_insert=lambda: (_ for _ in ()).throw(RuntimeError('stop')))
+        self.assertEqual(db.admin('SELECT count(*) FROM marong.scene_pictures'), [(0,)])
+        one, two = await asyncio.gather(reactions.reaction_job(row), reactions.reaction_job(row))
+        self.assertEqual(one['id'], two['id'])
+        self.assertEqual(db.admin('SELECT count(*) FROM marong.scene_pictures'), [(1,)])
+        self.assertEqual(db.admin('SELECT scene_job_id FROM marong.outfit_firsts WHERE id=%s', (first,))[0][0], one['id'])
+        db.admin("INSERT INTO marong.rooms(room_key,owner_friend_id) VALUES ('app:fixture',%s)", (friend,))
+        pictures = [db.admin("""INSERT INTO marong.scene_pictures(friend_id,character_id,purpose,item_id,state,
+            finished_at,fallback,format,width,height,image) VALUES (%s,%s,'reaction','fixture-hat','done',now(),true,
+            'png',1,1,'\\x01') RETURNING id""", (friend,pet))[0][0] for _ in range(2)]
+        delivery = UnifiedDelivery(store, SimpleNamespace(enabled=False), 'session', lambda: None)
+        results = await asyncio.gather(*(delivery.say(friend,'fixture',kind='proactive',notify=False,
+            key=f'app-reaction:{first}',meta={'scene':str(picture)}) for picture in pictures))
+        self.assertEqual(results, ['later','later'])
+        messages = db.admin("SELECT meta->>'scene' FROM marong.messages WHERE kakao_id=%s", (f'app-reaction:{first}',))
+        self.assertEqual(len(messages), 1)
+        await asyncio.gather(reactions.finish(row,'sent',pictures[1]), reactions.finish(row,'sent',pictures[0]))
+        self.assertEqual(str(db.admin('SELECT scene_picture_id FROM marong.outfit_firsts WHERE id=%s', (first,))[0][0]), messages[0][0])
+        default_first = db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'fixture-hat',now()) RETURNING id", (friend,))[0][0]
+        default_row = {**row, 'id':default_first, 'character_id':None}
+        with self.assertRaises(RuntimeError):
+            await reactions.reaction_job(default_row,after_insert=lambda: (_ for _ in ()).throw(RuntimeError('stop')))
+        self.assertEqual(db.admin('SELECT count(*) FROM marong.scene_pictures WHERE character_id IS NULL'), [(0,)])
+        a, b = await asyncio.gather(reactions.reaction_job(default_row), reactions.reaction_job(default_row))
+        self.assertEqual(a['id'],b['id'])
+        self.assertEqual(db.admin('SELECT count(*) FROM marong.scene_pictures WHERE character_id IS NULL'), [(1,)])
+        default_pictures = [db.admin("""INSERT INTO marong.scene_pictures(friend_id,purpose,item_id,state,
+            finished_at,fallback,format,width,height,image) VALUES (%s,'reaction','fixture-hat','done',now(),true,
+            'png',1,1,'\\x01') RETURNING id""", (friend,))[0][0] for _ in range(2)]
+        default_key = f'app-reaction:{default_first}'
+        results = await asyncio.gather(*(delivery.say(friend,'fixture',kind='proactive',notify=False,
+            key=default_key,meta={'scene':str(picture)}) for picture in default_pictures))
+        self.assertEqual(results, ['later','later'])
+        messages = db.admin("SELECT meta->>'scene' FROM marong.messages WHERE kakao_id=%s", (default_key,))
+        self.assertEqual(len(messages),1)
+        await asyncio.gather(reactions.finish(default_row,'sent',default_pictures[1]),
+                             reactions.finish(default_row,'sent',default_pictures[0]))
+        self.assertEqual(str(db.admin('SELECT scene_picture_id FROM marong.outfit_firsts WHERE id=%s', (default_first,))[0][0]), messages[0][0])
+
+    async def test_tc761_762_763_771_default_outfit_is_session_scoped(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        assets(folder.name)
+        db = TestDB()
+        self.addCleanup(db.close)
+        db.apply_unified_prerequisites()
+        db.apply_unified()
+        db.apply_pet_app_prerequisites()
+        db.apply_pet_app()
+        db.apply_marong_outfit()
+        store = UnifiedStore(db.app_url)
+        await store.open(wait=True)
+        self.addAsyncCleanup(store.close)
+        sessions = AppSessions(store.pool, secrets.token_bytes(32), contact_schedule=(2, 8, 22))
+        first = await sessions.join((await sessions.create_invite('join'))[0], '시험가', '웹')
+        second = await sessions.join((await sessions.create_invite('join'))[0], '시험나', '웹')
+        a = (await sessions.find_session(first.token))['friend_id']
+        b = (await sessions.find_session(second.token))['friend_id']
+        ah = {'Cookie': f'{COOKIE}={first.token}', 'Origin': ORIGIN}
+        bh = {'Cookie': f'{COOKIE}={second.token}', 'Origin': ORIGIN}
+        chat = AppChat(store, SimpleNamespace(friend_cards=None), RoomLocks(), None, AppPush(store),
+                       origin=ORIGIN, sessions=sessions, authentication='session')
+        chat.decor.catalog = DecorCatalog(folder.name)
+        chat.pet_app_settings = replace(chat.pet_app_settings, decor=True, default_wear=True)
+        chat.profile.features.update(decor=True, defaultWear=True)
+        await chat.decor.seed()
+        async with TestClient(TestServer(chat.web_app())) as client:
+            await client.post('/chat/api/shop/hat-fixture/claim', headers=ah)
+            await client.post('/chat/api/shop/top-fixture/claim', headers=bh)
+            outfit = '/chat/api/marong/outfit'
+            hat = {'head': 'hat-fixture', 'body': None, 'neck': None}
+            top = {'head': None, 'body': 'top-fixture', 'neck': None}
+            self.assertEqual((await client.put(outfit, headers=bh, json=top)).status, 200)
+            before = db.admin('SELECT row_to_json(x) FROM (SELECT * FROM marong.marong_outfits WHERE friend_id=%s) x', (b,))
+            before_profile = await (await client.get('/chat/api/profile', headers=bh)).read()
+            before_closet = await (await client.get('/chat/api/closet', headers=bh)).read()
+            for payload, code in (({**hat, 'friendId': b}, 400), (top, 409)):
+                self.assertEqual((await client.put(outfit, headers=ah, json=payload)).status, code)
+            response = await client.put(outfit, headers=ah, json=hat)
+            self.assertEqual(response.status, 200)
+            self.assertEqual((await response.json())['head']['layerUrl'], '/chat/decor/v1/hat-fixture/marong.png')
+            self.assertEqual(db.admin('SELECT extract(epoch FROM next_at-worn_at) FROM marong.outfit_firsts WHERE friend_id=%s', (a,)), [(180,)])
+            self.assertEqual((await client.put(outfit, headers=ah, json=hat)).status, 200)
+            self.assertEqual(db.admin('SELECT count(*) FROM marong.outfit_firsts WHERE friend_id=%s', (a,)), [(1,)])
+            chat.authentication = 'access'
+            chat.access = SimpleNamespace(check=AsyncMock(return_value=('ok', 'a'*64)))
+            self.assertEqual((await client.put(outfit, headers={**ah, 'Cf-Access-Jwt-Assertion':'fixture'}, json=hat)).status, 200)
+            self.assertEqual((await client.put(outfit, headers={'Origin': ORIGIN, 'Cf-Access-Jwt-Assertion':'fixture'}, json=hat)).status, 401)
+            chat.authentication = 'session'
+            self.assertEqual((await client.put(outfit, headers=ah, json={'head': None, 'body': None, 'neck': None})).status, 200)
+            self.assertEqual((await client.put(outfit, headers=ah, json=hat)).status, 200)
+            self.assertEqual(db.admin('SELECT count(*) FROM marong.outfit_firsts WHERE friend_id=%s', (a,)), [(1,)])
+            wrong = await client.put(outfit, headers=ah, json={'head': None, 'body': 'hat-fixture', 'neck': None})
+            self.assertEqual((wrong.status, (await wrong.json())['errors']), (400, [{'field': 'body', 'reason': 'wrong_kind'}]))
+            self.assertEqual(before, db.admin('SELECT row_to_json(x) FROM (SELECT * FROM marong.marong_outfits WHERE friend_id=%s) x', (b,)))
+            self.assertEqual(before_profile, await (await client.get('/chat/api/profile', headers=bh)).read())
+            self.assertEqual(before_closet, await (await client.get('/chat/api/closet', headers=bh)).read())
+            profile = await (await client.get('/chat/api/profile', headers=ah)).json()
+            self.assertEqual(profile['marongOutfit']['head']['id'], 'hat-fixture')
+            closet = await (await client.get('/chat/api/closet', headers=ah)).json()
+            self.assertEqual(closet['outfit']['head']['id'], 'hat-fixture')
+            self.assertEqual((await client.put(outfit, headers={'Origin': ORIGIN}, json=hat)).status, 401)
+            self.assertEqual((await client.put(outfit, headers={**ah, 'Origin': 'https://other.invalid'}, json=hat)).status, 403)
+            self.assertEqual((await client.put(outfit, headers=ah, json={'head': None})).status, 400)
+            self.assertEqual((await client.put(outfit, headers=ah, json={**hat, 'extra': 'x'*17000})).status, 413)
+            character = db.admin("""INSERT INTO marong.characters(friend_id,kind,status,stage,ready_at,template,name,traits)
+                VALUES (%s,'dog','ready','done',now(),'dog_small','fixture','{}') RETURNING id""", (a,))[0][0]
+            db.admin('UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s', (character, a))
+            self.assertEqual((await client.put(outfit, headers=ah, json=hat)).status, 200)
+            self.assertEqual(db.admin('SELECT count(*) FROM marong.outfits WHERE character_id=%s', (character,)), [(0,)])
+            self.assertNotIn('marongOutfit', await (await client.get('/chat/api/profile', headers=ah)).json())
+            db.admin('UPDATE marong.friend_profiles SET character_id=NULL WHERE friend_id=%s', (a,))
+            chat.pet_app_settings = replace(chat.pet_app_settings, default_wear=False)
+            chat.profile.features['defaultWear'] = False
+            self.assertEqual((await client.put(outfit, headers=ah, json=hat)).status, 404)
+            self.assertNotIn('marongOutfit', await (await client.get('/chat/api/profile', headers=ah)).json())
+            self.assertIsNone((await (await client.get('/chat/api/closet', headers=ah)).json())['outfit'])
+            chat.pet_app_settings = replace(chat.pet_app_settings, default_wear=True, decor=False)
+            self.assertEqual((await client.put(outfit, headers=ah, json=hat)).status, 404)
+
+    def test_tc760_default_marong_layers(self):
+        catalog = DecorCatalog()
+        wearable = [item for item in catalog.items.values() if item.slot]
+        self.assertEqual(len(wearable), 10)
+        for item in wearable:
+            with self.subTest(item=item.id):
+                self.assertIn("marong.png", item.files)
+                with Image.open(item.files["marong.png"]) as image:
+                    self.assertEqual((image.mode, image.size), ("RGBA", (1024, 1024)))
+                self.assertIsNone(catalog._layer_issue(item.files["marong.png"], "marong", item.slot))
+                self.assertEqual("layer", catalog.marong_layer_issue(replace(
+                    item, files={k: v for k, v in item.files.items() if k != "marong.png"})))
+
     def test_all_shipped_items_pass_the_same_catalog_validation(self):
         catalog = DecorCatalog()
         self.assertEqual(len(catalog.items), 48)
@@ -128,6 +368,7 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
         db.apply_unified()
         db.apply_pet_app_prerequisites()
         db.apply_pet_app()
+        db.apply_marong_outfit()
         for attempt in range(2):
             child = await asyncio.create_subprocess_exec(
                 sys.executable, str(ROOT / "tests/support/decor_start_child.py"), db.app_url, folder.name,
@@ -223,6 +464,7 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
         db.apply_unified()
         db.apply_pet_app_prerequisites()
         db.apply_pet_app()
+        db.apply_marong_outfit()
         store = UnifiedStore(db.app_url)
         await store.open(wait=True)
         self.addAsyncCleanup(store.close)
@@ -244,6 +486,11 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             thumb = "/chat/admin/api/items/hat-fixture/thumbnail"
             self.assertEqual((await client.get(thumb, headers=admin)).status, 404)
             chat.decor.catalog = catalog
+            original_hat = catalog.items['hat-fixture']
+            catalog.items['hat-fixture'] = replace(original_hat, files={key: value for key, value in original_hat.files.items() if key != 'marong.png'})
+            listed_missing = await client.post('/chat/admin/api/items/hat-fixture/list', headers=admin)
+            self.assertEqual(listed_missing.status, 200)
+            catalog.items['hat-fixture'] = original_hat
             self.assertEqual((await client.get(thumb, headers=member)).status, 403)
             self.assertEqual((await client.get(thumb)).status, 403)
             access.check.return_value = ("ok", "b" * 64)
@@ -408,7 +655,7 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             reactions = DecorReactions(store, SimpleNamespace(read=AsyncMock(return_value=expression.getvalue())),
                                        chat.usage, catalog, failed_scene)
             due, = await reactions.due(friend)
-            self.assertTrue(due["active"])
+            self.assertTrue(due["active"])  # Switch 0 keeps the old unlisted-item behavior.
             scene = await reactions.scene(due)
             failed_scene.wait_for_topic.assert_awaited_once()
             await reactions.finish(due, "sent", scene)

@@ -20,6 +20,7 @@ class PetAppSettings:
     scene_model: str = "gpt-image-2.5-flare"
     diary_image_budget: Decimal | None = Decimal(5)
     decor: bool = False
+    default_wear: bool = False
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "PetAppSettings":
@@ -40,4 +41,5 @@ class PetAppSettings:
             scene_model=env.get("MARONG_SCENE_MODEL", "").strip() or cls.scene_model,
             diary_image_budget=image_budget(env.get("MARONG_DIARY_IMAGE_BUDGET_USD")),
             decor=env.get("MARONG_DECOR") == "1",
+            default_wear=env.get("MARONG_DEFAULT_WEAR") == "1" and env.get("MARONG_DECOR") == "1",
         )

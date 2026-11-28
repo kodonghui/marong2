@@ -2,12 +2,16 @@
 
 import asyncio
 import base64
+from dataclasses import replace
+import shutil
+import tempfile
 from collections import deque
 from datetime import datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
+import unittest
 from unittest.mock import AsyncMock, patch
 
 from PIL import Image
@@ -15,11 +19,171 @@ from PIL import Image
 from test_app_chat import prepare
 from marong.app_delivery import AppRoutes
 from marong.diary import KST, drawing_allowed
-from marong.diary_models import DEFAULT_PRICES, MAX_IMAGE, ModelResult, draw_prompt, drawing_usage, parse_picture
-from marong.diary_models import validate_draft, write_prompt
+from marong.diary_models import DEFAULT_PRICES, MAX_IMAGE, ModelResult, draw_prompt, drawing_usage, parse_picture, validate_draft, write_prompt
 from marong.diary_worker import DiaryWorker, NOTICE_LINES
 from marong.discord_store import DiscordStore
 from pg import TestDB
+
+
+class MarongWearPromptTest(unittest.TestCase):
+    def test_tc768_outfit_line_and_empty_bytes(self):
+        scene = 'The little white character holds a flower.'
+        original = draw_prompt(scene, None)
+        self.assertEqual(draw_prompt(scene, None, outfit=[]), original)
+        prompt = draw_prompt(scene, None, outfit=['a raspberry red knitted beanie with a cream pom-pom'])
+        self.assertIn('The little white character is wearing: a raspberry red knitted beanie with a cream pom-pom.', prompt)
+        self.assertLess(prompt.index('Keep its face and body'), prompt.index('The little white character is wearing:'))
+        self.assertLess(prompt.index('The little white character is wearing:'), prompt.index('Scene:'))
+
+
+class MarongWearDrawPathsTest(unittest.IsolatedAsyncioTestCase):
+    async def test_tc768_night_and_redraw_use_outfit(self):
+        from marong.diary_edits import DiaryEdits
+        from marong.decor import DecorCatalog
+        from contextlib import asynccontextmanager
+        @asynccontextmanager
+        async def connection():
+            yield SimpleNamespace(transaction=connection)
+        store = SimpleNamespace(pool=SimpleNamespace(connection=connection), _all=AsyncMock(return_value=[{'id':'berry-beanie'}]), _one=AsyncMock(side_effect=[
+            {'scene':'The little white character sits.', 'weather':'sunny', 'friend_name':'fixture', 'hair':None},
+            {'body':None, 'neck':None, 'head':'berry-beanie'},
+            {'body':None, 'neck':None, 'head':'berry-beanie'},
+        ]))
+        models = SimpleNamespace(image_key='fixture',image_model='fixture',draw=AsyncMock(return_value=ModelResult(outcome='error')))
+        now = at(18, 7)
+        catalog = DecorCatalog()
+        worker = DiaryWorker(store, models, None, None, now=lambda:now, wear_catalog=catalog)
+        worker._owned = AsyncMock(return_value=False)
+        row={'id':1,'revision':1,'friend_id':1,'character_id':None,'draw_tries':0}
+        with patch('marong.diary_worker.drawing_allowed', new=AsyncMock(return_value=True)), patch('marong.diary_worker.record_run', new=AsyncMock(return_value=1)):
+            await worker._draw(row,now+timedelta(minutes=5),'fixture')
+        self.assertEqual(models.draw.await_args.kwargs['outfit'], [catalog.items['berry-beanie'].prompt])
+        chat=SimpleNamespace(pet_app_settings=SimpleNamespace(decor=True,default_wear=True),decor=SimpleNamespace(catalog=catalog),diary_scenes=None,diary_models=models)
+        edits=DiaryEdits(SimpleNamespace(chat=chat,store=store,models=models,draw_budget=None))
+        edits._current=AsyncMock(return_value={'hair':None,'scene':'The little white character sits.','weather':'sunny','name':'fixture'})
+        edits._log=AsyncMock(return_value=1); edits._finish_redraw=AsyncMock()
+        with patch('marong.diary_edits.drawing_allowed',new=AsyncMock(return_value=True)):
+            await edits._redraw(row,None,'fixture')
+        self.assertEqual(models.draw.await_args.kwargs['outfit'], [catalog.items['berry-beanie'].prompt])
+        chat.pet_app_settings.default_wear = False
+        with patch('marong.diary_edits.drawing_allowed',new=AsyncMock(return_value=True)):
+            await edits._redraw(row,None,'fixture')
+        self.assertEqual(models.draw.await_args.kwargs, {})
+
+    async def test_bug141_diary_paths_discard_drawing_when_layer_changes(self):
+        from marong.diary_edits import DiaryEdits
+        from marong.decor import DecorCatalog
+        from contextlib import asynccontextmanager
+        @asynccontextmanager
+        async def connection():
+            yield SimpleNamespace(transaction=connection)
+        async def read(sql, args):
+            if 'marong_outfits' in sql:
+                return {'body':None, 'neck':None, 'head':'berry-beanie'}
+            return {'scene':'The little white character sits.', 'weather':'sunny', 'friend_name':'fixture', 'hair':None}
+        store = SimpleNamespace(pool=SimpleNamespace(connection=connection), _one=AsyncMock(side_effect=read), _all=AsyncMock(return_value=[{'id':'berry-beanie'}]))
+        catalog = DecorCatalog(); item = catalog.items['berry-beanie']
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name)/'hat.png'; shutil.copyfile(item.files['marong.png'],path)
+        catalog.items[item.id] = replace(item,files={**item.files,'marong.png':path})
+        def changed():
+            image = Image.open(path).convert('RGBA'); point = image.getchannel('A').getbbox()[:2]
+            r,g,b,a = image.getpixel(point); image.putpixel(point,((r+1)%256,g,b,a)); image.save(path)
+        async def draw(*args, **kwargs):
+            changed()
+            return ModelResult(value='fixture',outcome='ok',cost=Decimal('.02'))
+        models=SimpleNamespace(image_key='fixture',image_model='fixture',draw=AsyncMock(side_effect=draw))
+        now=at(18,7); row={'id':1,'revision':1,'friend_id':1,'character_id':None,'draw_tries':0}
+        worker=DiaryWorker(store,models,None,None,now=lambda:now,wear_catalog=catalog); worker._owned=AsyncMock(return_value=False)
+        log=AsyncMock(return_value=1)
+        with patch('marong.diary_worker.drawing_allowed',new=AsyncMock(return_value=True)), patch('marong.diary_worker.record_run',new=log):
+            await worker._draw(row,now+timedelta(minutes=5),'fixture')
+        self.assertNotEqual(log.await_args.args[9].outcome, 'ok')
+        self.assertEqual(log.await_args.args[9].cost, Decimal('.02'))
+        chat=SimpleNamespace(pet_app_settings=SimpleNamespace(decor=True,default_wear=True),decor=SimpleNamespace(catalog=catalog),diary_scenes=None,diary_models=models)
+        edits=DiaryEdits(SimpleNamespace(chat=chat,store=store,models=models,draw_budget=None))
+        edits._current=AsyncMock(return_value={'hair':None,'scene':'The little white character sits.','weather':'sunny','name':'fixture'})
+        edits._log=AsyncMock(return_value=1); edits._finish_redraw=AsyncMock()
+        with patch('marong.diary_edits.drawing_allowed',new=AsyncMock(return_value=True)):
+            await edits._redraw(row,None,'fixture')
+        self.assertEqual(edits._finish_redraw.await_args.args[1], 'draw_failed')
+        self.assertEqual(edits._log.await_args.args[6].cost, Decimal('.02'))
+
+    async def test_bug142_diary_outfit_change_keeps_success(self):
+        from marong.diary_edits import DiaryEdits
+        from marong.decor import DecorCatalog
+        from contextlib import asynccontextmanager
+        @asynccontextmanager
+        async def connection():
+            yield SimpleNamespace(transaction=connection)
+        selected={'body':None,'neck':None,'head':'berry-beanie'}
+        async def read(sql, args):
+            if 'marong_outfits' in sql:
+                return selected.copy()
+            return {'scene':'The little white character sits.', 'weather':'sunny', 'friend_name':'fixture', 'hair':None}
+        store=SimpleNamespace(pool=SimpleNamespace(connection=connection),_one=AsyncMock(side_effect=read),
+                              _all=AsyncMock(return_value=[{'id':'berry-beanie'}]))
+        async def draw(*args, **kwargs):
+            self.assertIn(catalog.items['berry-beanie'].prompt,kwargs['outfit'])
+            selected['head']=None
+            return ModelResult(value='fixture',outcome='ok',cost=Decimal('.02'))
+        catalog=DecorCatalog(); models=SimpleNamespace(image_key='fixture',image_model='fixture',draw=AsyncMock(side_effect=draw))
+        now=at(18,7); row={'id':1,'revision':1,'friend_id':1,'character_id':None,'draw_tries':0}
+        worker=DiaryWorker(store,models,None,None,now=lambda:now,wear_catalog=catalog); worker._owned=AsyncMock(return_value=False)
+        log=AsyncMock(return_value=1)
+        with patch('marong.diary_worker.drawing_allowed',new=AsyncMock(return_value=True)), patch('marong.diary_worker.record_run',new=log):
+            await worker._draw(row,now+timedelta(minutes=5),'fixture')
+        self.assertEqual(log.await_args.args[9].outcome,'ok')
+        selected['head']='berry-beanie'
+        chat=SimpleNamespace(pet_app_settings=SimpleNamespace(decor=True,default_wear=True),decor=SimpleNamespace(catalog=catalog),diary_scenes=None,diary_models=models)
+        edits=DiaryEdits(SimpleNamespace(chat=chat,store=store,models=models,draw_budget=None))
+        edits._current=AsyncMock(return_value={'hair':None,'scene':'The little white character sits.','weather':'sunny','name':'fixture'})
+        edits._log=AsyncMock(return_value=1); edits._finish_redraw=AsyncMock()
+        with patch('marong.diary_edits.drawing_allowed',new=AsyncMock(return_value=True)):
+            await edits._redraw(row,None,'fixture')
+        self.assertEqual(edits._finish_redraw.await_args.args[1],'done')
+        self.assertEqual(edits._finish_redraw.await_args.args[2],'fixture')
+
+    async def test_bug142_diary_rejects_fixed_item_unlisted_or_unowned(self):
+        from marong.diary_edits import DiaryEdits
+        from marong.decor import DecorCatalog
+        from contextlib import asynccontextmanager
+        @asynccontextmanager
+        async def connection():
+            yield SimpleNamespace(transaction=connection)
+        for path_type in ('night','redraw'):
+            for invalid in ('unlisted','unowned'):
+                with self.subTest(path=path_type, invalid=invalid):
+                    available=True
+                    async def read(sql, args):
+                        if 'marong_outfits' in sql:
+                            return {'body':None,'neck':None,'head':'berry-beanie'}
+                        return {'scene':'The little white character sits.','weather':'sunny','friend_name':'fixture','hair':None}
+                    async def allowed(*args):
+                        return [{'id':'berry-beanie'}] if available else []
+                    async def draw(*args, **kwargs):
+                        nonlocal available
+                        available=False
+                        return ModelResult(value='fixture',outcome='ok',cost=Decimal('.02'))
+                    store=SimpleNamespace(pool=SimpleNamespace(connection=connection),_one=AsyncMock(side_effect=read),_all=AsyncMock(side_effect=allowed))
+                    catalog=DecorCatalog(); models=SimpleNamespace(image_key='fixture',image_model='fixture',draw=AsyncMock(side_effect=draw))
+                    now=at(18,7); row={'id':1,'revision':1,'friend_id':1,'character_id':None,'draw_tries':0}
+                    if path_type=='night':
+                        worker=DiaryWorker(store,models,None,None,now=lambda:now,wear_catalog=catalog); worker._owned=AsyncMock(return_value=False)
+                        log=AsyncMock(return_value=1)
+                        with patch('marong.diary_worker.drawing_allowed',new=AsyncMock(return_value=True)), patch('marong.diary_worker.record_run',new=log):
+                            await worker._draw(row,now+timedelta(minutes=5),'fixture')
+                        self.assertNotEqual(log.await_args.args[9].outcome,'ok')
+                        self.assertEqual(log.await_args.args[9].cost,Decimal('.02'))
+                    else:
+                        chat=SimpleNamespace(pet_app_settings=SimpleNamespace(decor=True,default_wear=True),decor=SimpleNamespace(catalog=catalog),diary_scenes=None,diary_models=models)
+                        edits=DiaryEdits(SimpleNamespace(chat=chat,store=store,models=models,draw_budget=None))
+                        edits._current=AsyncMock(return_value={'hair':None,'scene':'The little white character sits.','weather':'sunny','name':'fixture'})
+                        edits._log=AsyncMock(return_value=1); edits._finish_redraw=AsyncMock()
+                        with patch('marong.diary_edits.drawing_allowed',new=AsyncMock(return_value=True)):
+                            await edits._redraw(row,None,'fixture')
+                        self.assertEqual(edits._finish_redraw.await_args.args[1],'draw_failed')
+                        self.assertEqual(edits._log.await_args.args[6].cost,Decimal('.02'))
 
 
 DRAFT = {"title": "군밤 일기", "body": "친구와 군밤을 먹고 이야기를 나누었다. " * 4,
@@ -299,6 +463,8 @@ async def run(db):
 
 
 if __name__ == "__main__":
+    MarongWearPromptTest('test_tc768_outfit_line_and_empty_bytes').test_tc768_outfit_line_and_empty_bytes()
+    asyncio.run(MarongWearDrawPathsTest('test_tc768_night_and_redraw_use_outfit').test_tc768_night_and_redraw_use_outfit())
     test_provider_validation()
     db = TestDB()
     try:

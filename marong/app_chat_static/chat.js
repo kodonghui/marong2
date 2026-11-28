@@ -160,14 +160,14 @@ async function refreshProfile() {
       image.src = app.face;
     }
   }
-  outfitLayers = ['body', 'neck', 'head'].map(slot => profile.character?.outfit?.[slot]?.layerUrl)
+  outfitLayers = ['body', 'neck', 'head'].map(slot => (profile.character?.outfit || profile.marongOutfit)?.[slot]?.layerUrl)
     .filter(url => typeof url === 'string' && LAYER.test(url));
   for (const face of document.querySelectorAll('.message.marong .face, #typing .face')) showLayers(face);
   const headerFace = $('header-pet-face');
   if (headerFace) {
-    headerFace.hidden = !profile.character;
+    headerFace.hidden = !profile.character && !profile.features?.defaultWear;
     headerFace.replaceChildren();
-    if (profile.character) {
+    if (profile.character || profile.features?.defaultWear) {
       const image = document.createElement('img');
       image.alt = '';
       image.src = app.face;

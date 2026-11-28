@@ -29,7 +29,7 @@ from marong.character.worker import CharacterWorker, WorkerBudget
 from marong.config import load_dotenv, load_settings
 from marong.deepseek import from_env as deepseek_route
 from marong.decor import DecorCatalog
-from marong.decor_reactions import DecorReactions
+from marong.decor_reactions import DecorReactions, drain_default_wear_loop
 from marong.diary_models import DiaryModels
 from marong.diary_worker import DiaryWorker
 from marong.discord_dm import PrivateChatAgent
@@ -236,9 +236,10 @@ async def serve(settings, credentials, options, secret, authentication, home, st
         scenes = None
         if home == "app" and pet_settings.scene_pictures and chat.characters.media is not None:
             pictures = ScenePictures(store, chat.characters.media, diary_models, pet_settings.scene_model,
-                                     catalog=chat.decor.catalog)
+                                     catalog=chat.decor.catalog,
+                                     default_wear=pet_settings.default_wear and pet_settings.decor)
             chat.diary_scenes = pictures
-            scenes = SceneWorker(store, pictures, chat.usage)
+            scenes = SceneWorker(store, pictures, chat.usage, default_wear=pet_settings.default_wear and pet_settings.decor)
             jobs["scenes"] = scenes.run
         topics = None
         if os.getenv("MARONG_TOPICS") == "1" and await topic_tables(store):
@@ -247,7 +248,10 @@ async def serve(settings, credentials, options, secret, authentication, home, st
             topics = candidate if candidate.on else None
         await chat.serve()
         if home == "app":
-            reactions = (DecorReactions(store, chat.characters.media, chat.usage, chat.decor.catalog, scenes)
+            if not pet_settings.default_wear or not pet_settings.decor:
+                jobs['default_wear_drain'] = lambda: drain_default_wear_loop(store)
+            reactions = (DecorReactions(store, chat.characters.media, chat.usage, chat.decor.catalog, scenes,
+                                        default_wear=pet_settings.default_wear and pet_settings.decor)
                          if chat.decor.catalog and chat.characters.media else None)
             proactive = AppProactive(settings, store, agent, locks, delivery, topics=topics, scenes=scenes,
                                      reactions=reactions)
@@ -256,7 +260,8 @@ async def serve(settings, credentials, options, secret, authentication, home, st
             jobs.update(proactive=proactive.run, reminders=reminders.run)
             if diary_enabled:
                 diary = DiaryWorker(store, diary_models, delivery, pet_settings.diary_image_budget,
-                                    unified=True, pet_voice=pet_settings.pet_voice, scenes=chat.diary_scenes)
+                                    unified=True, pet_voice=pet_settings.pet_voice, scenes=chat.diary_scenes,
+                                    wear_catalog=chat.decor.catalog if pet_settings.default_wear and pet_settings.decor else None)
                 jobs["diary"] = diary.run
             call_texts = await store._one("SELECT to_regclass('marong.call_texts') IS NOT NULL AS ready")
             if call_texts["ready"]:

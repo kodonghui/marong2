@@ -68,7 +68,7 @@ async def insert_picture(conn, row, revision, origin, run_id, picture):
 
 class DiaryWorker:
     def __init__(self, store, models, delivery, budget, *, now=None, rng=None, on_saved=None, unified=False,
-                 pet_voice=False, scenes=None):
+                 pet_voice=False, scenes=None, wear_catalog=None):
         self.store = store
         self.models = models
         self.delivery = delivery
@@ -80,6 +80,7 @@ class DiaryWorker:
         self.unified = unified
         self.pet_voice = pet_voice
         self.scenes = scenes
+        self.wear_catalog = wear_catalog
 
     def destination(self, friend):
         if self.unified:
@@ -340,7 +341,14 @@ class DiaryWorker:
                 if pet_scene:
                     result = await self.scenes.diary_art(row, scene, look, context["weather"], context["friend_name"])
                 else:
-                    result = await self.models.draw(scene, look)
+                    from .diary_models import marong_outfit_snapshot, outfit_snapshot_prompts
+                    catalog = self.wear_catalog if row.get('character_id') is None else None
+                    snapshot = await marong_outfit_snapshot(self.store, catalog, row['friend_id'])
+                    outfit = outfit_snapshot_prompts(catalog, snapshot) if catalog else []
+                    result = await self.models.draw(scene, look, outfit=outfit) if outfit else await self.models.draw(scene, look)
+                    from .decor import valid_fixed_outfit_snapshot
+                    if catalog and result.outcome == 'ok' and not await valid_fixed_outfit_snapshot(self.store, catalog, row['friend_id'], snapshot):
+                        result = replace(result, value=None, outcome='error', error='outfit_unavailable')
         except TimeoutError:
             result = ModelResult(outcome="timeout", error="deadline")
         async with self.store.pool.connection() as conn:

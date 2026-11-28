@@ -144,6 +144,10 @@
 .unified .body-template {text-align: left}
 .unified input[type="checkbox"] {width: 24px; min-height: 0; aspect-ratio: 1; accent-color: var(--accent)}
 .unified .wardrobe-image {width: 64px; height: 64px; border-radius: 50%; object-fit: contain; background: var(--face-base)}
+.unified .account-face, .unified .profile-portrait {position: relative}
+.unified .profile-portrait img {width: 100%; height: 100%; object-fit: contain}
+.unified .profile-outfit-layer {position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none}
+.unified .account-face .profile-outfit-layer {inset: 5%; width: 90%; height: 90%}
 @media (min-width: 500px) {
   body:has(.unified) {background: var(--backdrop)}
   .unified {box-shadow: 0 0 32px var(--panel-shadow)}

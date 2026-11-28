@@ -1,11 +1,12 @@
 """Draw a pet character's scene from its portrait and expression (AI-42)."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 import re
 
 from .character.records import CharacterError
-from .diary_models import DRAW_PROMPT, DiaryPicture, ModelResult, draw_prompt
+from .decor import available_outfit_snapshot, valid_fixed_outfit_snapshot
+from .diary_models import DRAW_PROMPT, DiaryPicture, ModelResult, draw_prompt, REFERENCES
 
 
 VERSION = "scene-v1"
@@ -59,12 +60,13 @@ def scene_prompt(purpose, character, outfit, scene, *, look=None, friend_name=No
 
 
 class ScenePictures:
-    def __init__(self, store, media, models, model, *, catalog=None):
+    def __init__(self, store, media, models, model, *, catalog=None, default_wear=False):
         self.store = store
         self.media = media
         self.models = models
         self.model = model
         self.catalog = catalog
+        self.default_wear = default_wear
 
     def outfit_prompts(self, ids):
         if not self.catalog:
@@ -80,21 +82,41 @@ class ScenePictures:
         """, (row["character_id"], row["friend_id"]))
         if character is None:
             return ModelResult(outcome="error", error="references")
-        outfit = self.outfit_prompts([character[slot] for slot in ("body", "neck", "head") if character[slot]])
+        if not self.default_wear:
+            outfit = self.outfit_prompts([character[slot] for slot in ('body', 'neck', 'head') if character[slot]])
+            result = await self.draw('diary', character, outfit, scene, look=look, weather=weather, friend_name=friend_name)
+            return result.measurement or ModelResult(outcome='error', error='references')
+        snapshot = await available_outfit_snapshot(self.store, self.catalog, row['friend_id'], character, character['template'])
+        outfit = self.outfit_prompts([layer['id'] for layer in snapshot])
         result = await self.draw("diary", character, outfit, scene, look=look, weather=weather, friend_name=friend_name)
-        return result.measurement or ModelResult(outcome="error", error="references")
+        measured = result.measurement or ModelResult(outcome="error", error="references")
+        if measured.outcome == 'ok' and not await valid_fixed_outfit_snapshot(self.store, self.catalog, row['friend_id'], snapshot, character['template']):
+            return replace(measured, value=None, outcome='error', error='outfit_unavailable')
+        return measured
 
     async def draw(self, purpose, character, outfit, scene, *, look=None, weather=None, friend_name=None):
         if purpose not in {"topic", "reaction", "diary"}:
             raise ValueError("invalid_scene_purpose")
         expression = {"topic": "smile", "reaction": "excited", "diary": WEATHER_FACE.get(weather, "smile")}[purpose]
+        default_marong = character is None
+        version = 'scene-marong-v1' if default_marong else VERSION
         try:
-            async with self.store.pool.connection() as conn:
-                refs = [("image[]", (f"{slot}.png", await self.media.read(conn, character["id"], slot), "image/png"))
-                        for slot in ("front", expression)]
+            if default_marong:
+                refs = [("image[]", (name, (REFERENCES / name).read_bytes(), 'image/webp'))
+                        for name in ('01-neutral.webp', '02-big-laugh.webp')]
+            else:
+                async with self.store.pool.connection() as conn:
+                    refs = [("image[]", (f"{slot}.png", await self.media.read(conn, character["id"], slot), "image/png"))
+                            for slot in ("front", expression)]
         except (CharacterError, OSError):
-            return SceneResult("failed", "check_failed", None, Decimal(0), False, self.model)
-        prompt = scene_prompt(purpose, character, outfit, scene, look=look, friend_name=friend_name)
+            return SceneResult("failed", "check_failed", None, Decimal(0), False, self.model, prompt_version=version)
+        if default_marong:
+            prompt = '\n'.join([TOPIC_STYLE, 'Main character: ' + DRAW_PROMPT.splitlines()[2],
+                                *(['Wearing: ' + ', '.join(outfit) + '.'] if outfit else []),
+                                'Scene: ' + ' '.join(scene.split()),
+                                'No text, letters or numbers anywhere in the picture. Only one animal character.'])
+        else:
+            prompt = scene_prompt(purpose, character, outfit, scene, look=look, friend_name=friend_name)
         size = "1536x1024" if purpose == "diary" else "1024x1024"
         cost, estimated = Decimal(0), False
         for _ in range(1 if purpose == "diary" else 2):
@@ -103,10 +125,10 @@ class ScenePictures:
             cost += result.cost or Decimal(0)
             estimated |= result.estimated
             if result.outcome == "ok":
-                return SceneResult("ok", None, result.value, cost, estimated, self.model, measurement=result)
+                return SceneResult("ok", None, result.value, cost, estimated, self.model, prompt_version=version, measurement=result)
             if result.outcome == "refused":
-                return SceneResult("refused", "refused", None, cost, estimated, self.model, measurement=result)
+                return SceneResult("refused", "refused", None, cost, estimated, self.model, prompt_version=version, measurement=result)
             if result.outcome == "invalid":
-                return SceneResult("failed", "check_failed", None, cost, estimated, self.model, measurement=result)
+                return SceneResult("failed", "check_failed", None, cost, estimated, self.model, prompt_version=version, measurement=result)
         reason = "timeout" if result.outcome == "timeout" else "model_error"
-        return SceneResult("failed", reason, None, cost, estimated, self.model, measurement=result)
+        return SceneResult("failed", reason, None, cost, estimated, self.model, prompt_version=version, measurement=result)

@@ -7,7 +7,7 @@
 
 | ID | Case | From | Runs as | Data | Steps | Expected | Last result |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| TC-760 | 착용 아이템마다 기본 마롱이 레이어가 있고 자리 상자 안 | SPEC-574, REQ-529, 3.14 | unit(`tests/test_decor.py`) | 실제 `marong/decor/v1/` | 목록 검사를 돌림. `marong.png`를 뺀 합성 폴더로 한 번 더 | 착용 아이템 10개 모두 `marong.png`가 1024×1024 RGBA, 자리 상자 밖 불투명 5% 이하, 48개 검사 통과. 뺀 폴더는 `missing: ["layer:marong"]`이고 API-264가 409 `item_invalid` | |
+| TC-760 | 레이어 없는 아이템의 등록과 입히기 분리 | SPEC-574, D196 | api·browser(`tests/test_decor.py`, `apps/android/test/pet-decor.e2e.cjs`) | 기본 마롱이 레이어를 뺀 합성 아이템, 두 스위치 켬·끔 | 빈 DB 등록·관리자 올리기·받기, 기본 마롱이와 반려동물 차림 API·상점 상세·보관함을 각각 확인. 유효한 레이어와 자리 상자 밖 레이어도 확인 | 레이어가 없어도 등록·받기·반려동물 착용은 가능. 기본 마롱이에서는 `marongWearable=false`, 입히기 단추 대신 지정 안내, 직접 API는 409 `item_invalid`이고 차림·반응 줄 불변. 유효한 레이어는 입히기 가능, 유효하지 않은 레이어도 기본 마롱이에게는 불가. 옷 4개 실제 레이어 제작·검사는 별도 대기 | |
 | TC-761 | 기본 마롱이 차림 바꾸기 | SPEC-570, REQ-690, REQ-693, API-330#200, API-330#400, API-330#401, API-330#403, API-330#404, API-330#409, API-330#413 | api(`tests/test_decor.py`) | 시험친구 가가 `berry-beanie`만 받음 | ① `{head: berry-beanie, body: null, neck: null}` ② ①과 같은 본문 다시 ③ `{head: null, body: null, neck: null}` 뒤 ① 다시 ④ `{head: null, body: oat-sweater, neck: null}`(받지 않은 아이템) ⑤ `{head: null, body: berry-beanie, neck: null}`(모자를 몸에) ⑥ `{head: berry-beanie, body: null}`(`neck` 빠짐) ⑦ ①을 다른 Origin으로 ⑧ ①을 로그인 없이 ⑨ 세 자리에 17KB 넘는 칸을 더한 본문 ⑩ 반려동물 캐릭터를 적용한 채 ① | ① 200, `layerUrl`이 `/chat/decor/v1/berry-beanie/marong.png`, `marong_outfits` 1줄, `outfit_firsts`에 `character_id`가 빈 줄 1개 ②③ 200, `outfit_firsts` 그대로 ④ 409 `not_owned` ⑤ 400 `invalid_input`, `errors`에 `body`·`wrong_kind`(D190) ⑥ 400 `invalid_input`, `errors`에 `neck`·`required` ⑦ 403 `cross_site` ⑧ 401 ⑨ 413 ⑩ 200이고 그 캐릭터의 `outfits`는 그대로. ④\~⑨ 뒤 `marong_outfits`·`outfit_firsts`는 그대로 | |
 | TC-762 | 프로필과 보관함이 기본 마롱이 차림을 줌 | SPEC-571, REQ-692, API-216#200, API-254#200 | api(`tests/test_decor.py`, `tests/test_unified_profile.py`) | TC-761 ① 뒤 | API-216, API-254를 부름. 반려동물 캐릭터를 적용하고 다시 부름. 기본 마롱이로 돌아와 다시 부름 | 처음: `character` null, `marongOutfit.head.id = berry-beanie`, `features.defaultWear` 참, 보관함 `characterId` null이고 `outfit.head`가 같음. 캐릭터 적용 중: `marongOutfit` 없음, 보관함 `outfit`은 그 캐릭터 차림. 돌아오면 처음과 같음(REQ-693) | |
 | TC-763 | 스위치를 끄면 지금 그대로 | REQ-697, SPEC-570, SPEC-571, 1절 5 | api(`tests/test_decor.py`) | TC-761 ① 뒤, `MARONG_DEFAULT_WEAR=0`으로 다시 띄움. 또 `MARONG_DECOR=0`으로 | API-330(TC-761 ①과 같은 세 자리 본문), API-216, API-254, 반응 선톡 차례 | API-330 404 `not_found`, `marongOutfit` 없음, `features.defaultWear` 거짓, 보관함 기본 마롱이 `outfit` null, 반응 줄을 새로 만들지 않음. `marong_outfits` 줄은 남음 | |
@@ -23,6 +23,10 @@
 | TC-773 | 반려동물 반응도 첫 착용 하나에 그림 작업 하나 | SPEC-422(D195 손봄), 3.14 비용 표 | job(`tests/test_proactive.py`, `tests/test_scene_picture.py`) | 시험친구 나의 반려동물 캐릭터 '콩이'가 `berry-beanie`를 처음 입음, 가짜 그림·글 모델, 가짜 전달 | ① 그림이 끝난 뒤 보내기가 실패해 같은 첫 착용을 다음 차례에 다시 처리 ② 그림 작업이 185초를 넘긴 채 다음 차례 ③ 게이트에 한 번 막혔다가 다음 차례에 보냄 ④ 두 처리자가 동시에 처리 ⑤ 작업 줄을 넣은 뒤 연결 전에 멈춤 뒤 다시 처리 ⑥ 그림 모델이 실패(비용 있음) | ① 첫 착용 줄의 `scene_job_id`가 처음 작업이고 그 아이템의 반응 장면 그림 줄은 1개, 그림 모델 부름 합 ≤ 6 ② 겹친 그림(비용 0)으로 보내고 새 작업 없음 ③ 처음 작업의 그림으로 보내고 새 작업 없음. ④ 작업 줄 1개, 메시지 1번 ⑤ 멈춘 뒤 0개, 다시 처리에서 1개 ⑥ 작업 줄은 `failed`와 비용을 가지고, 보낸 그림은 다른 겹친 그림 줄(비용 0). `MARONG_DEFAULT_WEAR`가 0이어도 같음 | |
 
 남은 번호: TC-774\~789는 비워 둬요.
+
+## D198 고정 차림 회귀 확인
+
+TC-767·768·773의 보충 시험은 기본 마롱이와 반려동물의 일기·반응·화두 장면을 대상으로 해요. 작업이 대기 중일 때 차림을 바꾸면 모델 호출 시작 시의 차림을 고정하고, 호출 뒤 다른 옷으로 갈아입어도 고정 아이템의 받기·상점 상태와 레이어 해시가 유효하면 성공 그림을 써요. 반응 대상 아이템을 벗거나 캐릭터를 바꾼 경우는 기존 `skipped`를 지켜요. 고정 아이템의 내림·소유 해제·파일 변경은 그림을 쓰지 않으며 발생한 비용은 남겨요. D199에 따라 스위치 0의 반려동물과 해시 기록이 없는 기존 반려동물 작업은 main 방식으로 처리해요. 해시 기록이 있는 새 장면은 글 대화와 통화 화두에서 같은 검사를 해요. 시험은 `test_bug142_`·`test_bug144_`와 main 비교 시험이며 격리 DB·가짜 모델·가짜 발송만 써요.
 
 ## 요구사항마다 시험
 

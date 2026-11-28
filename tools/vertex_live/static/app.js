@@ -115,7 +115,7 @@ const DAILY_MESSAGE='오늘 쓸 수 있는 양을 다 썼어. 새벽 4시에 다
 const BUDGET_MESSAGE='이번 달 통화는 여기까지야. 다음 달에 또 걸어 줘. 글로는 계속 얘기할 수 있어';
 // A call Marong placed at a time the friend set (docs/app-ring.md SPEC-135): the app opens /?ring=<id>.
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-let ringId=null,ringShown=false,botName='마롱이',characterId=null,lastCharacterFace=null;
+let ringId=null,ringShown=false,botName='마롱이',characterId=null,lastCharacterFace=null,defaultWearBounce=false;
 {
   // Take the ring out of the address at once, so a reload or a shared link never answers it again.
   const search=location.search||'',found=/[?&]ring=([^&#]*)/.exec(search);
@@ -253,10 +253,11 @@ async function refreshProfile(){
     if(brand?.firstChild?.nodeType===Node.TEXT_NODE)brand.firstChild.textContent=botName;
     document.title=botName+' · 너의 이야기 곁에';
     characterId=profile.character?.id||null;
+    defaultWearBounce=!profile.character&&!!profile.marongOutfit;
     const face=$('face');
     face.parentElement.querySelectorAll('.outfit-layer').forEach(layer=>layer.remove());
     for(const slot of ['body','neck','head']){
-      const url=profile.character?.outfit?.[slot]?.layerUrl;
+      const url=(profile.character?.outfit||profile.marongOutfit)?.[slot]?.layerUrl;
       if(typeof url!=='string'||!/^\/chat\/decor\/v[0-9]{1,3}\/[a-z0-9-]{3,40}\/[a-z_]+\.png$/.test(url))continue;
       const layer=new Image();
       layer.className='outfit-layer';layer.src=url;layer.alt='';
@@ -650,6 +651,12 @@ setInterval(()=>{
   }
   if(waiting&&!speaking)frame=4;
   if((budgetBlocked||dailyBlocked)&&!intended)frame=6;
+  const disc=document.querySelector('.face-disc');
+  if(disc) {
+    const bounce=defaultWearBounce&&!topicOn&&intended&&speaking&&!reducedMotion.matches?({15:2,16:4,20:2,21:2,22:4,23:4}[frame]||0):0;
+    disc.classList.toggle('talk-bounce-2',bounce===2);
+    disc.classList.toggle('talk-bounce-4',bounce===4);
+  }
   if(frame!==lastFace||characterId!==lastCharacterFace){
     lastFace=frame;lastCharacterFace=characterId;
     const expression=({4:'surprised',6:'sad',15:'smile',16:'excited',18:'sleepy',19:'sleepy',20:'smile',21:'smile',22:'excited',23:'excited'})[frame]||'front';

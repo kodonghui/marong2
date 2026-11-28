@@ -18,7 +18,8 @@ class AppProfile:
     def __init__(self, chat, *, character=None, friends=None, google=False, voices=None,
                  voice_samples=None):
         self.chat = chat
-        self.features = {"character": bool(character), "friends": bool(friends), "decor": chat.pet_app_settings.decor}
+        self.features = {"character": bool(character), "friends": bool(friends), "decor": chat.pet_app_settings.decor,
+                         "defaultWear": chat.pet_app_settings.decor and chat.pet_app_settings.default_wear}
         if chat.pet_app_settings.scene_pictures:
             self.features["scenePictures"] = True
         self.google = google
@@ -65,10 +66,13 @@ class AppProfile:
         ringing = None
         if record["ring_id"] is not None:
             ringing = {"ringId": str(record["ring_id"]), "until": record["answer_until"].isoformat()}
-        return {"friendName": record["name"], "botName": record["bot_name"], "character": character,
+        result = {"friendName": record["name"], "botName": record["bot_name"], "character": character,
                 "voice": record["voice"], "friendCode": record["friend_code"], "share": record["share"],
                 "features": self.features, "google": google, "pendingRing": ringing,
                 "usageToday": await self.chat.usage.summary(friend, now, day, record)}
+        if character is None and self.features["defaultWear"]:
+            result["marongOutfit"] = await self.chat.decor.equipped(friend, "marong")
+        return result
 
     async def get(self, req):
         who = await self.who(req)

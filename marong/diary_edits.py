@@ -281,7 +281,15 @@ class DiaryEdits:
             result = await scenes.diary_art(row, scene, look, current["weather"], current["name"])
             model, version = scenes.model, SCENE_PROMPT_VERSION
         else:
-            result = await self.models.draw(scene, look)
+            from .diary_models import marong_outfit_snapshot, outfit_snapshot_prompts
+            settings = self.chat.pet_app_settings
+            catalog = self.chat.decor.catalog if settings.decor and settings.default_wear and row.get('character_id') is None else None
+            snapshot = await marong_outfit_snapshot(self.store, catalog, row['friend_id'])
+            outfit = outfit_snapshot_prompts(catalog, snapshot) if catalog else []
+            result = await self.models.draw(scene, look, outfit=outfit) if outfit else await self.models.draw(scene, look)
+            from .decor import valid_fixed_outfit_snapshot
+            if catalog and result.outcome == 'ok' and not await valid_fixed_outfit_snapshot(self.store, catalog, row['friend_id'], snapshot):
+                result = replace(result, value=None, outcome='error', error='outfit_unavailable')
             model, version = self.models.image_model, PROMPT_VERSION
         run_id = await self._log(row, "draw", "redraw", model, trace, sent, result, version=version)
         if result.outcome == "ok":
