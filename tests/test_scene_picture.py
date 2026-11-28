@@ -205,6 +205,44 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(db.admin('SELECT count(*) FROM marong.messages WHERE kakao_id=%s',(calls[0],)),[(1,)])
                 self.assertEqual(model.await_count,1)
 
+    async def test_tc767_773_concurrent_priority_shares_job_and_delivery(self):
+        from marong.unified_delivery import AppProactive, UnifiedDelivery
+        for pet_mode in (False, True):
+            with self.subTest(pet=pet_mode):
+                db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+                if pet_mode:
+                    pet=db.admin("""INSERT INTO marong.characters(friend_id,kind,status,stage,ready_at,template,name,traits)
+                        VALUES (%s,'dog','ready','done',now(),'dog_small','시험','{}') RETURNING id""",(friend,))[0][0]
+                    db.admin('UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s',(pet,friend))
+                    db.admin("INSERT INTO marong.outfits(character_id,head) VALUES (%s,'berry-beanie')",(pet,))
+                    db.admin("INSERT INTO marong.outfit_firsts(friend_id,character_id,item_id,next_at) VALUES (%s,%s,'berry-beanie',now())",(friend,pet))
+                    worker.default_wear=False; reactions.default_wear=False
+                    worker.pictures.media=SimpleNamespace(read=AsyncMock(return_value=b'fixture'))
+                entered=0; both=asyncio.Event(); finished=asyncio.Event(); lock=asyncio.Lock()
+                async def draw_once(job):
+                    nonlocal entered
+                    entered += 1
+                    if entered==2: both.set()
+                    await asyncio.wait_for(both.wait(),timeout=5)
+                    async with lock:
+                        if not finished.is_set():
+                            await worker.step(); finished.set()
+                    return await worker.wait_for_topic({'id':job['id'],'state':'done'})
+                reactions.scenes=SimpleNamespace(wait_for_topic=draw_once)
+                delivery=UnifiedDelivery(store,SimpleNamespace(enabled=False),'session',lambda:None)
+                loop=AppProactive(SimpleNamespace(),store,SimpleNamespace(proactive_message=AsyncMock(return_value=None)),RoomLocks(),delivery,reactions=reactions)
+                loop.reaction_friends={friend}; loop.still_current=AsyncMock(return_value=True)
+                store.record_delivery=AsyncMock()
+                results=await asyncio.gather(*(loop.priority({'friend_id':friend},None) for _ in range(2)))
+                self.assertTrue(any(result and result['ok'] for result in results))
+                condition = 'IS NOT NULL' if pet_mode else 'IS NULL'
+                self.assertEqual(db.admin(f"SELECT count(*) FROM marong.scene_pictures WHERE character_id {condition}"),[(1,)])
+                first=db.admin(f"SELECT id,state,scene_job_id,scene_picture_id FROM marong.outfit_firsts WHERE character_id {condition}")[0]
+                messages=db.admin("SELECT meta->>'scene' FROM marong.messages WHERE kakao_id=%s",(f'app-reaction:{first[0]}',))
+                self.assertEqual((first[1],len(messages)),('sent',1))
+                self.assertEqual(str(first[2]),messages[0][0]); self.assertEqual(str(first[3]),messages[0][0])
+                self.assertEqual(model.await_count,1)
+
     async def test_tc773_pet_timeout_reuses_job_with_zero_cost_fallback(self):
         from marong.decor_reactions import DecorReactions
         db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
