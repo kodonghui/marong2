@@ -1,6 +1,6 @@
 -- 025 The default 마롱이 wears items too (part pet-app, feature change 1 "기본 마롱이에게 입히기", D192, 2026-11-28).
 -- Design draft from the design PR; not applied to the server. 024 is left for the iPhone web app notifications draft
--- (docs/05-erd/024_web_push_subscriptions.draft.sql). Needs 022. Only adds a table, an index and a CHECK, lets two
+-- (docs/05-erd/024_web_push_subscriptions.draft.sql). Needs 022. Only adds a table, a column, indexes and a CHECK, lets two
 -- columns be empty and allows one more fail_reason value, so the code on main keeps working: it never writes a row
 -- without a character. Safe to apply twice. No down script: a rollback turns the switch off, drains the default
 -- 마롱이 rows and reverts the code, and the tables stay (SPEC-575, docs/05-erd/pet-app.md 8절).
@@ -22,6 +22,15 @@ CREATE TABLE IF NOT EXISTS marong.marong_outfits (
 ALTER TABLE marong.outfit_firsts ALTER COLUMN character_id DROP NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS outfit_firsts_marong_once ON marong.outfit_firsts (friend_id, item_id)
   WHERE character_id IS NULL;
+
+-- TBL-179 outfit_firsts.scene_job_id (SPEC-422, SPEC-572): the one model drawing job of this first wear, the key every
+-- retry reuses. scene_picture_id stays the picture that was actually sent (the job's picture when it is done in time,
+-- otherwise a separate fallback row). The job row keeps its own cost; a fallback row costs 0 (022's CHECK), so the two are
+-- never the same row. The app creates the job and stores its id in one transaction while holding the first-wear row
+-- (SELECT ... FOR UPDATE), so a crash leaves neither and a second worker waits and then reuses the stored job.
+ALTER TABLE marong.outfit_firsts ADD COLUMN IF NOT EXISTS scene_job_id uuid REFERENCES marong.scene_pictures (id);
+CREATE UNIQUE INDEX IF NOT EXISTS outfit_firsts_scene_job_once ON marong.outfit_firsts (scene_job_id)
+  WHERE scene_job_id IS NOT NULL;
 
 -- TBL-176 scene_pictures: a picture with no character is the default 마롱이 drawn for a first-wear reaction.
 -- Topic pictures of the default 마롱이 stay the drawn picture set (REQ-694), so such a row is always a reaction.

@@ -39,6 +39,7 @@ info:
     4. 착용 아이템의 레이어 파일에 `marong.png`가 늘어요(API-257은 목록에 적힌 파일만 주는 규칙 그대로). 올리기(API-264)의 `missing`에 `layer:marong`이 나올 수 있어요.
     5. `MARONG_DEFAULT_WEAR=0`이면 API-330은 404 `not_found`예요. 끄기와 코드 되돌리기 순서는 SPEC-575예요.
     6. 장면 그림의 `fail_reason`에 `disabled`가 늘어요(스위치를 끄며 그림 모델 없이 끝낸 기본 마롱이 그림). 응답에는 나오지 않아요.
+    7. 반응 메시지의 `meta.scene`은 실제로 보낸 그림(제때 끝난 작업 그림이나 겹친 그림)의 id예요. 모델 작업 줄과 겹친 그림 줄은 다른 줄이고, 늦게 끝난 작업 그림은 보낸 메시지를 바꾸지 않아요(04 3.15). API-262는 지금처럼 `done` 그림만 줘요.
 servers:
 - url: https://marong.corthex-hq.com
   description: 앱 서버. 터널이 /chat/ 아래를 앱 서버로 보내요. /chat/admin/ 아래만 Cloudflare Access 뒤예요
