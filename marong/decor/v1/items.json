@@ -89,7 +89,8 @@
         "dog_large.png": "dog_large.png",
         "dog_long.png": "dog_long.png",
         "dog_small.png": "dog_small.png",
-        "thumb.webp": "thumb.webp"
+        "thumb.webp": "thumb.webp",
+        "marong.png": "marong.png"
       },
       "license": "oat-sweater",
       "prompt": "a cream knit sleeveless pet sweater with a single brown cable stripe",
@@ -107,7 +108,8 @@
         "dog_large.png": "dog_large.png",
         "dog_long.png": "dog_long.png",
         "dog_small.png": "dog_small.png",
-        "thumb.webp": "thumb.webp"
+        "thumb.webp": "thumb.webp",
+        "marong.png": "marong.png"
       },
       "license": "blue-raincoat",
       "prompt": "a pastel blue sleeveless pet rain jacket, hood folded down",
@@ -125,7 +127,8 @@
         "dog_large.png": "dog_large.png",
         "dog_long.png": "dog_long.png",
         "dog_small.png": "dog_small.png",
-        "thumb.webp": "thumb.webp"
+        "thumb.webp": "thumb.webp",
+        "marong.png": "marong.png"
       },
       "license": "forest-vest",
       "prompt": "a muted green pet vest with a round wooden button",
@@ -143,7 +146,8 @@
         "dog_large.png": "dog_large.png",
         "dog_long.png": "dog_long.png",
         "dog_small.png": "dog_small.png",
-        "thumb.webp": "thumb.webp"
+        "thumb.webp": "thumb.webp",
+        "marong.png": "marong.png"
       },
       "license": "apricot-apron",
       "prompt": "a pet apron with warm peach fabric and a single small pocket",

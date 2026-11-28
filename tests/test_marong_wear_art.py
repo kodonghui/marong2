@@ -12,10 +12,20 @@ from unittest.mock import patch
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tools import draw_marong_wear
+from tools import draw_marong_wear, fit_marong_layers
 
 
 class ArtHelperTest(unittest.TestCase):
+    def test_body_fit_excludes_nearly_transparent_haze(self):
+        image = Image.new('RGBA',(1024,1024),(0,0,0,1))
+        for y in range(350,650):
+            for x in range(300,700):
+                image.putpixel((x,y),(100,100,100,255))
+        result = fit_marong_layers.fit(image,'body')
+        box = result.getchannel('A').getbbox()
+        self.assertGreater(box[2] - box[0], 350)
+        self.assertLess(box[3], 800)
+
     def test_single_item_retry_calls_only_once(self):
         class Client:
             calls = 0

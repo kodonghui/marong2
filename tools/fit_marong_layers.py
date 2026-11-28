@@ -15,6 +15,10 @@ SLOTS = {
 def fit(image, slot):
     (x0, y0, x1, y1), anchor = SLOTS[slot]
     image = image.convert("RGBA")
+    if slot == "body":
+        # Generated clothing may contain nearly transparent background haze.
+        # Exclude it before finding the visible item box, retaining antialiasing.
+        image.putalpha(image.getchannel("A").point(lambda value: 0 if value < 16 else value))
     bounds = image.getchannel("A").getbbox()
     if bounds is None:
         raise ValueError("empty layer")
