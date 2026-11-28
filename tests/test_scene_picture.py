@@ -56,6 +56,7 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         auth = await sessions.join((await sessions.create_invite('join'))[0],'시험친구','웹')
         friend = (await sessions.find_session(auth.token))['friend_id']
         db.admin("INSERT INTO marong.decor_items(id,kind,slot) VALUES ('berry-beanie','hat','head'),('oat-sweater','top','body')")
+        db.admin("INSERT INTO marong.decor_owned(friend_id,item_id) VALUES (%s,'berry-beanie'),(%s,'oat-sweater')", (friend,friend))
         db.admin("INSERT INTO marong.marong_outfits(friend_id,head,body) VALUES (%s,'berry-beanie','oat-sweater')", (friend,))
         db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'berry-beanie',now())", (friend,))
         catalog = DecorCatalog()
@@ -167,6 +168,39 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         result = await reactions.scene(row)
         self.assertNotEqual(result,job['id'])
         self.assertEqual(db.admin('SELECT fallback FROM marong.scene_pictures WHERE id=%s',(result,)), [(True,)])
+
+    async def test_bug142_reaction_keeps_valid_draw_after_changing_other_slot(self):
+        db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+        db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'oat-sweater',now())",(friend,))
+        row = next(row for row in await reactions.due(friend) if row['item_id'] == 'oat-sweater')
+        job = await reactions.reaction_job(row)
+        async def draw(*args, **kwargs):
+            db.admin('UPDATE marong.marong_outfits SET head=NULL WHERE friend_id=%s',(friend,))
+            return ModelResult(value=picture(),cost=Decimal('.02'))
+        model.side_effect=draw
+        self.assertEqual(await worker.step(),1)
+        self.assertEqual(await reactions.scene(row),job['id'])
+        self.assertEqual(db.admin('SELECT count(*) FROM marong.scene_pictures'),[(1,)])
+
+    async def test_bug142_reaction_rejects_unlisted_or_unowned_fixed_layer(self):
+        for change in ('unlisted','unowned'):
+            with self.subTest(change=change):
+                db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+                db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'oat-sweater',now())",(friend,))
+                row=next(row for row in await reactions.due(friend) if row['item_id']=='oat-sweater')
+                job=await reactions.reaction_job(row)
+                async def draw(*args, **kwargs):
+                    if change=='unlisted':
+                        db.admin("UPDATE marong.decor_items SET state='unlisted',unlisted_at=now() WHERE id='berry-beanie'")
+                    else:
+                        db.admin("DELETE FROM marong.decor_owned WHERE friend_id=%s AND item_id='berry-beanie'",(friend,))
+                    return ModelResult(value=picture(),cost=Decimal('.02'))
+                model.side_effect=draw
+                self.assertEqual(await worker.step(),1)
+                result=await reactions.scene(row)
+                self.assertNotEqual(result,job['id'])
+                self.assertEqual(db.admin('SELECT fallback FROM marong.scene_pictures WHERE id=%s',(result,)),[(True,)])
+                self.assertEqual(db.admin('SELECT outfit FROM marong.scene_pictures WHERE id=%s',(result,)),[(['oat-sweater'],)])
 
     async def test_tc767_773_gate_then_failed_send_reuses_one_job(self):
         from marong.unified_delivery import AppProactive, UnifiedDelivery
