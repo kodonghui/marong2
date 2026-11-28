@@ -160,7 +160,7 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
         chat.pet_app_settings = replace(chat.pet_app_settings, decor=True, default_wear=False)
         hat = chat.decor.catalog.items['berry-beanie']
         missing_pet_layer = replace(hat, files={name:path for name,path in hat.files.items() if name != 'cat.png'})
-        self.assertEqual(chat.decor.catalog.check(missing_pet_layer, require_marong=False), ['layer:cat'])
+        self.assertEqual(chat.decor.catalog.check(missing_pet_layer), ['layer:cat'])
         for ident in ('oat-sweater','blue-raincoat','forest-vest','apricot-apron'):
             item = chat.decor.catalog.items[ident]
             chat.decor.catalog.items[ident] = replace(item, files={name:path for name,path in item.files.items() if name != 'marong.png'})
