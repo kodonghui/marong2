@@ -12,10 +12,11 @@ log = logging.getLogger(__name__)
 
 
 class SceneWorker:
-    def __init__(self, store, pictures, usage):
+    def __init__(self, store, pictures, usage, *, default_wear=False):
         self.store = store
         self.pictures = pictures
         self.usage = usage
+        self.default_wear = default_wear
 
     async def topic_job(self, friend, key, at, *, queue=True):
         """Keep one job per planned topic and selected character, including prefetch retries."""
@@ -55,7 +56,7 @@ class SceneWorker:
             return None
         active = await self.store._one("""
             SELECT s.id FROM marong.scene_pictures s
-            JOIN marong.friend_profiles p ON p.friend_id=s.friend_id AND p.character_id=s.character_id
+            JOIN marong.friend_profiles p ON p.friend_id=s.friend_id AND p.character_id IS NOT DISTINCT FROM s.character_id
             WHERE s.id=%s
         """, (job["id"],))
         return active["id"] if active else None
@@ -76,13 +77,13 @@ class SceneWorker:
             cur = await conn.execute("""
                 WITH due AS (
                     SELECT id FROM marong.scene_pictures
-                    WHERE state='queued' AND not_before<=now() AND attempts<3
+                    WHERE state='queued' AND not_before<=now() AND attempts<3 AND (%s OR character_id IS NOT NULL)
                     ORDER BY not_before, created_at, id LIMIT 2 FOR UPDATE SKIP LOCKED
                 )
                 UPDATE marong.scene_pictures s SET state='drawing', lease_until=now()+interval '10 minutes',
                     started_at=now(), attempts=s.attempts+1
                 FROM due WHERE s.id=due.id RETURNING s.*
-            """)
+            """, (self.default_wear,))
             return await cur.fetchall()
 
     async def finish(self, job, result, *, fail_reason=None):
@@ -113,14 +114,15 @@ class SceneWorker:
         topics = picture_set()
         topic = topics.get(job["topic"]) if topics and job["purpose"] == "topic" else None
         result = None
-        if character:
+        if character or (job['character_id'] is None and self.default_wear and job['purpose'] == 'reaction'):
             outfit = self.pictures.outfit_prompts(job["outfit"])
             if topic:
                 result = await self.pictures.draw("topic", character, outfit, topic.scene)
             elif job["purpose"] == "reaction":
                 item = self.pictures.catalog.items.get(job["item_id"]) if self.pictures.catalog else None
                 if item and item.prompt:
-                    scene = f"The pet character proudly shows off the new {item.prompt}, looking at the viewer."
+                    subject = 'little white character' if character is None else 'pet character'
+                    scene = f"The {subject} proudly shows off the new {item.prompt}, looking at the viewer."
                     result = await self.pictures.draw("reaction", character, outfit, scene)
         if await self.finish(job, result, fail_reason="check_failed"):
             log.info("scene_finished result=%s friend=%s character=%s scene=%s ms=%d usd=%s",
@@ -129,6 +131,11 @@ class SceneWorker:
 
     async def step(self):
         await self.recover()
+        if not self.default_wear:
+            await self.store._one("""WITH disabled AS (
+                UPDATE marong.scene_pictures SET state='failed',fail_reason='disabled',finished_at=now()
+                WHERE character_id IS NULL AND purpose='reaction' AND state='queued' RETURNING id
+            ) SELECT count(*) FROM disabled""")
         jobs = await self.claim()
         results = await asyncio.gather(*(self.process(job) for job in jobs), return_exceptions=True)
         for job, result in zip(jobs, results):

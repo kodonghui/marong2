@@ -22,6 +22,8 @@ FILE_NAME = re.compile(r"[A-Za-z0-9_-]{1,40}\.(?:png|webp|woff2)\Z")
 KINDS = ("hat", "top", "scarf", "background", "paper", "font", "sticker")
 SLOTS = {"hat": "head", "top": "body", "scarf": "neck"}
 WEAR = ("head", "body", "neck")
+MARONG_SLOTS = {"head": (0.30, 0.17, 0.70, 0.398), "neck": (0.31, 0.49, 0.69, 0.63),
+                "body": (0.29, 0.50, 0.71, 0.772)}
 CONTENT = {".webp": "image/webp", ".png": "image/png", ".woff2": "font/woff2"}
 PAPER_STYLES = {"manuscript"}
 
@@ -111,7 +113,7 @@ class DecorCatalog:
         if item.kind in SLOTS:
             if not isinstance(item.prompt, str) or not 1 <= len(item.prompt) <= 200 or not item.prompt.isascii():
                 missing.append("prompt")
-            for template in TEMPLATE_IDS:
+            for template in (*TEMPLATE_IDS, "marong"):
                 key = f"{template}.png"
                 path = item.files.get(key)
                 issue = self._layer_issue(path, template, item.slot) if path else "layer"
@@ -152,11 +154,11 @@ class DecorCatalog:
 
     def _layer_issue(self, path, template, slot):
         try:
-            slots = json.loads((self.templates / f"{template}.json").read_text(encoding="utf-8"))["slots"]
+            slots = MARONG_SLOTS if template == "marong" else json.loads((self.templates / f"{template}.json").read_text(encoding="utf-8"))["slots"]
             left, top, right, bottom = slots[slot]
             box = (floor(left * 1024), floor(top * 1024), ceil(right * 1024), ceil(bottom * 1024))
             with Image.open(path, formats=("PNG",)) as image:
-                if image.size != (1024, 1024):
+                if image.size != (1024, 1024) or (template == "marong" and image.mode != "RGBA"):
                     return "layer"
                 ink = image.convert("RGBA").getchannel("A").point(lambda value: 255 if value else 0)
                 total = ink.histogram()[255]

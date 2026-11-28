@@ -10,6 +10,19 @@
   const error = document.getElementById('profile-error');
   let data, editing = false, timer, codeTimer;
 
+  function layers(frame, outfit) {
+    for (const slot of ['body', 'neck', 'head']) {
+      const url = outfit?.[slot]?.layerUrl;
+      if (!url) continue;
+      const layer = new Image();
+      layer.src = url;
+      layer.alt = '';
+      layer.className = 'profile-outfit-layer';
+      layer.addEventListener('error', () => layer.remove(), {once:true});
+      frame.append(layer);
+    }
+  }
+
   function relogin() {
     try { sessionStorage.setItem('marong.session.return', location.pathname); } catch {}
     location.replace('/chat/login?expired=1');
@@ -171,6 +184,15 @@
       }
       const items = result.body.characters;
       const base = node('div', '', 'card');
+      if (data.features.defaultWear && !data.character) {
+        const portrait = node('div', '', 'wardrobe-image profile-portrait');
+        const image = new Image();
+        image.src = '/face/v1/01-neutral.webp';
+        image.alt = '';
+        portrait.append(image);
+        layers(portrait, data.marongOutfit);
+        base.append(portrait);
+      }
       base.append(node('p', '기본 마롱이' + (data.character ? '' : ' · 쓰는 중')));
       if (data.character) {
         const reset = button('기본 마롱이로 돌아가기', () => {
@@ -255,9 +277,15 @@
     image.src = data.character?.faceUrl || '/face/v1/01-neutral.webp';
     image.alt = '';
     face.replaceChildren(image);
+    layers(face, data.character?.outfit || data.marongOutfit);
     groups.replaceChildren(nameGroup(), link('통화 목소리 · ' + (data.voiceLabel || data.voice || '기본'),
       '/chat/me/voice', 'btn2'), codes(), usage());
     if (data.features.character) groups.insertBefore(wardrobe(), groups.children[1]);
+    if (!data.character && data.features.defaultWear) {
+      const worn = [['head', '모자'], ['body', '옷'], ['neck', '목도리']]
+        .filter(([slot]) => data.marongOutfit?.[slot]).map(([, label]) => label).join('·') || '아직 안 입음';
+      groups.insertBefore(link('꾸미기 · ' + worn, '/chat/closet', 'btn2'), groups.children[1]);
+    }
     if (data.character) {
       const introPath = '/chat/character/' + data.character.id + '/intro';
       const intro = node('div', '', 'card');

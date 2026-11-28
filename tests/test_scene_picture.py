@@ -44,6 +44,130 @@ def picture():
 
 
 class ScenesTests(unittest.IsolatedAsyncioTestCase):
+    async def test_tc773_failure_cost_is_not_lost_in_fallback(self):
+        from marong.decor_reactions import DecorReactions
+        db=TestDB(); self.addCleanup(db.close)
+        db.apply_unified_prerequisites(); db.apply_unified(); db.apply_pet_app_prerequisites(); db.apply_pet_app(); db.apply_marong_outfit()
+        store=UnifiedStore(db.app_url); await store.open(wait=True); self.addAsyncCleanup(store.close)
+        sessions=AppSessions(store.pool,secrets.token_bytes(32),contact_schedule=(2,8,22))
+        auth=await sessions.join((await sessions.create_invite('join'))[0],'시험친구','웹')
+        friend=(await sessions.find_session(auth.token))['friend_id']
+        pet=db.admin("""INSERT INTO marong.characters(friend_id,kind,status,stage,ready_at,template,name,traits)
+            VALUES (%s,'dog','ready','done',now(),'dog_small','시험','{}') RETURNING id""",(friend,))[0][0]
+        db.admin("UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s",(pet,friend))
+        db.admin("INSERT INTO marong.decor_items(id,kind,slot) VALUES ('berry-beanie','hat','head')")
+        db.admin("INSERT INTO marong.outfits(character_id,head) VALUES (%s,'berry-beanie')",(pet,))
+        db.admin("INSERT INTO marong.outfit_firsts(friend_id,character_id,item_id,next_at) VALUES (%s,%s,'berry-beanie',now())",(friend,pet))
+        model=AsyncMock(return_value=ModelResult(outcome='error',cost=Decimal('.025')))
+        media=SimpleNamespace(read=AsyncMock(return_value=(Path(__file__).resolve().parents[1]/'marong/call/static/face/v1/05-excited.webp').read_bytes()))
+        catalog=DecorCatalog()
+        art=ScenePictures(store,media,SimpleNamespace(edit_picture=model),'fixture',catalog=catalog)
+        worker=SceneWorker(store,art,SimpleNamespace(record=AsyncMock()))
+        reactions=DecorReactions(store,media,SimpleNamespace(record=AsyncMock()),catalog,worker)
+        row,=await reactions.due(friend)
+        job=await reactions.reaction_job(row)
+        self.assertEqual(await worker.step(),1)
+        sent=await reactions.scene(row)
+        self.assertNotEqual(job['id'],sent)
+        self.assertEqual(db.admin('SELECT state,cost_usd,fallback FROM marong.scene_pictures WHERE id=%s',(job['id'],)), [('failed',Decimal('.05'),False)])
+        self.assertEqual(db.admin('SELECT state,cost_usd,fallback FROM marong.scene_pictures WHERE id=%s',(sent,)), [('done',Decimal(0),True)])
+
+    async def test_tc767_default_fallback_and_reuse(self):
+        from marong.decor_reactions import DecorReactions
+        db=TestDB(); self.addCleanup(db.close)
+        db.apply_unified_prerequisites(); db.apply_unified(); db.apply_pet_app_prerequisites(); db.apply_pet_app(); db.apply_marong_outfit()
+        store=UnifiedStore(db.app_url); await store.open(wait=True); self.addAsyncCleanup(store.close)
+        sessions=AppSessions(store.pool,secrets.token_bytes(32),contact_schedule=(2,8,22))
+        auth=await sessions.join((await sessions.create_invite('join'))[0],'시험친구','웹')
+        friend=(await sessions.find_session(auth.token))['friend_id']
+        db.admin("INSERT INTO marong.decor_items(id,kind,slot) VALUES ('berry-beanie','hat','head')")
+        db.admin("INSERT INTO marong.marong_outfits(friend_id,head) VALUES (%s,'berry-beanie')", (friend,))
+        db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'berry-beanie',now())", (friend,))
+        scenes=SimpleNamespace(wait_for_topic=AsyncMock(return_value=None))
+        reactions=DecorReactions(store,None,SimpleNamespace(record=AsyncMock()),DecorCatalog(),scenes,default_wear=True)
+        row,=await reactions.due(friend)
+        self.assertTrue(row['active'])
+        sent=await reactions.scene(row)
+        again=await reactions.scene(row)
+        self.assertNotEqual(sent,again)
+        jobs=db.admin("SELECT id,state,fallback,cost_usd FROM marong.scene_pictures ORDER BY created_at")
+        self.assertEqual(len(jobs),3)
+        self.assertEqual([j[1:3] for j in jobs], [('queued',False),('done',True),('done',True)])
+        self.assertTrue(all(j[3]==0 for j in jobs))
+        self.assertEqual(scenes.wait_for_topic.await_args_list[0].args[0]['id'],scenes.wait_for_topic.await_args_list[1].args[0]['id'])
+        await reactions.finish(row, 'sent', sent)
+        db.admin("""UPDATE marong.scene_pictures SET state='done',finished_at=now(),format='png',width=1,height=1,
+            image='\\x01',cost_usd=0.02 WHERE id=%s""", (jobs[0][0],))
+        self.assertEqual(db.admin('SELECT scene_job_id,scene_picture_id,state FROM marong.outfit_firsts WHERE id=%s', (row['id'],)),
+                         [(jobs[0][0],sent,'sent')])
+
+    async def test_tc767_default_reaction_references_and_prompt(self):
+        model = AsyncMock(return_value=ModelResult(value=picture(), cost=Decimal('.02')))
+        art = ScenePictures(None, None, SimpleNamespace(edit_picture=model), 'fixture')
+        result = await art.draw('reaction', None, ['a red hat'], 'The little white character shows the hat.')
+        self.assertEqual((result.outcome, result.prompt_version), ('ok', 'scene-marong-v1'))
+        prompt, refs = model.await_args.args
+        self.assertEqual([ref[1][0] for ref in refs], ['01-neutral.webp', '02-big-laugh.webp'])
+        self.assertIn('Wearing: a red hat.', prompt)
+        self.assertIn('The little white character is the one in the reference images', prompt)
+
+    async def test_tc767_default_job_uses_worker_and_active_profile(self):
+        from marong.decor_reactions import DecorReactions
+        db=TestDB(); self.addCleanup(db.close)
+        db.apply_unified_prerequisites(); db.apply_unified(); db.apply_pet_app_prerequisites(); db.apply_pet_app(); db.apply_marong_outfit()
+        store=UnifiedStore(db.app_url); await store.open(wait=True); self.addAsyncCleanup(store.close)
+        sessions=AppSessions(store.pool,secrets.token_bytes(32),contact_schedule=(2,8,22))
+        auth=await sessions.join((await sessions.create_invite('join'))[0],'시험친구','웹')
+        friend=(await sessions.find_session(auth.token))['friend_id']
+        db.admin("INSERT INTO marong.decor_items(id,kind,slot) VALUES ('berry-beanie','hat','head')")
+        db.admin("INSERT INTO marong.marong_outfits(friend_id,head) VALUES (%s,'berry-beanie')",(friend,))
+        db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'berry-beanie',now())",(friend,))
+        model=AsyncMock(return_value=ModelResult(value=picture(),cost=Decimal('.02')))
+        catalog=DecorCatalog(); usage=SimpleNamespace(record=AsyncMock())
+        art=ScenePictures(store,None,SimpleNamespace(edit_picture=model),'fixture',catalog=catalog)
+        worker=SceneWorker(store,art,usage,default_wear=True)
+        reactions=DecorReactions(store,None,usage,catalog,worker,default_wear=True)
+        row,=await reactions.due(friend)
+        job=await reactions.reaction_job(row)
+        self.assertEqual(await worker.step(),1)
+        self.assertEqual(await reactions.scene(row),job['id'])
+        self.assertEqual(db.admin('SELECT state,prompt_version,cost_usd,character_id FROM marong.scene_pictures WHERE id=%s',(job['id'],)), [('done','scene-marong-v1',Decimal('.02'),None)])
+        self.assertEqual(model.await_count,1)
+        pet=db.admin("INSERT INTO marong.characters(friend_id,kind) VALUES (%s,'dog') RETURNING id",(friend,))[0][0]
+        db.admin('UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s',(pet,friend))
+        self.assertFalse((await reactions.due(friend))[0]['active'])
+        self.assertIsNone(await worker.wait_for_topic({'id':job['id'],'state':'done'}))
+
+    async def test_tc772_disabled_drains_default_reactions(self):
+        from marong.decor_reactions import DecorReactions, drain_default_wear
+        db = TestDB()
+        self.addCleanup(db.close)
+        db.apply_unified_prerequisites(); db.apply_unified(); db.apply_pet_app_prerequisites(); db.apply_pet_app(); db.apply_marong_outfit()
+        friend = db.admin("INSERT INTO marong.friends(name) VALUES ('fixture') RETURNING id")[0][0]
+        db.admin("INSERT INTO marong.decor_items(id,kind,slot) VALUES ('fixture-hat','hat','head')")
+        db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'fixture-hat',now())", (friend,))
+        job = db.admin("INSERT INTO marong.scene_pictures(friend_id,purpose,item_id) VALUES (%s,'reaction','fixture-hat') RETURNING id", (friend,))[0][0]
+        db.admin("UPDATE marong.outfit_firsts SET scene_job_id=%s", (job,))
+        drawing = db.admin("INSERT INTO marong.scene_pictures(friend_id,purpose,item_id,state,lease_until) VALUES (%s,'reaction','fixture-hat','drawing',now()+interval '10 minutes') RETURNING id", (friend,))[0][0]
+        store = UnifiedStore(db.app_url)
+        await store.open(wait=True)
+        self.addAsyncCleanup(store.close)
+        reactions = DecorReactions(store, None, None, None, None, default_wear=False)
+        self.assertEqual(await reactions.due(), [])
+        worker = SceneWorker(store, None, None, default_wear=False)
+        self.assertEqual(await worker.step(), 0)
+        self.assertEqual(db.admin('SELECT state FROM marong.outfit_firsts'), [('skipped',)])
+        self.assertEqual(db.admin('SELECT state,fail_reason,cost_usd FROM marong.scene_pictures WHERE id=%s', (job,)), [('failed','disabled',0)])
+        self.assertEqual(db.admin('SELECT state FROM marong.scene_pictures WHERE id=%s', (drawing,)), [('drawing',)])
+        db.admin("INSERT INTO marong.decor_items(id,kind,slot) VALUES ('second-hat','hat','head')")
+        db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'second-hat',now()-interval '2 hours')", (friend,))
+        reactions.default_wear = True
+        self.assertEqual(await reactions.due(), [])
+        self.assertEqual(db.admin("SELECT state FROM marong.outfit_firsts WHERE item_id='second-hat'"), [('skipped',)])
+        db.admin("UPDATE marong.scene_pictures SET lease_until=now()-interval '1 second' WHERE id=%s", (drawing,))
+        await drain_default_wear(store)
+        self.assertEqual(db.admin('SELECT state,fail_reason FROM marong.scene_pictures WHERE id=%s', (drawing,)), [('failed','timeout')])
+
     async def test_scene_prompts_references_retries_and_cost(self):
         self.assertEqual(subject({"kind": "dog"}), "a small dog")
         self.assertEqual(subject(PET), "a small brown poodle")
@@ -102,7 +226,7 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
     async def test_tc554_scene_worker_logs_omit_prompt_and_names(self):
         db = TestDB()
         self.addCleanup(db.close)
-        db.apply_unified_prerequisites(); db.apply_unified(); db.apply_pet_app_prerequisites(); db.apply_pet_app()
+        db.apply_unified_prerequisites(); db.apply_unified(); db.apply_pet_app_prerequisites(); db.apply_pet_app(); db.apply_marong_outfit()
         store = UnifiedStore(db.app_url)
         await store.open(wait=True)
         self.addAsyncCleanup(store.close)
@@ -146,6 +270,7 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         db.apply_unified()
         db.apply_pet_app_prerequisites()
         db.apply_pet_app()
+        db.apply_marong_outfit()
         store = UnifiedStore(db.app_url)
         await store.open(wait=True)
         self.addAsyncCleanup(store.close)

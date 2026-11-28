@@ -112,7 +112,9 @@ class AppDecor:
     async def equipped(self, character, template):
         if not self.catalog:
             return dict.fromkeys(WEAR)
-        row = await self.store._one("SELECT head,body,neck FROM marong.outfits WHERE character_id=%s", (character,))
+        sql = ("SELECT head,body,neck FROM marong.marong_outfits WHERE friend_id=%s" if template == "marong"
+               else "SELECT head,body,neck FROM marong.outfits WHERE character_id=%s")
+        row = await self.store._one(sql, (character,))
         return self.outfit_view(row, template)
 
     async def closet(self, req):
@@ -121,7 +123,8 @@ class AppDecor:
             SELECT c.id,c.template FROM marong.friend_profiles p JOIN marong.characters c
             ON c.id=p.character_id AND c.friend_id=p.friend_id AND c.status='ready' WHERE p.friend_id=%s
         """, (friend,))
-        outfit = await self.equipped(character["id"], character["template"]) if character else None
+        outfit = (await self.equipped(character["id"], character["template"]) if character else
+                  await self.equipped(friend, "marong") if self.chat.pet_app_settings.default_wear and self.chat.pet_app_settings.decor else None)
         return self.chat._json(200, {"items": await self.items_for(friend, closet=True),
                                     "characterId": character["id"] if character else None,
                                     "outfit": outfit, "diaryDecor": await self.diary_view(friend)})
@@ -154,6 +157,53 @@ class AppDecor:
             WHERE d.id=ANY(%s) AND d.item_set=%s AND (d.starter OR o.item_id IS NOT NULL)
         """, (friend, ids, self.catalog.set))
         return {row["id"]: row for row in await cursor.fetchall() if row["id"] in self.catalog.items}
+
+    async def marong_outfit(self, req):
+        if not (self.chat.pet_app_settings.decor and self.chat.pet_app_settings.default_wear):
+            raise Problem("not_found")
+        friend = await self.friend(req, write=True)
+        try:
+            picks = await self.chat._body(req)
+        except Problem:
+            raise Problem("invalid_input", [{"field": "request", "reason": "bad_format"}]) from None
+        errors, ids = [], []
+        if set(picks) - set(WEAR):
+            errors.append({"field": "request", "reason": "bad_format"})
+        for slot in WEAR:
+            if slot not in picks:
+                errors.append({"field": slot, "reason": "required"})
+            elif picks[slot] is not None:
+                try:
+                    ids.append(self.item_key(picks[slot]))
+                except Problem:
+                    errors.append({"field": slot, "reason": "bad_format"})
+        if errors:
+            raise Problem("invalid_input", errors)
+        async with self.store.pool.connection() as conn, conn.transaction():
+            await one(conn, "SELECT id FROM marong.friends WHERE id=%s FOR UPDATE", (friend,))
+            owned = await self.owned_items(conn, friend, ids)
+            if set(ids) != owned.keys():
+                raise Problem("not_owned")
+            errors = [{"field": slot, "reason": "wrong_kind"} for slot in WEAR
+                      if picks[slot] and owned[picks[slot]]["slot"] != slot]
+            if errors:
+                raise Problem("invalid_input", errors)
+            prior = await one(conn, "SELECT head,body,neck FROM marong.marong_outfits WHERE friend_id=%s", (friend,))
+            if prior != picks:
+                await conn.execute("""INSERT INTO marong.marong_outfits(friend_id,head,body,neck) VALUES (%s,%s,%s,%s)
+                    ON CONFLICT (friend_id) DO UPDATE SET head=excluded.head,body=excluded.body,
+                    neck=excluded.neck,updated_at=now()""", (friend, *(picks[slot] for slot in WEAR)))
+                reaction = False
+                for slot in WEAR:
+                    item = picks[slot]
+                    if item is None or (prior and prior[slot] == item):
+                        continue
+                    added = await one(conn, """INSERT INTO marong.outfit_firsts(friend_id,character_id,item_id,state,next_at,finished_at)
+                        VALUES (%s,NULL,%s,%s,now()+interval '3 minutes',CASE WHEN %s THEN now() END)
+                        ON CONFLICT (friend_id,item_id) WHERE character_id IS NULL DO NOTHING RETURNING id""",
+                        (friend, item, 'skipped' if reaction else 'waiting', reaction))
+                    reaction = reaction or added is not None
+        return self.chat._json(200, self.outfit_view(picks, 'marong'))
 
     async def outfit(self, req):
         friend = await self.friend(req, write=True)
@@ -232,3 +282,4 @@ class AppDecor:
         router.add_post("/chat/api/shop/{itemId}/claim", self.claim)
         router.add_get("/chat/api/closet", self.closet)
         router.add_put("/chat/api/characters/{id}/outfit", self.outfit)
+        router.add_put("/chat/api/marong/outfit", self.marong_outfit)

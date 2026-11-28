@@ -82,12 +82,23 @@ def write_prompt(name: str, has_look: bool, persona: Path, *, character=None) ->
     return prompt
 
 
-def draw_prompt(scene: str, look: dict | None) -> str:
+def draw_prompt(scene: str, look: dict | None, *, outfit=None) -> str:
     look_line = ""
     if look and re.search(r"\bthe +friend\b", scene, re.IGNORECASE):
         look_line = (f"The friend is a person with {HAIR[look['hair']]}, {GLASSES[look['glasses']]} "
                      f"and a {look['top']} top.")
-    return DRAW_PROMPT.format(scene=scene, look_line=look_line)
+    prompt = DRAW_PROMPT.format(scene=scene, look_line=look_line)
+    if outfit:
+        prompt = prompt.replace('\nScene:', '\nThe little white character is wearing: ' + ', '.join(outfit) + '.\nScene:', 1)
+    return prompt
+
+
+async def marong_outfit_prompts(store, catalog, friend):
+    if not catalog:
+        return []
+    row = await store._one('SELECT body,neck,head FROM marong.marong_outfits WHERE friend_id=%s', (friend,))
+    return [catalog.items[ident].prompt for slot in ('body', 'neck', 'head')
+            if row and (ident := row[slot]) in catalog.items and catalog.items[ident].prompt]
 
 
 @dataclass(frozen=True)
@@ -285,14 +296,14 @@ class DiaryModels:
             return ModelResult(outcome="invalid", error="json", stop=stop, **result)
         return ModelResult(value=value, stop=stop, **result)
 
-    async def draw(self, scene: str, look: dict | None) -> ModelResult:
+    async def draw(self, scene: str, look: dict | None, *, outfit=None) -> ModelResult:
         started = monotonic()
         try:
             images = [("image[]", (name, (REFERENCES / name).read_bytes(), "image/webp"))
                       for name in ("01-neutral.webp", "02-big-laugh.webp")]
         except OSError:
             return ModelResult(outcome="error", error="references", total_ms=milliseconds(started))
-        return await self.edit_picture(draw_prompt(scene, look), images, model=self.image_model,
+        return await self.edit_picture(draw_prompt(scene, look, outfit=outfit), images, model=self.image_model,
                                        size="1536x1024", output_format=self.image_format, deadline=60)
 
     async def edit_picture(self, prompt, images, *, model, size, output_format, deadline, estimate_errors=False):

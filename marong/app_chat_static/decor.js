@@ -1,7 +1,7 @@
 'use strict';
 
 (() => {
-  const {node, button, link, request, signal} = Unified;
+  const {node, button, link, request, signal, endLetter} = Unified;
   const title = document.getElementById('decor-title');
   const target = document.getElementById('decor-content');
   const screen = document.getElementById('decor-screen');
@@ -59,11 +59,11 @@
     base.alt = '';
     base.src = pet ? '/chat/api/characters/' + pet.id + '/images/smile' : '/face/v1/01-neutral.webp';
     frame.append(base);
-    if (!pet) return frame;
+    if (!pet && !profile.features?.defaultWear) return frame;
     for (const slot of ['body', 'neck', 'head']) {
       const layer = node('img', '', 'decor-layer');
       layer.alt = '';
-      const source = item?.slot === slot ? item.thumbUrl.replace(/thumb\.webp$/, pet.template + '.png') : outfit?.[slot]?.layerUrl;
+      const source = item?.slot === slot ? item.thumbUrl.replace(/thumb\.webp$/, (pet?.template || 'marong') + '.png') : outfit?.[slot]?.layerUrl;
       if (!source) continue;
       layer.src = source;
       layer.addEventListener('error', () => layer.remove(), {once: true});
@@ -86,7 +86,7 @@
       if (item.starter) card.append(node('p', '기본', 'caption'));
       if (!detail) card.append(link('아이템 보기', '#' + item.id, 'btnt'));
       if (detail && item.owned) {
-        if (item.slot && profile.character) {
+        if (item.slot && (profile.character || profile.features?.defaultWear)) {
           const wear = button('입혀 볼래', async () => {
             for (const note of wear.parentElement.querySelectorAll('[id^="outfit-error-"]')) note.remove();
             wear.removeAttribute('aria-invalid');
@@ -94,14 +94,17 @@
             signal(error);
             wear.disabled = true;
             const picks = Object.fromEntries(['head', 'body', 'neck'].map(slot => [slot,
-              slot === item.slot ? item.id : profile.character.outfit?.[slot]?.id || null]));
-            const result = await request('/chat/api/characters/' + profile.character.id + '/outfit', picks, 'PUT');
+              slot === item.slot ? item.id : (profile.character?.outfit || profile.marongOutfit)?.[slot]?.id || null]));
+            const result = await request(profile.character ? '/chat/api/characters/' + profile.character.id + '/outfit' : '/chat/api/marong/outfit', picks, 'PUT');
             if (result.status === 200) {
-              sessionStorage.setItem('decor-worn', profile.character.name + '가 ' + item.name + ' 입었어!');
+              sessionStorage.setItem('decor-worn', endLetter(profile.character?.name || profile.botName || '마롱이', '이가', '가') + ' ' + item.name + ' 입었어!');
               location.href = '/chat/closet';
             } else if (result.status === 409 && result.body?.code === 'not_ready') {
               wear.disabled = false;
               signal(error, '아직 다 만들지 못한 캐릭터야', result);
+            } else if (result.status === 409 && result.body?.code === 'not_owned') {
+              wear.disabled = false;
+              signal(error, '아직 안 받은 거야', result);
             } else {
               wear.disabled = false;
               problem(result);
@@ -145,7 +148,10 @@
     if (detail) {
       target.append(link('상점으로', '/chat/shop', 'btnt'));
       if (detail.slot) {
-        if (profile.character) target.append(face(profile.character.outfit, detail));
+        if (profile.character || profile.features?.defaultWear) {
+          target.append(face(profile.character?.outfit || profile.marongOutfit, detail));
+          if (!profile.character) target.append(node('p', endLetter(profile.botName, '이가', '가') + ' 입으면 이렇게 돼', 'caption'));
+        }
         else target.append(node('p', '반려동물 캐릭터에 입힐 수 있어', 'caption'));
       } else {
         const frame = node('div', '', 'decor-book-preview-frame');
@@ -203,7 +209,7 @@
       return;
     }
     target.append(face(inventory.outfit));
-    if (!inventory.characterId) {
+    if (!inventory.characterId && !profile.features?.defaultWear) {
       target.append(node('p', '반려동물 캐릭터를 만들면 옷을 입힐 수 있어', 'caption'));
       if (profile.features?.character) target.append(link('캐릭터 만들기', '/chat/character/new', 'btn2'));
       return;
@@ -223,7 +229,7 @@
         const choice = button(item.name, () => {
           const next = {...inventory.outfit};
           next[slot] = selected ? null : {id: item.id, name: item.name,
-            layerUrl: item.thumbUrl.replace(/thumb\.webp$/, profile.character.template + '.png')};
+            layerUrl: item.thumbUrl.replace(/thumb\.webp$/, (profile.character?.template || 'marong') + '.png')};
           inventory.outfit = next;
           wearPending.push({itemId: item.id, picks: Object.fromEntries(Object.keys(slots).map(key => [key, next[key]?.id || null]))});
           render();
@@ -249,7 +255,7 @@
       wearCurrent = job.itemId;
       render();
       const picks = job.picks;
-      const result = await request('/chat/api/characters/' + inventory.characterId + '/outfit', picks, 'PUT');
+      const result = await request(inventory.characterId ? '/chat/api/characters/' + inventory.characterId + '/outfit' : '/chat/api/marong/outfit', picks, 'PUT');
       if (result.status !== 200) {
         wearPending = [];
         wearCurrent = null;

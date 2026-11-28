@@ -256,7 +256,7 @@ async function refreshProfile(){
     const face=$('face');
     face.parentElement.querySelectorAll('.outfit-layer').forEach(layer=>layer.remove());
     for(const slot of ['body','neck','head']){
-      const url=profile.character?.outfit?.[slot]?.layerUrl;
+      const url=(profile.character?.outfit||profile.marongOutfit)?.[slot]?.layerUrl;
       if(typeof url!=='string'||!/^\/chat\/decor\/v[0-9]{1,3}\/[a-z0-9-]{3,40}\/[a-z_]+\.png$/.test(url))continue;
       const layer=new Image();
       layer.className='outfit-layer';layer.src=url;layer.alt='';
