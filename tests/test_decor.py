@@ -131,6 +131,14 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(messages), 1)
         await asyncio.gather(reactions.finish(row,'sent',pictures[1]), reactions.finish(row,'sent',pictures[0]))
         self.assertEqual(str(db.admin('SELECT scene_picture_id FROM marong.outfit_firsts WHERE id=%s', (first,))[0][0]), messages[0][0])
+        default_first = db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'fixture-hat',now()) RETURNING id", (friend,))[0][0]
+        default_row = {**row, 'id':default_first, 'character_id':None}
+        with self.assertRaises(RuntimeError):
+            await reactions.reaction_job(default_row,after_insert=lambda: (_ for _ in ()).throw(RuntimeError('stop')))
+        self.assertEqual(db.admin('SELECT count(*) FROM marong.scene_pictures WHERE character_id IS NULL'), [(0,)])
+        a, b = await asyncio.gather(reactions.reaction_job(default_row), reactions.reaction_job(default_row))
+        self.assertEqual(a['id'],b['id'])
+        self.assertEqual(db.admin('SELECT count(*) FROM marong.scene_pictures WHERE character_id IS NULL'), [(1,)])
 
     async def test_tc761_762_763_771_default_outfit_is_session_scoped(self):
         folder = tempfile.TemporaryDirectory()

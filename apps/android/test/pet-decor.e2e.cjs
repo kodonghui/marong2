@@ -66,12 +66,12 @@ test('TC-765: default character can wear and remove a hat', {skip:!chromium}, as
   try {
     const page=await browser.newPage({viewport:{width:360,height:780}});
     const hat={id:'berry-beanie',kind:'hat',slot:'head',name:'털모자',owned:true,thumbUrl:'/chat/decor/v1/berry-beanie/thumb.webp'};
-    let outfit={head:null,body:null,neck:null};
+    let outfit={head:null,body:null,neck:null}, status=200;
     await page.route('**/*',async route=>{
       const address=new URL(route.request().url()).pathname;
       if(address==='/chat/api/profile') return route.fulfill({json:{botName:'마롱이',character:null,features:{defaultWear:true},marongOutfit:outfit}});
       if(address==='/chat/api/closet') return route.fulfill({json:{items:[hat],characterId:null,outfit}});
-      if(address==='/chat/api/marong/outfit') { const picks=route.request().postDataJSON(); outfit={...outfit,head:picks.head?{id:hat.id,name:hat.name,layerUrl:'/chat/decor/v1/berry-beanie/marong.png'}:null};return route.fulfill({json:outfit}); }
+      if(address==='/chat/api/marong/outfit') { const picks=route.request().postDataJSON(); if(status!==200) return route.fulfill({status,json:{code:status===409?'not_owned':'internal'}}); outfit={...outfit,head:picks.head?{id:hat.id,name:hat.name,layerUrl:'/chat/decor/v1/berry-beanie/marong.png'}:null};return route.fulfill({json:outfit}); }
       if(address.startsWith('/face/') || address.startsWith('/chat/decor/')) return route.fulfill({contentType:'image/png',body:BLANK});
       const file=address==='/chat/closet'?'decor.html':path.basename(address);
       if(!['decor.html','decor.js','chat.css','unified.css','unified.js'].includes(file)) return route.fulfill({status:404});
@@ -83,6 +83,12 @@ test('TC-765: default character can wear and remove a hat', {skip:!chromium}, as
     await page.locator('.decor-layer[src$="/marong.png"]').waitFor();
     await choice.click();
     await page.waitForFunction(()=>document.querySelectorAll('.decor-layer').length===0);
+    for(const failure of [409,500]) {
+      status=failure;
+      await choice.click();
+      await page.getByText(failure===409?'아직 안 받은 거야':'잠깐 문제가 생겼어. 다시 해 볼래?').waitFor();
+      assert.equal(await page.locator('.decor-layer').count(),0);
+    }
   } finally {await browser.close();}
 });
 
