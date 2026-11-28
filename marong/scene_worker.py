@@ -5,6 +5,8 @@ from datetime import timedelta
 import logging
 from time import monotonic
 
+from psycopg.types.json import Jsonb
+
 from .topics import picture_set
 
 
@@ -105,6 +107,13 @@ class SceneWorker:
                 await self.usage.record(updated["friend_id"], conn=conn, images=1)
         return updated is not None
 
+    async def record_drawn_outfit(self, job, snapshot):
+        async with self.store.pool.connection() as conn, conn.transaction():
+            cursor = await conn.execute("""UPDATE marong.scene_pictures SET drawn_outfit=%s
+                WHERE id=%s AND state='drawing' AND lease_until=%s AND attempts=%s RETURNING id""",
+                (Jsonb(snapshot), job['id'], job['lease_until'], job['attempts']))
+            return await cursor.fetchone() is not None
+
     async def process(self, job):
         started = monotonic()
         character = await self.store._one("""
@@ -114,6 +123,7 @@ class SceneWorker:
         topics = picture_set()
         topic = topics.get(job["topic"]) if topics and job["purpose"] == "topic" else None
         result = None
+        drawn_outfit = None
         if character or (job['character_id'] is None and self.default_wear and job['purpose'] == 'reaction'):
             selections = job['outfit']
             if character is None:
@@ -124,8 +134,8 @@ class SceneWorker:
                         item = catalog.items.get(ident)
                         if item and item.slot in by_slot:
                             by_slot[item.slot] = ident
-                    valid = await asyncio.to_thread(catalog.valid_marong_outfit, by_slot)
-                    selections = [valid[slot] for slot in ('body', 'neck', 'head') if valid[slot]]
+                    drawn_outfit = await asyncio.to_thread(catalog.marong_outfit_snapshot, by_slot)
+                    selections = [layer['id'] for layer in drawn_outfit]
                 else:
                     selections = []
             outfit = self.pictures.outfit_prompts(selections)
@@ -134,6 +144,8 @@ class SceneWorker:
             elif job["purpose"] == "reaction":
                 item = self.pictures.catalog.items.get(job["item_id"]) if self.pictures.catalog else None
                 if item and item.prompt and (character is not None or job['item_id'] in selections):
+                    if character is None and not await self.record_drawn_outfit(job, drawn_outfit):
+                        return
                     subject = 'little white character' if character is None else 'pet character'
                     scene = f"The {subject} proudly shows off the new {item.prompt}, looking at the viewer."
                     result = await self.pictures.draw("reaction", character, outfit, scene)

@@ -138,6 +138,10 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         job = await reactions.reaction_job(row)
         original = path.read_bytes(); path.unlink()
         async def restore_during_draw(*args, **kwargs):
+            saved = db.admin('SELECT state,drawn_outfit FROM marong.scene_pictures WHERE id=%s',(job['id'],))[0]
+            self.assertEqual(saved[0], 'drawing')
+            self.assertEqual([layer['id'] for layer in saved[1]], ['oat-sweater'])
+            self.assertEqual(len(saved[1][0]['sha256']), 64)
             path.write_bytes(original)
             return ModelResult(value=picture(), cost=Decimal('.02'))
         model.side_effect = restore_during_draw
@@ -163,6 +167,76 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         result = await reactions.scene(row)
         self.assertNotEqual(result,job['id'])
         self.assertEqual(db.admin('SELECT fallback FROM marong.scene_pictures WHERE id=%s',(result,)), [(True,)])
+
+    async def test_tc767_773_gate_then_failed_send_reuses_one_job(self):
+        from marong.unified_delivery import AppProactive, UnifiedDelivery
+        for pet_mode in (False, True):
+            with self.subTest(pet=pet_mode):
+                db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+                if pet_mode:
+                    pet=db.admin("""INSERT INTO marong.characters(friend_id,kind,status,stage,ready_at,template,name,traits)
+                        VALUES (%s,'dog','ready','done',now(),'dog_small','시험','{}') RETURNING id""", (friend,))[0][0]
+                    db.admin('UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s',(pet,friend))
+                    db.admin("INSERT INTO marong.outfits(character_id,head) VALUES (%s,'berry-beanie')",(pet,))
+                    db.admin("INSERT INTO marong.outfit_firsts(friend_id,character_id,item_id,next_at) VALUES (%s,%s,'berry-beanie',now())",(friend,pet))
+                    worker.default_wear = False; reactions.default_wear = False
+                    worker.pictures.media = SimpleNamespace(read=AsyncMock(return_value=b'fixture'))
+                row = next(r for r in await reactions.due(friend) if r['character_id'] == (pet if pet_mode else None))
+                job = await reactions.reaction_job(row)
+                self.assertEqual(await worker.step(),1)
+                await reactions.defer(row,db.admin('SELECT now()')[0][0])
+                row = next(r for r in await reactions.due(friend) if r['id'] == row['id'])
+                self.assertEqual(row['attempts'],1)
+                self.assertEqual((await reactions.reaction_job(row))['id'],job['id'])
+                actual = UnifiedDelivery(store,SimpleNamespace(enabled=False),'session',lambda:None)
+                calls = []
+                async def fail_once(*args, **kwargs):
+                    calls.append(kwargs['key'])
+                    return None if len(calls)==1 else await actual.say(*args,**kwargs)
+                delivery = SimpleNamespace(say=fail_once, push=actual.push)
+                loop=AppProactive(SimpleNamespace(),store,SimpleNamespace(proactive_message=AsyncMock(return_value=None)),RoomLocks(),delivery,reactions=reactions)
+                loop.reaction_friends={friend}; loop.still_current=AsyncMock(return_value=True)
+                store.record_delivery=AsyncMock()
+                self.assertIsNone(await loop.priority({'friend_id':friend},None))
+                self.assertTrue((await loop.priority({'friend_id':friend},None))['ok'])
+                self.assertEqual(calls,[f"app-reaction:{row['id']}"]*2)
+                self.assertEqual(db.admin('SELECT scene_job_id,state FROM marong.outfit_firsts WHERE id=%s',(row['id'],)),[(job['id'],'sent')])
+                self.assertEqual(db.admin('SELECT count(*) FROM marong.scene_pictures WHERE id=%s',(job['id'],)),[(1,)])
+                self.assertEqual(db.admin('SELECT count(*) FROM marong.messages WHERE kakao_id=%s',(calls[0],)),[(1,)])
+                self.assertEqual(model.await_count,1)
+
+    async def test_tc773_pet_timeout_reuses_job_with_zero_cost_fallback(self):
+        from marong.decor_reactions import DecorReactions
+        db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+        pet=db.admin("""INSERT INTO marong.characters(friend_id,kind,status,stage,ready_at,template,name,traits)
+            VALUES (%s,'dog','ready','done',now(),'dog_small','시험','{}') RETURNING id""", (friend,))[0][0]
+        db.admin('UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s',(pet,friend))
+        db.admin("INSERT INTO marong.outfits(character_id,head) VALUES (%s,'berry-beanie')",(pet,))
+        db.admin("INSERT INTO marong.outfit_firsts(friend_id,character_id,item_id,next_at) VALUES (%s,%s,'berry-beanie',now())",(friend,pet))
+        worker.default_wear=False
+        expression=(Path(__file__).resolve().parents[1]/'marong/call/static/face/v1/05-excited.webp').read_bytes()
+        media=SimpleNamespace(read=AsyncMock(return_value=expression))
+        reactions=DecorReactions(store,media,SimpleNamespace(record=AsyncMock()),catalog,worker,default_wear=False)
+        row,=await reactions.due(friend)
+        with patch('marong.scene_worker.monotonic',side_effect=[0,186,0,186]):
+            first=await reactions.scene(row); second=await reactions.scene(row)
+        jobs=db.admin("SELECT state,fallback,cost_usd FROM marong.scene_pictures ORDER BY created_at")
+        self.assertEqual(jobs,[('queued',False,Decimal(0)),('done',True,Decimal(0)),('done',True,Decimal(0))])
+        self.assertNotEqual(first,second)
+        self.assertEqual(db.admin('SELECT count(*) FROM marong.scene_pictures WHERE state=%s',('queued',)),[(1,)])
+        model.assert_not_awaited()
+
+    async def test_tc767_default_model_failure_cost_and_fallback(self):
+        db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+        model.return_value = ModelResult(outcome='error',cost=Decimal('.025'))
+        row, = await reactions.due(friend)
+        job = await reactions.reaction_job(row)
+        self.assertEqual(await worker.step(),1)
+        sent = await reactions.scene(row)
+        self.assertNotEqual(job['id'],sent)
+        self.assertEqual(db.admin('SELECT state,cost_usd,fallback FROM marong.scene_pictures WHERE id=%s',(job['id'],)), [('failed',Decimal('.05'),False)])
+        self.assertEqual(db.admin('SELECT state,cost_usd,fallback FROM marong.scene_pictures WHERE id=%s',(sent,)), [('done',Decimal(0),True)])
+        self.assertEqual(model.await_count,2)
 
     async def test_tc773_failure_cost_is_not_lost_in_fallback(self):
         from marong.decor_reactions import DecorReactions

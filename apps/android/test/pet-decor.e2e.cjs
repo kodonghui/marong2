@@ -72,71 +72,94 @@ test('TC-764: chat shows default outfit on header, messages and typing', {skip:!
   const {startChatSite}=require('./support/chat-site.cjs');
   const site=await startChatSite(), browser=await chromium.launch();
   try {
-    const page=await browser.newPage({viewport:{width:430,height:850}});
-    const paths=['body-item','neck-item','head-item'].map(id=>`/chat/decor/v1/${id}/marong.png`);
-    site.state.messages=[{id:1,from:'marong',text:'합성 대화',at:'2026-11-26T09:00:00+09:00',via:'app',kind:'chat'}];
-    await page.route('**/chat/api/profile',r=>r.fulfill({json:{botName:'마롱이',character:null,features:{decor:true,defaultWear:true,friends:false},
-      marongOutfit:{body:{layerUrl:paths[0]},neck:{layerUrl:paths[1]},head:{layerUrl:paths[2]}}}}));
-    await page.route('**/chat/decor/**',r=>r.fulfill({contentType:'image/png',body:BLANK}));
-    await page.goto(site.url+'/chat/');
-    await page.locator('#header-pet-face .face-layer').first().waitFor();
-    await page.locator('.message.marong .face .face-layer').first().waitFor();
-    for(const selector of ['#header-pet-face','.message.marong .face','#typing .face']) {
-      assert.deepEqual(await page.locator(selector).first().locator('.face-layer').evaluateAll(a=>a.map(i=>i.getAttribute('src'))),paths);
+    for (const width of [360,430]) for (const hour of [3,15]) {
+      const page=await browser.newPage({viewport:{width,height:850}});
+      await page.clock.setFixedTime(new Date(`2026-11-28T${String(hour).padStart(2,'0')}:00:00Z`));
+      let missingLayers=false;
+      const paths=['body-item','neck-item','head-item'].map(id=>`/chat/decor/v1/${id}/marong.png`);
+      site.state.messages=[{id:1,from:'marong',text:'합성 대화',at:'2026-11-26T09:00:00+09:00',via:'app',kind:'chat'}];
+      await page.route('**/chat/api/profile',r=>r.fulfill({json:{botName:'마롱이',character:null,features:{decor:true,defaultWear:true,friends:false},
+        marongOutfit:{body:{layerUrl:paths[0]},neck:{layerUrl:paths[1]},head:{layerUrl:paths[2]}}}}));
+      await page.route('**/chat/decor/**',r=>missingLayers?r.fulfill({status:404}):r.fulfill({contentType:'image/png',body:BLANK}));
+      await page.goto(site.url+'/chat/');
+      await page.locator('#header-pet-face .face-layer').first().waitFor();
+      await page.locator('.message.marong .face .face-layer').first().waitFor();
+      for(const selector of ['#header-pet-face','.message.marong .face','#typing .face']) {
+        assert.deepEqual(await page.locator(selector).first().locator('.face-layer').evaluateAll(a=>a.map(i=>i.getAttribute('src'))),paths);
+      }
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
+      assert.equal(await page.locator('html').getAttribute('data-theme'),hour===3?'chestnut':'night');
+      missingLayers=true;
+      const missingResponse=page.waitForResponse(response=>response.url().includes('/chat/decor/') && response.status()===404);
+      await page.reload();
+      await missingResponse;
+      await page.waitForFunction(()=>document.querySelectorAll('#header-pet-face .face-layer').length===0);
+      assert.equal(await page.locator('#header-pet-face').isVisible(),true);
+      await page.close();
     }
-    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),430);
   } finally {await browser.close();await site.close();}
 });
 
 test('TC-764: profile shows default character outfit', {skip:!chromium}, async()=>{
   const browser=await chromium.launch();
   try {
-    const page=await browser.newPage({viewport:{width:360,height:780}});
-    const layer='/chat/decor/v1/berry-beanie/marong.png';
-    await page.route('**/*',async route=>{
-      const address=new URL(route.request().url()).pathname;
-      if(address==='/chat/api/profile') return route.fulfill({json:{friendName:'시험',botName:'마롱이',character:null,features:{defaultWear:true,decor:true,character:true},marongOutfit:{head:{id:'berry-beanie',layerUrl:layer},body:null,neck:null},google:'off',usageToday:null}});
-      if(address==='/chat/api/characters') return route.fulfill({json:{characters:[],limit:4}});
-      if(address.startsWith('/face/') || address.startsWith('/chat/decor/')) return route.fulfill({contentType:'image/png',body:BLANK});
-      const file=address==='/chat/me'?'profile.html':path.basename(address);
-      if(!['profile.html','profile.js','chat.css','unified.css','unified.js'].includes(file)) return route.fulfill({status:404});
-      return route.fulfill({contentType:file.endsWith('.css')?'text/css':file.endsWith('.js')?'application/javascript':'text/html',body:await readFile(path.join(STATIC,file))});
-    });
-    await page.goto(BASE+'/chat/me');
-    await page.getByRole('link',{name:'꾸미기 · 모자'}).waitFor({timeout:3000});
-    await page.locator('#face .profile-outfit-layer').waitFor();
-    await page.locator('.profile-portrait .profile-outfit-layer').waitFor();
-    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),360);
+    for (const width of [360,430]) for (const hour of [3,15]) {
+      const page=await browser.newPage({viewport:{width,height:850}});
+      await page.clock.setFixedTime(new Date(`2026-11-28T${String(hour).padStart(2,'0')}:00:00Z`));
+      const layer='/chat/decor/v1/berry-beanie/marong.png';
+      await page.route('**/*',async route=>{
+        const address=new URL(route.request().url()).pathname;
+        if(address==='/chat/api/profile') return route.fulfill({json:{friendName:'시험',botName:'마롱이',character:null,features:{defaultWear:true,decor:true,character:true},marongOutfit:{head:{id:'berry-beanie',layerUrl:layer},body:null,neck:null},google:'off',usageToday:null}});
+        if(address==='/chat/api/characters') return route.fulfill({json:{characters:[],limit:4}});
+        if(address.startsWith('/face/') || address.startsWith('/chat/decor/')) return route.fulfill({contentType:'image/png',body:BLANK});
+        const file=address==='/chat/me'?'profile.html':path.basename(address);
+        if(!['profile.html','profile.js','chat.css','unified.css','unified.js'].includes(file)) return route.fulfill({status:404});
+        return route.fulfill({contentType:file.endsWith('.css')?'text/css':file.endsWith('.js')?'application/javascript':'text/html',body:await readFile(path.join(STATIC,file))});
+      });
+      await page.goto(BASE+'/chat/me');
+      await page.getByRole('link',{name:'꾸미기 · 모자'}).waitFor({timeout:3000});
+      await page.locator('#face .profile-outfit-layer').waitFor();
+      await page.locator('.profile-portrait .profile-outfit-layer').waitFor();
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
+      assert.equal(await page.locator('html').getAttribute('data-theme'),hour===3?'chestnut':'night');
+      await page.close();
+    }
   } finally {await browser.close();}
 });
 
 test('TC-765: default character can wear and remove a hat', {skip:!chromium}, async()=>{
   const browser=await chromium.launch();
   try {
-    const page=await browser.newPage({viewport:{width:360,height:780}});
-    const hat={id:'berry-beanie',kind:'hat',slot:'head',name:'털모자',owned:true,thumbUrl:'/chat/decor/v1/berry-beanie/thumb.webp'};
-    let outfit={head:null,body:null,neck:null}, status=200;
-    await page.route('**/*',async route=>{
-      const address=new URL(route.request().url()).pathname;
-      if(address==='/chat/api/profile') return route.fulfill({json:{botName:'마롱이',character:null,features:{defaultWear:true},marongOutfit:outfit}});
-      if(address==='/chat/api/closet') return route.fulfill({json:{items:[hat],characterId:null,outfit}});
-      if(address==='/chat/api/marong/outfit') { const picks=route.request().postDataJSON(); if(status!==200) return route.fulfill({status,json:{code:status===409?'not_owned':'internal'}}); outfit={...outfit,head:picks.head?{id:hat.id,name:hat.name,layerUrl:'/chat/decor/v1/berry-beanie/marong.png'}:null};return route.fulfill({json:outfit}); }
-      if(address.startsWith('/face/') || address.startsWith('/chat/decor/')) return route.fulfill({contentType:'image/png',body:BLANK});
-      const file=address==='/chat/closet'?'decor.html':path.basename(address);
-      if(!['decor.html','decor.js','chat.css','unified.css','unified.js'].includes(file)) return route.fulfill({status:404});
-      return route.fulfill({contentType:file.endsWith('.css')?'text/css':file.endsWith('.js')?'application/javascript':'text/html',body:await readFile(path.join(STATIC,file))});
-    });
-    await page.goto(BASE+'/chat/closet');
-    const choice=page.getByRole('button',{name:'털모자'});
-    await choice.click({timeout:3000});
-    await page.locator('.decor-layer[src$="/marong.png"]').waitFor();
-    await choice.click();
-    await page.waitForFunction(()=>document.querySelectorAll('.decor-layer').length===0);
-    for(const failure of [409,500]) {
-      status=failure;
+    for (const width of [360,430]) for (const hour of [3,15]) {
+      const page=await browser.newPage({viewport:{width,height:850}});
+      await page.clock.setFixedTime(new Date(`2026-11-28T${String(hour).padStart(2,'0')}:00:00Z`));
+      const hat={id:'berry-beanie',kind:'hat',slot:'head',name:'털모자',owned:true,thumbUrl:'/chat/decor/v1/berry-beanie/thumb.webp'};
+      let outfit={head:null,body:null,neck:null}, status=200;
+      await page.route('**/*',async route=>{
+        const address=new URL(route.request().url()).pathname;
+        if(address==='/chat/api/profile') return route.fulfill({json:{botName:'마롱이',character:null,features:{defaultWear:true},marongOutfit:outfit}});
+        if(address==='/chat/api/closet') return route.fulfill({json:{items:[hat],characterId:null,outfit}});
+        if(address==='/chat/api/marong/outfit') { const picks=route.request().postDataJSON(); if(status!==200) return route.fulfill({status,json:{code:status===409?'not_owned':'internal'}}); outfit={...outfit,head:picks.head?{id:hat.id,name:hat.name,layerUrl:'/chat/decor/v1/berry-beanie/marong.png'}:null};return route.fulfill({json:outfit}); }
+        if(address.startsWith('/face/') || address.startsWith('/chat/decor/')) return route.fulfill({contentType:'image/png',body:BLANK});
+        const file=address==='/chat/closet'?'decor.html':path.basename(address);
+        if(!['decor.html','decor.js','chat.css','unified.css','unified.js'].includes(file)) return route.fulfill({status:404});
+        return route.fulfill({contentType:file.endsWith('.css')?'text/css':file.endsWith('.js')?'application/javascript':'text/html',body:await readFile(path.join(STATIC,file))});
+      });
+      await page.goto(BASE+'/chat/closet');
+      const choice=page.getByRole('button',{name:'털모자'});
+      await choice.click({timeout:3000});
+      await page.locator('.decor-layer[src$="/marong.png"]').waitFor();
       await choice.click();
-      await page.getByText(failure===409?'아직 안 받은 거야':'잠깐 문제가 생겼어. 다시 해 볼래?').waitFor();
-      assert.equal(await page.locator('.decor-layer').count(),0);
+      await page.waitForFunction(()=>document.querySelectorAll('.decor-layer').length===0);
+      for(const failure of [409,500]) {
+        status=failure;
+        await choice.click();
+        await page.getByText(failure===409?'아직 안 받은 거야':'잠깐 문제가 생겼어. 다시 해 볼래?').waitFor();
+        assert.equal(await page.locator('.decor-layer').count(),0);
+      }
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
+      assert.equal(await page.locator('html').getAttribute('data-theme'),hour===3?'chestnut':'night');
+      await page.close();
     }
   } finally {await browser.close();}
 });
@@ -144,34 +167,44 @@ test('TC-765: default character can wear and remove a hat', {skip:!chromium}, as
 test('TC-765: default shop preview and wear error', {skip:!chromium}, async()=>{
   const browser=await chromium.launch();
   try {
-    const page=await browser.newPage({viewport:{width:360,height:780}});
-    const hat={id:'berry-beanie',kind:'hat',slot:'head',name:'털모자',owned:true,priceKrw:0,thumbUrl:'/chat/decor/v1/berry-beanie/thumb.webp'};
-    const outfit={head:null,body:null,neck:null};
-    let reject=409, picked;
-    await page.route('**/*',async route=>{
-      const address=new URL(route.request().url()).pathname;
-      if(address==='/chat/api/profile') return route.fulfill({json:{botName:'마롱이',character:null,features:{defaultWear:true},marongOutfit:outfit}});
-      if(address==='/chat/api/shop') return route.fulfill({json:{items:[hat]}});
-      if(address==='/chat/api/closet') return route.fulfill({json:{items:[hat],characterId:null,outfit}});
-      if(address==='/chat/api/marong/outfit') {picked=route.request().postDataJSON();return reject?route.fulfill({status:reject,json:{code:reject===409?'not_owned':'internal'}}):route.fulfill({json:outfit});}
-      if(address.startsWith('/face/') || address.startsWith('/chat/decor/')) return route.fulfill({contentType:'image/png',body:BLANK});
-      const file=['/chat/shop','/chat/closet'].includes(address)?'decor.html':path.basename(address);
-      if(!['decor.html','decor.js','chat.css','unified.css','unified.js'].includes(file)) return route.fulfill({status:404});
-      return route.fulfill({contentType:file.endsWith('.css')?'text/css':file.endsWith('.js')?'application/javascript':'text/html',body:await readFile(path.join(STATIC,file))});
-    });
-    await page.goto(BASE+'/chat/shop#berry-beanie');
-    await page.getByText('마롱이가 입으면 이렇게 돼').waitFor();
-    await page.locator('.decor-layer[src$="/marong.png"]').waitFor();
-    await page.getByRole('button',{name:'입혀 볼래'}).click();
-    await page.getByText('아직 안 받은 거야').waitFor();
-    reject=500;
-    await page.getByRole('button',{name:'입혀 볼래'}).click();
-    await page.getByText('잠깐 문제가 생겼어. 다시 해 볼래?').waitFor();
-    reject=0;
-    await page.getByRole('button',{name:'입혀 볼래'}).click();
-    await page.waitForURL(BASE+'/chat/closet');
-    assert.deepEqual(picked,{head:'berry-beanie',body:null,neck:null});
-    await page.getByText('마롱이가 털모자 입었어!').waitFor();
+    for (const width of [360,430]) for (const hour of [3,15]) {
+      const page=await browser.newPage({viewport:{width,height:850}});
+      await page.clock.setFixedTime(new Date(`2026-11-28T${String(hour).padStart(2,'0')}:00:00Z`));
+      const hat={id:'berry-beanie',kind:'hat',slot:'head',name:'털모자',owned:false,priceKrw:0,thumbUrl:'/chat/decor/v1/berry-beanie/thumb.webp'};
+      const outfit={head:null,body:{id:'body-item',layerUrl:'/chat/decor/v1/body-item/marong.png'},neck:{id:'neck-item',layerUrl:'/chat/decor/v1/neck-item/marong.png'}};
+      let reject=409, picked;
+      await page.route('**/*',async route=>{
+        const address=new URL(route.request().url()).pathname;
+        if(address==='/chat/api/profile') return route.fulfill({json:{botName:'마롱이',character:null,features:{defaultWear:true},marongOutfit:outfit}});
+        if(address==='/chat/api/shop') return route.fulfill({json:{items:[hat]}});
+        if(address.endsWith('/claim')) {hat.owned=true;return route.fulfill({status:201,json:{itemId:hat.id,owned:true}});}
+        if(address==='/chat/api/closet') return route.fulfill({json:{items:[hat],characterId:null,outfit}});
+        if(address==='/chat/api/marong/outfit') {picked=route.request().postDataJSON();return reject?route.fulfill({status:reject,json:{code:reject===409?'not_owned':'internal'}}):route.fulfill({json:outfit});}
+        if(address.startsWith('/face/') || address.startsWith('/chat/decor/')) return route.fulfill({contentType:'image/png',body:BLANK});
+        const file=['/chat/shop','/chat/closet'].includes(address)?'decor.html':path.basename(address);
+        if(!['decor.html','decor.js','chat.css','unified.css','unified.js'].includes(file)) return route.fulfill({status:404});
+        return route.fulfill({contentType:file.endsWith('.css')?'text/css':file.endsWith('.js')?'application/javascript':'text/html',body:await readFile(path.join(STATIC,file))});
+      });
+      await page.goto(BASE+'/chat/shop#berry-beanie');
+      await page.getByText('마롱이가 입으면 이렇게 돼').waitFor();
+      await page.locator('.decor-layer[src$="/marong.png"]').first().waitFor();
+      assert.deepEqual(await page.locator('.decor-layer').evaluateAll(items=>items.map(i=>i.getAttribute('src'))),
+        ['/chat/decor/v1/body-item/marong.png','/chat/decor/v1/neck-item/marong.png','/chat/decor/v1/berry-beanie/marong.png']);
+      await page.getByRole('button',{name:'받기',exact:true}).click();
+      await page.getByRole('button',{name:'입혀 볼래'}).click();
+      await page.getByText('아직 안 받은 거야').waitFor();
+      reject=500;
+      await page.getByRole('button',{name:'입혀 볼래'}).click();
+      await page.getByText('잠깐 문제가 생겼어. 다시 해 볼래?').waitFor();
+      reject=0;
+      await page.getByRole('button',{name:'입혀 볼래'}).click();
+      await page.waitForURL(BASE+'/chat/closet');
+      assert.deepEqual(picked,{head:'berry-beanie',body:'body-item',neck:'neck-item'});
+      await page.getByText('마롱이가 털모자 입었어!').waitFor();
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
+      assert.equal(await page.locator('html').getAttribute('data-theme'),hour===3?'chestnut':'night');
+      await page.close();
+    }
   } finally {await browser.close();}
 });
 

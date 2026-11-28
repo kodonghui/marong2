@@ -66,7 +66,11 @@ class MarongOutfitSchemaTest(unittest.TestCase):
         db.admin("UPDATE marong.scene_pictures SET state='failed',fail_reason='model_error',finished_at=now() WHERE character_id IS NULL AND state='drawing'")
         self.assertEqual(remaining(), 0)
         self.assertEqual(db.admin(claim), [])
+        with psycopg.connect(db.app_url, autocommit=True) as conn:
+            conn.execute("UPDATE marong.scene_pictures SET drawn_outfit=%s::jsonb WHERE state='failed' AND fail_reason='disabled'",
+                         ('[{"slot":"head","id":"fixture-hat","sha256":"fixture"}]',))
         db.apply_marong_outfit()
+        self.assertEqual(db.admin("SELECT drawn_outfit->0->>'id' FROM marong.scene_pictures WHERE fail_reason='disabled'"), [('fixture-hat',)])
 
 
 if __name__ == '__main__':

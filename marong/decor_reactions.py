@@ -1,10 +1,12 @@
 """First-wear reactions, including a local composite if the image model fails."""
 
 import asyncio
+import hashlib
 from io import BytesIO
 import logging
 
 from PIL import Image
+from psycopg.types.json import Jsonb
 
 from .character.records import CharacterError
 from .diary_models import REFERENCES
@@ -130,12 +132,18 @@ class DecorReactions:
             return job
 
     async def scene(self, row):
+        async def current_snapshot():
+            if row['character_id'] is not None:
+                return None
+            stored = await self.store._one('SELECT body,neck,head FROM marong.marong_outfits WHERE friend_id=%s',
+                                           (row['friend_id'],))
+            return await asyncio.to_thread(self.catalog.marong_outfit_snapshot, stored)
+
         async def current_selections():
             if row['character_id'] is None:
-                outfit = await asyncio.to_thread(self.catalog.valid_marong_outfit, row)
-                if row['item_id'] not in outfit.values():
-                    return None
-                return [outfit[slot] for slot in ('body', 'neck', 'head') if outfit[slot]]
+                snapshot = await current_snapshot()
+                selections = [layer['id'] for layer in snapshot]
+                return selections if row['item_id'] in selections else None
             return [row[slot] for slot in ('body', 'neck', 'head') if row[slot]]
 
         selections = await current_selections()
@@ -152,14 +160,16 @@ class DecorReactions:
             if result:
                 if row['character_id'] is not None:
                     return result
-                current = await current_selections()
-                if current is None:
+                current = await current_snapshot()
+                if row['item_id'] not in [layer['id'] for layer in current]:
                     return None
-                snapshot = await self.store._one('SELECT outfit FROM marong.scene_pictures WHERE id=%s', (result,))
-                if snapshot and snapshot['outfit'] == current:
+                snapshot = await self.store._one('SELECT drawn_outfit FROM marong.scene_pictures WHERE id=%s', (result,))
+                if snapshot and snapshot['drawn_outfit'] is not None and snapshot['drawn_outfit'] == current:
                     return result
-        selections = await current_selections()
-        if selections is None:
+        snapshot = await current_snapshot()
+        selections = ([layer['id'] for layer in snapshot] if snapshot is not None
+                      else await current_selections())
+        if selections is None or (snapshot is not None and row['item_id'] not in selections):
             return None
         try:
             if row['character_id'] is None:
@@ -170,16 +180,24 @@ class DecorReactions:
             key = row["template"] + ".png"
             paths = [self.catalog.items[ident].files[key] for ident in selections
                      if ident in self.catalog.items and key in self.catalog.items[ident].files]
+            if snapshot is not None:
+                layers = [await asyncio.to_thread(path.read_bytes) for path in paths]
+                if [hashlib.sha256(layer).hexdigest() for layer in layers] != [layer['sha256'] for layer in snapshot]:
+                    return None
+                paths = [BytesIO(layer) for layer in layers]
             data, width, height = await asyncio.to_thread(composite, expression, paths)
+            if snapshot is not None and snapshot != await current_snapshot():
+                return None
         except (CharacterError, OSError, ValueError, TypeError) as error:
             log.warning("reaction_composite_error character=%s error=%s", row["character_id"], type(error).__name__)
             return None
         async with self.store.pool.connection() as conn, conn.transaction():
             cursor = await conn.execute("""
                 INSERT INTO marong.scene_pictures(friend_id,character_id,purpose,item_id,outfit,
-                    state,finished_at,fallback,format,width,height,image)
-                VALUES (%s,%s,'reaction',%s,%s,'done',now(),true,'png',%s,%s,%s) RETURNING id
-            """, (row["friend_id"], row["character_id"], row["item_id"], selections, width, height, data))
+                    state,finished_at,fallback,format,width,height,image,drawn_outfit)
+                VALUES (%s,%s,'reaction',%s,%s,'done',now(),true,'png',%s,%s,%s,%s) RETURNING id
+            """, (row["friend_id"], row["character_id"], row["item_id"], selections, width, height, data,
+                  Jsonb(snapshot) if snapshot is not None else None))
             done = await cursor.fetchone()
             await self.usage.record(row["friend_id"], conn=conn, images=1)
         return done["id"]

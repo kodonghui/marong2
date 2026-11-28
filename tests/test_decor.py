@@ -224,6 +224,18 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
         a, b = await asyncio.gather(reactions.reaction_job(default_row), reactions.reaction_job(default_row))
         self.assertEqual(a['id'],b['id'])
         self.assertEqual(db.admin('SELECT count(*) FROM marong.scene_pictures WHERE character_id IS NULL'), [(1,)])
+        default_pictures = [db.admin("""INSERT INTO marong.scene_pictures(friend_id,purpose,item_id,state,
+            finished_at,fallback,format,width,height,image) VALUES (%s,'reaction','fixture-hat','done',now(),true,
+            'png',1,1,'\\x01') RETURNING id""", (friend,))[0][0] for _ in range(2)]
+        default_key = f'app-reaction:{default_first}'
+        results = await asyncio.gather(*(delivery.say(friend,'fixture',kind='proactive',notify=False,
+            key=default_key,meta={'scene':str(picture)}) for picture in default_pictures))
+        self.assertEqual(results, ['later','later'])
+        messages = db.admin("SELECT meta->>'scene' FROM marong.messages WHERE kakao_id=%s", (default_key,))
+        self.assertEqual(len(messages),1)
+        await asyncio.gather(reactions.finish(default_row,'sent',default_pictures[1]),
+                             reactions.finish(default_row,'sent',default_pictures[0]))
+        self.assertEqual(str(db.admin('SELECT scene_picture_id FROM marong.outfit_firsts WHERE id=%s', (default_first,))[0][0]), messages[0][0])
 
     async def test_tc761_762_763_771_default_outfit_is_session_scoped(self):
         folder = tempfile.TemporaryDirectory()
@@ -267,6 +279,7 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             response = await client.put(outfit, headers=ah, json=hat)
             self.assertEqual(response.status, 200)
             self.assertEqual((await response.json())['head']['layerUrl'], '/chat/decor/v1/hat-fixture/marong.png')
+            self.assertEqual(db.admin('SELECT extract(epoch FROM next_at-worn_at) FROM marong.outfit_firsts WHERE friend_id=%s', (a,)), [(180,)])
             self.assertEqual((await client.put(outfit, headers=ah, json=hat)).status, 200)
             self.assertEqual(db.admin('SELECT count(*) FROM marong.outfit_firsts WHERE friend_id=%s', (a,)), [(1,)])
             chat.authentication = 'access'

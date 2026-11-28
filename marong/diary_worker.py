@@ -341,9 +341,13 @@ class DiaryWorker:
                 if pet_scene:
                     result = await self.scenes.diary_art(row, scene, look, context["weather"], context["friend_name"])
                 else:
-                    from .diary_models import marong_outfit_prompts
-                    outfit = await marong_outfit_prompts(self.store, self.wear_catalog, row['friend_id']) if row.get('character_id') is None else []
+                    from .diary_models import marong_outfit_snapshot, outfit_snapshot_prompts
+                    catalog = self.wear_catalog if row.get('character_id') is None else None
+                    snapshot = await marong_outfit_snapshot(self.store, catalog, row['friend_id'])
+                    outfit = outfit_snapshot_prompts(catalog, snapshot) if catalog else []
                     result = await self.models.draw(scene, look, outfit=outfit) if outfit else await self.models.draw(scene, look)
+                    if catalog and result.outcome == 'ok' and snapshot != await marong_outfit_snapshot(self.store, catalog, row['friend_id']):
+                        result = replace(result, value=None, outcome='error', error='outfit_changed')
         except TimeoutError:
             result = ModelResult(outcome="timeout", error="deadline")
         async with self.store.pool.connection() as conn:

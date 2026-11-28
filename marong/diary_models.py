@@ -93,13 +93,20 @@ def draw_prompt(scene: str, look: dict | None, *, outfit=None) -> str:
     return prompt
 
 
-async def marong_outfit_prompts(store, catalog, friend):
+async def marong_outfit_snapshot(store, catalog, friend):
     if not catalog:
         return []
     row = await store._one('SELECT body,neck,head FROM marong.marong_outfits WHERE friend_id=%s', (friend,))
-    outfit = await asyncio.to_thread(catalog.valid_marong_outfit, row)
-    return [catalog.items[ident].prompt for slot in ('body', 'neck', 'head')
-            if (ident := outfit[slot]) and catalog.items[ident].prompt]
+    return await asyncio.to_thread(catalog.marong_outfit_snapshot, row)
+
+
+def outfit_snapshot_prompts(catalog, snapshot):
+    return [catalog.items[layer['id']].prompt for layer in snapshot if catalog.items[layer['id']].prompt]
+
+
+async def marong_outfit_prompts(store, catalog, friend):
+    snapshot = await marong_outfit_snapshot(store, catalog, friend)
+    return outfit_snapshot_prompts(catalog, snapshot) if catalog else []
 
 
 @dataclass(frozen=True)

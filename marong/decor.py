@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 import csv
+import hashlib
+from io import BytesIO
 import json
 import logging
 from math import ceil, floor
@@ -135,13 +137,24 @@ class DecorCatalog:
                 missing.append("file:" + key)
         return missing
 
-    def valid_marong_outfit(self, row):
-        """Resolve stored selections consistently for every default-Marong consumer."""
-        result = dict.fromkeys(WEAR)
-        for slot in WEAR:
+    def marong_outfit_snapshot(self, row):
+        """Capture valid layers and hashes from the same bytes used to validate them."""
+        result = []
+        for slot in ('body', 'neck', 'head'):
             item = self.items.get(row[slot]) if row and row[slot] else None
-            if item and item.slot == slot and not self.marong_layer_issue(item):
-                result[slot] = item.id
+            path = item.files.get('marong.png') if item and item.slot == slot else None
+            try:
+                data = path.read_bytes() if path else None
+                if data and not self._layer_issue(BytesIO(data), 'marong', slot):
+                    result.append({'slot': slot, 'id': item.id, 'sha256': hashlib.sha256(data).hexdigest()})
+            except OSError:
+                continue
+        return result
+
+    def valid_marong_outfit(self, row):
+        result = dict.fromkeys(WEAR)
+        for layer in self.marong_outfit_snapshot(row):
+            result[layer['slot']] = layer['id']
         return result
 
     def marong_layer_issue(self, item):
