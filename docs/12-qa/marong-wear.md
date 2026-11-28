@@ -20,8 +20,9 @@
 | TC-770 | 025 두 번 적용, 거절, 되돌리기 예행 | TBL-190, TBL-176·179 바꿈, SPEC-570, SPEC-572, SPEC-575 | api(`tests/test_marong_outfit_schema.py`) | 022·023까지 적용한 빈 DB | ① 025를 두 번 적용. `marong` 역할로 넣기·고치기·지우기, 같은 친구 두 번째 줄, 없는 아이템, 같은 기본 마롱이 첫 착용 두 번, 캐릭터 없는 화두 장면 그림, 모르는 `fail_reason`. `marong_call` 역할로 새 표 읽기 ② 기본 마롱이 `waiting` 첫 착용(`next_at` 지남) 1줄, `queued` 반응 그림 1줄, `drawing` 반응 그림 1줄을 넣고 확인 SQL(SPEC-575) ③ 한 트랜잭션을 열어 `main` `5c2575f`의 `scene_worker.claim` SQL을 돌려 가져간 줄을 본 뒤 그 트랜잭션을 되돌림(ROLLBACK). 같은 `main`의 `decor_reactions.due` SQL(읽기만) ④ 확인 SQL을 다시 봄(③이 상태를 바꾸지 않았는지) ⑤ SPEC-575의 비우기(`waiting` → `skipped`, `queued` → `failed`/`disabled`) 뒤 확인 SQL ⑥ `drawing` 줄을 끝냄(그 작업자의 끝내기와 같은 UPDATE) 뒤 확인 SQL ⑦ `main`의 claim SQL을 이번엔 커밋까지 돌림 ⑧ 줄이 있는 채로 025 다시 적용 | ① 두 번 적용 통과, 넣기·고치기 됨, 나머지는 거절, 통화 서버 계정은 새 표를 못 읽음 ② 3 ③ claim이 기본 마롱이 `queued` 줄 1개를 가져감(되돌리기 위험 재현), due는 0줄 ④ 3(되돌려서 그대로) ⑤ 1(`drawing`만) ⑥ 0. 비운 줄의 비용 0 ⑦ 가져가는 줄 0개 ⑧ 통과. (2026-11-28 설계 때 같은 순서로 수동 확인, 05 8절) | |
 | TC-771 | 두 친구 분리: 다른 친구의 기본 마롱이 차림을 읽거나 바꾸지 못함 | SPEC-570, SPEC-571, REQ-524, API-330#400, API-330#409, 공통 규칙 4 | api(`tests/test_decor.py`) | 시험친구 가(`berry-beanie`만 받음)와 나(`oat-sweater`만 받음, 기본 마롱이 차림 `{head: null, body: oat-sweater, neck: null}`) | 모두 가의 세션으로 부르고, 본문은 세 자리를 모두 넣음. ① `{head: berry-beanie, body: null, neck: null, friendId: <나의 id>}`(모르는 칸 하나만 틀림) ② `{head: null, body: oat-sweater, neck: null}`(나만 받은 아이템) ③ `{head: berry-beanie, body: null, neck: null}`(정상) ④ ①\~③ 뒤마다 나의 `marong_outfits`·`outfit_firsts`와 나의 세션 API-216·API-254를 읽음 ⑤ 가의 API-216·API-254를 읽음 | ① 400 `invalid_input`(모르는 칸) ② 409 `not_owned` ③ 200이고 바뀐 줄은 가의 `marong_outfits` 1줄과 가의 `outfit_firsts` 1줄뿐 ④ 나의 줄·응답은 처음과 바이트까지 같음 ⑤ 가의 응답에 `oat-sweater`가 없음. 로그에 친구 이름·대화 글 없음 | |
 | TC-772 | 스위치를 끄면 기본 마롱이 대기 줄을 비우고, 늦은 반응은 보내지 않음 | SPEC-575, REQ-697 | job(`tests/test_proactive.py`, `tests/test_scene_picture.py`) | 기본 마롱이 `waiting` 1줄(`next_at` 지남), `queued` 반응 그림 1줄, `drawing` 반응 그림 1줄, 가짜 그림 모델 | SPEC-575 순서대로: ① `MARONG_DEFAULT_WEAR=0`으로 반응 루프와 장면 그림 루프를 한 번씩 돌림 ② `drawing` 작업이 끝날 때까지 루프를 돌리고 확인 SQL ③ 다시 1로 켜고 루프를 돌림 ④ `next_at`이 2시간 전인 `waiting` 줄을 하나 더 넣고 1로 루프를 돌림 | ① `waiting`은 `skipped`, `queued`는 `failed`/`disabled`, 그 두 줄에 그림 모델 부름 0번, 선톡 0번 ② `drawing` 작업은 그 부름만 끝내고 쓰이지 않음, 확인 SQL 0 ③ ①에서 끝난 아이템은 다시 반응하지 않음(첫 착용 줄 그대로) ④ `skipped`이고 선톡 0번 | |
+| TC-773 | 반려동물 반응도 첫 착용 하나에 그림 작업 하나 | SPEC-422(D195 손봄), 3.14 비용 표 | job(`tests/test_proactive.py`, `tests/test_scene_picture.py`) | 시험친구 나의 반려동물 캐릭터 '콩이'가 `berry-beanie`를 처음 입음, 가짜 그림·글 모델, 가짜 전달 | ① 그림이 끝난 뒤 보내기가 실패해 같은 첫 착용을 다음 차례에 다시 처리 ② 그림 작업이 185초를 넘긴 채 다음 차례 ③ 게이트에 한 번 막혔다가 다음 차례에 보냄 | ① 첫 착용 줄의 `scene_picture_id`가 처음 작업이고 그 아이템의 반응 장면 그림 줄은 1개, 그림 모델 부름 합 ≤ 6 ② 겹친 그림(비용 0)으로 보내고 새 작업 없음 ③ 처음 작업의 그림으로 보내고 새 작업 없음. `MARONG_DEFAULT_WEAR`가 0이어도 같음 | |
 
-남은 번호: TC-773\~789는 비워 둬요.
+남은 번호: TC-774\~789는 비워 둬요.
 
 ## 요구사항마다 시험
 
@@ -37,3 +38,4 @@
 | REQ-697 | TC-763, TC-769, TC-770, TC-772 |
 | REQ-524(남의 것) | TC-771 |
 | REQ-529(바뀜) | TC-760 |
+| REQ-536·537(SPEC-422 손봄, D195) | TC-773 |
