@@ -1,0 +1,415 @@
+<title>마롱이 옷 입히기 목업</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="unified-mockup.css">
+<link rel="stylesheet" href="pet-app-mockup.css">
+<style>
+/* Board gallery around the phones. The phones themselves use only the frozen tokens in the two CSS files above
+   (day = chestnut cream color.b, night = night sky color.a). The gallery is neutral so either board reads on it. */
+:root {--g-bg: #ece8e1; --g-fg: #2b211a; --g-muted: #6b5b4f; --g-line: #d6ccbd; --g-chip: #fffdf8}
+@media (prefers-color-scheme: dark) {:root:not([data-theme="light"]) {--g-bg: #191b24; --g-fg: #f4f1ea; --g-muted: #b4b2c6; --g-line: #2e3247; --g-chip: #232740; color-scheme: dark}}
+:root[data-theme="dark"] {--g-bg: #191b24; --g-fg: #f4f1ea; --g-muted: #b4b2c6; --g-line: #2e3247; --g-chip: #232740; color-scheme: dark}
+body {background: var(--g-bg); color: var(--g-fg); font-family: "Noto Sans KR", "Apple SD Gothic Neo", sans-serif; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 20px 48px}
+.intro {max-width: 760px; margin: 0 auto 28px; display: flex; flex-direction: column; gap: 10px}
+.intro h1 {margin: 0; font-size: 24px; text-wrap: balance}
+.intro p {margin: 0; color: var(--g-muted); font-size: 15px}
+.intro ul {margin: 0; padding-left: 20px; font-size: 15px}
+.jump {display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px}
+.jump a {padding: 6px 12px; border-radius: 999px; border: 1px solid var(--g-line); background: var(--g-chip); color: var(--g-fg); text-decoration: none; font-size: 14px}
+.jump a:focus-visible, .phone a:focus-visible, .phone button:focus-visible {outline: 3px solid #e8a35c; outline-offset: 2px}
+section.set {max-width: 1180px; margin: 0 auto 40px}
+section.set > h2 {margin: 0 0 4px; font-size: 18px}
+section.set > p {margin: 0 0 14px; color: var(--g-muted); font-size: 14px; max-width: 760px}
+.boards {display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start}
+.wrap {display: flex; flex-direction: column; gap: 6px; max-width: 100%}
+.wrap > b {font-size: 13px; color: var(--g-muted); font-weight: 700}
+.phone {max-width: 100%; border-radius: 28px; box-shadow: 0 1px 0 var(--g-line)}
+.faces {display: flex; flex-wrap: wrap; gap: 12px}
+.faces figure {margin: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 13px; color: var(--g-muted)}
+.faces .face {width: 120px; height: 120px}
+.sheet-img {display: block; width: 100%; max-width: 760px; border-radius: 16px; border: 1px solid var(--g-line); background: #fff}
+.tag-new {position: absolute; left: var(--space-sm); top: var(--space-sm)}
+/* in the call screen the face and its layers move together (the bounce and the talk frames) */
+.face-call .dress, .face-home .dress, .face-chat .dress, .face-row .dress {transform: translateY(0)}
+@media (prefers-reduced-motion: no-preference) {.bounce .dress {animation: bob 1.98s steps(1) infinite}}
+@keyframes bob {0%, 10% {transform: translateY(0)} 11%, 15% {transform: translateY(-2px)} 16%, 24% {transform: translateY(-4px)} 25%, 100% {transform: translateY(0)}}
+</style>
+
+<header class="intro">
+<h1>기본 마롱이에게 옷 입히기 목업</h1>
+<p>2026-11-28 설계 초안(항목 253). 폭 360px, 낮은 군밤 크림, 밤은 밤하늘 테마예요. 버튼과 링크는 대지 사이를 오가요.</p>
+<ul>
+<li>모자·옷·목도리 그림은 운영 상점의 실제 아이템 10개를 마롱이 자리에 자동으로 맞춘 것이에요(그림 방식 A, 그림값 0원).</li>
+<li>이름·대화·날짜는 화면을 보이려고 지어낸 것이에요.</li>
+<li>입기 전 대지는 지금 운영 모습이에요. 입은 뒤 대지가 바뀌는 모습이에요.</li>
+</ul>
+<nav class="jump" aria-label="대지 묶음">
+<a href="#set-chat">글 대화</a><a href="#set-call">통화</a><a href="#set-shop">상점 미리 보기</a><a href="#set-closet">보관함 입히기</a><a href="#set-me">내 마롱이</a><a href="#set-fit">표정과 그림 맞춤</a>
+</nav>
+</header>
+
+<section class="set" id="set-chat">
+<h2>글 대화: 입기 전과 입은 뒤</h2>
+<p>머리말과 말풍선 옆 얼굴에 지금 차림이 겹쳐요. 처음 입힌 아이템은 3분 뒤 마롱이가 그 차림으로 그린 그림과 함께 먼저 말을 걸어요(하루 선톡 상한 안에서 한 번).</p>
+<div class="boards">
+
+<div class="wrap" id="W-107-before-day"><b>W-107-before-day · SCR-107 입기 전(지금) · 낮</b>
+<div class="phone" data-theme="chestnut" style="width: 360px; height: 640px">
+<header class="bar">
+<div class="face face-chat"><img src="marong-wear-mockup/face-01-neutral.webp" alt=""></div>
+<span class="brand">마롱이<span style="color: var(--star); font-size: var(--font-size-caption); vertical-align: top; margin-left: var(--space-xs)" aria-hidden="true">✦</span></span>
+<div class="actions">
+<button class="iconbtn chat" type="button" aria-label="마롱이한테 전화하기"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"></path></svg></button>
+<a class="iconbtn chat" href="#W-181-default-day" aria-label="알림과 메뉴"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4l2-2zM10 20a2 2 0 0 0 4 0"></path></svg></a>
+<a class="iconbtn chat" href="#W-165-default-day" aria-label="내 마롱이"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 20a8 8 0 0 1 16 0"></path></svg></a>
+</div>
+</header>
+<section class="log" aria-label="마롱이와 나눈 글 대화">
+<div class="msg"><div class="face face-chat"><img src="marong-wear-mockup/face-01-neutral.webp" alt=""></div><p class="bubble">오늘 바람 엄청 차대! 목도리 꼭 하고 나가</p></div>
+<div class="msg me"><p class="bubble">알았어 ㅋㅋ 너는 안 추워?</p></div>
+<div class="msg"><div class="face face-chat"><img src="marong-wear-mockup/face-01-neutral.webp" alt=""></div><p class="bubble">나는 털이 복슬복슬해서 괜찮아</p></div>
+</section>
+<form class="composer">
+<input class="input" id="c1" type="text" placeholder="마롱이한테 하고 싶은 말" aria-label="마롱이한테 하고 싶은 말">
+<button class="send" type="button" aria-disabled="true" style="opacity: 0.45">보내기</button>
+</form>
+</div>
+</div>
+
+<div class="wrap" id="W-107-after-day"><b>W-107-after-day · SCR-107 입은 뒤와 반응 선톡 · 낮</b>
+<div class="phone" data-theme="chestnut" style="width: 360px; height: 800px">
+<header class="bar">
+<div class="face face-chat"><span class="dress"><img src="marong-wear-mockup/face-01-neutral.webp" alt=""><img src="marong-wear-mockup/oat-sweater.webp" alt=""><img src="marong-wear-mockup/chestnut-scarf.webp" alt=""><img src="marong-wear-mockup/berry-beanie.webp" alt=""></span></div>
+<span class="brand">마롱이<span style="color: var(--star); font-size: var(--font-size-caption); vertical-align: top; margin-left: var(--space-xs)" aria-hidden="true">✦</span></span>
+<div class="actions">
+<button class="iconbtn chat" type="button" aria-label="마롱이한테 전화하기"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"></path></svg></button>
+<a class="iconbtn chat" href="#W-181-default-day" aria-label="알림과 메뉴"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4l2-2zM10 20a2 2 0 0 0 4 0"></path></svg></a>
+<a class="iconbtn chat" href="#W-165-default-day" aria-label="내 마롱이"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 20a8 8 0 0 1 16 0"></path></svg></a>
+</div>
+</header>
+<section class="log" aria-label="마롱이와 나눈 글 대화">
+<div class="msg"><div class="face face-chat"><span class="dress"><img src="marong-wear-mockup/face-01-neutral.webp" alt=""><img src="marong-wear-mockup/oat-sweater.webp" alt=""><img src="marong-wear-mockup/chestnut-scarf.webp" alt=""></span></div><p class="bubble">오늘 바람 엄청 차대! 목도리 꼭 하고 나가</p></div>
+<div class="msg me"><p class="bubble">나 말고 너도 하나 해 ㅋㅋ 털모자 줬어</p></div>
+<p class="unread">여기부터 안 읽은 말이야</p>
+<div class="msg">
+<div class="face face-chat"><span class="dress"><img src="marong-wear-mockup/face-01-neutral.webp" alt=""><img src="marong-wear-mockup/oat-sweater.webp" alt=""><img src="marong-wear-mockup/chestnut-scarf.webp" alt=""><img src="marong-wear-mockup/berry-beanie.webp" alt=""></span></div>
+<div class="stack-col">
+<span class="scene"><img src="pet-app-mockup/scene-walk.svg" alt="마롱이의 그림"><span class="dress"><img src="marong-wear-mockup/face-05-excited.webp" alt=""><img src="marong-wear-mockup/oat-sweater.webp" alt=""><img src="marong-wear-mockup/chestnut-scarf.webp" alt=""><img src="marong-wear-mockup/berry-beanie.webp" alt=""></span><span class="tag">새 딸기 털모자!</span></span>
+<p class="bubble">나 딸기 털모자 생겼어! 어때? 귀까지 따뜻해</p>
+</div>
+</div>
+</section>
+<form class="composer">
+<input class="input" id="c2" type="text" placeholder="마롱이한테 하고 싶은 말" aria-label="마롱이한테 하고 싶은 말">
+<button class="send" type="button" aria-disabled="true" style="opacity: 0.45">보내기</button>
+</form>
+</div>
+</div>
+
+<div class="wrap" id="W-107-after-night"><b>W-107-after-night · SCR-107 입은 뒤 · 밤</b>
+<div class="phone" style="width: 360px; height: 640px">
+<header class="bar">
+<div class="face face-chat"><span class="dress"><img src="marong-wear-mockup/face-01-neutral.webp" alt=""><img src="marong-wear-mockup/blue-raincoat.webp" alt=""><img src="marong-wear-mockup/picnic-hat.webp" alt=""></span></div>
+<span class="brand">마롱이<span style="color: var(--star); font-size: var(--font-size-caption); vertical-align: top; margin-left: var(--space-xs)" aria-hidden="true">✦</span></span>
+<div class="actions">
+<button class="iconbtn chat" type="button" aria-label="마롱이한테 전화하기"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"></path></svg></button>
+<a class="iconbtn chat" href="#W-181-default-day" aria-label="알림과 메뉴"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4l2-2zM10 20a2 2 0 0 0 4 0"></path></svg></a>
+<a class="iconbtn chat" href="#W-165-default-day" aria-label="내 마롱이"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 20a8 8 0 0 1 16 0"></path></svg></a>
+</div>
+</header>
+<section class="log" aria-label="마롱이와 나눈 글 대화">
+<div class="msg"><div class="face face-chat"><span class="dress"><img src="marong-wear-mockup/face-01-neutral.webp" alt=""><img src="marong-wear-mockup/blue-raincoat.webp" alt=""><img src="marong-wear-mockup/picnic-hat.webp" alt=""></span></div><p class="bubble">내일 비 온대. 나 우비 입고 기다릴게</p></div>
+<div class="msg me"><p class="bubble">밀짚모자는 왜 썼어 ㅋㅋㅋ</p></div>
+<div class="msg"><div class="face face-chat"><span class="dress"><img src="marong-wear-mockup/face-01-neutral.webp" alt=""><img src="marong-wear-mockup/blue-raincoat.webp" alt=""><img src="marong-wear-mockup/picnic-hat.webp" alt=""></span></div><p class="bubble">비 그치면 바로 소풍 가려고!</p></div>
+</section>
+<form class="composer">
+<input class="input" id="c3" type="text" placeholder="마롱이한테 하고 싶은 말" aria-label="마롱이한테 하고 싶은 말">
+<button class="send" type="button" aria-disabled="true" style="opacity: 0.45">보내기</button>
+</form>
+</div>
+</div>
+
+</div>
+</section>
+
+<section class="set" id="set-call">
+<h2>통화 중: 입기 전과 입은 뒤</h2>
+<p>통화 얼굴의 모든 표정(웃음, 놀람, 졸림, 말하는 입 모양, 깜빡임)에 같은 차림이 겹쳐요. 말할 때 얼굴이 튀어도 옷이 같이 움직여요(오른쪽 대지가 그 움직임을 보여 줘요).</p>
+<div class="boards">
+
+<div class="wrap" id="W-002-before-night"><b>W-002-before-night · SCR-002 입기 전(지금) · 밤</b>
+<div class="phone" style="width: 360px; height: 680px">
+<header class="bar" style="border-bottom: 0"><span class="brand">마롱이<span style="color: var(--star); font-size: var(--font-size-caption); vertical-align: top; margin-left: var(--space-xs)" aria-hidden="true">✦</span></span></header>
+<main class="main center" style="padding: 56px var(--space-lg) 40px; gap: var(--space-lg)">
+<div class="ringed"><div class="face face-call"><img src="marong-wear-mockup/face-01-neutral.webp" alt="마롱이 얼굴"></div></div>
+<p class="cap" role="status" style="margin-top: var(--space-md)">마롱이가 듣는 중</p>
+<div class="line" style="margin-top: auto; gap: var(--space-xl); justify-content: center">
+<button class="iconbtn raised" type="button" aria-label="마이크 끄기" aria-pressed="false" style="width: var(--size-control); height: var(--size-control)"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path></svg></button>
+<button class="end" type="button" aria-label="통화 끝내기"><svg class="ico solid" viewBox="0 0 24 24" aria-hidden="true" style="width: 36px; height: 36px"><path d="M3 15c5-6 13-6 18 0v4h-5v-4a14 14 0 0 0-8 0v4H3z"></path></svg></button>
+</div>
+</main>
+</div>
+</div>
+
+<div class="wrap" id="W-002-after-night"><b>W-002-after-night · SCR-002 입은 뒤(말하는 중) · 밤</b>
+<div class="phone" style="width: 360px; height: 680px">
+<header class="bar" style="border-bottom: 0"><span class="brand">마롱이<span style="color: var(--star); font-size: var(--font-size-caption); vertical-align: top; margin-left: var(--space-xs)" aria-hidden="true">✦</span></span></header>
+<main class="main center" style="padding: 56px var(--space-lg) 40px; gap: var(--space-lg)">
+<div class="ringed bounce"><div class="face face-call"><span class="dress"><img src="marong-wear-mockup/face-02-big-laugh.webp" alt="웃는 마롱이 얼굴, 딸기 털모자와 오트밀 스웨터, 밤색 목도리"><img src="marong-wear-mockup/oat-sweater.webp" alt=""><img src="marong-wear-mockup/chestnut-scarf.webp" alt=""><img src="marong-wear-mockup/berry-beanie.webp" alt=""></span></div></div>
+<p class="cap" role="status" style="margin-top: var(--space-md)">마롱이가 말하는 중</p>
+<div class="line" style="margin-top: auto; gap: var(--space-xl); justify-content: center">
+<button class="iconbtn raised" type="button" aria-label="마이크 끄기" aria-pressed="false" style="width: var(--size-control); height: var(--size-control)"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path></svg></button>
+<button class="end" type="button" aria-label="통화 끝내기"><svg class="ico solid" viewBox="0 0 24 24" aria-hidden="true" style="width: 36px; height: 36px"><path d="M3 15c5-6 13-6 18 0v4h-5v-4a14 14 0 0 0-8 0v4H3z"></path></svg></button>
+</div>
+</main>
+</div>
+</div>
+
+<div class="wrap" id="W-002-after-day"><b>W-002-after-day · SCR-002 입은 뒤(쉬는 중) · 낮</b>
+<div class="phone" data-theme="chestnut" style="width: 360px; height: 680px">
+<header class="bar" style="border-bottom: 0"><span class="brand">마롱이<span style="color: var(--star); font-size: var(--font-size-caption); vertical-align: top; margin-left: var(--space-xs)" aria-hidden="true">✦</span></span></header>
+<main class="main center" style="padding: 56px var(--space-lg) 40px; gap: var(--space-lg)">
+<div class="ringed"><div class="face face-call"><span class="dress"><img src="marong-wear-mockup/face-12-asleep.webp" alt="자는 마롱이 얼굴, 별 베레모와 살구빛 앞치마"><img src="marong-wear-mockup/apricot-apron.webp" alt=""><img src="marong-wear-mockup/star-beret.webp" alt=""></span></div></div>
+<p class="cap" role="status" style="margin-top: var(--space-md)">마롱이가 쉬는 중. 말하면 깨어나</p>
+<div class="line" style="margin-top: auto; gap: var(--space-xl); justify-content: center">
+<button class="iconbtn raised" type="button" aria-label="마이크 끄기" aria-pressed="false" style="width: var(--size-control); height: var(--size-control)"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path></svg></button>
+<button class="end" type="button" aria-label="통화 끝내기"><svg class="ico solid" viewBox="0 0 24 24" aria-hidden="true" style="width: 36px; height: 36px"><path d="M3 15c5-6 13-6 18 0v4h-5v-4a14 14 0 0 0-8 0v4H3z"></path></svg></button>
+</div>
+</main>
+</div>
+</div>
+
+</div>
+</section>
+
+<section class="set" id="set-shop">
+<h2>상점과 아이템 보기(미리 보기)</h2>
+<p>입는 아이템을 누르면 마롱이가 지금 차림에 그 아이템을 더 입은 모습을 먼저 보여 줘요. 지금은 '반려동물 캐릭터에 입힐 수 있어'라는 글과 썸네일만 보여요.</p>
+<div class="boards">
+
+<div class="wrap" id="W-181-default-day"><b>W-181-default-day · SCR-181#default 상점 · 낮</b>
+<div class="phone" data-theme="chestnut" style="width: 360px; height: 760px">
+<header class="head">
+<a class="back" href="#W-107-after-day" style="text-decoration: none"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>글 대화</a>
+<h1>상점</h1>
+<a class="iconbtn" href="#W-183-wear-day" aria-label="보관함" style="justify-self: end"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h16v12H4zM9 8V5h6v3M4 12h16"></path></svg></a>
+</header>
+<main class="main">
+<div class="tabs3" role="tablist">
+<button class="tab on" type="button" role="tab" aria-selected="true">입는 것</button>
+<button class="tab" type="button" role="tab" aria-selected="false">일기장</button>
+<button class="tab" type="button" role="tab" aria-selected="false">스티커</button>
+</div>
+<div class="items">
+<div class="item"><a class="thumb" href="#W-182-marong-day" aria-label="딸기 털모자 보기"><img src="marong-wear-mockup/berry-beanie-thumb.webp" alt=""></a><p class="name">딸기 털모자</p><p class="price">0원</p><a class="mini" href="#W-182-marong-day" style="display: grid; place-items: center; text-decoration: none">받기</a></div>
+<div class="item"><a class="thumb" href="#W-182-marong-day" aria-label="클로버 모자 보기"><img src="marong-wear-mockup/clover-cap-thumb.webp" alt=""></a><p class="name">클로버 모자</p><p class="price">0원</p><button class="mini" type="button">받기</button></div>
+<div class="item"><a class="thumb" href="#W-182-marong-day" aria-label="밀짚모자 보기"><img src="marong-wear-mockup/picnic-hat-thumb.webp" alt=""></a><p class="name">밀짚모자</p><p class="price">0원</p><button class="mini" type="button">받기</button></div>
+<div class="item"><a class="thumb" href="#W-182-marong-day" aria-label="별 베레모 보기"><img src="marong-wear-mockup/star-beret-thumb.webp" alt=""></a><p class="name">별 베레모</p><p class="price">0원</p><button class="mini" type="button">받기</button></div>
+<div class="item"><a class="thumb" href="#W-182-marong-day" aria-label="오트밀 스웨터 보기"><img src="marong-wear-mockup/oat-sweater-thumb.webp" alt=""></a><p class="name">오트밀 스웨터</p><p class="price">0원</p><button class="mini done" type="button" aria-disabled="true">받았어</button></div>
+<div class="item"><a class="thumb" href="#W-182-marong-day" aria-label="하늘색 우비 보기"><img src="marong-wear-mockup/blue-raincoat-thumb.webp" alt=""></a><p class="name">하늘색 우비</p><p class="price">0원</p><button class="mini" type="button">받기</button></div>
+<div class="item"><a class="thumb" href="#W-182-marong-day" aria-label="숲빛 조끼 보기"><img src="marong-wear-mockup/forest-vest-thumb.webp" alt=""></a><p class="name">숲빛 조끼</p><p class="price">0원</p><button class="mini" type="button">받기</button></div>
+<div class="item"><a class="thumb" href="#W-182-marong-day" aria-label="살구빛 앞치마 보기"><img src="marong-wear-mockup/apricot-apron-thumb.webp" alt=""></a><p class="name">살구빛 앞치마</p><p class="price">0원</p><button class="mini" type="button">받기</button></div>
+<div class="item"><a class="thumb" href="#W-182-marong-day" aria-label="밤색 목도리 보기"><img src="marong-wear-mockup/chestnut-scarf-thumb.webp" alt=""></a><p class="name">밤색 목도리</p><p class="price">0원</p><button class="mini done" type="button" aria-disabled="true">받았어</button></div>
+</div>
+<p class="cap" style="margin-top: auto; text-align: center">받은 건 보관함에서 입힐 수 있어</p>
+</main>
+</div>
+</div>
+
+<div class="wrap" id="W-182-marong-day"><b>W-182-marong-day · SCR-182#wearable 기본 마롱이 미리 보기 · 낮</b>
+<div class="phone layered" data-theme="chestnut" style="width: 360px; height: 760px">
+<header class="head"><span class="back"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>글 대화</span><h1>상점</h1><span></span></header>
+<main class="main" aria-hidden="true">
+<div class="tabs3"><span class="tab on" style="display: grid; place-items: center">입는 것</span><span class="tab" style="display: grid; place-items: center">일기장</span><span class="tab" style="display: grid; place-items: center">스티커</span></div>
+<div class="items">
+<div class="item"><span class="thumb"><img src="marong-wear-mockup/berry-beanie-thumb.webp" alt=""></span><p class="name">딸기 털모자</p><p class="price">0원</p></div>
+<div class="item"><span class="thumb"><img src="marong-wear-mockup/clover-cap-thumb.webp" alt=""></span><p class="name">클로버 모자</p><p class="price">0원</p></div>
+<div class="item"><span class="thumb"><img src="marong-wear-mockup/picnic-hat-thumb.webp" alt=""></span><p class="name">밀짚모자</p><p class="price">0원</p></div>
+</div>
+</main>
+<div class="scrim"></div>
+<section class="sheet" role="dialog" aria-label="딸기 털모자">
+<span class="grab" aria-hidden="true"></span>
+<div class="line">
+<p class="grow strong" style="font-size: var(--font-size-title)">딸기 털모자</p>
+<a class="iconbtn" href="#W-181-default-day" aria-label="닫기"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></a>
+</div>
+<div class="center stack">
+<div class="face face-home"><span class="dress"><img src="marong-wear-mockup/face-01-neutral.webp" alt="딸기 털모자를 쓴 마롱이 미리 보기"><img src="marong-wear-mockup/oat-sweater.webp" alt=""><img src="marong-wear-mockup/chestnut-scarf.webp" alt=""><img src="marong-wear-mockup/berry-beanie.webp" alt=""></span></div>
+<p class="cap">마롱이가 입으면 이렇게 돼</p>
+</div>
+<div class="line"><span class="badge">모자</span><span class="grow strong">0원</span></div>
+<a class="btn" href="#W-182-owned-night">받기</a>
+</section>
+</div>
+</div>
+
+<div class="wrap" id="W-182-owned-night"><b>W-182-owned-night · SCR-182#owned 받은 뒤 '입혀 볼래' · 밤</b>
+<div class="phone layered" style="width: 360px; height: 760px">
+<header class="head"><span class="back"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>글 대화</span><h1>상점</h1><span></span></header>
+<main class="main" aria-hidden="true">
+<div class="tabs3"><span class="tab on" style="display: grid; place-items: center">입는 것</span><span class="tab" style="display: grid; place-items: center">일기장</span><span class="tab" style="display: grid; place-items: center">스티커</span></div>
+<div class="items">
+<div class="item"><span class="thumb"><img src="marong-wear-mockup/berry-beanie-thumb.webp" alt=""></span><p class="name">딸기 털모자</p><p class="price">0원</p></div>
+<div class="item"><span class="thumb"><img src="marong-wear-mockup/clover-cap-thumb.webp" alt=""></span><p class="name">클로버 모자</p><p class="price">0원</p></div>
+<div class="item"><span class="thumb"><img src="marong-wear-mockup/picnic-hat-thumb.webp" alt=""></span><p class="name">밀짚모자</p><p class="price">0원</p></div>
+</div>
+</main>
+<div class="scrim"></div>
+<section class="sheet" role="dialog" aria-label="딸기 털모자">
+<span class="grab" aria-hidden="true"></span>
+<div class="line">
+<p class="grow strong" style="font-size: var(--font-size-title)">딸기 털모자</p>
+<a class="iconbtn" href="#W-181-default-day" aria-label="닫기"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></a>
+</div>
+<div class="center stack">
+<div class="face face-home"><span class="dress"><img src="marong-wear-mockup/face-01-neutral.webp" alt="딸기 털모자를 쓴 마롱이 미리 보기"><img src="marong-wear-mockup/oat-sweater.webp" alt=""><img src="marong-wear-mockup/chestnut-scarf.webp" alt=""><img src="marong-wear-mockup/berry-beanie.webp" alt=""></span></div>
+<p class="cap">마롱이가 입으면 이렇게 돼</p>
+</div>
+<div class="line"><span class="badge">모자</span><span class="grow strong">받았어</span></div>
+<a class="btn" href="#W-183-wear-night">입혀 볼래</a>
+</section>
+</div>
+</div>
+
+</div>
+</section>
+
+<section class="set" id="set-closet">
+<h2>보관함 '입히기'</h2>
+<p>지금 기본 마롱이는 이 탭 대신 '반려동물 캐릭터를 만들면 옷을 입힐 수 있어'와 '캐릭터 만들기'를 봐요(캐릭터 만들기는 운영에서 꺼져 있음). 바뀌면 받은 아이템을 눌러 바로 입히고, 한 번 더 누르면 벗겨요.</p>
+<div class="boards">
+
+<div class="wrap" id="W-183-before-day"><b>W-183-before-day · SCR-183#default-marong(지금) · 낮</b>
+<div class="phone" data-theme="chestnut" style="width: 360px; height: 560px">
+<header class="head">
+<a class="back" href="#W-165-default-day" style="text-decoration: none"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>내 마롱이</a>
+<h1>보관함</h1><span></span>
+</header>
+<main class="main">
+<div class="tabs" role="tablist">
+<button class="tab on" type="button" role="tab" aria-selected="true">입는 것</button>
+<button class="tab" type="button" role="tab" aria-selected="false">일기장</button>
+</div>
+<section class="card center">
+<div class="face face-home"><img src="marong-wear-mockup/face-01-neutral.webp" alt="마롱이 얼굴"></div>
+<p class="cap">반려동물 캐릭터를 만들면 옷을 입힐 수 있어</p>
+<span class="btn2" style="opacity: var(--opacity-faded)">캐릭터 만들기</span>
+</section>
+</main>
+</div>
+</div>
+
+<div class="wrap" id="W-183-wear-day"><b>W-183-wear-day · SCR-183#wear 기본 마롱이 입히기 · 낮</b>
+<div class="phone" data-theme="chestnut" style="width: 360px; height: 1000px">
+<header class="head">
+<a class="back" href="#W-165-default-day" style="text-decoration: none"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>내 마롱이</a>
+<h1>보관함</h1><span></span>
+</header>
+<main class="main">
+<div class="tabs" role="tablist">
+<button class="tab on" type="button" role="tab" aria-selected="true">입는 것</button>
+<button class="tab" type="button" role="tab" aria-selected="false">일기장</button>
+</div>
+<section class="card center">
+<div class="face face-home"><span class="dress"><img src="marong-wear-mockup/face-01-neutral.webp" alt="지금 차림의 마롱이: 딸기 털모자, 오트밀 스웨터, 밤색 목도리"><img src="marong-wear-mockup/oat-sweater.webp" alt=""><img src="marong-wear-mockup/chestnut-scarf.webp" alt=""><img src="marong-wear-mockup/berry-beanie.webp" alt=""></span></div>
+<p class="cap">누르면 입히고, 한 번 더 누르면 벗겨</p>
+</section>
+<p class="slot-title">머리</p>
+<div class="items">
+<button class="item on" type="button" aria-pressed="true"><span class="thumb"><img src="marong-wear-mockup/berry-beanie-thumb.webp" alt=""></span><span class="name">딸기 털모자</span></button>
+<button class="item" type="button" aria-pressed="false"><span class="thumb"><img src="marong-wear-mockup/picnic-hat-thumb.webp" alt=""></span><span class="name">밀짚모자</span></button>
+</div>
+<p class="slot-title">몸</p>
+<div class="items">
+<button class="item on" type="button" aria-pressed="true"><span class="thumb"><img src="marong-wear-mockup/oat-sweater-thumb.webp" alt=""></span><span class="name">오트밀 스웨터</span></button>
+<button class="item" type="button" aria-pressed="false"><span class="thumb"><img src="marong-wear-mockup/blue-raincoat-thumb.webp" alt=""></span><span class="name">하늘색 우비</span></button>
+</div>
+<p class="slot-title">목</p>
+<div class="items">
+<button class="item on" type="button" aria-pressed="true"><span class="thumb"><img src="marong-wear-mockup/chestnut-scarf-thumb.webp" alt=""></span><span class="name">밤색 목도리</span></button>
+</div>
+<a class="btn2" href="#W-181-default-day" style="margin-top: auto; text-decoration: none">상점 가기</a>
+</main>
+</div>
+</div>
+
+<div class="wrap" id="W-183-wear-night"><b>W-183-wear-night · SCR-183#wear 입히기(밀짚모자로 바꿈) · 밤</b>
+<div class="phone" style="width: 360px; height: 1000px">
+<header class="head">
+<a class="back" href="#W-165-default-day" style="text-decoration: none"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>내 마롱이</a>
+<h1>보관함</h1><span></span>
+</header>
+<main class="main">
+<div class="tabs" role="tablist">
+<button class="tab on" type="button" role="tab" aria-selected="true">입는 것</button>
+<button class="tab" type="button" role="tab" aria-selected="false">일기장</button>
+</div>
+<section class="card center">
+<div class="face face-home"><span class="dress"><img src="marong-wear-mockup/face-01-neutral.webp" alt="지금 차림의 마롱이: 밀짚모자, 하늘색 우비"><img src="marong-wear-mockup/blue-raincoat.webp" alt=""><img src="marong-wear-mockup/picnic-hat.webp" alt=""></span></div>
+<p class="cap">누르면 입히고, 한 번 더 누르면 벗겨</p>
+</section>
+<p class="slot-title">머리</p>
+<div class="items">
+<button class="item" type="button" aria-pressed="false"><span class="thumb"><img src="marong-wear-mockup/berry-beanie-thumb.webp" alt=""></span><span class="name">딸기 털모자</span></button>
+<button class="item on" type="button" aria-pressed="true"><span class="thumb"><img src="marong-wear-mockup/picnic-hat-thumb.webp" alt=""></span><span class="name">밀짚모자</span></button>
+</div>
+<p class="slot-title">몸</p>
+<div class="items">
+<button class="item" type="button" aria-pressed="false"><span class="thumb"><img src="marong-wear-mockup/oat-sweater-thumb.webp" alt=""></span><span class="name">오트밀 스웨터</span></button>
+<button class="item on" type="button" aria-pressed="true"><span class="thumb"><img src="marong-wear-mockup/blue-raincoat-thumb.webp" alt=""></span><span class="name">하늘색 우비</span></button>
+</div>
+<p class="slot-title">목</p>
+<div class="items">
+<button class="item" type="button" aria-pressed="false"><span class="thumb"><img src="marong-wear-mockup/chestnut-scarf-thumb.webp" alt=""></span><span class="name">밤색 목도리</span></button>
+</div>
+<a class="btn2" href="#W-181-default-day" style="margin-top: auto; text-decoration: none">상점 가기</a>
+</main>
+</div>
+</div>
+
+</div>
+</section>
+
+<section class="set" id="set-me">
+<h2>내 마롱이</h2>
+<p>기본 마롱이를 쓰는 사람에게도 '꾸미기' 줄이 생기고, 얼굴은 지금 차림이에요. 캐릭터 목록의 기본 마롱이 얼굴도 같은 차림이에요.</p>
+<div class="boards">
+<div class="wrap" id="W-165-default-day"><b>W-165-default-day · SCR-165 기본 마롱이 · 낮</b>
+<div class="phone" data-theme="chestnut" style="width: 360px; height: 720px">
+<header class="head">
+<a class="back" href="#W-107-after-day" style="text-decoration: none"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>글 대화</a>
+<h1>내 마롱이</h1><span></span>
+</header>
+<main class="main">
+<section class="card center">
+<div class="face face-home"><span class="dress"><img src="marong-wear-mockup/face-01-neutral.webp" alt="지금 차림의 마롱이"><img src="marong-wear-mockup/oat-sweater.webp" alt=""><img src="marong-wear-mockup/chestnut-scarf.webp" alt=""><img src="marong-wear-mockup/berry-beanie.webp" alt=""></span></div>
+<p class="title">마롱이</p>
+</section>
+<div class="rows">
+<a class="row" href="#W-183-wear-day"><span class="grow">꾸미기</span><span class="val">모자·옷·목도리</span><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></a>
+<a class="row" href="#W-165-default-day"><span class="grow">통화 목소리</span><span class="val">기본 목소리</span><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></a>
+</div>
+<section class="stack">
+<h2 class="group-title">오늘 쓴 양</h2>
+<div class="card"><p>글 답 9번 · 통화 4분 · 그림 1장</p></div>
+</section>
+</main>
+</div>
+</div>
+</div>
+</section>
+
+<section class="set" id="set-fit">
+<h2>표정과 그림 맞춤</h2>
+<p>마롱이 얼굴 그림 21장은 몸 테두리가 같아서(생각 풍선·졸음 표시만 더해짐) 아이템마다 마롱이용 레이어 한 장이면 모든 표정에 맞아요. 아래는 같은 차림을 네 표정에 겹친 모습과, 운영 아이템 10개를 자동으로 맞춘 결과예요.</p>
+<div class="faces" role="list">
+<figure role="listitem"><div class="face"><span class="dress"><img src="marong-wear-mockup/face-01-neutral.webp" alt="기본 얼굴"><img src="marong-wear-mockup/forest-vest.webp" alt=""><img src="marong-wear-mockup/cloud-scarf.webp" alt=""><img src="marong-wear-mockup/clover-cap.webp" alt=""></span></div><figcaption>기본</figcaption></figure>
+<figure role="listitem"><div class="face"><span class="dress"><img src="marong-wear-mockup/face-05-excited.webp" alt="신난 얼굴"><img src="marong-wear-mockup/forest-vest.webp" alt=""><img src="marong-wear-mockup/cloud-scarf.webp" alt=""><img src="marong-wear-mockup/clover-cap.webp" alt=""></span></div><figcaption>신남</figcaption></figure>
+<figure role="listitem"><div class="face"><span class="dress"><img src="marong-wear-mockup/face-04-thinking.webp" alt="생각하는 얼굴"><img src="marong-wear-mockup/forest-vest.webp" alt=""><img src="marong-wear-mockup/cloud-scarf.webp" alt=""><img src="marong-wear-mockup/clover-cap.webp" alt=""></span></div><figcaption>생각 중</figcaption></figure>
+<figure role="listitem"><div class="face"><span class="dress"><img src="marong-wear-mockup/face-12-asleep.webp" alt="자는 얼굴"><img src="marong-wear-mockup/forest-vest.webp" alt=""><img src="marong-wear-mockup/cloud-scarf.webp" alt=""><img src="marong-wear-mockup/clover-cap.webp" alt=""></span></div><figcaption>쉬는 중</figcaption></figure>
+</div>
+<p style="margin-top: 18px">자동 맞춤 결과(한 칸에 아이템 하나, 아래 줄은 섞어 입힘):</p>
+<img class="sheet-img" src="marong-wear-mockup/fit-sheet.webp" alt="마롱이에게 모자 4개, 옷 4개, 목도리 2개를 하나씩 입힌 모습과 섞어 입힌 모습 4가지">
+</section>
