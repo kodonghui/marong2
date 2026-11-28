@@ -204,7 +204,8 @@
     }
     target.append(face(inventory.outfit));
     if (!inventory.characterId) {
-      target.append(node('p', '반려동물 캐릭터를 만들면 옷을 입힐 수 있어', 'caption'), link('캐릭터 만들기', '/chat/character/new', 'btn2'));
+      target.append(node('p', '반려동물 캐릭터를 만들면 옷을 입힐 수 있어', 'caption'));
+      if (profile.features?.character) target.append(link('캐릭터 만들기', '/chat/character/new', 'btn2'));
       return;
     }
     const wearable = inventory.items.filter(item => item.slot);
