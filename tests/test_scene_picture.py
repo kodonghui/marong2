@@ -96,20 +96,40 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_bug140_queued_reaction_rechecks_invalid_target_and_other_layers(self):
         db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
-        row, = await reactions.due(friend)
-        job = await reactions.reaction_job(row)
-        path.unlink()
-        self.assertEqual(await worker.step(), 1)
-        model.assert_not_awaited()
-        self.assertEqual(db.admin('SELECT state FROM marong.scene_pictures WHERE id=%s',(job['id'],)), [('failed',)])
-        # A different valid target still draws, but the missing hat must not enter its prompt.
         db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'oat-sweater',now())", (friend,))
-        row = next(x for x in await reactions.due(friend) if x['item_id'] == 'oat-sweater')
-        job = await reactions.reaction_job(row)
-        await worker.step()
+        rows = {row['item_id']: row for row in await reactions.due(friend)}
+        jobs = {ident: await reactions.reaction_job(row) for ident, row in rows.items()}
+        path.unlink()
+        self.assertEqual(await worker.step(), 2)
+        self.assertEqual(model.await_count, 1)
+        self.assertEqual(db.admin('SELECT state FROM marong.scene_pictures WHERE id=%s',(jobs['berry-beanie']['id'],)), [('failed',)])
+        self.assertEqual(db.admin('SELECT state FROM marong.scene_pictures WHERE id=%s',(jobs['oat-sweater']['id'],)), [('done',)])
         prompt = model.await_args.args[0]
         self.assertNotIn(catalog.items['berry-beanie'].prompt, prompt)
         self.assertIn(catalog.items['oat-sweater'].prompt, prompt)
+
+    async def test_bug140_stale_reaction_fallback_rechecks_layer(self):
+        db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+        db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'oat-sweater',now())", (friend,))
+        rows = {row['item_id']: row for row in await reactions.due(friend)}
+        reactions.scenes = None
+        path.unlink()
+        self.assertIsNone(await reactions.scene(rows['berry-beanie']))
+        image_id = await reactions.scene(rows['oat-sweater'])
+        self.assertIsNotNone(image_id)
+        self.assertEqual(db.admin('SELECT outfit FROM marong.scene_pictures WHERE id=%s',(image_id,)), [(['oat-sweater'],)])
+
+    async def test_bug140_completed_snapshot_rechecked_before_fallback(self):
+        db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+        db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'oat-sweater',now())", (friend,))
+        row = next(row for row in await reactions.due(friend) if row['item_id'] == 'oat-sweater')
+        async def completed_after_loss(job):
+            path.unlink()
+            return job['id']
+        reactions.scenes = SimpleNamespace(wait_for_topic=completed_after_loss)
+        image_id = await reactions.scene(row)
+        self.assertEqual(db.admin('SELECT outfit,fallback FROM marong.scene_pictures WHERE id=%s',(image_id,)), [(['oat-sweater'],True)])
+        self.assertEqual(db.admin('SELECT count(*) FROM marong.scene_pictures'), [(2,)])
 
     async def test_tc773_failure_cost_is_not_lost_in_fallback(self):
         from marong.decor_reactions import DecorReactions

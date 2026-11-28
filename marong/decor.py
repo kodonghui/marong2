@@ -135,6 +135,15 @@ class DecorCatalog:
                 missing.append("file:" + key)
         return missing
 
+    def valid_marong_outfit(self, row):
+        """Resolve stored selections consistently for every default-Marong consumer."""
+        result = dict.fromkeys(WEAR)
+        for slot in WEAR:
+            item = self.items.get(row[slot]) if row and row[slot] else None
+            if item and item.slot == slot and not self.marong_layer_issue(item):
+                result[slot] = item.id
+        return result
+
     def marong_layer_issue(self, item):
         path = item.files.get('marong.png')
         return self._layer_issue(path, 'marong', item.slot) if path else 'layer'

@@ -109,6 +109,7 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
                        sessions=sessions,authentication='session',admin_email_hash='a'*64)
         chat.decor.catalog = catalog
         chat.pet_app_settings = replace(chat.pet_app_settings,decor=True,default_wear=True)
+        chat.profile.features['defaultWear'] = True
         await chat.decor.seed()
         async with TestClient(TestServer(chat.web_app())) as client:
             shop = (await (await client.get('/chat/api/shop',headers=member)).json())['items']
@@ -142,6 +143,7 @@ class DecorTests(unittest.IsolatedAsyncioTestCase):
             catalog.items['hat-fixture'] = replace(original,files={k:v for k,v in original.files.items() if k != 'marong.png'})
             db.admin('UPDATE marong.friend_profiles SET character_id=NULL WHERE friend_id=%s',(friend,))
             self.assertIsNone((await (await client.get('/chat/api/closet',headers=member)).json())['outfit']['head'])
+            self.assertIsNone((await (await client.get('/chat/api/profile',headers=member)).json())['marongOutfit']['head'])
 
     async def test_bug139_switch_off_seeds_all_existing_items_and_shop(self):
         """BUG-139 / SPEC-575: an absent default layer must not hide existing pet items."""

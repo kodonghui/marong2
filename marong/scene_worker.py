@@ -115,12 +115,25 @@ class SceneWorker:
         topic = topics.get(job["topic"]) if topics and job["purpose"] == "topic" else None
         result = None
         if character or (job['character_id'] is None and self.default_wear and job['purpose'] == 'reaction'):
-            outfit = self.pictures.outfit_prompts(job["outfit"])
+            selections = job['outfit']
+            if character is None:
+                catalog = self.pictures.catalog
+                by_slot = dict.fromkeys(('body', 'neck', 'head'))
+                if catalog:
+                    for ident in selections:
+                        item = catalog.items.get(ident)
+                        if item and item.slot in by_slot:
+                            by_slot[item.slot] = ident
+                    valid = await asyncio.to_thread(catalog.valid_marong_outfit, by_slot)
+                    selections = [valid[slot] for slot in ('body', 'neck', 'head') if valid[slot]]
+                else:
+                    selections = []
+            outfit = self.pictures.outfit_prompts(selections)
             if topic:
                 result = await self.pictures.draw("topic", character, outfit, topic.scene)
             elif job["purpose"] == "reaction":
                 item = self.pictures.catalog.items.get(job["item_id"]) if self.pictures.catalog else None
-                if item and item.prompt:
+                if item and item.prompt and (character is not None or job['item_id'] in selections):
                     subject = 'little white character' if character is None else 'pet character'
                     scene = f"The {subject} proudly shows off the new {item.prompt}, looking at the viewer."
                     result = await self.pictures.draw("reaction", character, outfit, scene)

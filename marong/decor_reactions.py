@@ -66,7 +66,7 @@ class DecorReactions:
                 WHERE character_id IS NULL AND state='waiting' AND next_at < now()-interval '1 hour' RETURNING id)
                 SELECT count(*) FROM skipped""")
             self._stale_drained = True
-        return await self.store._all("""
+        rows = await self.store._all("""
             SELECT r.id,r.friend_id,r.character_id,r.item_id,r.attempts,coalesce(c.template,'marong') AS template,
                    coalesce(c.name,p.bot_name) AS name,
                    CASE WHEN r.character_id IS NULL THEN mo.body ELSE o.body END AS body,
@@ -82,6 +82,17 @@ class DecorReactions:
             WHERE r.state='waiting' AND r.next_at<=now() AND (%s::bigint IS NULL OR r.friend_id=%s)
             ORDER BY r.next_at,r.id LIMIT 40
         """, (friend, friend))
+        def validate():
+            result = []
+            for row in rows:
+                row = dict(row)
+                if row['character_id'] is None:
+                    outfit = self.catalog.valid_marong_outfit(row) if self.catalog else dict.fromkeys(('body', 'neck', 'head'))
+                    row.update(outfit)
+                    row['active'] = row['active'] and row['item_id'] in outfit.values()
+                result.append(row)
+            return result
+        return await asyncio.to_thread(validate)
 
     async def finish(self, row, state, scene=None):
         await self.store._one(f"""
@@ -119,14 +130,37 @@ class DecorReactions:
             return job
 
     async def scene(self, row):
-        selections = [row[slot] for slot in ("body", "neck", "head") if row[slot]]
+        async def current_selections():
+            if row['character_id'] is None:
+                outfit = await asyncio.to_thread(self.catalog.valid_marong_outfit, row)
+                if row['item_id'] not in outfit.values():
+                    return None
+                return [outfit[slot] for slot in ('body', 'neck', 'head') if outfit[slot]]
+            return [row[slot] for slot in ('body', 'neck', 'head') if row[slot]]
+
+        selections = await current_selections()
+        if selections is None:
+            return None
+        if row['character_id'] is None:
+            row = {**row, **{slot: next((ident for ident in selections if self.catalog.items[ident].slot == slot), None)
+                             for slot in ('body', 'neck', 'head')}}
         if self.scenes:
             job = await self.reaction_job(row)
             if not job:
                 return None
             result = await self.scenes.wait_for_topic(job)
             if result:
-                return result
+                if row['character_id'] is not None:
+                    return result
+                current = await current_selections()
+                if current is None:
+                    return None
+                snapshot = await self.store._one('SELECT outfit FROM marong.scene_pictures WHERE id=%s', (result,))
+                if snapshot and snapshot['outfit'] == current:
+                    return result
+        selections = await current_selections()
+        if selections is None:
+            return None
         try:
             if row['character_id'] is None:
                 expression = (REFERENCES / '05-excited.webp').read_bytes()

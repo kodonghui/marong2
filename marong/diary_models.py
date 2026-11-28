@@ -97,8 +97,9 @@ async def marong_outfit_prompts(store, catalog, friend):
     if not catalog:
         return []
     row = await store._one('SELECT body,neck,head FROM marong.marong_outfits WHERE friend_id=%s', (friend,))
+    outfit = await asyncio.to_thread(catalog.valid_marong_outfit, row)
     return [catalog.items[ident].prompt for slot in ('body', 'neck', 'head')
-            if row and (ident := row[slot]) in catalog.items and catalog.items[ident].prompt]
+            if (ident := outfit[slot]) and catalog.items[ident].prompt]
 
 
 @dataclass(frozen=True)

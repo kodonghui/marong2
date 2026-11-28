@@ -110,10 +110,10 @@ class AppDecor:
 
     def outfit_view(self, row, template):
         outfit = dict.fromkeys(WEAR)
+        if self.catalog and template == 'marong':
+            row = self.catalog.valid_marong_outfit(row)
         for slot in WEAR:
             item = self.catalog.items.get(row[slot]) if self.catalog and row else None
-            if item and template == 'marong' and self.catalog.marong_layer_issue(item):
-                continue
             layer = self.catalog.url(item, f"{template}.png") if item else None
             if layer:
                 outfit[slot] = {"id": item.id, "name": item.name, "layerUrl": layer}
