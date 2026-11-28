@@ -131,6 +131,39 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.admin('SELECT outfit,fallback FROM marong.scene_pictures WHERE id=%s',(image_id,)), [(['oat-sweater'],True)])
         self.assertEqual(db.admin('SELECT count(*) FROM marong.scene_pictures'), [(2,)])
 
+    async def test_bug141_restored_layer_was_not_in_actual_draw(self):
+        db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+        db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'oat-sweater',now())", (friend,))
+        row = next(row for row in await reactions.due(friend) if row['item_id'] == 'oat-sweater')
+        job = await reactions.reaction_job(row)
+        original = path.read_bytes(); path.unlink()
+        async def restore_during_draw(*args, **kwargs):
+            path.write_bytes(original)
+            return ModelResult(value=picture(), cost=Decimal('.02'))
+        model.side_effect = restore_during_draw
+        self.assertEqual(await worker.step(), 1)
+        self.assertNotIn(catalog.items['berry-beanie'].prompt, model.await_args.args[0])
+        result = await reactions.scene(row)
+        self.assertNotEqual(result,job['id'])
+        self.assertEqual(db.admin('SELECT fallback FROM marong.scene_pictures WHERE id=%s',(result,)), [(True,)])
+
+    async def test_bug141_changed_layer_hash_invalidates_completed_draw(self):
+        db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+        db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'oat-sweater',now())", (friend,))
+        row = next(row for row in await reactions.due(friend) if row['item_id'] == 'oat-sweater')
+        job = await reactions.reaction_job(row)
+        async def change_during_draw(*args, **kwargs):
+            image = Image.open(path).convert('RGBA')
+            point = image.getchannel('A').getbbox()[:2]
+            image.putpixel(point,(123,45,67,255)); image.save(path)
+            return ModelResult(value=picture(), cost=Decimal('.02'))
+        model.side_effect = change_during_draw
+        self.assertEqual(await worker.step(), 1)
+        self.assertIsNone(catalog.marong_layer_issue(catalog.items['berry-beanie']))
+        result = await reactions.scene(row)
+        self.assertNotEqual(result,job['id'])
+        self.assertEqual(db.admin('SELECT fallback FROM marong.scene_pictures WHERE id=%s',(result,)), [(True,)])
+
     async def test_tc773_failure_cost_is_not_lost_in_fallback(self):
         from marong.decor_reactions import DecorReactions
         db=TestDB(); self.addCleanup(db.close)
