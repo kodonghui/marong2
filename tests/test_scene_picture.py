@@ -211,6 +211,7 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         db.admin("INSERT INTO marong.outfits(character_id,head) VALUES (%s,'berry-beanie')",(pet,))
         topics=picture_set(); key=f"{topics.set}/{next(iter(topics.by_name))}"
         job=db.admin("INSERT INTO marong.scene_pictures(friend_id,character_id,purpose,topic,outfit) VALUES (%s,%s,'topic',%s,%s) RETURNING id",(friend,pet,key,['berry-beanie']))[0][0]
+        worker.default_wear=False
         worker.pictures.media=SimpleNamespace(read=AsyncMock(return_value=b'fixture'))
         async def draw(*args, **kwargs):
             db.admin("UPDATE marong.decor_items SET state='unlisted',unlisted_at=now() WHERE id='berry-beanie'")
@@ -219,6 +220,50 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await worker.step(),1)
         self.assertIsNone(await worker.wait_for_topic({'id':job,'state':'done'}))
         self.assertEqual(model.await_count,1)
+        db.admin("UPDATE marong.decor_items SET state='listed',unlisted_at=NULL WHERE id='berry-beanie'")
+        legacy=db.admin("""INSERT INTO marong.scene_pictures(friend_id,character_id,purpose,topic,state,
+            finished_at,format,width,height,image) VALUES (%s,%s,'topic',%s,'done',now(),'png',1,1,'\\x01') RETURNING id""",(friend,pet,key))[0][0]
+        self.assertIsNone(await worker.wait_for_topic({'id':legacy,'state':'done'}))
+
+    async def test_bug142_fixed_snapshot_checks_ownership_per_friend(self):
+        from marong.decor import valid_fixed_outfit_snapshot
+        db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+        other=db.admin("INSERT INTO marong.friends(name) VALUES ('fixture') RETURNING id")[0][0]
+        snapshot=catalog.outfit_snapshot({'head':'berry-beanie','body':None,'neck':None},'marong')
+        self.assertTrue(await valid_fixed_outfit_snapshot(store,catalog,friend,snapshot,'marong'))
+        self.assertFalse(await valid_fixed_outfit_snapshot(store,catalog,other,snapshot,'marong'))
+        db.admin("INSERT INTO marong.decor_owned(friend_id,item_id) VALUES (%s,'berry-beanie')",(other,))
+        self.assertTrue(await valid_fixed_outfit_snapshot(store,catalog,other,snapshot,'marong'))
+
+    async def test_bug142_pet_reaction_keeps_valid_snapshot_or_falls_back(self):
+        from marong.decor_reactions import DecorReactions
+        for action in ('change_selection','unlist'):
+            with self.subTest(action=action):
+                db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+                pet=db.admin("""INSERT INTO marong.characters(friend_id,kind,status,stage,ready_at,template,name,traits)
+                    VALUES (%s,'dog','ready','done',now(),'dog_small','시험','{}') RETURNING id""",(friend,))[0][0]
+                db.admin('UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s',(pet,friend))
+                db.admin("INSERT INTO marong.outfits(character_id,head,body) VALUES (%s,'berry-beanie','oat-sweater')",(pet,))
+                db.admin("INSERT INTO marong.outfit_firsts(friend_id,character_id,item_id,next_at) VALUES (%s,%s,'oat-sweater',now())",(friend,pet))
+                expression=(Path(__file__).resolve().parents[1]/'marong/call/static/face/v1/05-excited.webp').read_bytes()
+                media=SimpleNamespace(read=AsyncMock(return_value=expression))
+                worker.pictures.media=media; reactions=DecorReactions(store,media,SimpleNamespace(record=AsyncMock()),catalog,worker)
+                row,=await reactions.due(friend); job=await reactions.reaction_job(row)
+                async def draw(*args, **kwargs):
+                    if action=='change_selection':
+                        db.admin('UPDATE marong.outfits SET head=NULL WHERE character_id=%s',(pet,))
+                    else:
+                        db.admin("UPDATE marong.decor_items SET state='unlisted',unlisted_at=now() WHERE id='berry-beanie'")
+                    return ModelResult(value=picture(),cost=Decimal('.02'))
+                model.side_effect=draw
+                self.assertEqual(await worker.step(),1)
+                result=await reactions.scene(row)
+                if action=='change_selection':
+                    self.assertEqual(result,job['id'])
+                else:
+                    self.assertNotEqual(result,job['id'])
+                    self.assertEqual(db.admin('SELECT outfit,fallback FROM marong.scene_pictures WHERE id=%s',(result,)),[(['oat-sweater'],True)])
+                self.assertEqual(model.await_count,1)
 
     async def test_bug142_pet_diary_keeps_changed_selection_but_rejects_unlisted_item(self):
         db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
@@ -241,6 +286,32 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         result=await worker.pictures.diary_art(row,'The little white character sits.',None,'sunny','fixture')
         self.assertNotEqual(result.outcome,'ok')
         self.assertEqual(result.cost,Decimal('.02'))
+
+    async def test_bug142_reaction_snapshots_current_outfit_at_worker_start(self):
+        for pet_mode in (False,True):
+            with self.subTest(pet=pet_mode):
+                db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+                if pet_mode:
+                    pet=db.admin("""INSERT INTO marong.characters(friend_id,kind,status,stage,ready_at,template,name,traits)
+                        VALUES (%s,'dog','ready','done',now(),'dog_small','시험','{}') RETURNING id""",(friend,))[0][0]
+                    db.admin('UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s',(pet,friend))
+                    db.admin("INSERT INTO marong.outfits(character_id,head,body) VALUES (%s,'berry-beanie','oat-sweater')",(pet,))
+                    db.admin("INSERT INTO marong.outfit_firsts(friend_id,character_id,item_id,next_at) VALUES (%s,%s,'oat-sweater',now())",(friend,pet))
+                    worker.default_wear=False; reactions.default_wear=False
+                    worker.pictures.media=SimpleNamespace(read=AsyncMock(return_value=b'fixture'))
+                else:
+                    db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'oat-sweater',now())",(friend,))
+                row=next(row for row in await reactions.due(friend) if row['item_id']=='oat-sweater')
+                job=await reactions.reaction_job(row)
+                if pet_mode:
+                    db.admin('UPDATE marong.outfits SET head=NULL WHERE character_id=%s',(pet,))
+                else:
+                    db.admin('UPDATE marong.marong_outfits SET head=NULL WHERE friend_id=%s',(friend,))
+                self.assertEqual(await worker.step(),1)
+                self.assertNotIn(catalog.items['berry-beanie'].prompt,model.await_args.args[0])
+                saved=db.admin('SELECT drawn_outfit FROM marong.scene_pictures WHERE id=%s',(job['id'],))[0][0]
+                self.assertEqual([layer['id'] for layer in saved],['oat-sweater'])
+                self.assertEqual(await reactions.scene(row),job['id'])
 
     async def test_tc767_773_gate_then_failed_send_reuses_one_job(self):
         from marong.unified_delivery import AppProactive, UnifiedDelivery
@@ -362,6 +433,7 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
             VALUES (%s,'dog','ready','done',now(),'dog_small','시험','{}') RETURNING id""",(friend,))[0][0]
         db.admin("UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s",(pet,friend))
         db.admin("INSERT INTO marong.decor_items(id,kind,slot) VALUES ('berry-beanie','hat','head')")
+        db.admin("INSERT INTO marong.decor_owned(friend_id,item_id) VALUES (%s,'berry-beanie')",(friend,))
         db.admin("INSERT INTO marong.outfits(character_id,head) VALUES (%s,'berry-beanie')",(pet,))
         db.admin("INSERT INTO marong.outfit_firsts(friend_id,character_id,item_id,next_at) VALUES (%s,%s,'berry-beanie',now())",(friend,pet))
         model=AsyncMock(return_value=ModelResult(outcome='error',cost=Decimal('.025')))
@@ -606,6 +678,7 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         item = catalog.items["berry-beanie"]
         catalog.items[item.id] = replace(item, prompt="시험장면지시")
         db.admin("INSERT INTO marong.decor_items(id,item_set,kind,slot,starter) VALUES (%s,'v1','hat','head',false)", (item.id,))
+        db.admin("INSERT INTO marong.decor_owned(friend_id,item_id) VALUES (%s,%s)", (friend,item.id))
         db.admin("""INSERT INTO marong.scene_pictures(friend_id,character_id,purpose,item_id,outfit)
                     VALUES (%s,%s,'reaction',%s,ARRAY[%s])""", (friend, character, item.id, item.id))
         model = AsyncMock(return_value=ModelResult(value=picture(), cost=Decimal("0")))
