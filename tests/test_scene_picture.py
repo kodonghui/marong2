@@ -9,6 +9,8 @@ from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 import secrets
+import shutil
+import tempfile
 import sys
 from types import SimpleNamespace
 import unittest
@@ -44,6 +46,71 @@ def picture():
 
 
 class ScenesTests(unittest.IsolatedAsyncioTestCase):
+    async def bug140_setup(self):
+        from marong.app_decor import AppDecor
+        from marong.decor_reactions import DecorReactions
+        db = TestDB(); self.addCleanup(db.close)
+        db.apply_unified_prerequisites(); db.apply_unified(); db.apply_pet_app_prerequisites(); db.apply_pet_app(); db.apply_marong_outfit()
+        store = UnifiedStore(db.app_url); await store.open(wait=True); self.addAsyncCleanup(store.close)
+        sessions = AppSessions(store.pool,secrets.token_bytes(32),contact_schedule=(2,8,22))
+        auth = await sessions.join((await sessions.create_invite('join'))[0],'시험친구','웹')
+        friend = (await sessions.find_session(auth.token))['friend_id']
+        db.admin("INSERT INTO marong.decor_items(id,kind,slot) VALUES ('berry-beanie','hat','head'),('oat-sweater','top','body')")
+        db.admin("INSERT INTO marong.marong_outfits(friend_id,head,body) VALUES (%s,'berry-beanie','oat-sweater')", (friend,))
+        db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'berry-beanie',now())", (friend,))
+        catalog = DecorCatalog()
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        original = catalog.items['berry-beanie']; path = Path(tmp.name) / 'hat.png'
+        shutil.copyfile(original.files['marong.png'], path)
+        catalog.items[original.id] = replace(original, files={**original.files, 'marong.png': path})
+        decor = AppDecor(SimpleNamespace(store=store)); decor.catalog = catalog
+        model = AsyncMock(return_value=ModelResult(value=picture(), cost=Decimal('.02')))
+        usage = SimpleNamespace(record=AsyncMock())
+        art = ScenePictures(store,None,SimpleNamespace(edit_picture=model),'fixture',catalog=catalog)
+        worker = SceneWorker(store,art,usage,default_wear=True)
+        reactions = DecorReactions(store,None,usage,catalog,worker,default_wear=True)
+        return db, store, friend, catalog, path, decor, model, worker, reactions
+
+    async def test_bug140_profile_and_diary_agree_after_layer_removed_or_invalid(self):
+        from marong.diary_models import marong_outfit_prompts
+        db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+        self.assertEqual((await decor.equipped(friend,'marong'))['head']['id'], 'berry-beanie')
+        self.assertIn(catalog.items['berry-beanie'].prompt, await marong_outfit_prompts(store,catalog,friend))
+        for invalid in ('missing', 'outside'):
+            if invalid == 'missing':
+                path.unlink()
+            else:
+                image = Image.new('RGBA',(1024,1024)); image.putpixel((0,0),(255,0,0,255)); image.save(path)
+            with self.subTest(invalid=invalid):
+                self.assertIsNone((await decor.equipped(friend,'marong'))['head'])
+                self.assertNotIn(catalog.items['berry-beanie'].prompt, await marong_outfit_prompts(store,catalog,friend))
+                self.assertIn(catalog.items['oat-sweater'].prompt, await marong_outfit_prompts(store,catalog,friend))
+
+    async def test_bug140_waiting_reaction_inactive_when_layer_removed(self):
+        db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+        self.assertTrue((await reactions.due(friend))[0]['active'])
+        path.unlink()
+        row, = await reactions.due(friend)
+        self.assertFalse(row['active'])
+        self.assertIsNone(row['head'])
+
+    async def test_bug140_queued_reaction_rechecks_invalid_target_and_other_layers(self):
+        db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+        row, = await reactions.due(friend)
+        job = await reactions.reaction_job(row)
+        path.unlink()
+        self.assertEqual(await worker.step(), 1)
+        model.assert_not_awaited()
+        self.assertEqual(db.admin('SELECT state FROM marong.scene_pictures WHERE id=%s',(job['id'],)), [('failed',)])
+        # A different valid target still draws, but the missing hat must not enter its prompt.
+        db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'oat-sweater',now())", (friend,))
+        row = next(x for x in await reactions.due(friend) if x['item_id'] == 'oat-sweater')
+        job = await reactions.reaction_job(row)
+        await worker.step()
+        prompt = model.await_args.args[0]
+        self.assertNotIn(catalog.items['berry-beanie'].prompt, prompt)
+        self.assertIn(catalog.items['oat-sweater'].prompt, prompt)
+
     async def test_tc773_failure_cost_is_not_lost_in_fallback(self):
         from marong.decor_reactions import DecorReactions
         db=TestDB(); self.addCleanup(db.close)
