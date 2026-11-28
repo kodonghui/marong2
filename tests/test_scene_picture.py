@@ -197,6 +197,28 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         await drain_default_wear(store)
         self.assertEqual(db.admin('SELECT state,fail_reason FROM marong.scene_pictures WHERE id=%s', (drawing,)), [('failed','timeout')])
 
+    async def test_tc767_gate_twice_blocks_without_drawing(self):
+        from marong.decor_reactions import DecorReactions
+        db=TestDB(); self.addCleanup(db.close)
+        db.apply_unified_prerequisites(); db.apply_unified(); db.apply_pet_app_prerequisites(); db.apply_pet_app(); db.apply_marong_outfit()
+        store=UnifiedStore(db.app_url); await store.open(wait=True); self.addAsyncCleanup(store.close)
+        sessions=AppSessions(store.pool,secrets.token_bytes(32),contact_schedule=(2,8,22))
+        auth=await sessions.join((await sessions.create_invite('join'))[0],'시험친구','웹')
+        friend=(await sessions.find_session(auth.token))['friend_id']
+        db.admin("INSERT INTO marong.decor_items(id,kind,slot) VALUES ('berry-beanie','hat','head')")
+        db.admin("INSERT INTO marong.marong_outfits(friend_id,head) VALUES (%s,'berry-beanie')",(friend,))
+        db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'berry-beanie',now())",(friend,))
+        scenes=SimpleNamespace(wait_for_topic=AsyncMock())
+        reactions=DecorReactions(store,None,None,DecorCatalog(),scenes,default_wear=True)
+        row,=await reactions.due(friend)
+        await reactions.defer(row,db.admin("SELECT now()")[0][0])
+        row,=await reactions.due(friend)
+        self.assertEqual(row['attempts'],1)
+        await reactions.defer(row,db.admin("SELECT now()")[0][0])
+        self.assertEqual(db.admin('SELECT state,attempts FROM marong.outfit_firsts'), [('blocked',1)])
+        self.assertEqual(db.admin('SELECT count(*) FROM marong.scene_pictures'), [(0,)])
+        scenes.wait_for_topic.assert_not_awaited()
+
     async def test_scene_prompts_references_retries_and_cost(self):
         self.assertEqual(subject({"kind": "dog"}), "a small dog")
         self.assertEqual(subject(PET), "a small brown poodle")
