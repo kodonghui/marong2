@@ -44,7 +44,7 @@ class MarongWearDrawPathsTest(unittest.IsolatedAsyncioTestCase):
         @asynccontextmanager
         async def connection():
             yield SimpleNamespace(transaction=connection)
-        store = SimpleNamespace(pool=SimpleNamespace(connection=connection), _one=AsyncMock(side_effect=[
+        store = SimpleNamespace(pool=SimpleNamespace(connection=connection), _all=AsyncMock(return_value=[{'id':'berry-beanie'}]), _one=AsyncMock(side_effect=[
             {'scene':'The little white character sits.', 'weather':'sunny', 'friend_name':'fixture', 'hair':None},
             {'body':None, 'neck':None, 'head':'berry-beanie'},
             {'body':None, 'neck':None, 'head':'berry-beanie'},
@@ -81,7 +81,7 @@ class MarongWearDrawPathsTest(unittest.IsolatedAsyncioTestCase):
             if 'marong_outfits' in sql:
                 return {'body':None, 'neck':None, 'head':'berry-beanie'}
             return {'scene':'The little white character sits.', 'weather':'sunny', 'friend_name':'fixture', 'hair':None}
-        store = SimpleNamespace(pool=SimpleNamespace(connection=connection), _one=AsyncMock(side_effect=read))
+        store = SimpleNamespace(pool=SimpleNamespace(connection=connection), _one=AsyncMock(side_effect=read), _all=AsyncMock(return_value=[{'id':'berry-beanie'}]))
         catalog = DecorCatalog(); item = catalog.items['berry-beanie']
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
         path = Path(tmp.name)/'hat.png'; shutil.copyfile(item.files['marong.png'],path)
@@ -143,6 +143,47 @@ class MarongWearDrawPathsTest(unittest.IsolatedAsyncioTestCase):
             await edits._redraw(row,None,'fixture')
         self.assertEqual(edits._finish_redraw.await_args.args[1],'done')
         self.assertEqual(edits._finish_redraw.await_args.args[2],'fixture')
+
+    async def test_bug142_diary_rejects_fixed_item_unlisted_or_unowned(self):
+        from marong.diary_edits import DiaryEdits
+        from marong.decor import DecorCatalog
+        from contextlib import asynccontextmanager
+        @asynccontextmanager
+        async def connection():
+            yield SimpleNamespace(transaction=connection)
+        for path_type in ('night','redraw'):
+            for invalid in ('unlisted','unowned'):
+                with self.subTest(path=path_type, invalid=invalid):
+                    available=True
+                    async def read(sql, args):
+                        if 'marong_outfits' in sql:
+                            return {'body':None,'neck':None,'head':'berry-beanie'}
+                        return {'scene':'The little white character sits.','weather':'sunny','friend_name':'fixture','hair':None}
+                    async def allowed(*args):
+                        return [{'id':'berry-beanie'}] if available else []
+                    async def draw(*args, **kwargs):
+                        nonlocal available
+                        available=False
+                        return ModelResult(value='fixture',outcome='ok',cost=Decimal('.02'))
+                    store=SimpleNamespace(pool=SimpleNamespace(connection=connection),_one=AsyncMock(side_effect=read),_all=AsyncMock(side_effect=allowed))
+                    catalog=DecorCatalog(); models=SimpleNamespace(image_key='fixture',image_model='fixture',draw=AsyncMock(side_effect=draw))
+                    now=at(18,7); row={'id':1,'revision':1,'friend_id':1,'character_id':None,'draw_tries':0}
+                    if path_type=='night':
+                        worker=DiaryWorker(store,models,None,None,now=lambda:now,wear_catalog=catalog); worker._owned=AsyncMock(return_value=False)
+                        log=AsyncMock(return_value=1)
+                        with patch('marong.diary_worker.drawing_allowed',new=AsyncMock(return_value=True)), patch('marong.diary_worker.record_run',new=log):
+                            await worker._draw(row,now+timedelta(minutes=5),'fixture')
+                        self.assertNotEqual(log.await_args.args[9].outcome,'ok')
+                        self.assertEqual(log.await_args.args[9].cost,Decimal('.02'))
+                    else:
+                        chat=SimpleNamespace(pet_app_settings=SimpleNamespace(decor=True,default_wear=True),decor=SimpleNamespace(catalog=catalog),diary_scenes=None,diary_models=models)
+                        edits=DiaryEdits(SimpleNamespace(chat=chat,store=store,models=models,draw_budget=None))
+                        edits._current=AsyncMock(return_value={'hair':None,'scene':'The little white character sits.','weather':'sunny','name':'fixture'})
+                        edits._log=AsyncMock(return_value=1); edits._finish_redraw=AsyncMock()
+                        with patch('marong.diary_edits.drawing_allowed',new=AsyncMock(return_value=True)):
+                            await edits._redraw(row,None,'fixture')
+                        self.assertEqual(edits._finish_redraw.await_args.args[1],'draw_failed')
+                        self.assertEqual(edits._log.await_args.args[6].cost,Decimal('.02'))
 
 
 DRAFT = {"title": "군밤 일기", "body": "친구와 군밤을 먹고 이야기를 나누었다. " * 4,
