@@ -12,7 +12,7 @@ import secrets
 import sys
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from aiohttp.test_utils import TestClient, TestServer
@@ -83,18 +83,19 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         db.admin("INSERT INTO marong.decor_items(id,kind,slot) VALUES ('berry-beanie','hat','head')")
         db.admin("INSERT INTO marong.marong_outfits(friend_id,head) VALUES (%s,'berry-beanie')", (friend,))
         db.admin("INSERT INTO marong.outfit_firsts(friend_id,item_id,next_at) VALUES (%s,'berry-beanie',now())", (friend,))
-        scenes=SimpleNamespace(wait_for_topic=AsyncMock(return_value=None))
+        scenes=SceneWorker(store,None,None,default_wear=True)
         reactions=DecorReactions(store,None,SimpleNamespace(record=AsyncMock()),DecorCatalog(),scenes,default_wear=True)
         row,=await reactions.due(friend)
         self.assertTrue(row['active'])
-        sent=await reactions.scene(row)
-        again=await reactions.scene(row)
+        with patch('marong.scene_worker.monotonic', side_effect=[0,186,0,186]):
+            sent=await reactions.scene(row)
+            again=await reactions.scene(row)
         self.assertNotEqual(sent,again)
         jobs=db.admin("SELECT id,state,fallback,cost_usd FROM marong.scene_pictures ORDER BY created_at")
         self.assertEqual(len(jobs),3)
         self.assertEqual([j[1:3] for j in jobs], [('queued',False),('done',True),('done',True)])
         self.assertTrue(all(j[3]==0 for j in jobs))
-        self.assertEqual(scenes.wait_for_topic.await_args_list[0].args[0]['id'],scenes.wait_for_topic.await_args_list[1].args[0]['id'])
+        self.assertEqual(db.admin('SELECT scene_job_id FROM marong.outfit_firsts WHERE id=%s',(row['id'],)),[(jobs[0][0],)])
         await reactions.finish(row, 'sent', sent)
         db.admin("""UPDATE marong.scene_pictures SET state='done',finished_at=now(),format='png',width=1,height=1,
             image='\\x01',cost_usd=0.02 WHERE id=%s""", (jobs[0][0],))
