@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import logging
+import json
 from datetime import timedelta
 from dataclasses import replace
 from decimal import Decimal
@@ -312,6 +313,39 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
                 saved=db.admin('SELECT drawn_outfit FROM marong.scene_pictures WHERE id=%s',(job['id'],))[0][0]
                 self.assertEqual([layer['id'] for layer in saved],['oat-sweater'])
                 self.assertEqual(await reactions.scene(row),job['id'])
+
+    async def test_bug144_call_topic_checks_recorded_snapshot_without_waiting(self):
+        from marong.unified_delivery import AppProactive
+        db, store, friend, catalog, path, decor, model, worker, reactions = await self.bug140_setup()
+        pet=db.admin("""INSERT INTO marong.characters(friend_id,kind,status,stage,ready_at,template,name,traits)
+            VALUES (%s,'dog','ready','done',now(),'dog_small','시험','{}') RETURNING id""",(friend,))[0][0]
+        db.admin('UPDATE marong.friend_profiles SET character_id=%s WHERE friend_id=%s',(pet,friend))
+        item=catalog.items['berry-beanie']; pet_path=path.with_name('pet-hat.png')
+        shutil.copyfile(item.files['dog_small.png'],pet_path)
+        catalog.items[item.id]=replace(item,files={**item.files,'dog_small.png':pet_path})
+        snapshot=catalog.outfit_snapshot({'head':item.id,'body':None,'neck':None},'dog_small')
+        result=db.admin("""INSERT INTO marong.scene_pictures(friend_id,character_id,purpose,topic,state,
+            finished_at,format,width,height,image,drawn_outfit)
+            VALUES (%s,%s,'topic','v1/test','done',now(),'png',1,1,'\\x01',%s::jsonb) RETURNING id""",
+            (friend,pet,json.dumps(snapshot)))[0][0]
+        job={'id':result,'state':'done'}
+        worker.topic_job=AsyncMock(return_value=job)
+        loop=AppProactive(SimpleNamespace(),store,SimpleNamespace(),RoomLocks(),SimpleNamespace(push=None),scenes=worker)
+        choice=SimpleNamespace(at=db.admin('SELECT now()')[0][0],kind='call',prefs={'pictures':True},picture=SimpleNamespace(key='v1/test'))
+        self.assertEqual(await loop._topic_scene({'friend_id':friend},choice,wait=False),result)
+        db.admin('UPDATE marong.scene_pictures SET drawn_outfit=NULL WHERE id=%s',(result,))
+        self.assertEqual(await loop._topic_scene({'friend_id':friend},choice,wait=False),result)
+        db.admin('UPDATE marong.scene_pictures SET drawn_outfit=%s::jsonb WHERE id=%s',(json.dumps(snapshot),result))
+        db.admin("UPDATE marong.decor_items SET state='unlisted',unlisted_at=now() WHERE id='berry-beanie'")
+        self.assertIsNone(await loop._topic_scene({'friend_id':friend},choice,wait=False))
+        db.admin("UPDATE marong.decor_items SET state='listed',unlisted_at=NULL WHERE id='berry-beanie'")
+        db.admin("DELETE FROM marong.decor_owned WHERE friend_id=%s AND item_id='berry-beanie'",(friend,))
+        self.assertIsNone(await loop._topic_scene({'friend_id':friend},choice,wait=False))
+        db.admin("INSERT INTO marong.decor_owned(friend_id,item_id) VALUES (%s,'berry-beanie')",(friend,))
+        image=Image.open(pet_path).convert('RGBA'); point=image.getchannel('A').getbbox()[:2]
+        image.putpixel(point,(123,45,67,255)); image.save(pet_path)
+        self.assertIsNone(await loop._topic_scene({'friend_id':friend},choice,wait=False))
+        self.assertEqual(model.await_count,0)
 
     async def test_tc767_773_gate_then_failed_send_reuses_one_job(self):
         from marong.unified_delivery import AppProactive, UnifiedDelivery
