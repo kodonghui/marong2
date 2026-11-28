@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "id": "20261128-marong-wear-off",
+  "kind": "server",
+  "title": "기본 마롱이 차림 준비",
+  "deployedOn": "2026-11-28",
+  "app": null,
+  "backfilled": false,
+  "evidence": ["PR #148"],
+  "items": [
+    {
+      "type": "improved",
+      "area": "admin",
+      "title": "차림 기능 준비",
+      "before": "기본 마롱이 차림을 준비하기 전이었어요",
+      "after": "차림 기능을 꺼진 상태로 준비했어요",
+      "evidence": ["PR #148"]
+    }
+  ]
+}
