@@ -22,6 +22,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--only', choices=ITEMS, help='Retry one specific item')
+    parser.add_argument('--attempts', type=int, choices=(1,2), default=2)
     args = parser.parse_args()
     key = os.getenv('OPENAI_API_KEY')
     model = os.getenv('MARONG_WEAR_IMAGE_MODEL')
@@ -31,7 +33,8 @@ def main():
     if model not in prices or prices[model].get('kind') != 'image':
         parser.error('MARONG_WEAR_IMAGE_MODEL must be the approved image model')
     args.out.mkdir(parents=True, exist_ok=True)
-    if any((args.out / f'{ident}.png').exists() for ident in ITEMS) or (args.out / 'usage.json').exists():
+    items = (args.only,) if args.only else ITEMS
+    if any((args.out / f'{ident}.png').exists() for ident in items) or (args.out / 'usage.json').exists():
         raise SystemExit('output already exists; use an empty output directory')
     face = (ROOT / 'marong/call/static/face/v1/01-neutral.webp').read_bytes()
     catalog = ROOT / 'marong/decor/v1'
@@ -42,10 +45,10 @@ def main():
                                    'estimated_calls':estimated_calls}), encoding='utf-8')
     record()
     with httpx.Client(timeout=120) as client:
-        for ident in ITEMS:
+        for ident in items:
             target = args.out / f'{ident}.png'
             thumb = (catalog / ident / 'thumb.webp').read_bytes()
-            for _ in range(2):
+            for _ in range(args.attempts):
                 if cost + Decimal('0.025') > Decimal('1'):
                     print('budget limit reached', flush=True)
                     return 1
@@ -59,7 +62,7 @@ def main():
                         data={'model':model, 'n':'1', 'size':'1024x1024', 'quality':'low', 'background':'transparent',
                               'prompt':'The first reference is the character and the second reference is a clothing item. '
                               'Draw only this same clothing item as it would fit this character, without the character. '
-                              'Transparent background, no text, no people, no additional objects.'},
+                              'Transparent background, no character, no face, no body, no paws, no text, no people, no additional objects.'},
                         files=[('image[]', ('face.webp', face, 'image/webp')),
                                ('image[]', ('item.webp', thumb, 'image/webp'))])
                     response.raise_for_status()
@@ -89,7 +92,7 @@ def main():
                     print(f'{ident}: attempt failed', flush=True)
     record()
     print(f'calls={calls} completed={ok}')
-    return 0 if ok == len(ITEMS) else 1
+    return 0 if ok == len(items) else 1
 
 
 if __name__ == '__main__':

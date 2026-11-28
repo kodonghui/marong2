@@ -16,6 +16,23 @@ from tools import draw_marong_wear
 
 
 class ArtHelperTest(unittest.TestCase):
+    def test_single_item_retry_calls_only_once(self):
+        class Client:
+            calls = 0
+            def __init__(self, **_): pass
+            def __enter__(self): return self
+            def __exit__(self, *_): pass
+            def post(self, *_, **__):
+                type(self).calls += 1
+                raise draw_marong_wear.httpx.ConnectError('fixture')
+        prices=json.loads((draw_marong_wear.ROOT/'marong/pet/prices.json').read_text())['models']
+        model=next(name for name, entry in prices.items() if entry['kind']=='image')
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'OPENAI_API_KEY':'fixture','MARONG_WEAR_IMAGE_MODEL':model}), \
+                patch.object(draw_marong_wear.httpx,'Client',Client), patch.object(sys,'argv',['draw','--out',folder,'--only','forest-vest','--attempts','1']):
+            self.assertEqual(draw_marong_wear.main(),1)
+            self.assertEqual(Client.calls,1)
+            self.assertEqual(json.loads((Path(folder)/'usage.json').read_text())['calls'],1)
+
     def test_budget_stops_before_another_request(self):
         class Response:
             def raise_for_status(self): pass
