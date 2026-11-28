@@ -322,7 +322,9 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         legacy=db.admin("""INSERT INTO marong.scene_pictures(friend_id,character_id,purpose,item_id,state,
             finished_at,format,width,height,image) VALUES (%s,%s,'reaction','berry-beanie','done',now(),'png',1,1,'\\x01') RETURNING id""",(friend,pet))[0][0]
         db.admin("INSERT INTO marong.outfit_firsts(friend_id,character_id,item_id,next_at,scene_job_id) VALUES (%s,%s,'berry-beanie',now(),%s)",(friend,pet,legacy))
+        db.admin("UPDATE marong.decor_items SET state='unlisted',unlisted_at=now() WHERE id='berry-beanie'")
         row=next(row for row in await reactions.due(friend) if row['character_id']==pet)
+        self.assertTrue(row['active'])
         reactions.media=SimpleNamespace(read=AsyncMock(return_value=(Path(__file__).resolve().parents[1]/'marong/call/static/face/v1/05-excited.webp').read_bytes()))
         self.assertEqual(await reactions.scene(row),legacy)
         model.assert_not_awaited()
