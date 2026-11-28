@@ -30,7 +30,7 @@ class AppDecor:
         catalog = self.require_catalog()
         valid = []
         for item in catalog.items.values():
-            if await asyncio.to_thread(catalog.check, item):
+            if await asyncio.to_thread(catalog.check, item, require_marong=self.chat.pet_app_settings.default_wear):
                 log.info("decor_seed_skip item=%s", item.id)
             else:
                 valid.append((item.id, catalog.set, item.kind, item.slot, item.starter))

@@ -92,7 +92,7 @@ class DecorCatalog:
     def url(self, item, key):
         return f"/chat/decor/{self.set}/{item.id}/{key}" if key in item.files else None
 
-    def check(self, item):
+    def check(self, item, *, require_marong=True):
         missing = []
         if item.kind not in KINDS:
             return ["kind"]
@@ -113,7 +113,7 @@ class DecorCatalog:
         if item.kind in SLOTS:
             if not isinstance(item.prompt, str) or not 1 <= len(item.prompt) <= 200 or not item.prompt.isascii():
                 missing.append("prompt")
-            for template in (*TEMPLATE_IDS, "marong"):
+            for template in (*TEMPLATE_IDS, *(('marong',) if require_marong else ())):
                 key = f"{template}.png"
                 path = item.files.get(key)
                 issue = self._layer_issue(path, template, item.slot) if path else "layer"

@@ -92,6 +92,37 @@ def assets(root):
 
 
 class DecorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bug139_switch_off_seeds_all_existing_items_and_shop(self):
+        """BUG-139 / SPEC-575: an absent default layer must not hide existing pet items."""
+        db = TestDB()
+        self.addCleanup(db.close)
+        db.apply_unified_prerequisites(); db.apply_unified(); db.apply_pet_app_prerequisites(); db.apply_pet_app(); db.apply_marong_outfit()
+        store = UnifiedStore(db.app_url)
+        await store.open(wait=True)
+        self.addAsyncCleanup(store.close)
+        sessions = AppSessions(store.pool, secrets.token_bytes(32), contact_schedule=(2, 8, 22))
+        auth = await sessions.join((await sessions.create_invite('join'))[0], '시험친구', '웹')
+        headers = {'Cookie': f'{COOKIE}={auth.token}', 'Origin': ORIGIN}
+        chat = AppChat(store, SimpleNamespace(friend_cards=None), RoomLocks(), None, AppPush(store),
+                       origin=ORIGIN, sessions=sessions, authentication='session')
+        chat.decor.catalog = DecorCatalog()
+        chat.pet_app_settings = replace(chat.pet_app_settings, decor=True, default_wear=False)
+        hat = chat.decor.catalog.items['berry-beanie']
+        missing_pet_layer = replace(hat, files={name:path for name,path in hat.files.items() if name != 'cat.png'})
+        self.assertEqual(chat.decor.catalog.check(missing_pet_layer, require_marong=False), ['layer:cat'])
+        for ident in ('oat-sweater','blue-raincoat','forest-vest','apricot-apron'):
+            item = chat.decor.catalog.items[ident]
+            chat.decor.catalog.items[ident] = replace(item, files={name:path for name,path in item.files.items() if name != 'marong.png'})
+            self.assertEqual(chat.decor.catalog.check(chat.decor.catalog.items[ident]), ['layer:marong'])
+        await chat.decor.seed()
+        await chat.decor.seed()
+        self.assertEqual(db.admin('SELECT count(*) FROM marong.decor_items'), [(48,)])
+        async with TestClient(TestServer(chat.web_app())) as client:
+            shop = (await (await client.get('/chat/api/shop', headers=headers)).json())['items']
+            self.assertEqual(len(shop), 48)
+            self.assertTrue({'oat-sweater','blue-raincoat','forest-vest','apricot-apron'} <= {item['id'] for item in shop})
+            self.assertEqual((await client.post('/chat/api/shop/oat-sweater/claim', headers=headers)).status, 201)
+
     def test_tc763_default_wear_requires_both_flags(self):
         from marong.pet_app_settings import PetAppSettings
         for env, expected in (({},False), ({'MARONG_DEFAULT_WEAR':'1'},False),
