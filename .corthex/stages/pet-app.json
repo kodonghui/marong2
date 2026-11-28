@@ -17,13 +17,25 @@
           "level": "info",
           "message": "기능 변경 1(기본 마롱이에게 입히기, D192, 2026-11-28, 설계 PR claude/marong-wear-design, 기준 main 5c2575f, 체크포인트 전): 9절 제안. CTX-030·009·031·007·001·002 바뀜, TERM-218·TERM-112 정의 바꿈 제안, 새 용어 없음. DDD 질문 1~4는 사용자님",
           "at": "2026-11-28"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1: 02~12 통과(D193). 01 DDD 질문 1~4는 사용자님 답 대기(항목 253)",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-28T06:30:00+00:00"
+      "updated": "2026-11-28T07:30:00+00:00"
     },
     "02-prd": {
       "state": "in_progress",
-      "checkpoints": [],
+      "checkpoints": [
+        {
+          "date": "2026-11-28",
+          "decision": "D193",
+          "approver": "사용자님",
+          "note": "기능 변경 1(기본 마롱이에게 입히기) 체크포인트. 위임 말씀(2026-11-23 '추천 모두 승인', 2026-11-27 'DDD랑 목업때만 보면 되게')과 오랑이 답 '추천안 모두 승인'(요청 msg_d615ed1cdc0e). 기능 변경 목록 1-1~1-20 모두 제안대로. PR #147 claude/marong-wear-design"
+        }
+      ],
       "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
       "checks": [
         {
@@ -35,13 +47,25 @@
           "level": "info",
           "message": "기능 변경 1(D192, 체크포인트 전): REQ-690~697 제안, 기능 변경 목록 1(1-1~1-20, 1-1은 D192로 답함). 용어 검사 통과",
           "at": "2026-11-28"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1 체크포인트 통과(D193, 2026-11-28, 승인한 사람 사용자님, 오랑이 답 msg_d615ed1cdc0e 요청의 답). 이 part의 다른 단계 상태는 그대로",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-28T06:30:00+00:00"
+      "updated": "2026-11-28T07:30:00+00:00"
     },
     "03-user-flow": {
       "state": "in_progress",
-      "checkpoints": [],
+      "checkpoints": [
+        {
+          "date": "2026-11-28",
+          "decision": "D193",
+          "approver": "사용자님",
+          "note": "기능 변경 1(기본 마롱이에게 입히기) 체크포인트. 위임 말씀(2026-11-23 '추천 모두 승인', 2026-11-27 'DDD랑 목업때만 보면 되게')과 오랑이 답 '추천안 모두 승인'(요청 msg_d615ed1cdc0e). 기능 변경 목록 1-1~1-20 모두 제안대로. PR #147 claude/marong-wear-design"
+        }
+      ],
       "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
       "checks": [
         {
@@ -63,13 +87,25 @@
           "level": "info",
           "message": "기능 변경 1(D192, 체크포인트 전): FL-189·190을 기본 마롱이까지 넓히고 그림 문법 손봄(diagram-check main 22·26건 → 0건), FL-192 선 이름 '6가지'(목록 1-20)",
           "at": "2026-11-28"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1 체크포인트 통과(D193, 2026-11-28, 승인한 사람 사용자님, 오랑이 답 msg_d615ed1cdc0e 요청의 답). 이 part의 다른 단계 상태는 그대로",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-28T06:30:00+00:00"
+      "updated": "2026-11-28T07:30:00+00:00"
     },
     "04-functional-spec": {
       "state": "in_progress",
-      "checkpoints": [],
+      "checkpoints": [
+        {
+          "date": "2026-11-28",
+          "decision": "D193",
+          "approver": "사용자님",
+          "note": "기능 변경 1(기본 마롱이에게 입히기) 체크포인트. 위임 말씀(2026-11-23 '추천 모두 승인', 2026-11-27 'DDD랑 목업때만 보면 되게')과 오랑이 답 '추천안 모두 승인'(요청 msg_d615ed1cdc0e). 기능 변경 목록 1-1~1-20 모두 제안대로. PR #147 claude/marong-wear-design"
+        }
+      ],
       "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
       "checks": [
         {
@@ -91,13 +127,25 @@
           "level": "info",
           "message": "기능 변경 1(D192, 체크포인트 전): SPEC-570~574, 3.14(마롱이 자리 상자, 그림 방식), 스위치 MARONG_DEFAULT_WEAR. 용어 검사 통과",
           "at": "2026-11-28"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1 체크포인트 통과(D193, 2026-11-28, 승인한 사람 사용자님, 오랑이 답 msg_d615ed1cdc0e 요청의 답). 이 part의 다른 단계 상태는 그대로",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-28T06:30:00+00:00"
+      "updated": "2026-11-28T07:30:00+00:00"
     },
     "05-erd": {
       "state": "in_progress",
-      "checkpoints": [],
+      "checkpoints": [
+        {
+          "date": "2026-11-28",
+          "decision": "D193",
+          "approver": "사용자님",
+          "note": "기능 변경 1(기본 마롱이에게 입히기) 체크포인트. 위임 말씀(2026-11-23 '추천 모두 승인', 2026-11-27 'DDD랑 목업때만 보면 되게')과 오랑이 답 '추천안 모두 승인'(요청 msg_d615ed1cdc0e). 기능 변경 목록 1-1~1-20 모두 제안대로. PR #147 claude/marong-wear-design"
+        }
+      ],
       "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
       "checks": [
         {
@@ -109,13 +157,25 @@
           "level": "info",
           "message": "기능 변경 1(D192, 체크포인트 전): marong/migrations/025_marong_outfit.sql(TBL-190 marong_outfits, TBL-176·179 character_id 비울 수 있음). 2026-11-28 pgserver에서 두 번 적용과 거절 11가지 확인. 운영 DB에는 넣지 않음",
           "at": "2026-11-28"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1 체크포인트 통과(D193, 2026-11-28, 승인한 사람 사용자님, 오랑이 답 msg_d615ed1cdc0e 요청의 답). 이 part의 다른 단계 상태는 그대로",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-28T06:30:00+00:00"
+      "updated": "2026-11-28T07:30:00+00:00"
     },
     "06-api": {
       "state": "in_progress",
-      "checkpoints": [],
+      "checkpoints": [
+        {
+          "date": "2026-11-28",
+          "decision": "D193",
+          "approver": "사용자님",
+          "note": "기능 변경 1(기본 마롱이에게 입히기) 체크포인트. 위임 말씀(2026-11-23 '추천 모두 승인', 2026-11-27 'DDD랑 목업때만 보면 되게')과 오랑이 답 '추천안 모두 승인'(요청 msg_d615ed1cdc0e). 기능 변경 목록 1-1~1-20 모두 제안대로. PR #147 claude/marong-wear-design"
+        }
+      ],
       "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
       "checks": [
         {
@@ -127,13 +187,25 @@
           "level": "info",
           "message": "기능 변경 1(D192, 체크포인트 전): API-330 PUT /chat/api/marong/outfit, Closet outfit 뜻 바뀜, 프로필 marongOutfit·features.defaultWear. pet-app·unified 계약 OpenAPI 검사 통과",
           "at": "2026-11-28"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1 체크포인트 통과(D193, 2026-11-28, 승인한 사람 사용자님, 오랑이 답 msg_d615ed1cdc0e 요청의 답). 이 part의 다른 단계 상태는 그대로",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-28T06:30:00+00:00"
+      "updated": "2026-11-28T07:30:00+00:00"
     },
     "07-sitemap": {
       "state": "in_progress",
-      "checkpoints": [],
+      "checkpoints": [
+        {
+          "date": "2026-11-28",
+          "decision": "D193",
+          "approver": "사용자님",
+          "note": "기능 변경 1(기본 마롱이에게 입히기) 체크포인트. 위임 말씀(2026-11-23 '추천 모두 승인', 2026-11-27 'DDD랑 목업때만 보면 되게')과 오랑이 답 '추천안 모두 승인'(요청 msg_d615ed1cdc0e). 기능 변경 목록 1-1~1-20 모두 제안대로. PR #147 claude/marong-wear-design"
+        }
+      ],
       "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
       "checks": [
         {
@@ -145,13 +217,25 @@
           "level": "info",
           "message": "기능 변경 1(D192, 체크포인트 전): 새 화면·경로 없음. SCR-001·002·165의 흐름에 FL-190을 더함",
           "at": "2026-11-28"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1 체크포인트 통과(D193, 2026-11-28, 승인한 사람 사용자님, 오랑이 답 msg_d615ed1cdc0e 요청의 답). 이 part의 다른 단계 상태는 그대로",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-28T06:30:00+00:00"
+      "updated": "2026-11-28T07:30:00+00:00"
     },
     "08-screen-states": {
       "state": "in_progress",
-      "checkpoints": [],
+      "checkpoints": [
+        {
+          "date": "2026-11-28",
+          "decision": "D193",
+          "approver": "사용자님",
+          "note": "기능 변경 1(기본 마롱이에게 입히기) 체크포인트. 위임 말씀(2026-11-23 '추천 모두 승인', 2026-11-27 'DDD랑 목업때만 보면 되게')과 오랑이 답 '추천안 모두 승인'(요청 msg_d615ed1cdc0e). 기능 변경 목록 1-1~1-20 모두 제안대로. PR #147 claude/marong-wear-design"
+        }
+      ],
       "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
       "checks": [
         {
@@ -173,9 +257,14 @@
           "level": "info",
           "message": "기능 변경 1(D192, 체크포인트 전): docs/08-screens/pet-app.md 12절. SCR-182·183#default-marong은 스위치 0일 때만(목록 1-15·1-16)",
           "at": "2026-11-28"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1 체크포인트 통과(D193, 2026-11-28, 승인한 사람 사용자님, 오랑이 답 msg_d615ed1cdc0e 요청의 답). 이 part의 다른 단계 상태는 그대로",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-28T06:30:00+00:00"
+      "updated": "2026-11-28T07:30:00+00:00"
     },
     "09-mockup": {
       "state": "in_progress",
@@ -191,13 +280,25 @@
           "level": "info",
           "message": "기능 변경 1(D192, 사용자님 확인 전): 목업 https://claude.ai/artifact/AyzwChfUqjEUCccgPEfn7A 대지 13장(360px 낮·밤, 입기 전·후, 상점 미리 보기, 보관함 입히기), 기록 design/marong-wear-mockup.md(그림 방식 비교). 새 토큰 없음",
           "at": "2026-11-28"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1: 목업 M1~M3은 사용자님 답 대기(항목 253)",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-28T06:30:00+00:00"
+      "updated": "2026-11-28T07:30:00+00:00"
     },
     "10-wbs": {
       "state": "in_progress",
-      "checkpoints": [],
+      "checkpoints": [
+        {
+          "date": "2026-11-28",
+          "decision": "D193",
+          "approver": "사용자님",
+          "note": "기능 변경 1(기본 마롱이에게 입히기) 체크포인트. 위임 말씀(2026-11-23 '추천 모두 승인', 2026-11-27 'DDD랑 목업때만 보면 되게')과 오랑이 답 '추천안 모두 승인'(요청 msg_d615ed1cdc0e). 기능 변경 목록 1-1~1-20 모두 제안대로. PR #147 claude/marong-wear-design"
+        }
+      ],
       "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
       "checks": [
         {
@@ -209,13 +310,25 @@
           "level": "info",
           "message": "기능 변경 1(D192, 체크포인트 전): docs/10-wbs/marong-wear.md TASK-600~607, 시작 조건은 목업 확인·질문 답·PR 병합",
           "at": "2026-11-28"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1 체크포인트 통과(D193, 2026-11-28, 승인한 사람 사용자님, 오랑이 답 msg_d615ed1cdc0e 요청의 답). 이 part의 다른 단계 상태는 그대로",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-28T06:30:00+00:00"
+      "updated": "2026-11-28T07:30:00+00:00"
     },
     "12-qa": {
       "state": "in_progress",
-      "checkpoints": [],
+      "checkpoints": [
+        {
+          "date": "2026-11-28",
+          "decision": "D193",
+          "approver": "사용자님",
+          "note": "기능 변경 1(기본 마롱이에게 입히기) 체크포인트. 위임 말씀(2026-11-23 '추천 모두 승인', 2026-11-27 'DDD랑 목업때만 보면 되게')과 오랑이 답 '추천안 모두 승인'(요청 msg_d615ed1cdc0e). 기능 변경 목록 1-1~1-20 모두 제안대로. PR #147 claude/marong-wear-design"
+        }
+      ],
       "next": "설계 PR을 검사 통과 뒤 Claude가 합침(동희님 2026-11-21 16:43 KST). 그 뒤 GPT가 TASK-420부터 구현. NEXUS 체크포인트는 없음(동희님 16:47 KST \"야 넥서스 하지 말고 걍 작업해\")",
       "checks": [
         {
@@ -227,9 +340,14 @@
           "level": "info",
           "message": "기능 변경 1(D192, 체크포인트 전): docs/12-qa/marong-wear.md TC-760~770",
           "at": "2026-11-28"
+        },
+        {
+          "level": "info",
+          "message": "기능 변경 1 체크포인트 통과(D193, 2026-11-28, 승인한 사람 사용자님, 오랑이 답 msg_d615ed1cdc0e 요청의 답). 이 part의 다른 단계 상태는 그대로",
+          "at": "2026-11-28"
         }
       ],
-      "updated": "2026-11-28T06:30:00+00:00"
+      "updated": "2026-11-28T07:30:00+00:00"
     }
   }
 }

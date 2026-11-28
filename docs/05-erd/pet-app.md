@@ -211,6 +211,8 @@ DB가 지키지 않고 앱이 지키는 것: 차림의 아이템이 보관함에
 
 ## 8. 기능 변경 1: 기본 마롱이 차림(마이그레이션 025, 2026-11-28 제안)
 
+2026-11-28 05 단계 체크포인트 통과(D193, 목록 1-12·1-13). 제목의 '제안'은 다른 문서의 링크를 지키려고 그대로 둬요.
+
 원본: [`marong/migrations/025_marong_outfit.sql`](../../marong/migrations/025_marong_outfit.sql). 설계 초안이고 서버 DB에는 적용하지 않았어요. 024는 아이폰 웹앱 알림 초안([024_web_push_subscriptions.draft.sql](024_web_push_subscriptions.draft.sql))이 쓸 번호라 비워 둬요. 025는 022에만 기대요.
 
 | TBL | 표·칸 | 바뀜 | 명세 |
