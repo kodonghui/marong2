@@ -71,6 +71,9 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(job['id'],sent)
         self.assertEqual(db.admin('SELECT state,cost_usd,fallback FROM marong.scene_pictures WHERE id=%s',(job['id'],)), [('failed',Decimal('.05'),False)])
         self.assertEqual(db.admin('SELECT state,cost_usd,fallback FROM marong.scene_pictures WHERE id=%s',(sent,)), [('done',Decimal(0),True)])
+        self.assertEqual(await worker.wait_for_topic({'id':sent,'state':'done'}),sent)
+        db.admin('UPDATE marong.friend_profiles SET character_id=NULL WHERE friend_id=%s',(friend,))
+        self.assertIsNone(await worker.wait_for_topic({'id':sent,'state':'done'}))
 
     async def test_tc767_default_fallback_and_reuse(self):
         from marong.decor_reactions import DecorReactions
