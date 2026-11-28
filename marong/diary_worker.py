@@ -346,8 +346,9 @@ class DiaryWorker:
                     snapshot = await marong_outfit_snapshot(self.store, catalog, row['friend_id'])
                     outfit = outfit_snapshot_prompts(catalog, snapshot) if catalog else []
                     result = await self.models.draw(scene, look, outfit=outfit) if outfit else await self.models.draw(scene, look)
-                    if catalog and result.outcome == 'ok' and snapshot != await marong_outfit_snapshot(self.store, catalog, row['friend_id']):
-                        result = replace(result, value=None, outcome='error', error='outfit_changed')
+                    from .decor import valid_fixed_outfit_snapshot
+                    if catalog and result.outcome == 'ok' and not await valid_fixed_outfit_snapshot(self.store, catalog, row['friend_id'], snapshot):
+                        result = replace(result, value=None, outcome='error', error='outfit_unavailable')
         except TimeoutError:
             result = ModelResult(outcome="timeout", error="deadline")
         async with self.store.pool.connection() as conn:

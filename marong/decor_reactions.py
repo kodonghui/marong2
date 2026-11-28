@@ -10,6 +10,7 @@ from psycopg.types.json import Jsonb
 
 from .character.records import CharacterError
 from .diary_models import REFERENCES
+from .decor import available_outfit_snapshot, valid_fixed_outfit_snapshot
 from .room_scope import writing_room_key
 
 
@@ -84,17 +85,19 @@ class DecorReactions:
             WHERE r.state='waiting' AND r.next_at<=now() AND (%s::bigint IS NULL OR r.friend_id=%s)
             ORDER BY r.next_at,r.id LIMIT 40
         """, (friend, friend))
-        def validate():
-            result = []
-            for row in rows:
-                row = dict(row)
-                if row['character_id'] is None:
-                    outfit = self.catalog.valid_marong_outfit(row) if self.catalog else dict.fromkeys(('body', 'neck', 'head'))
-                    row.update(outfit)
-                    row['active'] = row['active'] and row['item_id'] in outfit.values()
+        result = []
+        for row in rows:
+            row = dict(row)
+            if not row['active']:
                 result.append(row)
-            return result
-        return await asyncio.to_thread(validate)
+                continue
+            snapshot = await available_outfit_snapshot(self.store, self.catalog, row['friend_id'], row, row['template'])
+            outfit = dict.fromkeys(('body', 'neck', 'head'))
+            outfit.update({layer['slot']: layer['id'] for layer in snapshot})
+            row.update(outfit)
+            row['active'] = row['active'] and row['item_id'] in outfit.values()
+            result.append(row)
+        return result
 
     async def finish(self, row, state, scene=None):
         await self.store._one(f"""
@@ -133,43 +136,36 @@ class DecorReactions:
 
     async def scene(self, row):
         async def current_snapshot():
-            if row['character_id'] is not None:
-                return None
-            stored = await self.store._one('SELECT body,neck,head FROM marong.marong_outfits WHERE friend_id=%s',
-                                           (row['friend_id'],))
-            return await asyncio.to_thread(self.catalog.marong_outfit_snapshot, stored)
-
-        async def current_selections():
             if row['character_id'] is None:
-                snapshot = await current_snapshot()
-                selections = [layer['id'] for layer in snapshot]
-                return selections if row['item_id'] in selections else None
-            return [row[slot] for slot in ('body', 'neck', 'head') if row[slot]]
+                sql = 'SELECT body,neck,head FROM marong.marong_outfits WHERE friend_id=%s'
+                owner = row['friend_id']
+            else:
+                sql = 'SELECT body,neck,head FROM marong.outfits WHERE character_id=%s'
+                owner = row['character_id']
+            stored = await self.store._one(sql, (owner,))
+            return await available_outfit_snapshot(self.store, self.catalog, row['friend_id'], stored, row['template'])
 
-        selections = await current_selections()
-        if selections is None:
+        snapshot = await current_snapshot()
+        selections = [layer['id'] for layer in snapshot]
+        if row['item_id'] not in selections:
             return None
-        if row['character_id'] is None:
-            row = {**row, **{slot: next((ident for ident in selections if self.catalog.items[ident].slot == slot), None)
-                             for slot in ('body', 'neck', 'head')}}
+        row = {**row, **{slot: next((layer['id'] for layer in snapshot if layer['slot'] == slot), None)
+                         for slot in ('body', 'neck', 'head')}}
         if self.scenes:
             job = await self.reaction_job(row)
             if not job:
                 return None
             result = await self.scenes.wait_for_topic(job)
             if result:
-                if row['character_id'] is not None:
-                    return result
                 current = await current_snapshot()
                 if row['item_id'] not in [layer['id'] for layer in current]:
                     return None
                 snapshot = await self.store._one('SELECT drawn_outfit FROM marong.scene_pictures WHERE id=%s', (result,))
-                if snapshot and snapshot['drawn_outfit'] is not None and snapshot['drawn_outfit'] == current:
+                if snapshot and await valid_fixed_outfit_snapshot(self.store, self.catalog, row['friend_id'], snapshot['drawn_outfit'], row['template']):
                     return result
         snapshot = await current_snapshot()
-        selections = ([layer['id'] for layer in snapshot] if snapshot is not None
-                      else await current_selections())
-        if selections is None or (snapshot is not None and row['item_id'] not in selections):
+        selections = [layer['id'] for layer in snapshot]
+        if row['item_id'] not in selections:
             return None
         try:
             if row['character_id'] is None:
@@ -180,13 +176,12 @@ class DecorReactions:
             key = row["template"] + ".png"
             paths = [self.catalog.items[ident].files[key] for ident in selections
                      if ident in self.catalog.items and key in self.catalog.items[ident].files]
-            if snapshot is not None:
-                layers = [await asyncio.to_thread(path.read_bytes) for path in paths]
-                if [hashlib.sha256(layer).hexdigest() for layer in layers] != [layer['sha256'] for layer in snapshot]:
-                    return None
-                paths = [BytesIO(layer) for layer in layers]
+            layers = [await asyncio.to_thread(path.read_bytes) for path in paths]
+            if [hashlib.sha256(layer).hexdigest() for layer in layers] != [layer['sha256'] for layer in snapshot]:
+                return None
+            paths = [BytesIO(layer) for layer in layers]
             data, width, height = await asyncio.to_thread(composite, expression, paths)
-            if snapshot is not None and snapshot != await current_snapshot():
+            if not await valid_fixed_outfit_snapshot(self.store, self.catalog, row['friend_id'], snapshot, row['template']):
                 return None
         except (CharacterError, OSError, ValueError, TypeError) as error:
             log.warning("reaction_composite_error character=%s error=%s", row["character_id"], type(error).__name__)

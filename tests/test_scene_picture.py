@@ -679,6 +679,7 @@ class ScenesTests(unittest.IsolatedAsyncioTestCase):
         catalog.items[item.id] = replace(item, prompt="시험장면지시")
         db.admin("INSERT INTO marong.decor_items(id,item_set,kind,slot,starter) VALUES (%s,'v1','hat','head',false)", (item.id,))
         db.admin("INSERT INTO marong.decor_owned(friend_id,item_id) VALUES (%s,%s)", (friend,item.id))
+        db.admin("INSERT INTO marong.outfits(character_id,head) VALUES (%s,%s)", (character,item.id))
         db.admin("""INSERT INTO marong.scene_pictures(friend_id,character_id,purpose,item_id,outfit)
                     VALUES (%s,%s,'reaction',%s,ARRAY[%s])""", (friend, character, item.id, item.id))
         model = AsyncMock(return_value=ModelResult(value=picture(), cost=Decimal("0")))

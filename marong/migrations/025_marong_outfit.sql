@@ -34,7 +34,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS outfit_firsts_scene_job_once ON marong.outfit_
 
 -- TBL-176 scene_pictures: a picture with no character is the default 마롱이 drawn for a first-wear reaction.
 -- Topic pictures of the default 마롱이 stay the drawn picture set (REQ-694), so such a row is always a reaction.
--- Actual default-reaction layers and file hashes at draw time, not the earlier queued selection.
+-- Actual scene layers and file hashes at draw time, not the earlier queued selection (D198).
 ALTER TABLE marong.scene_pictures ADD COLUMN IF NOT EXISTS drawn_outfit jsonb;
 ALTER TABLE marong.scene_pictures ALTER COLUMN character_id DROP NOT NULL;
 DO $$

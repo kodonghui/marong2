@@ -221,7 +221,7 @@ DB가 지키지 않고 앱이 지키는 것: 차림의 아이템이 보관함에
 | TBL-179 | `outfit_firsts.character_id` | 비울 수 있어요. 비면 기본 마롱이의 첫 착용이고, 친구와 아이템마다 한 줄(부분 고유 색인 `outfit_firsts_marong_once`) | SPEC-570, 572 |
 | TBL-176 | `scene_pictures.character_id` | 비울 수 있어요. 비면 기본 마롱이를 그린 반응 그림이에요(CHECK `scene_pictures_marong_reaction`: 비면 용도는 `reaction`만) | SPEC-572 |
 | TBL-179 | `outfit_firsts.scene_job_id`(새 칸) | 그 첫 착용의 모델 그림 작업 줄. 다시 처리할 때 찾는 키이고, 작업 줄 하나는 첫 착용 하나에만 걸려요(고유 색인 `outfit_firsts_scene_job_once`). `scene_picture_id`는 그대로 '보낸 그림'(제때 끝난 작업 줄이나 겹친 그림 줄)이에요. 만들기와 연결은 첫 착용 줄을 잡은 한 트랜잭션이에요(04 3.15) | SPEC-422, SPEC-572 |
-| TBL-176 | `scene_pictures.drawn_outfit` | 기본 마롱이 반응을 그릴 때 실제 사용한 자리·아이템·레이어 SHA-256 목록을 그림 호출 전에 기록해요. 작업 임대가 같을 때만 쓰고, 완료 뒤 현재 유효 차림과 비교해요(BUG-141). 이전 작업과 반려동물에는 비어 있을 수 있어요 | SPEC-572, SPEC-574 |
+| TBL-176 | `scene_pictures.drawn_outfit` | 기본 마롱이·반려동물의 반응·화두 장면을 그릴 때 실제 사용한 자리·아이템·레이어 SHA-256 목록을 그림 호출 전에 기록해요. 작업 임대가 같을 때만 쓰고, 완료 뒤 그 고정 아이템이 여전히 유효한지 확인하며 이후의 정상 차림 변경은 실패가 아니에요(D198, BUG-142). 이전 작업은 비어 있을 수 있고 이 경우 고정 차림을 확인할 수 없어 그림을 다시 쓰지 않아요 | SPEC-572, SPEC-574 |
 | TBL-176 | `scene_pictures.fail_reason` | 값 `disabled`를 더해요(022의 CHECK `scene_pictures_fail_reason_check`를 다시 걸음, 옛 값은 그대로). 스위치를 끄며 그림 모델 없이 끝낸 기본 마롱이 그림이에요 | SPEC-575 |
 
 ```mermaid

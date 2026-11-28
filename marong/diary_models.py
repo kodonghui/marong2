@@ -96,8 +96,9 @@ def draw_prompt(scene: str, look: dict | None, *, outfit=None) -> str:
 async def marong_outfit_snapshot(store, catalog, friend):
     if not catalog:
         return []
+    from .decor import available_outfit_snapshot
     row = await store._one('SELECT body,neck,head FROM marong.marong_outfits WHERE friend_id=%s', (friend,))
-    return await asyncio.to_thread(catalog.marong_outfit_snapshot, row)
+    return await available_outfit_snapshot(store, catalog, friend, row)
 
 
 def outfit_snapshot_prompts(catalog, snapshot):

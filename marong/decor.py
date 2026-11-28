@@ -1,6 +1,7 @@
 """Read the versioned decor catalog and validate its repository assets."""
 
 from dataclasses import dataclass
+import asyncio
 import csv
 import hashlib
 from io import BytesIO
@@ -42,6 +43,41 @@ class Item:
     files: dict[str, Path]
     license_id: str
     paper_style: str | None
+
+
+async def available_outfit_snapshot(store, catalog, friend, row, template="marong"):
+    """Capture the valid, listed layers owned by this friend."""
+    if not catalog:
+        return []
+    snapshot = await asyncio.to_thread(catalog.outfit_snapshot, row, template)
+    if not snapshot:
+        return []
+    ids = [layer['id'] for layer in snapshot]
+    rows = await store._all("""SELECT d.id FROM marong.decor_items d
+        LEFT JOIN marong.decor_owned o ON o.item_id=d.id AND o.friend_id=%s
+        WHERE d.id=ANY(%s) AND d.item_set=%s AND d.state='listed'
+          AND (d.starter OR o.item_id IS NOT NULL)""", (friend, ids, catalog.set))
+    available = {item['id'] for item in rows}
+    return [layer for layer in snapshot if layer['id'] in available]
+
+
+async def valid_fixed_outfit_snapshot(store, catalog, friend, snapshot, template="marong"):
+    """Validate a captured outfit without comparing it to the friend's current selection."""
+    if not isinstance(snapshot, list):
+        return False
+    if not snapshot:
+        return True
+    if not catalog:
+        return False
+    row = dict.fromkeys(WEAR)
+    for layer in snapshot:
+        if not isinstance(layer, dict) or layer.keys() != {'slot', 'id', 'sha256'}:
+            return False
+        slot = layer['slot']
+        if slot not in row or row[slot] is not None:
+            return False
+        row[slot] = layer['id']
+    return await available_outfit_snapshot(store, catalog, friend, row, template) == snapshot
 
 
 class DecorCatalog:
@@ -137,19 +173,24 @@ class DecorCatalog:
                 missing.append("file:" + key)
         return missing
 
-    def marong_outfit_snapshot(self, row):
+    def outfit_snapshot(self, row, template="marong"):
         """Capture valid layers and hashes from the same bytes used to validate them."""
+        if template not in (*TEMPLATE_IDS, 'marong'):
+            return []
         result = []
         for slot in ('body', 'neck', 'head'):
             item = self.items.get(row[slot]) if row and row[slot] else None
-            path = item.files.get('marong.png') if item and item.slot == slot else None
+            path = item.files.get(f'{template}.png') if item and item.slot == slot else None
             try:
                 data = path.read_bytes() if path else None
-                if data and not self._layer_issue(BytesIO(data), 'marong', slot):
+                if data and not self._layer_issue(BytesIO(data), template, slot):
                     result.append({'slot': slot, 'id': item.id, 'sha256': hashlib.sha256(data).hexdigest()})
             except OSError:
                 continue
         return result
+
+    def marong_outfit_snapshot(self, row):
+        return self.outfit_snapshot(row, 'marong')
 
     def valid_marong_outfit(self, row):
         result = dict.fromkeys(WEAR)

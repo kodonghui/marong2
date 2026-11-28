@@ -1,10 +1,11 @@
 """Draw a pet character's scene from its portrait and expression (AI-42)."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 import re
 
 from .character.records import CharacterError
+from .decor import available_outfit_snapshot, valid_fixed_outfit_snapshot
 from .diary_models import DRAW_PROMPT, DiaryPicture, ModelResult, draw_prompt, REFERENCES
 
 
@@ -80,9 +81,13 @@ class ScenePictures:
         """, (row["character_id"], row["friend_id"]))
         if character is None:
             return ModelResult(outcome="error", error="references")
-        outfit = self.outfit_prompts([character[slot] for slot in ("body", "neck", "head") if character[slot]])
+        snapshot = await available_outfit_snapshot(self.store, self.catalog, row['friend_id'], character, character['template'])
+        outfit = self.outfit_prompts([layer['id'] for layer in snapshot])
         result = await self.draw("diary", character, outfit, scene, look=look, weather=weather, friend_name=friend_name)
-        return result.measurement or ModelResult(outcome="error", error="references")
+        measured = result.measurement or ModelResult(outcome="error", error="references")
+        if measured.outcome == 'ok' and not await valid_fixed_outfit_snapshot(self.store, self.catalog, row['friend_id'], snapshot, character['template']):
+            return replace(measured, value=None, outcome='error', error='outfit_unavailable')
+        return measured
 
     async def draw(self, purpose, character, outfit, scene, *, look=None, weather=None, friend_name=None):
         if purpose not in {"topic", "reaction", "diary"}:
