@@ -1,7 +1,7 @@
 # 기본 마롱이에게 입히기: 시험 계획(12단계, pet-app 기능 변경 1)
 
 상태: 2026-11-28 작성(Claude, 항목 253). 2026-11-28 12 단계 체크포인트 통과(D193). 아직 돌리지 않았어요. 시험을 쓰고 돌리는 쪽은 GPT예요([AGENTS.md](../../AGENTS.md)). 작업은 [작업 목록](../10-wbs/marong-wear.md)이에요. 사용자님 도메인 질문 1\~4의 답은 모두 추천대로라(D194) TC-767·768은 그대로예요.
-입력: [기능 명세](../04-functional-spec/pet-app.md) SPEC-570\~574의 받아들임 조건과 3.14, 요구사항 REQ-690\~697, 흐름 FL-189·190·192, 화면 [pet-app.md 12절](../08-screens/pet-app.md#12-기능-변경-1-기본-마롱이에게-입히기2026-11-28-d192-제안), 계약 API-330·API-254·API-216.
+입력: [기능 명세](../04-functional-spec/pet-app.md) SPEC-570\~575의 받아들임 조건과 3.14, 요구사항 REQ-690\~697, 흐름 FL-189·190·192, 화면 [pet-app.md 12절](../08-screens/pet-app.md#12-기능-변경-1-기본-마롱이에게-입히기2026-11-28-d192-제안), 계약 API-330·API-254·API-216.
 
 돌리는 법(`Runs as`)과 시험 데이터는 [반려동물 캐릭터 시험 계획](pet-app.md)과 같아요. 사람은 '시험친구 가'(기본 마롱이)·'시험친구 나'(반려동물 캐릭터 '콩이'). 아이템은 실제 목록 폴더의 착용 아이템 id를 써요(예: `berry-beanie`, `oat-sweater`, `chestnut-scarf`). 두 스위치는 `MARONG_DECOR=1`, `MARONG_DEFAULT_WEAR=1`이에요(따로 적지 않으면).
 
@@ -17,9 +17,11 @@
 | TC-767 | 기본 마롱이 반응 선톡 | SPEC-572, REQ-694, REQ-537, AI-43 | job(`tests/test_proactive.py`, `tests/test_scene_picture.py`) | TC-761 ①, 가짜 그림·글 모델, 시험 시계 | ① 3분 뒤 차례, 게이트 열림 ② 그 사이 반려동물 캐릭터 적용 ③ 그림 모델 실패 ④ 게이트 막힘 두 번 ⑤ 같은 아이템 두 번째 첫 착용 시도 | ① 선톡 1번, `meta.reaction = berry-beanie`, `meta.scene` 있음, 그림 요청의 참조 이미지가 마롱이 얼굴 `01-neutral`·`02-big-laugh`, 지시 글에 털모자 `prompt`, 친구 이름·대화 글 없음, `scene_pictures.character_id` 비고 `prompt_version = scene-marong-v1` ② `skipped`, 선톡 없음 ③ 겹친 그림(`05-excited` 위), `fallback` 참, 비용 0 ④ `blocked` ⑤ 줄 그대로 | |
 | TC-768 | 기본 마롱이 일기 그림의 차림 줄과 그림 화두 | SPEC-573, REQ-695, REQ-696 | job(`tests/test_diary_worker.py`, `tests/test_proactive.py`) | 털모자 차림의 시험친구 가, 가짜 그림 모델 | 밤 작업이 일기 그림을 그림. 다시 그리기. 차림을 벗고 다시. 그림 화두 차례 | 지시 글에 "The little white character is wearing: a raspberry red knitted beanie with a cream pom-pom."이 생김새 줄 뒤에 있음. 차림이 없으면 지금 `draw_prompt`와 바이트까지 같음. 그림 화두는 `meta.topic`이고 그림 모델 부름 0번 | |
 | TC-769 | 반영 뒤 운영과 실제 폰 | REQ-692, REQ-697, SCR-107, SCR-002, SCR-183 | server, device | 사용자님 계정 | 반영(TASK-607) 뒤 스위치 0에서 로그 5분과 화면이 그대로인지, 1로 켠 뒤 사용자님이 폰에서 보관함으로 마롱이에게 모자를 씌우고 글 대화·통화 화면을 봄 | 스위치 0에서 운영 그대로(오류 0). 켠 뒤 글 대화 머리말·통화 얼굴에 모자, 3분 뒤 반응 선톡 1번(게이트 열림일 때). 운영 화면 사진은 Orca 항목 댓글로만 | |
-| TC-770 | 025 두 번 적용과 거절 | TBL-190, TBL-176·179 바꿈, SPEC-570, SPEC-572 | api(`tests/test_marong_outfit_schema.py`) | 022·023까지 적용한 빈 DB | 025를 두 번 적용. `marong` 역할로 넣기·고치기·지우기, 같은 친구 두 번째 줄, 없는 아이템, 같은 기본 마롱이 첫 착용 두 번, 캐릭터 없는 화두 장면 그림. `marong_call` 역할로 새 표 읽기 | 두 번 적용 통과, 넣기·고치기 됨, 지우기·두 번째 줄·없는 아이템·같은 첫 착용·캐릭터 없는 화두는 거절, 통화 서버 계정은 새 표를 못 읽음. 지금 표의 줄은 그대로(2026-11-28 설계 때 수동 확인과 같은 11가지) | |
+| TC-770 | 025 두 번 적용, 거절, 되돌리기 예행 | TBL-190, TBL-176·179 바꿈, SPEC-570, SPEC-572, SPEC-575 | api(`tests/test_marong_outfit_schema.py`) | 022·023까지 적용한 빈 DB | ① 025를 두 번 적용. `marong` 역할로 넣기·고치기·지우기, 같은 친구 두 번째 줄, 없는 아이템, 같은 기본 마롱이 첫 착용 두 번, 캐릭터 없는 화두 장면 그림, 모르는 `fail_reason`. `marong_call` 역할로 새 표 읽기 ② 기본 마롱이 `waiting` 첫 착용·`queued`·`drawing` 반응 그림을 넣고, `main` `5c2575f`의 `scene_worker.claim`과 `decor_reactions.due` SQL을 그대로 돌림 ③ SPEC-575의 비우기와 확인 SQL ④ 비운 뒤 같은 `main` SQL ⑤ 줄이 있는 채로 025 다시 적용 | ① 두 번 적용 통과, 넣기·고치기 됨, 나머지는 거절, 통화 서버 계정은 새 표를 못 읽음 ② 비우기 전 `main` claim이 기본 마롱이 줄 1개를 가져감(되돌리기 위험 재현), due는 못 봄 ③ `drawing`이 끝나기 전 1, 뒤 0. 비운 줄 비용 0 ④ 가져가는 줄 0개 ⑤ 통과. (2026-11-28 설계 때 수동으로 같은 확인을 함, 05 8절) | |
+| TC-771 | 두 친구 분리: 다른 친구의 기본 마롱이 차림을 읽거나 바꾸지 못함 | SPEC-570, SPEC-571, REQ-524, API-330#400, API-330#409, 공통 규칙 4 | api(`tests/test_decor.py`) | 시험친구 가(`berry-beanie`만 받음)와 나(`oat-sweater`만 받음, 기본 마롱이 차림 `oat-sweater`) | ① 가의 세션으로 본문에 `friendId: <나의 id>`를 넣어 API-330 ② 가의 세션으로 `{body: oat-sweater}`(나만 받은 아이템) ③ 가의 세션으로 정상 `{head: berry-beanie}` ④ 매번 나의 `marong_outfits`·`outfit_firsts`와 나의 세션 API-216·API-254를 읽음 ⑤ 가의 API-216·API-254에 나의 차림이 있는지 봄 | ① 400 `invalid_input` ② 409 `not_owned` ③ 200이고 바뀐 줄은 가의 것뿐 ④ 나의 줄·응답은 처음과 바이트까지 같음 ⑤ 가의 응답에 나의 아이템 id가 없음. 로그에 친구 이름·대화 글 없음 | |
+| TC-772 | 스위치를 끄면 기본 마롱이 대기 줄을 비우고, 늦은 반응은 보내지 않음 | SPEC-575, REQ-697 | job(`tests/test_proactive.py`, `tests/test_scene_picture.py`) | 기본 마롱이 `waiting` 1줄(`next_at` 지남), `queued`·`drawing` 반응 그림, 가짜 그림 모델 | ① `MARONG_DEFAULT_WEAR=0`으로 루프를 한 번 돌림 ② 다시 1로 켬 ③ `next_at`이 2시간 전인 `waiting` 줄을 넣고 1로 루프를 돌림 | ① `waiting`은 `skipped`, `queued`는 `failed`/`disabled`, 그림 모델 부름 0번, 선톡 0번. `drawing`은 그 부름이 끝나면 쓰이지 않음 ② 꺼진 동안 끝난 아이템은 다시 반응하지 않음 ③ `skipped`이고 선톡 0번 | |
 
-남은 번호: TC-771\~789는 비워 둬요.
+남은 번호: TC-773\~789는 비워 둬요.
 
 ## 요구사항마다 시험
 
@@ -32,5 +34,6 @@
 | REQ-694 | TC-767 |
 | REQ-695 | TC-768 |
 | REQ-696 | TC-768 |
-| REQ-697 | TC-763, TC-769 |
+| REQ-697 | TC-763, TC-769, TC-770, TC-772 |
+| REQ-524(남의 것) | TC-771 |
 | REQ-529(바뀜) | TC-760 |
