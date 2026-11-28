@@ -3220,6 +3220,9 @@ components:
           - $ref: '#/components/schemas/ProfileCharacter'
           - type: 'null'
           description: 쓰는 캐릭터. null이면 기본 마롱이(TERM-186)
+        marongOutfit:
+          $ref: 'pet-app.openapi.yaml#/components/schemas/WornOutfit'
+          description: 기본 마롱이의 지금 차림과 레이어 주소(`/chat/decor/v1/{id}/marong.png`, pet-app SPEC-571, API-330). 기본 마롱이를 쓰고(character가 null) MARONG_DECOR와 MARONG_DEFAULT_WEAR가 모두 켜져 있을 때만 보내요. 기능 변경 1(2026-11-28)이 더한 선택 칸이라 그 전 서버는 보내지 않아요. 없으면 아무것도 안 입은 것으로 봐요
         voice:
           oneOf:
           - type: string
@@ -3254,6 +3257,9 @@ components:
             scenePictures:
               type: boolean
               description: 반려동물 장면 그림이 켜져 있으면 true(SPEC-411). 없으면 false로 봐요
+            defaultWear:
+              type: boolean
+              description: MARONG_DEFAULT_WEAR와 MARONG_DECOR가 모두 켜져 있으면 true(pet-app SPEC-570, 기능 변경 1). 없으면 false로 봐요
           description: 서버에서 켜진 기능. 화면은 꺼진 기능의 메뉴를 그리지 않아요(명세 공통 규칙 9)
         google:
           type: string

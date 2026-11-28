@@ -136,6 +136,7 @@
 - 선 전화 목업은 그 스레드가 실제 화면 CSS를 띄워 찍은 그림이라 그대로 올렸어요(원본 [그 목업](https://claude.ai/artifact/UQYxaGXQ72wGRSWv5YuU8x), 프로젝트 파일 `marong-call-first-mockup-20261116/`).
 - 통합 앱(MVP) 목업은 캔버스를 따로 써요: [마롱이 통합 앱 목업](https://claude.ai/artifact/GXVep4QepAUdFhH6gDmLb3), 대지 `C026-<SCR>-<상태>-<day|night>` 17장(2026-11-19). 대지가 실제 HTML이고 부품 클래스는 [unified-mockup.css](unified-mockup.css) 한 벌이에요. 기록은 [unified-mockup.md](unified-mockup.md)예요.
 - 반려동물 캐릭터 앱 안(pet-app) 목업도 캔버스를 따로 써요: [마롱이 반려동물 앱 안 목업](https://claude.ai/artifact/SvoMoaLwcvq5XoBQxT2uVd), 대지 `C027-<SCR>-<상태>-<day|night>` 13장(2026-11-21). `unified-mockup.css` 위에 [pet-app-mockup.css](pet-app-mockup.css)를 더 불러요. 아이템 그림은 [pet-app-mockup/](pet-app-mockup/)의 자리 표시 그림이에요. 기록은 [pet-app-mockup.md](pet-app-mockup.md)예요.
+- 기본 마롱이 옷 입히기(pet-app 기능 변경 1, 2026-11-28) 목업: [마롱이 옷 입히기 목업](https://claude.ai/artifact/AyzwChfUqjEUCccgPEfn7A), 대지 `W-<SCR>-<상태>-<day|night>` 13장. 두 CSS를 그대로 불러요. 모자·옷·목도리는 운영 아이템 레이어를 마롱이에게 자동으로 맞춘 그림이에요. 기록과 그림 방식 비교는 [marong-wear-mockup.md](marong-wear-mockup.md)예요.
 
 ## 7. 다른 스레드가 화면을 더할 때
 
