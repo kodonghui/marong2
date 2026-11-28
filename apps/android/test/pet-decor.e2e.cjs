@@ -120,6 +120,32 @@ test('TC-765: default shop preview and wear error', {skip:!chromium}, async()=>{
   } finally {await browser.close();}
 });
 
+test('TC-764/765: default outfits fit both widths and themes', {skip:!chromium}, async()=>{
+  const browser=await chromium.launch();
+  try {
+    for(const width of [360,430]) for(const hour of [3,15]) {
+      const page=await browser.newPage({viewport:{width,height:850}});
+      await page.clock.setFixedTime(new Date(`2026-11-28T${String(hour).padStart(2,'0')}:00:00Z`));
+      const hat={id:'berry-beanie',kind:'hat',slot:'head',name:'털모자',owned:true,thumbUrl:'/chat/decor/v1/berry-beanie/thumb.webp'};
+      const outfit={head:{id:hat.id,name:hat.name,layerUrl:'/chat/decor/v1/berry-beanie/marong.png'},body:null,neck:null};
+      await page.route('**/*',async route=>{
+        const address=new URL(route.request().url()).pathname;
+        if(address==='/chat/api/profile') return route.fulfill({json:{botName:'마롱이',character:null,features:{defaultWear:true},marongOutfit:outfit}});
+        if(address==='/chat/api/closet') return route.fulfill({json:{items:[hat],characterId:null,outfit}});
+        if(address.startsWith('/face/') || address.startsWith('/chat/decor/')) return route.fulfill({contentType:'image/png',body:BLANK});
+        const file=address==='/chat/closet'?'decor.html':path.basename(address);
+        if(!['decor.html','decor.js','chat.css','unified.css','unified.js'].includes(file)) return route.fulfill({status:404});
+        return route.fulfill({contentType:file.endsWith('.css')?'text/css':file.endsWith('.js')?'application/javascript':'text/html',body:await readFile(path.join(STATIC,file))});
+      });
+      await page.goto(BASE+'/chat/closet');
+      await page.locator('.decor-layer').waitFor();
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
+      assert.equal(await page.locator('html').getAttribute('data-theme'),hour===3?'chestnut':'night');
+      await page.close();
+    }
+  } finally {await browser.close();}
+});
+
 test('TC-766: default character keeps outfit layers when expression changes', {skip: !chromium}, async () => {
   const site = await startCallSite();
   const browser = await chromium.launch();
